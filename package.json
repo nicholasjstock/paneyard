@@ -1,0 +1,36 @@
+{
+  "name": "workflow-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "wf-orchestrator": "bin/orchestrator_launcher",
+    "wf-orchestrator-claude": "bin/orchestrator_launcher_claude",
+    "wf-supervisor": "bin/supervisor_launcher",
+    "wf-supervisor-claude": "bin/supervisor_launcher_claude",
+    "wf-bus": "bin/workflow_bus",
+    "wf-mcp-state": "bin/workflow_mcp_state",
+    "wf-mcp-state-ui": "bin/workflow_mcp_state_ui",
+    "wf-mcp-server": "bin/workflow_mcp_server",
+    "wf-mcp-http": "bin/workflow_mcp_http",
+    "wf-worker-follow": "bin/workflow_worker_follow",
+    "wf-worker-log": "bin/workflow_worker_log",
+    "wf-workers": "bin/workflow_workers"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "bin-tests": "for f in bin/*.test.sh; do bash \"$f\" || exit 1; done"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
+  }
+}

@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+PKG_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$PKG_ROOT}"
+TSX_BIN="${TSX_BIN:-$PKG_ROOT/node_modules/.bin/tsx}"
+SUPERVISOR_SCRIPT="$PKG_ROOT/scripts/supervisor-loop.ts"
+WORKFLOW_STATE_DIR="${WORKFLOW_STATE_DIR:-$TARGET_ROOT/front/demo-output/agents-sdk}"
+ORCHESTRATOR_LAUNCHER="$PKG_ROOT/bin/orchestrator_launcher_claude"
+
+usage() {
+  cat <<'EOF'
+Usage: bin/supervisor_launcher_claude [options]
+
+Run a single supervisor tick: one orchestrator turn plus any worker spawns
+it triggers, then exit. Intended to be called once per turn from a Claude
+session driving the workflow interactively, as opposed to
+bin/supervisor_launcher's continuous loop.
+
+Examples:
+  bin/supervisor_launcher_claude --run-id=demo-2026-07-03
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ ! -x "$TSX_BIN" ]]; then
+  echo "Missing tsx binary at $TSX_BIN" >&2
+  exit 1
+fi
+
+if [[ ! -f "$SUPERVISOR_SCRIPT" ]]; then
+  echo "Missing supervisor loop script at $SUPERVISOR_SCRIPT" >&2
+  exit 1
+fi
+
+if [[ ! -x "$ORCHESTRATOR_LAUNCHER" ]]; then
+  echo "Missing claude orchestrator launcher at $ORCHESTRATOR_LAUNCHER" >&2
+  exit 1
+fi
+
+printf 'Running a single supervisor tick (spawn workers + one orchestrator turn).\n'
+printf 'Supervisor script: %s\n' "$SUPERVISOR_SCRIPT"
+printf 'Workflow state dir: %s\n' "$WORKFLOW_STATE_DIR"
+
+ARGS=("$@")
+has_once=false
+for arg in "${ARGS[@]+"${ARGS[@]}"}"; do
+  if [[ "$arg" == "--once" ]]; then
+    has_once=true
+    break
+  fi
+done
+
+if [[ "$has_once" == false ]]; then
+  ARGS+=("--once")
+fi
+
+cd "$TARGET_ROOT"
+exec env \
+  WORKFLOW_TARGET_ROOT="$TARGET_ROOT" \
+  WORKFLOW_STATE_DIR="$WORKFLOW_STATE_DIR" \
+  ORCHESTRATOR_LAUNCHER="$ORCHESTRATOR_LAUNCHER" \
+  "$TSX_BIN" "$SUPERVISOR_SCRIPT" "${ARGS[@]+"${ARGS[@]}"}"

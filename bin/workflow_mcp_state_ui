@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# bin/workflow_mcp_state_ui [OPTIONS]
+#
+# Launch the standalone workflow state UI on its own fixed port.
+#
+# Options:
+#   --host HOST    Bind host
+#   --port PORT    Bind port
+#   --help         Show this message
+
+set -euo pipefail
+
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+PKG_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$PKG_ROOT}"
+TSX_BIN="${TSX_BIN:-$PKG_ROOT/node_modules/.bin/tsx}"
+HOST="${HOST:-127.0.0.1}"
+PORT="${PORT:-8789}"
+WORKFLOW_HTTP_URL="${WORKFLOW_HTTP_URL:-http://${HOST}:8788}"
+
+usage() {
+  grep '^#' "$0" | grep -v '^#!/' | sed 's/^# \{0,1\}//'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)
+      shift
+      HOST="${1:-}"
+      ;;
+    --port)
+      shift
+      PORT="${1:-}"
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+if [[ ! -x "$TSX_BIN" ]]; then
+  echo "Missing tsx binary at $TSX_BIN" >&2
+  exit 1
+fi
+
+exec env \
+  WORKFLOW_TARGET_ROOT="$TARGET_ROOT" \
+  WORKFLOW_HTTP_URL="$WORKFLOW_HTTP_URL" \
+  MCP_STATE_UI_HOST="$HOST" \
+  MCP_STATE_UI_PORT="$PORT" \
+  "$TSX_BIN" "$PKG_ROOT/scripts/workflow-mcp-state-ui.ts"

@@ -1,0 +1,13 @@
+{
+  "runId": "demo-20260702-130620",
+  "phase": "planning",
+  "tickCount": 7,
+  "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174.",
+  "pendingSpawnKeys": [
+    "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+    "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+    "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
+  ],
+  "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=112946805 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=112946805; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+  "lastUpdatedAt": "2026-07-03T17:22:26.812Z"
+}

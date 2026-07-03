@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+PKG_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$PKG_ROOT}"
+CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude)}"
+
+usage() {
+  cat <<'EOF'
+Usage: bin/orchestrator_launcher_claude [options]
+
+Launch one orchestrator decision tick using the Claude CLI instead of Codex.
+
+Options:
+  --run-id=<id>
+  --task=<text>
+  --scenario=<admin|phone|both>
+  --frontend-url=<url>
+  --stale-after-ms=<n>
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ ! -x "$CLAUDE_BIN" ]]; then
+  echo "Missing claude binary at $CLAUDE_BIN" >&2
+  exit 1
+fi
+
+AGENT_DEF_FILE="$TARGET_ROOT/.claude/agents/demo-pipeline.md"
+if [[ ! -f "$AGENT_DEF_FILE" ]]; then
+  echo "Missing orchestrator agent definition at $AGENT_DEF_FILE" >&2
+  exit 1
+fi
+
+RUN_ID=""
+TASK=""
+SCENARIO=""
+FRONTEND_URL=""
+STALE_AFTER_MS=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --run-id=*)
+      RUN_ID="${arg#*=}"
+      ;;
+    --task=*)
+      TASK="${arg#*=}"
+      ;;
+    --scenario=*)
+      SCENARIO="${arg#*=}"
+      ;;
+    --frontend-url=*)
+      FRONTEND_URL="${arg#*=}"
+      ;;
+    --stale-after-ms=*)
+      STALE_AFTER_MS="${arg#*=}"
+      ;;
+  esac
+done
+
+PROMPT_FILE="$(mktemp)"
+trap 'rm -f "$PROMPT_FILE"' EXIT
+
+cat > "$PROMPT_FILE" <<'EOF'
+Launch the orchestrator for the current run. Inspect the shared bus, determine the active run context, and run exactly one orchestration tick that updates the bus with the next bounded handoff shape.
+
+Permissions:
+Use only MCP tools for orchestration and state inspection. Do not use shell commands, ad hoc file reads, or repo CLI wrappers to do the orchestrator's work.
+EOF
+
+if [[ -n "$RUN_ID" || -n "$TASK" || -n "$SCENARIO" || -n "$FRONTEND_URL" || -n "$STALE_AFTER_MS" ]]; then
+  {
+    printf '\nRequired turn parameters:\n'
+    [[ -n "$RUN_ID" ]] && printf 'runId: %s\n' "$RUN_ID"
+    [[ -n "$TASK" ]] && printf 'task: %s\n' "$TASK"
+    [[ -n "$SCENARIO" ]] && printf 'scenario: %s\n' "$SCENARIO"
+    [[ -n "$FRONTEND_URL" ]] && printf 'frontendUrl: %s\n' "$FRONTEND_URL"
+    [[ -n "$STALE_AFTER_MS" ]] && printf 'staleAfterMs: %s\n' "$STALE_AFTER_MS"
+    printf 'Call `run_orchestrator_turn` with these exact parameters if they are provided.\n'
+  } >> "$PROMPT_FILE"
+fi
+
+PROMPT="$(cat "$PROMPT_FILE")"
+
+cd "$TARGET_ROOT"
+
+# `claude -p` sends its first request to the model before the workflow MCP
+# server (spawned fresh per invocation) finishes its stdio handshake. When
+# that race is lost, the turn runs with zero mcp__workflow__* tools and the
+# agent reports being blocked instead of failing outright. Retry a bounded
+# number of times rather than treating that as a hard failure.
+MAX_ATTEMPTS="${ORCHESTRATOR_CLAUDE_MAX_ATTEMPTS:-3}"
+RETRY_DELAY_SECONDS="${ORCHESTRATOR_CLAUDE_RETRY_DELAY_SECONDS:-2}"
+
+attempt=1
+while true; do
+  set +e
+  output="$(WORKFLOW_TARGET_ROOT="$TARGET_ROOT" "$CLAUDE_BIN" \
+    --agent demo-pipeline \
+    --permission-mode bypassPermissions \
+    -p \
+    -- \
+    "$PROMPT" 2>&1)"
+  status=$?
+  set -e
+
+  if [[ "$status" -eq 0 ]] && ! grep -qi 'still connecting' <<<"$output"; then
+    printf '%s\n' "$output"
+    exit 0
+  fi
+
+  if [[ "$attempt" -ge "$MAX_ATTEMPTS" ]]; then
+    printf '%s\n' "$output" >&2
+    echo "Orchestrator gave up after $MAX_ATTEMPTS attempts: the workflow MCP server never finished connecting in time." >&2
+    exit 1
+  fi
+
+  attempt=$((attempt + 1))
+  sleep "$RETRY_DELAY_SECONDS"
+done

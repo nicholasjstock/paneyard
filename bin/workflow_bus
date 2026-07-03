@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# bin/workflow_bus [OPTIONS]
+#
+# Inspect the shared workflow bus JSON store from the terminal.
+#
+# Options:
+#   --path PATH    Read a specific JSON store file
+#   --limit N      Limit recent events shown by the inspector
+#   --json         Emit raw JSON for jq and other JSON filters
+#   --help         Show this message
+#
+# Examples:
+#   bin/workflow_bus
+#   bin/workflow_bus --path /tmp/workflow-bus.json
+#   bin/workflow_bus --json | jq '.openSpawnRequests'
+
+set -euo pipefail
+
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+PKG_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$PKG_ROOT}"
+TSX_BIN="${TSX_BIN:-$PKG_ROOT/node_modules/.bin/tsx}"
+
+usage() {
+  grep '^#' "$0" | grep -v '^#!/' | sed 's/^# \{0,1\}//'
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ ! -x "$TSX_BIN" ]]; then
+  echo "Missing tsx binary at $TSX_BIN" >&2
+  exit 1
+fi
+
+exec env WORKFLOW_TARGET_ROOT="$TARGET_ROOT" "$TSX_BIN" "$PKG_ROOT/scripts/workflow-bus-inspect.ts" "$@"

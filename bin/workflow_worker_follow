@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# bin/workflow_worker_follow [NICKNAME|--worker-id ID] [OPTIONS]
+#
+# Tail one worker's live log.
+#
+# Options:
+#   --path PATH      Read a specific workers JSON store
+#   --tail N         Show the last N lines before following (default: 40)
+#   --worker-id ID   Select a worker by ID instead of nickname
+#   --help           Show this message
+
+set -euo pipefail
+
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+PKG_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$PKG_ROOT}"
+TSX_BIN="${TSX_BIN:-$PKG_ROOT/node_modules/.bin/tsx}"
+STORAGE_PATH="$TARGET_ROOT/front/demo-output/agents-sdk/workers.json"
+TAIL_LINES=40
+NICKNAME=""
+WORKER_ID=""
+
+usage() {
+  grep '^#' "$0" | grep -v '^#!/' | sed 's/^# \{0,1\}//'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --path)
+      shift
+      STORAGE_PATH="${1:-}"
+      ;;
+    --tail)
+      shift
+      TAIL_LINES="${1:-40}"
+      ;;
+    --worker-id)
+      shift
+      WORKER_ID="${1:-}"
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ -z "$NICKNAME" ]]; then
+        NICKNAME="$1"
+      else
+        echo "Unknown argument: $1" >&2
+        usage >&2
+        exit 1
+      fi
+      ;;
+  esac
+  shift
+done
+
+if [[ ! -x "$TSX_BIN" ]]; then
+  echo "Missing tsx binary at $TSX_BIN" >&2
+  exit 1
+fi
+
+if [[ -z "$NICKNAME" && -z "$WORKER_ID" ]]; then
+  echo "Pass a worker nickname or --worker-id." >&2
+  usage >&2
+  exit 1
+fi
+
+args=(
+  "$PKG_ROOT/scripts/workflow-worker-monitor.ts"
+  --path "$STORAGE_PATH"
+  --log-path
+  --tail "$TAIL_LINES"
+)
+
+if [[ -n "$WORKER_ID" ]]; then
+  args+=(--worker-id "$WORKER_ID")
+else
+  args+=(--nickname "$NICKNAME")
+fi
+
+log_path="$(WORKFLOW_TARGET_ROOT="$TARGET_ROOT" "$TSX_BIN" "${args[@]}")"
+
+if [[ -z "$log_path" ]]; then
+  echo "Worker log not found." >&2
+  exit 1
+fi
+
+exec tail -n "$TAIL_LINES" -F "$log_path"

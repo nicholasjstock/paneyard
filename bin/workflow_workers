@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# bin/workflow_workers [OPTIONS]
+#
+# List the current workflow workers and their log paths.
+#
+# Options:
+#   --path PATH    Read a specific workers JSON store
+#   --help         Show this message
+
+set -euo pipefail
+
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+PKG_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$PKG_ROOT}"
+TSX_BIN="${TSX_BIN:-$PKG_ROOT/node_modules/.bin/tsx}"
+STORAGE_PATH="$TARGET_ROOT/front/demo-output/agents-sdk/workers.json"
+
+usage() {
+  grep '^#' "$0" | grep -v '^#!/' | sed 's/^# \{0,1\}//'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --path)
+      shift
+      STORAGE_PATH="${1:-}"
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+if [[ ! -x "$TSX_BIN" ]]; then
+  echo "Missing tsx binary at $TSX_BIN" >&2
+  exit 1
+fi
+
+exec env WORKFLOW_TARGET_ROOT="$TARGET_ROOT" "$TSX_BIN" "$PKG_ROOT/scripts/workflow-worker-monitor.ts" --path "$STORAGE_PATH"
