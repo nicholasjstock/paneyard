@@ -2,6 +2,7 @@
 name: implementor
 description: Fallback implementation agent for repo-local fixes that do not fit the specialized workers
 type: autonomous-agent
+model: haiku
 ---
 
 # Implementor (@implementor)

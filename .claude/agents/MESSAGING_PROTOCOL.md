@@ -3,6 +3,7 @@ name: agent-messaging-protocol
 description: Structured messaging protocol for agent-to-agent communication
 metadata:
   type: specification
+model: haiku
 ---
 
 # Agent Messaging Protocol

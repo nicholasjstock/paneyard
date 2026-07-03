@@ -1,3 +1,4 @@
+import * as fs from 'fs'
 import { spawnSync } from 'child_process'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
@@ -6,7 +7,7 @@ import { buildRequestedWorkerPrompt, buildWorkerNickname } from './orchestrator-
 import { buildWorkflowContext, readOrchestratorState } from './workflow-mcp'
 import { createWorkflowBus } from './workflow-bus'
 import { createNodeWorkerProcessAdapter } from './workflow-worker-runtime-node'
-import { createWorkflowWorkerRuntime, type WorkflowWorkerRecord } from './workflow-worker-runtime'
+import { createWorkflowWorkerRuntime, type WorkerDriver, type WorkflowWorkerRecord } from './workflow-worker-runtime'
 
 type SupervisorLoopOptions = {
   runId?: string
@@ -27,12 +28,14 @@ type SpawnRequest = {
   context: string | null
   requestedRole: string
   status: 'open' | 'fulfilled' | 'dismissed'
+  fulfilledWorkerId: string | null
+  dependsOn: string[]
 }
 
 type WorkerRuntimeLike = Pick<ReturnType<typeof createWorkflowWorkerRuntime>, 'listWorkers' | 'spawnWorker'>
 type WorkflowBusLike = Pick<
   ReturnType<typeof createWorkflowBus>,
-  'listOpenSpawnRequests' | 'publishWorkerSpawned' | 'fulfillSpawnRequest'
+  'listOpenSpawnRequests' | 'listSpawnRequests' | 'publishWorkerSpawned' | 'fulfillSpawnRequest'
 >
 
 const __filename = fileURLToPath(import.meta.url)
@@ -48,11 +51,18 @@ const OUTPUT_DIR = process.env.WORKFLOW_STATE_DIR
   ? path.resolve(process.env.WORKFLOW_STATE_DIR)
   : path.resolve(FRONT_DIR, 'demo-output', 'agents-sdk')
 const BUS_PATH = path.join(OUTPUT_DIR, 'workflow-bus.json')
+const ORCHESTRATOR_STATE_DIR = path.join(OUTPUT_DIR, 'orchestrator-state')
+const WORKER_DRIVER: WorkerDriver = process.env.WORKFLOW_WORKER_DRIVER === 'claude' ? 'claude' : 'codex'
 
 export function resolveOrchestratorLauncher(env: NodeJS.ProcessEnv, rootDir: string): string {
   return env.ORCHESTRATOR_LAUNCHER
     ? path.resolve(env.ORCHESTRATOR_LAUNCHER)
     : path.join(rootDir, 'bin', 'orchestrator_launcher')
+}
+
+type LatestPersistedRun = {
+  runId: string
+  summary: string | null
 }
 
 // orchestrator_launcher ships inside this package, not inside the target
@@ -126,6 +136,58 @@ function usage(): string {
   ].join('\n')
 }
 
+export function resolveLatestPersistedRun(
+  stateDir: string,
+  fileSystem: Pick<typeof fs, 'existsSync' | 'readdirSync' | 'readFileSync' | 'statSync'> = fs
+): LatestPersistedRun | null {
+  if (!fileSystem.existsSync(stateDir)) {
+    return null
+  }
+
+  const entries = fileSystem
+    .readdirSync(stateDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json') && !entry.name.endsWith('.history.json'))
+
+  let latest: { runId: string; summary: string | null; updatedAt: number; sortKey: string } | null = null
+
+  for (const entry of entries) {
+    const filePath = path.join(stateDir, entry.name)
+
+    try {
+      const parsed = JSON.parse(fileSystem.readFileSync(filePath, 'utf8')) as Partial<{
+        runId: string
+        lastPlanSummary: string | null
+        lastUpdatedAt: string | null
+      }>
+      const runId = typeof parsed.runId === 'string' && parsed.runId.length > 0 ? parsed.runId : entry.name.replace(/\.json$/, '')
+      const parsedUpdatedAt =
+        typeof parsed.lastUpdatedAt === 'string' && Number.isFinite(Date.parse(parsed.lastUpdatedAt))
+          ? Date.parse(parsed.lastUpdatedAt)
+          : Number.NaN
+      const statUpdatedAt = fileSystem.statSync(filePath).mtime.getTime()
+      const updatedAt = Number.isFinite(parsedUpdatedAt) ? parsedUpdatedAt : statUpdatedAt
+      const candidate = {
+        runId,
+        summary: typeof parsed.lastPlanSummary === 'string' ? parsed.lastPlanSummary : null,
+        updatedAt,
+        sortKey: entry.name,
+      }
+
+      if (
+        latest === null ||
+        candidate.updatedAt > latest.updatedAt ||
+        (candidate.updatedAt === latest.updatedAt && candidate.sortKey.localeCompare(latest.sortKey) > 0)
+      ) {
+        latest = candidate
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return latest ? { runId: latest.runId, summary: latest.summary } : null
+}
+
 function buildSpawnRequestKey(request: SpawnRequest): string | null {
   if (!request.requestedRole) {
     return null
@@ -156,6 +218,7 @@ function collectSpawnRequests(args: {
   runId: string
   requests: SpawnRequest[]
   activeWorkers: WorkflowWorkerRecord[]
+  satisfiedRequestIds: Set<string>
 }): SpawnRequest[] {
   const activeKeys = new Set(args.activeWorkers.map(buildActiveWorkerKey))
   const latestByKey = new Map<string, SpawnRequest>()
@@ -170,10 +233,39 @@ function collectSpawnRequests(args: {
       continue
     }
 
+    const isBlocked = request.dependsOn.some((dependsOnId) => !args.satisfiedRequestIds.has(dependsOnId))
+    if (isBlocked) {
+      continue
+    }
+
     latestByKey.set(key, request)
   }
 
   return [...latestByKey.values()]
+}
+
+// A dependency is only "satisfied" once the worker spawned to fulfill it has
+// actually stopped running — fulfillSpawnRequest fires at spawn time, before
+// the worker has done any work, so status === 'fulfilled' alone isn't enough.
+function computeSatisfiedRequestIds(args: {
+  allRequests: SpawnRequest[]
+  allWorkers: WorkflowWorkerRecord[]
+}): Set<string> {
+  const workerStatusById = new Map(args.allWorkers.map((worker) => [worker.workerId, worker.status]))
+
+  return new Set(
+    args.allRequests
+      .filter((request) => {
+        if (request.status !== 'fulfilled') {
+          return false
+        }
+        if (!request.fulfilledWorkerId) {
+          return true
+        }
+        return workerStatusById.get(request.fulfilledWorkerId) === 'stopped'
+      })
+      .map((request) => request.requestId)
+  )
 }
 
 export function spawnRequestedWorkers(args: {
@@ -182,12 +274,17 @@ export function spawnRequestedWorkers(args: {
   bus: WorkflowBusLike
 }): WorkflowWorkerRecord[] {
   const activeWorkers = args.workerRuntime.listWorkers({ runId: args.runId, activeOnly: true })
+  const currentWorkers = args.workerRuntime.listWorkers({ runId: args.runId })
+  const satisfiedRequestIds = computeSatisfiedRequestIds({
+    allRequests: args.bus.listSpawnRequests(),
+    allWorkers: currentWorkers,
+  })
   const spawnRequests = collectSpawnRequests({
     runId: args.runId,
     requests: args.bus.listOpenSpawnRequests(),
     activeWorkers,
+    satisfiedRequestIds,
   })
-  const currentWorkers = args.workerRuntime.listWorkers({ runId: args.runId })
   const spawnedWorkers: WorkflowWorkerRecord[] = []
 
   for (const request of spawnRequests) {
@@ -220,6 +317,7 @@ export function spawnRequestedWorkers(args: {
       requestId: request.requestId,
       fulfilledBy: 'supervisor_loop',
       fulfillmentNote: `Spawned worker ${nickname} (${role}).`,
+      fulfilledWorkerId: worker.workerId,
     })
   }
 
@@ -268,16 +366,18 @@ async function main(): Promise<number> {
     rootDir: ROOT_DIR,
     outputDir: OUTPUT_DIR,
     processAdapter: createNodeWorkerProcessAdapter(),
+    workerDriver: WORKER_DRIVER,
   })
 
   const latestRunStatus = [...bus.listRunStatuses()].sort((left, right) => left.at.localeCompare(right.at)).at(-1)
-  const runId = options.runId ?? latestRunStatus?.runId
+  const latestPersistedRun = resolveLatestPersistedRun(ORCHESTRATOR_STATE_DIR)
+  const runId = options.runId ?? latestRunStatus?.runId ?? latestPersistedRun?.runId
   if (!runId) {
     process.stderr.write(`No runId was provided and no active run status exists in ${BUS_PATH}.\n`)
     return 1
   }
 
-  const task = options.task ?? latestRunStatus?.summary ?? `Continue supervising run ${runId}.`
+  const task = options.task ?? latestRunStatus?.summary ?? latestPersistedRun?.summary ?? `Continue supervising run ${runId}.`
   const scenario = options.scenario ?? (process.env.WORKFLOW_SCENARIO as SupervisorLoopOptions['scenario']) ?? 'both'
   const frontendUrl = options.frontendUrl ?? process.env.WORKFLOW_FRONTEND_URL ?? 'http://localhost:5174'
 

@@ -1,7 +1,8 @@
 ---
-name: video-recorder
+name: demo_recorder
 description: Records demo videos using both local Playwright and Docker/Xvfb/ffmpeg pipelines
 type: autonomous-agent
+model: haiku
 ---
 
 # Video Recorder Agent

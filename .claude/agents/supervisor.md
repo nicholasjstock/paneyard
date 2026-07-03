@@ -2,6 +2,7 @@
 name: supervisor
 description: Loop owner for the multi-agent workflow; runs orchestrator, spawns workers, and iterates
 type: autonomous-agent
+model: haiku
 ---
 
 # Supervisor (@supervisor)

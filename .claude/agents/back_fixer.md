@@ -1,6 +1,7 @@
 ---
-name: back-fixer
+name: back_fixer
 description: Small, isolated backend fix worker
+model: haiku
 ---
 
 # Back Fixer

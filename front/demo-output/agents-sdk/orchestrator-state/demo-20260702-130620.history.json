@@ -9,8 +9,8 @@
       "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
       "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
     ],
-    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=108763639 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=108763639; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
-    "lastUpdatedAt": "2026-07-03T16:12:43.644Z"
+    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=117125509 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=117125509; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-03T18:32:05.514Z"
   },
   {
     "runId": "demo-20260702-130620",
@@ -22,8 +22,8 @@
       "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
       "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
     ],
-    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=109100384 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=109100384; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
-    "lastUpdatedAt": "2026-07-03T16:18:20.392Z"
+    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=117986139 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=117986139; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-03T18:46:26.145Z"
   },
   {
     "runId": "demo-20260702-130620",
@@ -35,8 +35,8 @@
       "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
       "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
     ],
-    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=109135565 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=109135565; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
-    "lastUpdatedAt": "2026-07-03T16:18:55.571Z"
+    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=118309550 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=118309550; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-03T18:51:49.555Z"
   },
   {
     "runId": "demo-20260702-130620",
@@ -48,8 +48,8 @@
       "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
       "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
     ],
-    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=109712456 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=109712456; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
-    "lastUpdatedAt": "2026-07-03T16:28:32.462Z"
+    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=118881031 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=118881031; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-03T19:01:21.035Z"
   },
   {
     "runId": "demo-20260702-130620",
@@ -61,8 +61,8 @@
       "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
       "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
     ],
-    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=110224337 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=110224337; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
-    "lastUpdatedAt": "2026-07-03T16:37:04.341Z"
+    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=119375724 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=119375724; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-03T19:09:35.732Z"
   },
   {
     "runId": "demo-20260702-130620",
@@ -74,8 +74,8 @@
       "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
       "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
     ],
-    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=111608432 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=111608432; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
-    "lastUpdatedAt": "2026-07-03T17:00:08.443Z"
+    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=120030614 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=120030614; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-03T19:20:30.622Z"
   },
   {
     "runId": "demo-20260702-130620",
@@ -87,7 +87,33 @@
       "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
       "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
     ],
-    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=112946805 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=112946805; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
-    "lastUpdatedAt": "2026-07-03T17:22:26.812Z"
+    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=120360843 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=120360843; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-03T19:26:00.848Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "planning",
+    "tickCount": 8,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174.",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=120430339 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=120430339; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-03T19:27:10.346Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "planning",
+    "tickCount": 9,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174.",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]"
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (front_fixer) | runId=demo-20260702-130620 | idleForMs=120484321 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=front_fixer; idleForMs=120484321; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-03T19:28:04.328Z"
   }
 ]

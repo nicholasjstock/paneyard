@@ -1,6 +1,7 @@
 ---
-name: front-fixer
+name: front_fixer
 description: Small, isolated frontend fix worker
+model: haiku
 ---
 
 # Front Fixer

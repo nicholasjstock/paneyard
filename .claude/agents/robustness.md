@@ -3,6 +3,7 @@ name: agent_robustness_patterns
 description: Guidelines for agents to robustly handle spawned jobs and external processes
 metadata:
   type: feedback
+model: haiku
 ---
 
 # Agent Robustness Patterns

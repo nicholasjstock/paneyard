@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_TARGET_ROOT="/Users/stockn/Source/simple-retail-planner/main"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -36,8 +37,8 @@ CLAUDE_BIN="$TMP_DIR/claude" \
     --stale-after-ms=60000 \
     >/dev/null
 
-if ! grep -q "^cwd=$ROOT$" "$CLAUDE_LOG"; then
-  echo "Expected bin/orchestrator_launcher_claude to run from the repo root for MCP config access." >&2
+if ! grep -q "^cwd=$DEFAULT_TARGET_ROOT$" "$CLAUDE_LOG"; then
+  echo "Expected bin/orchestrator_launcher_claude to default WORKFLOW_TARGET_ROOT to $DEFAULT_TARGET_ROOT and run from there for MCP config access." >&2
   cat "$CLAUDE_LOG"
   exit 1
 fi

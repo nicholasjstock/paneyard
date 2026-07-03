@@ -715,7 +715,11 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
   server.registerTool(
     'planner_turn',
     {
-      description: 'Submit the planner\'s complete decided plan for a run and publish the resulting spawn requests to the bus.',
+      description:
+        'Submit the planner\'s complete decided plan for a run and publish the resulting spawn requests to the bus. ' +
+        'planner_turn spawns a worker immediately for every included step; a step only waits if its ' +
+        'dependsOnArtifacts names another step\'s artifact, in which case the supervisor holds it until that ' +
+        'dependency is fulfilled.',
       inputSchema: {
         runId: z.string().min(1),
         summary: z.string().min(1),
@@ -724,6 +728,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
             owner: workflowAgentSchema,
             artifact: z.string().min(1),
             successCheck: z.string().min(1),
+            dependsOnArtifacts: z.array(z.string()).optional(),
           })
         ),
       },
@@ -735,6 +740,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
               owner: z.string(),
               artifact: z.string(),
               successCheck: z.string(),
+              dependsOnArtifacts: z.array(z.string()).optional(),
             }),
           })
         ),

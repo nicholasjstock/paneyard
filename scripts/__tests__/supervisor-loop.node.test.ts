@@ -7,9 +7,9 @@ import * as path from 'path'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import { createWorkflowBus } from '../workflow-bus'
-import { createWorkflowWorkerRuntime } from '../workflow-worker-runtime'
+import { createWorkflowWorkerRuntime, type WorkflowManagedRole } from '../workflow-worker-runtime'
 import { createNodeWorkerProcessAdapter } from '../workflow-worker-runtime-node'
-import { resolveOrchestratorLauncher, spawnRequestedWorkers } from '../supervisor-loop'
+import { resolveLatestPersistedRun, resolveOrchestratorLauncher, spawnRequestedWorkers } from '../supervisor-loop'
 
 const tempDirs: string[] = []
 
@@ -128,6 +128,84 @@ describe('supervisor loop worker spawning', () => {
     expect(spawned.map((call) => call.role)).toEqual(['demo_recorder', 'demo_verifier'])
     expect(spawned.map((call) => call.nickname)).toEqual(['demo-recorder', 'demo-verifier'])
   })
+
+  test('holds a dependent request until the dependency worker actually stops, not just spawns', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supervisor-loop-deps-'))
+    tempDirs.push(tempDir)
+    const bus = createWorkflowBus({
+      storagePath: path.join(tempDir, 'workflow-bus.json'),
+    })
+    const runId = 'demo-deps-run'
+
+    const workers: Array<{ workerId: string; role: WorkflowManagedRole; nickname: string; status: 'running' | 'stopped' }> = []
+    let nextWorkerId = 1
+
+    const workerRuntime = {
+      listWorkers(listArgs: { activeOnly?: boolean } = {}) {
+        return workers
+          .filter((worker) => (listArgs.activeOnly ? worker.status === 'running' : true))
+          .map((worker) => ({ ...worker, runId, scope: '', reason: '', pid: 0 })) as any
+      },
+      spawnWorker(spawnArgs: { role: WorkflowManagedRole; nickname: string }) {
+        const workerId = `worker-${nextWorkerId}`
+        nextWorkerId += 1
+        workers.push({ workerId, role: spawnArgs.role, nickname: spawnArgs.nickname, status: 'running' })
+        return {
+          workerId,
+          runId,
+          role: spawnArgs.role,
+          nickname: spawnArgs.nickname,
+          reason: '',
+          scope: '',
+          status: 'running' as const,
+          pid: 50000 + workers.length,
+          promptPath: '',
+          logPath: '',
+          lastMessagePath: '',
+          envPath: '',
+          command: 'codex',
+          args: [],
+          startedAt: new Date().toISOString(),
+          stoppedAt: null,
+          stopReason: null,
+        }
+      },
+    }
+
+    const infraRequest = bus.appendSpawnRequest({
+      runId,
+      askedBy: 'planner',
+      scope: 'colima-status.md',
+      text: 'colima is running',
+      requestedRole: 'infra_fixer',
+      priority: 'blocking',
+      tags: ['infra_fixer', 'colima-status.md', 'planner-job'],
+    })
+    bus.appendSpawnRequest({
+      runId,
+      askedBy: 'planner',
+      scope: 'recorder-report.md',
+      text: 'recording succeeds after the infra fix',
+      requestedRole: 'demo_recorder',
+      priority: 'blocking',
+      tags: ['demo_recorder', 'recorder-report.md', 'planner-job'],
+      dependsOn: [infraRequest.requestId],
+    })
+
+    const firstTick = spawnRequestedWorkers({ runId, workerRuntime, bus })
+    expect(firstTick.map((worker) => worker.role)).toEqual(['infra_fixer'])
+
+    // The infra_fixer worker was spawned (request marked fulfilled) but is
+    // still running: the dependent must stay blocked on this tick too.
+    const secondTick = spawnRequestedWorkers({ runId, workerRuntime, bus })
+    expect(secondTick).toEqual([])
+
+    // Now the infra_fixer worker actually finishes.
+    workers[0].status = 'stopped'
+
+    const thirdTick = spawnRequestedWorkers({ runId, workerRuntime, bus })
+    expect(thirdTick.map((worker) => worker.role)).toEqual(['demo_recorder'])
+  })
 })
 
 describe('supervisor loop worker spawning integration', () => {
@@ -227,5 +305,39 @@ describe('resolveOrchestratorLauncher', () => {
     expect(
       resolveOrchestratorLauncher({ ORCHESTRATOR_LAUNCHER: '/repo/bin/orchestrator_launcher_claude' }, '/repo')
     ).toBe('/repo/bin/orchestrator_launcher_claude')
+  })
+})
+
+describe('resolveLatestPersistedRun', () => {
+  test('returns the latest non-history orchestrator state when the bus has no active run', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supervisor-loop-state-'))
+    tempDirs.push(tempDir)
+    const stateDir = path.join(tempDir, 'orchestrator-state')
+    fs.mkdirSync(stateDir, { recursive: true })
+
+    fs.writeFileSync(
+      path.join(stateDir, 'demo-20260702-130619.json'),
+      `${JSON.stringify({
+        runId: 'demo-20260702-130619',
+        tickCount: 2,
+        lastPlanSummary: 'Older summary.',
+        lastUpdatedAt: '2026-07-02T13:06:19.000Z',
+      })}\n`
+    )
+    fs.writeFileSync(path.join(stateDir, 'demo-20260702-130620.history.json'), '[]\n')
+    fs.writeFileSync(
+      path.join(stateDir, 'demo-20260702-130620.json'),
+      `${JSON.stringify({
+        runId: 'demo-20260702-130620',
+        tickCount: 3,
+        lastPlanSummary: 'Latest summary.',
+        lastUpdatedAt: '2026-07-02T13:06:20.000Z',
+      })}\n`
+    )
+
+    expect(resolveLatestPersistedRun(stateDir)).toEqual({
+      runId: 'demo-20260702-130620',
+      summary: 'Latest summary.',
+    })
   })
 })

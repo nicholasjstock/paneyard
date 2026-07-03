@@ -16,6 +16,9 @@ export type WorkflowStep = {
   owner: WorkflowAgent
   artifact: string
   successCheck: string
+  // artifact names of other steps (in this same plan, or already on the bus
+  // for this run) that must be fulfilled before this step may be spawned.
+  dependsOnArtifacts?: string[]
 }
 
 export type WorkflowContext = {
@@ -295,6 +298,7 @@ export function publishPlannerJobs(
       requestedRole: string
       priority?: 'advisory' | 'blocking'
       tags?: string[]
+      dependsOn?: string[]
     }) => { requestId: string }
     listOpenSpawnRequests?: () => Array<{
       requestId: string
@@ -305,6 +309,11 @@ export function publishPlannerJobs(
       requestedRole: string
       status: 'open' | 'fulfilled' | 'dismissed'
     }>
+    listSpawnRequests?: () => Array<{
+      requestId: string
+      runId: string
+      scope: string
+    }>
   },
   args: {
     runId: string
@@ -312,6 +321,16 @@ export function publishPlannerJobs(
     plan: PlanWorkflowIterationResult
   }
 ): PlannerBusJob[] {
+  // Seed artifact -> requestId from anything already on the bus for this run
+  // (any status) so a step can depend on an artifact requested in an earlier
+  // planner_turn call, not just one in this same batch.
+  const requestIdByArtifact = new Map<string, string>()
+  for (const existing of bus.listSpawnRequests?.() ?? []) {
+    if (existing.runId === args.runId) {
+      requestIdByArtifact.set(existing.scope, existing.requestId)
+    }
+  }
+
   return args.plan.steps
     .filter((step) => step.owner !== 'orchestrator')
     .map((step) => {
@@ -328,11 +347,16 @@ export function publishPlannerJobs(
         )
 
       if (existingRequest) {
+        requestIdByArtifact.set(step.artifact, existingRequest.requestId)
         return {
           step,
           requestId: existingRequest.requestId,
         }
       }
+
+      const dependsOn = (step.dependsOnArtifacts ?? [])
+        .map((artifact) => requestIdByArtifact.get(artifact))
+        .filter((requestId): requestId is string => Boolean(requestId))
 
       const request = bus.appendSpawnRequest({
         runId: args.runId,
@@ -343,7 +367,10 @@ export function publishPlannerJobs(
         requestedRole: step.owner,
         priority: 'blocking',
         tags: [step.owner, step.artifact, 'planner-job'],
+        dependsOn,
       })
+
+      requestIdByArtifact.set(step.artifact, request.requestId)
 
       return {
         step,

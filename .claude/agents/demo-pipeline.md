@@ -3,6 +3,7 @@ name: demo-pipeline
 description: Orchestrator planning logic (called by supervisor each iteration)
 metadata:
   type: agent-orchestration
+model: haiku
 ---
 
 # Orchestrator Planning Logic (Demo Pipeline)

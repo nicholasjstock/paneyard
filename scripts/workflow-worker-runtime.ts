@@ -7,6 +7,7 @@ import type { WorkflowAgent } from './workflow-mcp'
 
 export type WorkflowManagedRole = WorkflowAgent | 'planner'
 export type WorkflowWorkerStatus = 'running' | 'stopped'
+export type WorkerDriver = 'codex' | 'claude'
 
 export type WorkflowWorkerRecord = {
   workerId: string
@@ -86,6 +87,7 @@ type CreateWorkerRuntimeArgs = {
   storagePath?: string
   fileSystem?: RuntimeFileSystem
   processAdapter: WorkerProcessAdapter
+  workerDriver?: WorkerDriver
 }
 
 type SpawnWorkerArgs = {
@@ -353,6 +355,8 @@ export function createWorkflowWorkerRuntime(
     )
   }
 
+  const workerDriver: WorkerDriver = args.workerDriver ?? 'codex'
+
   return {
     spawnWorker(spawnArgs) {
       ensureDir()
@@ -361,22 +365,24 @@ export function createWorkflowWorkerRuntime(
       const logPath = resolvePath(workersDir, `${spawnArgs.nickname}.log`)
       const lastMessagePath = resolvePath(workersDir, `${spawnArgs.nickname}.last-message.txt`)
       const envPath = resolvePath(workersDir, `${spawnArgs.nickname}.env.json`)
-      const command = 'codex'
-      const commandArgs = [
-        'exec',
-        '--dangerously-bypass-approvals-and-sandbox',
-        '-C',
-        args.rootDir,
-        '-o',
-        lastMessagePath,
-        '-',
-      ]
       const workerEnv = buildWorkerEnv()
-      const enrichedPrompt = buildWorkerPromptWithPersona({
-        rootDir: args.rootDir,
-        role: spawnArgs.role,
-        prompt: spawnArgs.prompt,
-      })
+
+      // The claude CLI resolves `--agent <role>` against .claude/agents/<role>.md
+      // itself, so the persona must not also be prepended into the prompt the
+      // way it is for codex (which has no equivalent named-agent mechanism).
+      const command = workerDriver === 'claude' ? 'claude' : 'codex'
+      const enrichedPrompt =
+        workerDriver === 'claude'
+          ? spawnArgs.prompt
+          : buildWorkerPromptWithPersona({
+              rootDir: args.rootDir,
+              role: spawnArgs.role,
+              prompt: spawnArgs.prompt,
+            })
+      const commandArgs =
+        workerDriver === 'claude'
+          ? ['--agent', spawnArgs.role, '--permission-mode', 'bypassPermissions', '-p', '--', enrichedPrompt]
+          : ['exec', '--dangerously-bypass-approvals-and-sandbox', '-C', args.rootDir, '-o', lastMessagePath, '-']
 
       fileSystem.writeFileSync(promptPath, enrichedPrompt)
       fileSystem.writeFileSync(logPath, '')
@@ -389,7 +395,11 @@ export function createWorkflowWorkerRuntime(
         logPath,
       })
 
-      child.stdin?.end(enrichedPrompt)
+      if (workerDriver === 'claude') {
+        child.stdin?.end()
+      } else {
+        child.stdin?.end(enrichedPrompt)
+      }
       child.unref?.()
 
       const worker: WorkflowWorkerRecord = {

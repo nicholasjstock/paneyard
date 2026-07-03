@@ -1,8 +1,9 @@
 ---
-name: video-verifier
+name: demo_verifier
 description: Streaming video analysis with parallel fast/medium/slow passes
 metadata:
   type: agent-improvement
+model: haiku
 ---
 
 # Video Verifier - Streaming Analysis

@@ -273,6 +273,111 @@ describe('workflow-mcp planning helpers', () => {
     ])
   })
 
+  function createDependencyTestBus() {
+    const requests: Array<{
+      requestId: string
+      runId: string
+      askedBy: string
+      scope: string
+      text: string
+      requestedRole: string
+      dependsOn: string[]
+      status: 'open' | 'fulfilled' | 'dismissed'
+    }> = []
+    let nextId = 1
+
+    return {
+      requests,
+      appendSpawnRequest(args: {
+        runId: string
+        askedBy: string
+        scope: string
+        text: string
+        requestedRole: string
+        dependsOn?: string[]
+      }) {
+        const requestId = `req-${nextId}`
+        nextId += 1
+        requests.push({
+          requestId,
+          runId: args.runId,
+          askedBy: args.askedBy,
+          scope: args.scope,
+          text: args.text,
+          requestedRole: args.requestedRole,
+          dependsOn: args.dependsOn ?? [],
+          status: 'open',
+        })
+        return { requestId }
+      },
+      listOpenSpawnRequests() {
+        return requests.filter((request) => request.status === 'open')
+      },
+      listSpawnRequests() {
+        return requests
+      },
+    }
+  }
+
+  test('publishPlannerJobs resolves dependsOnArtifacts to requestIds within the same batch', () => {
+    const bus = createDependencyTestBus()
+
+    const jobs = publishPlannerJobs(bus, {
+      runId: 'demo-5',
+      summary: 'Repair the recording loop.',
+      plan: {
+        summary: 'Repair the recording loop.',
+        steps: [
+          { owner: 'infra_fixer', artifact: 'colima-status.md', successCheck: 'colima is running' },
+          {
+            owner: 'demo_recorder',
+            artifact: 'recorder-report.md',
+            successCheck: 'recording succeeds',
+            dependsOnArtifacts: ['colima-status.md'],
+          },
+        ],
+      },
+    })
+
+    const infraJob = jobs.find((job) => job.step.owner === 'infra_fixer')
+    const recorderRequest = bus.requests.find((request) => request.requestedRole === 'demo_recorder')
+
+    expect(infraJob).toBeDefined()
+    expect(recorderRequest?.dependsOn).toEqual([infraJob?.requestId])
+  })
+
+  test('publishPlannerJobs resolves dependsOnArtifacts against a request already on the bus from an earlier call', () => {
+    const bus = createDependencyTestBus()
+    bus.appendSpawnRequest({
+      runId: 'demo-6',
+      askedBy: 'planner',
+      scope: 'colima-status.md',
+      text: 'colima is running',
+      requestedRole: 'infra_fixer',
+    })
+
+    publishPlannerJobs(bus, {
+      runId: 'demo-6',
+      summary: 'Retry the recording after the infra fix.',
+      plan: {
+        summary: 'Retry the recording after the infra fix.',
+        steps: [
+          {
+            owner: 'demo_recorder',
+            artifact: 'recorder-report.md',
+            successCheck: 'recording succeeds',
+            dependsOnArtifacts: ['colima-status.md'],
+          },
+        ],
+      },
+    })
+
+    const infraRequest = bus.requests.find((request) => request.requestedRole === 'infra_fixer')
+    const recorderRequest = bus.requests.find((request) => request.requestedRole === 'demo_recorder')
+
+    expect(recorderRequest?.dependsOn).toEqual([infraRequest?.requestId])
+  })
+
   test('buildRecordDemoCommand chooses the right entrypoint for docker and local runs', () => {
     expect(
       buildRecordDemoCommand({

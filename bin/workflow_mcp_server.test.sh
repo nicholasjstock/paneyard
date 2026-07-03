@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_TARGET_ROOT="/Users/stockn/Source/simple-retail-planner/main"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -30,8 +31,8 @@ if ! grep -q "^arg\\[0\\]=$ROOT/scripts/workflow-mcp-server.ts$" "$TSX_LOG"; the
   exit 1
 fi
 
-if ! grep -q "^WORKFLOW_TARGET_ROOT=$ROOT$" "$TSX_LOG"; then
-  echo "Expected bin/workflow_mcp_server to default WORKFLOW_TARGET_ROOT to the package root." >&2
+if ! grep -q "^WORKFLOW_TARGET_ROOT=$DEFAULT_TARGET_ROOT$" "$TSX_LOG"; then
+  echo "Expected bin/workflow_mcp_server to default WORKFLOW_TARGET_ROOT to $DEFAULT_TARGET_ROOT." >&2
   cat "$TSX_LOG" >&2 || true
   exit 1
 fi

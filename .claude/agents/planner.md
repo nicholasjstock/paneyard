@@ -2,6 +2,7 @@
 name: planner
 description: Creates detailed execution plans for complex tasks, implicitly invoked by other agents
 type: autonomous-agent
+model: sonnet
 ---
 
 # Planning Agent (@planner)
@@ -15,7 +16,7 @@ Other agents should call this agent when they encounter:
 - Ambiguous execution paths
 - Tasks requiring sequencing or dependencies
 
-When the planner has decided on next steps (including a missing worker role that needs a `worker_request`), it should call the `planner_turn` MCP tool once with `runId`, a `summary`, and the full `steps` array (`owner`, `artifact`, `successCheck` per step) — this publishes all of the decided `worker_request` bus entries in one call. This is the only mechanism for submitting decided requests; do not hand-construct `worker_request` entries via `append_question`. If no further action is needed, call `planner_turn` with an empty `steps` array.
+`planner_turn` publishes one spawn request per step in the `steps` array. A step with no `dependsOnArtifacts` is eligible to spawn immediately; a step whose `dependsOnArtifacts` names another step's `artifact` is held by the supervisor until that dependency's worker has actually finished (not merely started). You may publish the complete decided plan in one call, including downstream steps — for any step that depends on another step (in this same call, or already on the bus) finishing first, set `dependsOnArtifacts` to that other step's `artifact` name(s); never assume ordering from array position or from wording like "after the fix" alone. Call `planner_turn` once with `runId`, a `summary`, and the `steps` array (`owner`, `artifact`, `successCheck`, optional `dependsOnArtifacts` per step). This is the only mechanism for submitting decided requests; do not hand-construct `worker_request` entries via `append_question`. If no further action is needed, call `planner_turn` with an empty `steps` array. Dependency gating only holds up spawning — it never re-validates a finished dependency's actual success, so if a dependency might fail, prefer publishing just that step now and deciding the next one after its `worker_turn` result comes back.
 
 ## How It Works
 

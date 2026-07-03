@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_TARGET_ROOT="/Users/stockn/Source/simple-retail-planner/main"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -42,8 +43,8 @@ if [[ "$launcher_output" != *"Supervisor script: $ROOT/scripts/supervisor-loop.t
   exit 1
 fi
 
-if [[ "$launcher_output" != *"Workflow state dir: $ROOT/front/demo-output/agents-sdk"* ]]; then
-  echo "Expected bin/supervisor_launcher to print the workflow state directory." >&2
+if [[ "$launcher_output" != *"Workflow state dir: $DEFAULT_TARGET_ROOT/front/demo-output/agents-sdk"* ]]; then
+  echo "Expected bin/supervisor_launcher to print the workflow state directory, defaulting to the simple-retail-planner target root." >&2
   exit 1
 fi
 
@@ -52,8 +53,8 @@ if grep -q 'codex' "$TSX_LOG"; then
   exit 1
 fi
 
-if ! grep -q "^pwd=$ROOT$" "$TSX_LOG"; then
-  echo "Expected bin/supervisor_launcher to execute from the repo root." >&2
+if ! grep -q "^pwd=$DEFAULT_TARGET_ROOT$" "$TSX_LOG"; then
+  echo "Expected bin/supervisor_launcher to default WORKFLOW_TARGET_ROOT to $DEFAULT_TARGET_ROOT and run from there." >&2
   exit 1
 fi
 

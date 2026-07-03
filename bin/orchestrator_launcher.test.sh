@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_TARGET_ROOT="/Users/stockn/Source/simple-retail-planner/main"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -169,12 +170,12 @@ if ! grep -Fq 'args = ["wf-mcp-server"]' "$profile_path"; then
   exit 1
 fi
 
-if ! grep -Fq "cwd = \"$ROOT/front\"" "$profile_path"; then
+if ! grep -Fq "cwd = \"$DEFAULT_TARGET_ROOT/front\"" "$profile_path"; then
   echo "Expected the orchestrator profile to point MCP cwd at the target repo front/ directory." >&2
   exit 1
 fi
 
-if ! grep -Fq "env = { WORKFLOW_TARGET_ROOT = \"$ROOT\", WORKFLOW_STATE_DIR = \"\" }" "$profile_path"; then
+if ! grep -Fq "env = { WORKFLOW_TARGET_ROOT = \"$DEFAULT_TARGET_ROOT\", WORKFLOW_STATE_DIR = \"\" }" "$profile_path"; then
   echo "Expected the orchestrator profile to pass WORKFLOW_TARGET_ROOT and WORKFLOW_STATE_DIR through to the MCP server." >&2
   exit 1
 fi

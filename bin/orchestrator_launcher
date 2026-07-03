@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
 PKG_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
-TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$PKG_ROOT}"
+DEFAULT_TARGET_ROOT="/Users/stockn/Source/simple-retail-planner/main"
+TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$DEFAULT_TARGET_ROOT}"
 CODEX_BIN="${CODEX_BIN:-$(command -v codex)}"
 
 usage() {

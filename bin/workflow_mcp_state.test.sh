@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_TARGET_ROOT="/Users/stockn/Source/simple-retail-planner/main"
 TMP_DIR="$(mktemp -d)"
 
 HTTP_LOG="$TMP_DIR/http.log"
@@ -90,8 +91,8 @@ if ! grep -q '^HTTP_PORT=8792$' "$HTTP_LOG"; then
   exit 1
 fi
 
-if ! grep -q "^WORKFLOW_TARGET_ROOT=$ROOT$" "$HTTP_LOG"; then
-  echo "Expected the combined launcher to pass the target root through to the HTTP server." >&2
+if ! grep -q "^WORKFLOW_TARGET_ROOT=$DEFAULT_TARGET_ROOT$" "$HTTP_LOG"; then
+  echo "Expected the combined launcher to default WORKFLOW_TARGET_ROOT to $DEFAULT_TARGET_ROOT and pass it through to the HTTP server." >&2
   cat "$HTTP_LOG" >&2 || true
   exit 1
 fi

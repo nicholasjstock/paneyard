@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
 PKG_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
-TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$PKG_ROOT}"
+DEFAULT_TARGET_ROOT="/Users/stockn/Source/simple-retail-planner/main"
+TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$DEFAULT_TARGET_ROOT}"
 TSX_BIN="${TSX_BIN:-$PKG_ROOT/node_modules/.bin/tsx}"
 SUPERVISOR_SCRIPT="$PKG_ROOT/scripts/supervisor-loop.ts"
 WORKFLOW_STATE_DIR="${WORKFLOW_STATE_DIR:-$TARGET_ROOT/front/demo-output/agents-sdk}"
@@ -13,13 +14,13 @@ usage() {
   cat <<'EOF'
 Usage: bin/supervisor_launcher_claude [options]
 
-Run a single supervisor tick: one orchestrator turn plus any worker spawns
-it triggers, then exit. Intended to be called once per turn from a Claude
-session driving the workflow interactively, as opposed to
-bin/supervisor_launcher's continuous loop.
+Run the deterministic workflow supervisor loop, driving the orchestrator
+turn through the claude CLI instead of codex. Loops continuously on
+--interval-ms like bin/supervisor_launcher; pass --once for a single tick.
 
 Examples:
-  bin/supervisor_launcher_claude --run-id=demo-2026-07-03
+  bin/supervisor_launcher_claude
+  bin/supervisor_launcher_claude --once --run-id=demo-2026-07-03
 EOF
 }
 
@@ -43,26 +44,15 @@ if [[ ! -x "$ORCHESTRATOR_LAUNCHER" ]]; then
   exit 1
 fi
 
-printf 'Running a single supervisor tick (spawn workers + one orchestrator turn).\n'
+printf 'Launching deterministic supervisor loop (claude-driven orchestrator).\n'
 printf 'Supervisor script: %s\n' "$SUPERVISOR_SCRIPT"
 printf 'Workflow state dir: %s\n' "$WORKFLOW_STATE_DIR"
-
-ARGS=("$@")
-has_once=false
-for arg in "${ARGS[@]+"${ARGS[@]}"}"; do
-  if [[ "$arg" == "--once" ]]; then
-    has_once=true
-    break
-  fi
-done
-
-if [[ "$has_once" == false ]]; then
-  ARGS+=("--once")
-fi
+printf 'Use Ctrl-C to stop the loop.\n'
 
 cd "$TARGET_ROOT"
 exec env \
   WORKFLOW_TARGET_ROOT="$TARGET_ROOT" \
   WORKFLOW_STATE_DIR="$WORKFLOW_STATE_DIR" \
   ORCHESTRATOR_LAUNCHER="$ORCHESTRATOR_LAUNCHER" \
-  "$TSX_BIN" "$SUPERVISOR_SCRIPT" "${ARGS[@]+"${ARGS[@]}"}"
+  WORKFLOW_WORKER_DRIVER="claude" \
+  "$TSX_BIN" "$SUPERVISOR_SCRIPT" "$@"
