@@ -23,7 +23,7 @@ model: haiku
 
 **Before analyzing:** Call `collect_workflow_state` to inventory available evidence and decide fast/medium/slow scope.
 **During analysis:** Call `read_workflow_artifact` to read prior findings if any.
-**When done:** Call `write_workflow_artifact` for key="verifier-report.md" to persist findings in the shared bus.
+**When done:** Call `write_workflow_artifact` for the artifact name given in your bus request to persist findings in the shared bus.
 
 Analysis is **streaming**:
 - Run fast pass (2-3 min) → report early findings.
@@ -120,15 +120,15 @@ Never report success unless the analysis includes positive evidence for the expe
 ```
 // Emit findings as soon as each tier completes
 const fastResult = await analyzeVideoFast(videoPath)     // 2-3 min
-write_workflow_artifact(key="verifier-report.md", content=formatFastFindings(fastResult))
+write_workflow_artifact(key=<your bus request's artifact name>, content=formatFastFindings(fastResult))
 // @demo-pipeline can spawn @front-fixer/@back-fixer immediately here
 
 const mediumResult = await analyzeVideoMedium(videoPath) // 5-10 min
-write_workflow_artifact(key="verifier-report.md", content=formatMediumFindings(fastResult, mediumResult))
+write_workflow_artifact(key=<your bus request's artifact name>, content=formatMediumFindings(fastResult, mediumResult))
 // Fixers have more context now
 
 const slowResult = await analyzeVideoSlow(videoPath)     // 15-20 min
-write_workflow_artifact(key="verifier-report.md", content=formatSlowFindings(fastResult, mediumResult, slowResult))
+write_workflow_artifact(key=<your bus request's artifact name>, content=formatSlowFindings(fastResult, mediumResult, slowResult))
 // Final confidence for the orchestrator
 ```
 

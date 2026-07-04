@@ -10,7 +10,10 @@ const EXPECTED_TOOL_NAMES = [
   'stop_worker',
   'publish_run_status',
   'append_spawn_request',
+  'append_user_question',
   'list_open_spawn_requests',
+  'list_open_user_questions',
+  'queue_long_phone_demo_planner_job',
   'fulfill_spawn_request',
   'list_recent_events',
   'plan_workflow_iteration',
@@ -59,11 +62,11 @@ describe('workflow MCP tool registry', () => {
     harnesses.push(harness)
 
     const result = await harness.client.callTool({
-      name: 'list_open_spawn_requests',
+      name: 'list_open_user_questions',
       arguments: {},
     })
 
     expect(result.isError).toBeFalsy()
-    expect(result.structuredContent).toEqual({ requests: [] })
+    expect(result.structuredContent).toEqual({ questions: [] })
   })
 })

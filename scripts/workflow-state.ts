@@ -27,6 +27,18 @@ export type WorkflowServerState = {
     fulfillmentNote: string | null
     tags: string[]
   }>
+  openUserQuestions: Array<{
+    questionId: string
+    runId: string
+    askedBy: string
+    askedAt: string
+    scope: string
+    text: string
+    context: string | null
+    priority: 'advisory' | 'blocking'
+    status: 'open' | 'dismissed'
+    tags: string[]
+  }>
   recentEvents: Array<{
     eventId: string
     at: string
@@ -55,7 +67,7 @@ export type WorkflowWorkerLog = {
 
 export type WorkflowBusSnapshotSource = Pick<
   WorkflowBus,
-  'listRunStatuses' | 'listOpenSpawnRequests' | 'listRecentEvents'
+  'listRunStatuses' | 'listOpenSpawnRequests' | 'listOpenUserQuestions' | 'listRecentEvents'
 >
 
 export type WorkflowWorkerRuntimeSnapshotSource = {
@@ -71,6 +83,7 @@ export function collectWorkflowServerState(args: {
     runStatuses: args.bus.listRunStatuses(),
     workers: args.workerRuntime.listWorkers(),
     openSpawnRequests: args.bus.listOpenSpawnRequests(),
+    openUserQuestions: args.bus.listOpenUserQuestions(),
     recentEvents: args.bus.listRecentEvents(25),
   }
 }

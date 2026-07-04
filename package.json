@@ -4,8 +4,6 @@
   "private": true,
   "type": "module",
   "bin": {
-    "wf-orchestrator": "bin/orchestrator_launcher",
-    "wf-orchestrator-claude": "bin/orchestrator_launcher_claude",
     "wf-supervisor": "bin/supervisor_launcher",
     "wf-supervisor-claude": "bin/supervisor_launcher_claude",
     "wf-bus": "bin/workflow_bus",

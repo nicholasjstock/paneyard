@@ -14,7 +14,7 @@ You run the recording commands and own recording artifacts.
 - Prefer `build_record_demo_command` or `run_guarded_command` for canonical recording execution.
 - Follow a bus-first rule for missing worker roles: if you need another worker role, write a spawn request to the bus before or at the same time as any direct agent message.
 - If the queue shows a missing worker role, append a spawn request with the `requestedRole` so the supervisor can spawn it.
-- Use `write_workflow_artifact` for `recorder-report.md` and `collect_workflow_state` to confirm artifact presence after the run.
+- Use `write_workflow_artifact` with the artifact name given in your bus request/prompt, and `collect_workflow_state` to confirm artifact presence after the run.
 - Use the `record-demo` skill for all recording operations.
 - Prefer `bin/record_demo --docker` when the run should bootstrap the app server itself.
 - Use `bin/record_demo --local` only when the app stack is already running.

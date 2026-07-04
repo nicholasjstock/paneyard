@@ -12,8 +12,10 @@ export type WorkflowAgent =
   | 'infra_fixer'
   | 'general_fixer'
 
+export type WorkflowStepOwner = WorkflowAgent | 'planner'
+
 export type WorkflowStep = {
-  owner: WorkflowAgent
+  owner: WorkflowStepOwner
   artifact: string
   successCheck: string
   // artifact names of other steps (in this same plan, or already on the bus
@@ -34,7 +36,6 @@ export type WorkflowContext = {
   }
   workflow: {
     agents: WorkflowAgent[]
-    artifacts: string[]
     preferredLoop: string[]
   }
 }
@@ -55,6 +56,25 @@ export type PlanWorkflowIterationResult = {
 export type PlannerBusJob = {
   step: WorkflowStep
   requestId: string
+}
+
+export type PlannerSeedRequest = {
+  requestId: string
+  runId: string
+  askedBy: string
+  askedAt: string
+  scope: string
+  text: string
+  context: string | null
+  requestedRole: string
+  priority: 'advisory' | 'blocking'
+  status: 'open' | 'fulfilled' | 'dismissed'
+  fulfilledBy: string | null
+  fulfilledAt: string | null
+  fulfillmentNote: string | null
+  fulfilledWorkerId?: string | null
+  tags: string[]
+  dependsOn?: string[]
 }
 
 export type BuildRecordDemoCommandArgs = {
@@ -148,10 +168,36 @@ const defaultFileSystemAdapter: FileSystemAdapter = {
   },
 }
 
+// Defaults below describe the simple-retail-planner demo-recording pipeline,
+// the one downstream consumer this engine currently points at (via
+// WORKFLOW_TARGET_ROOT). They are caller-supplied defaults, not part of the
+// orchestrator's own domain — a different target project should pass its own
+// agents/recording shape instead of relying on these. Artifact names are not
+// part of this static config at all — they're decided per run by whichever
+// planner is active (see WorkflowStep.artifact / listPlannerDeclaredArtifacts).
+const DEFAULT_WORKFLOW_AGENTS: WorkflowAgent[] = [
+  'orchestrator',
+  'demo_recorder',
+  'demo_verifier',
+  'front_fixer',
+  'back_fixer',
+  'infra_fixer',
+  'general_fixer',
+]
+
+const DEFAULT_PREFERRED_LOOP: string[] = ['record', 'verify', 'fix-if-needed', 're-record', 're-verify']
+
 export function buildWorkflowContext(args: {
   rootDir: string
   frontDir: string
   outputDir: string
+  agents?: WorkflowAgent[]
+  preferredLoop?: string[]
+  recording?: {
+    entryPoint: string
+    scriptPath: string
+    runbookPath: string
+  }
 }): WorkflowContext {
   return {
     workspace: {
@@ -159,35 +205,20 @@ export function buildWorkflowContext(args: {
       frontDir: args.frontDir,
       outputDir: args.outputDir,
     },
-    recording: {
+    recording: args.recording ?? {
       entryPoint: 'bin/record_demo',
       scriptPath: `${args.frontDir}/scripts/record-demo.ts`,
       runbookPath: `${args.rootDir}/handoff/demo-video-openclaw.md`,
     },
     workflow: {
-      agents: [
-        'orchestrator',
-        'demo_recorder',
-        'demo_verifier',
-        'front_fixer',
-        'back_fixer',
-        'infra_fixer',
-        'general_fixer',
-      ],
-      artifacts: [
-        'workflow-plan.md',
-        'recorder-report.md',
-        'verifier-report.md',
-        'fix-summary.md',
-        'final-summary.md',
-      ],
-      preferredLoop: ['record', 'verify', 'fix-if-needed', 're-record', 're-verify'],
+      agents: args.agents ?? DEFAULT_WORKFLOW_AGENTS,
+      preferredLoop: args.preferredLoop ?? DEFAULT_PREFERRED_LOOP,
     },
   }
 }
 
 export function planWorkflowIteration(args: PlanWorkflowIterationArgs): PlanWorkflowIterationResult {
-  const findingText = [args.verifierFinding, args.stallFinding].filter(Boolean).join('\n').toLowerCase()
+  const findingText = [args.verifierFinding].filter(Boolean).join('\n').toLowerCase()
   const steps: WorkflowStep[] = [
     {
       owner: 'orchestrator',
@@ -285,6 +316,97 @@ export function planWorkflowIteration(args: PlanWorkflowIterationArgs): PlanWork
     summary: `${args.task} for the ${args.scenario} scenario against ${args.frontendUrl}.`,
     steps,
   }
+}
+
+export function buildStalledWorkerRecoveryPlan(args: {
+  task: string
+  scenario: DemoScenario
+  frontendUrl: string
+  stallFinding: string
+}): PlanWorkflowIterationResult {
+  const summarizedFinding = args.stallFinding.replace(/\s+/g, ' ').trim()
+
+  return {
+    summary: `${args.task} for the ${args.scenario} scenario against ${args.frontendUrl}. Recover the stalled worker via planner. ${summarizedFinding}`,
+    steps: [
+      {
+        owner: 'orchestrator',
+        artifact: 'workflow-plan.md',
+        successCheck: 'Captures the stalled-worker context and requests a bounded planner recovery handoff.',
+      },
+      {
+        owner: 'planner',
+        artifact: 'workflow-plan.md',
+        successCheck: `Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: ${summarizedFinding}`,
+      },
+    ],
+  }
+}
+
+export function buildWaitingPlan(args: {
+  task: string
+  scenario: DemoScenario
+  frontendUrl: string
+  activeWorkers: number
+  openSpawnRequests: number
+}): PlanWorkflowIterationResult {
+  const statusSummary =
+    args.activeWorkers === 0 && args.openSpawnRequests === 0
+      ? 'No active workers or open spawn requests; remain idle until a new request arrives.'
+      : `Waiting on ${args.activeWorkers} active workers and ${args.openSpawnRequests} open spawn requests.`
+
+  return {
+    summary: `${args.task} for the ${args.scenario} scenario against ${args.frontendUrl}. ${statusSummary}`,
+    steps: [
+      {
+        owner: 'orchestrator',
+        artifact: 'workflow-plan.md',
+        successCheck:
+          args.activeWorkers === 0 && args.openSpawnRequests === 0
+            ? 'Records that the run is idle and needs no automatic restart or new handoff.'
+            : 'Records that the run already has active work in flight and needs no new handoff yet.',
+      },
+    ],
+  }
+}
+
+export function queueLongPhoneDemoPlannerJob(
+  bus: {
+    appendSpawnRequest: (args: {
+      runId: string
+      askedBy: string
+      scope: string
+      text: string
+      context?: string
+      requestedRole: string
+      priority?: 'advisory' | 'blocking'
+      tags?: string[]
+      dependsOn?: string[]
+    }) => PlannerSeedRequest
+  },
+  args: {
+    runId: string
+    frontendUrl: string
+    task?: string
+  }
+): PlannerSeedRequest {
+  const task =
+    args.task?.trim() && args.task.trim().length > 0
+      ? args.task.trim()
+      : 'Create the long phone demo video.'
+
+  return bus.appendSpawnRequest({
+    runId: args.runId,
+    askedBy: 'user',
+    scope: 'workflow-plan.md',
+    text: task,
+    context:
+      `Plan the full worker chain needed to produce the long phone demo video against ${args.frontendUrl}. ` +
+      'Publish the next bounded handoff with planner_turn.',
+    requestedRole: 'planner',
+    priority: 'blocking',
+    tags: ['planner', 'phone-demo', 'long-demo-video', 'seed-job'],
+  })
 }
 
 export function publishPlannerJobs(
@@ -386,8 +508,15 @@ export function buildRecordDemoCommand(args: BuildRecordDemoCommandArgs): string
 }
 
 export function resolveWorkflowArtifactPath(context: WorkflowContext, artifactName: string): string {
-  if (!context.workflow.artifacts.includes(artifactName)) {
-    throw new Error(`Unsupported workflow artifact: ${artifactName}`)
+  if (
+    artifactName.length === 0 ||
+    artifactName === '.' ||
+    artifactName === '..' ||
+    artifactName.includes('/') ||
+    artifactName.includes('\\') ||
+    artifactName.includes('\0')
+  ) {
+    throw new Error(`Unsafe workflow artifact name: ${artifactName}`)
   }
 
   return `${context.workspace.outputDir.replace(/\/$/, '')}/${artifactName}`
@@ -534,8 +663,22 @@ export function readOrchestratorState(
   }
 }
 
+export function listPlannerDeclaredArtifacts(
+  bus: { listSpawnRequests: () => Array<{ runId: string; askedBy: string; scope: string }> },
+  runId: string
+): string[] {
+  const seen = new Set<string>()
+  for (const request of bus.listSpawnRequests()) {
+    if (request.runId === runId && request.askedBy === 'planner') {
+      seen.add(request.scope)
+    }
+  }
+  return [...seen]
+}
+
 export function collectWorkflowState(
   context: WorkflowContext,
+  artifactNames: string[],
   fileSystem: FileSystemAdapter = defaultFileSystemAdapter
 ): WorkflowState {
   function readPreview(filePath: string): string {
@@ -557,7 +700,7 @@ export function collectWorkflowState(
 
   return {
     outputDir: context.workspace.outputDir,
-    artifacts: context.workflow.artifacts.map((name) => {
+    artifacts: artifactNames.map((name) => {
       const artifactPath = resolveWorkflowArtifactPath(context, name)
 
       if (!fileSystem.existsSync(artifactPath)) {

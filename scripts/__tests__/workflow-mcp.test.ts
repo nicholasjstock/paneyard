@@ -6,6 +6,7 @@ import {
   buildGuardedCommand,
   buildRecordDemoCommand,
   collectWorkflowState,
+  queueLongPhoneDemoPlannerJob,
   readOrchestratorState,
   readOrchestratorTickHistory,
   publishPlannerJobs,
@@ -125,13 +126,6 @@ describe('workflow-mcp planning helpers', () => {
 
     expect(context.recording.entryPoint).toBe('bin/record_demo')
     expect(context.recording.scriptPath).toBe('/repo/front/scripts/record-demo.ts')
-    expect(context.workflow.artifacts).toEqual([
-      'workflow-plan.md',
-      'recorder-report.md',
-      'verifier-report.md',
-      'fix-summary.md',
-      'final-summary.md',
-    ])
     expect(context.workflow.agents).toContain('orchestrator')
     expect(context.workflow.agents).toContain('infra_fixer')
     expect(context.workflow.agents).toContain('general_fixer')
@@ -170,7 +164,7 @@ describe('workflow-mcp planning helpers', () => {
     expect(plan.steps[3]?.artifact).toBe('fix-summary.md')
   })
 
-  test('planWorkflowIteration also treats stall context as planner input for frontend-only defects', () => {
+  test('planWorkflowIteration ignores raw stall context and keeps the baseline route', () => {
     const plan = planWorkflowIteration({
       task: 'Repair the phone demo flow',
       scenario: 'phone',
@@ -178,17 +172,10 @@ describe('workflow-mcp planning helpers', () => {
       stallFinding: 'Stalled on a frontend-only defect: employee phone page fails to render the request state.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual([
-      'orchestrator',
-      'demo_recorder',
-      'demo_verifier',
-      'front_fixer',
-      'demo_recorder',
-      'demo_verifier',
-    ])
+    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'demo_recorder', 'demo_verifier'])
   })
 
-  test('planWorkflowIteration routes infrastructure stalls to the infra fixer', () => {
+  test('planWorkflowIteration does not route infrastructure stalls directly', () => {
     const plan = planWorkflowIteration({
       task: 'Repair the demo recording loop',
       scenario: 'both',
@@ -197,18 +184,10 @@ describe('workflow-mcp planning helpers', () => {
         'Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual([
-      'orchestrator',
-      'demo_recorder',
-      'demo_verifier',
-      'infra_fixer',
-      'demo_recorder',
-      'demo_verifier',
-    ])
-    expect(plan.steps[3]?.artifact).toBe('fix-summary.md')
+    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'demo_recorder', 'demo_verifier'])
   })
 
-  test('planWorkflowIteration routes unmatched blockers to the general fixer', () => {
+  test('planWorkflowIteration does not route unmatched stall blockers directly', () => {
     const plan = planWorkflowIteration({
       task: 'Repair the demo workflow',
       scenario: 'both',
@@ -216,15 +195,7 @@ describe('workflow-mcp planning helpers', () => {
       stallFinding: 'Unhandled worker startup error: the orchestrator can no longer classify this blocker.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual([
-      'orchestrator',
-      'demo_recorder',
-      'demo_verifier',
-      'general_fixer',
-      'demo_recorder',
-      'demo_verifier',
-    ])
-    expect(plan.steps[3]?.artifact).toBe('fix-summary.md')
+    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'demo_recorder', 'demo_verifier'])
   })
 
   test('publishPlannerJobs converts planner steps into spawn requests', () => {
@@ -271,6 +242,62 @@ describe('workflow-mcp planning helpers', () => {
       'recorder-report.md',
       'verifier-report.md',
     ])
+  })
+
+  test('queueLongPhoneDemoPlannerJob creates a blocking planner seed request for the long phone demo video', () => {
+    const captured: Array<{
+      runId: string
+      askedBy: string
+      scope: string
+      text: string
+      context?: string
+      requestedRole: string
+      priority?: 'advisory' | 'blocking'
+      tags?: string[]
+      dependsOn?: string[]
+    }> = []
+
+    const request = queueLongPhoneDemoPlannerJob(
+      {
+        appendSpawnRequest(args) {
+          captured.push(args)
+          return {
+            requestId: 'req-1',
+            runId: args.runId,
+            askedBy: args.askedBy,
+            askedAt: '2026-07-04T00:00:00.000Z',
+            scope: args.scope,
+            text: args.text,
+            context: args.context ?? null,
+            requestedRole: args.requestedRole,
+            priority: args.priority ?? 'advisory',
+            status: 'open' as const,
+            fulfilledBy: null,
+            fulfilledAt: null,
+            fulfillmentNote: null,
+            fulfilledWorkerId: null,
+            tags: args.tags ?? [],
+            dependsOn: args.dependsOn ?? [],
+          }
+        },
+      },
+      {
+        runId: 'demo-phone-long',
+        frontendUrl: 'http://localhost:5174',
+      }
+    )
+
+    expect(request.requestId).toBe('req-1')
+    expect(captured).toHaveLength(1)
+    expect(captured[0]).toMatchObject({
+      runId: 'demo-phone-long',
+      askedBy: 'user',
+      scope: 'workflow-plan.md',
+      requestedRole: 'planner',
+      priority: 'blocking',
+    })
+    expect(captured[0]?.text).toContain('Create the long phone demo video')
+    expect(captured[0]?.context).toContain('long phone demo video')
   })
 
   function createDependencyTestBus() {
@@ -396,7 +423,7 @@ describe('workflow-mcp planning helpers', () => {
     ).toBe('HEADLESS=1 bin/record_demo admin --local --frontend-url=http://localhost:5174')
   })
 
-  test('writeWorkflowArtifact and readWorkflowArtifact stay within the managed artifact set', () => {
+  test('writeWorkflowArtifact and readWorkflowArtifact reject unsafe artifact names', () => {
     const fileSystem = createMemoryFs()
     const tempRoot = '/virtual-repo'
     const context = buildWorkflowContext({
@@ -408,7 +435,8 @@ describe('workflow-mcp planning helpers', () => {
     writeWorkflowArtifact(context, 'workflow-plan.md', '# plan\n', fileSystem)
 
     expect(readWorkflowArtifact(context, 'workflow-plan.md', fileSystem)).toBe('# plan\n')
-    expect(() => writeWorkflowArtifact(context, '../escape.md', 'x', fileSystem)).toThrow('Unsupported workflow artifact')
+    expect(() => writeWorkflowArtifact(context, '../escape.md', 'x', fileSystem)).toThrow('Unsafe workflow artifact name')
+    expect(() => writeWorkflowArtifact(context, 'nested/path.md', 'x', fileSystem)).toThrow('Unsafe workflow artifact name')
   })
 
   test('writeOrchestratorState and readOrchestratorState persist decision state per run', () => {
@@ -561,7 +589,7 @@ describe('workflow-mcp planning helpers', () => {
 
     writeWorkflowArtifact(context, 'recorder-report.md', 'recorded ok', fileSystem)
 
-    const state = collectWorkflowState(context, fileSystem)
+    const state = collectWorkflowState(context, ['recorder-report.md', 'verifier-report.md'], fileSystem)
 
     expect(state.artifacts.find((artifact) => artifact.name === 'recorder-report.md')).toMatchObject({
       exists: true,
@@ -581,7 +609,7 @@ describe('workflow-mcp planning helpers', () => {
       outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
     })
 
-    const state = collectWorkflowState(context, fileSystem)
+    const state = collectWorkflowState(context, ['recorder-report.md'], fileSystem)
 
     expect(state.artifacts.find((artifact) => artifact.name === 'recorder-report.md')).toMatchObject({
       exists: true,

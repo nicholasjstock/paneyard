@@ -9,8 +9,10 @@ import {
   buildWorkflowContext,
   buildGuardedCommand,
   collectWorkflowState,
+  listPlannerDeclaredArtifacts,
   planWorkflowIteration,
   publishPlannerJobs,
+  queueLongPhoneDemoPlannerJob,
   readOrchestratorState,
   readOrchestratorTickHistory,
   readWorkflowArtifact,
@@ -123,6 +125,19 @@ const workerRecordSchema = z.object({
   startedAt: z.string(),
   stoppedAt: z.string().nullable(),
   stopReason: z.string().nullable(),
+})
+
+const workflowUserQuestionSchema = z.object({
+  questionId: z.string(),
+  runId: z.string(),
+  askedBy: z.string(),
+  askedAt: z.string(),
+  scope: z.string(),
+  text: z.string(),
+  context: z.string().nullable(),
+  priority: z.enum(['advisory', 'blocking']),
+  status: z.enum(['open', 'dismissed']),
+  tags: z.array(z.string()),
 })
 
 const orchestratorDecisionStateSchema = z.object({
@@ -371,6 +386,40 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
   )
 
   server.registerTool(
+    'append_user_question',
+    {
+      description: 'Append one user-facing question to the shared workflow bus when a planner or worker is blocked on a user decision.',
+      inputSchema: {
+        runId: z.string().min(1),
+        askedBy: z.string().min(1),
+        scope: z.string().min(1),
+        text: z.string().min(1),
+        context: z.string().optional(),
+        priority: z.enum(['advisory', 'blocking']).optional(),
+        tags: z.array(z.string()).optional(),
+      },
+      outputSchema: workflowUserQuestionSchema.shape,
+    },
+    async ({ runId, askedBy, scope, text, context, priority, tags }) => {
+      logWorkflow('tool:append_user_question', 'requested', { runId, askedBy, scope, priority: priority ?? 'advisory' })
+      const structuredContent = activeBus.appendUserQuestion({
+        runId,
+        askedBy,
+        scope,
+        text,
+        context,
+        priority,
+        tags,
+      })
+      logWorkflow('tool:append_user_question', 'completed', { runId, questionId: structuredContent.questionId })
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
+        structuredContent,
+      }
+    }
+  )
+
+  server.registerTool(
     'list_open_spawn_requests',
     {
       description: 'List all currently open worker spawn requests from the shared bus.',
@@ -401,6 +450,74 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
       const structuredContent = { requests: activeBus.listOpenSpawnRequests() }
       logWorkflow('tool:list_open_spawn_requests', 'completed', {
         count: structuredContent.requests.length,
+      })
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
+        structuredContent,
+      }
+    }
+  )
+
+  server.registerTool(
+    'list_open_user_questions',
+    {
+      description: 'List open user-facing workflow questions from the shared bus.',
+      inputSchema: {},
+      outputSchema: {
+        questions: z.array(workflowUserQuestionSchema),
+      },
+    },
+    async () => {
+      logWorkflow('tool:list_open_user_questions', 'requested')
+      const structuredContent = {
+        questions: activeBus.listOpenUserQuestions(),
+      }
+      logWorkflow('tool:list_open_user_questions', 'completed', { count: structuredContent.questions.length })
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
+        structuredContent,
+      }
+    }
+  )
+
+  server.registerTool(
+    'queue_long_phone_demo_planner_job',
+    {
+      description: 'Queue an explicit planner job to create the long phone demo video without auto-restarting an idle run.',
+      inputSchema: {
+        runId: z.string().min(1),
+        frontendUrl: z.string().url(),
+        task: z.string().optional(),
+      },
+      outputSchema: {
+        requestId: z.string(),
+        runId: z.string(),
+        askedBy: z.string(),
+        askedAt: z.string(),
+        scope: z.string(),
+        text: z.string(),
+        context: z.string().nullable(),
+        requestedRole: z.string(),
+        priority: z.enum(['advisory', 'blocking']),
+        status: z.enum(['open', 'fulfilled', 'dismissed']),
+        fulfilledBy: z.string().nullable(),
+        fulfilledAt: z.string().nullable(),
+        fulfillmentNote: z.string().nullable(),
+        fulfilledWorkerId: z.string().nullable(),
+        tags: z.array(z.string()),
+        dependsOn: z.array(z.string()),
+      },
+    },
+    async ({ runId, frontendUrl, task }) => {
+      logWorkflow('tool:queue_long_phone_demo_planner_job', 'requested', { runId, frontendUrl })
+      const structuredContent = queueLongPhoneDemoPlannerJob(activeBus, {
+        runId,
+        frontendUrl,
+        task,
+      })
+      logWorkflow('tool:queue_long_phone_demo_planner_job', 'completed', {
+        runId,
+        requestId: structuredContent.requestId,
       })
       return {
         content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
@@ -847,8 +964,11 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
   server.registerTool(
     'collect_workflow_state',
     {
-      description: 'Inspect the managed workflow artifact directory and summarize which workflow artifacts exist.',
-      inputSchema: {},
+      description:
+        "Inspect the managed workflow artifact directory and summarize which of this run's planner-declared artifacts exist.",
+      inputSchema: {
+        runId: z.string().min(1),
+      },
       outputSchema: {
         outputDir: z.string(),
         artifacts: z.array(
@@ -863,10 +983,12 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         ),
       },
     },
-    async () => {
-      logWorkflow('tool:collect_workflow_state', 'requested')
-      const structuredContent = collectWorkflowState(activeContext)
+    async ({ runId }) => {
+      logWorkflow('tool:collect_workflow_state', 'requested', { runId })
+      const artifactNames = listPlannerDeclaredArtifacts(activeBus, runId)
+      const structuredContent = collectWorkflowState(activeContext, artifactNames)
       logWorkflow('tool:collect_workflow_state', 'completed', {
+        runId,
         artifacts: structuredContent.artifacts.filter((artifact) => artifact.exists).length,
       })
 

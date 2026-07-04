@@ -149,4 +149,31 @@ describe('workflow bus', () => {
     expect(secondBus.listOpenSpawnRequests()[0]?.requestId).toBe(request.requestId)
     expect(secondBus.listRecentEvents(1)[0]?.type).toBe('spawn_request.created')
   })
+
+  test('stores user questions in the shared ledger and emits user-question events', () => {
+    const bus = makeBus()
+
+    const question = bus.appendUserQuestion({
+      runId: 'demo-question',
+      askedBy: 'planner',
+      scope: 'deployment target',
+      text: 'Which environment should this workflow target?',
+      context: 'The planner is blocked until the user chooses staging or production.',
+      priority: 'blocking',
+      tags: ['planner', 'user-input'],
+    })
+
+    expect(question.status).toBe('open')
+    expect(question.priority).toBe('blocking')
+    expect(bus.listOpenUserQuestions()).toHaveLength(1)
+    expect(bus.listOpenUserQuestions()[0]?.questionId).toBe(question.questionId)
+
+    const [event] = bus.listRecentEvents(1)
+    expect(event?.type).toBe('user_question.created')
+    expect(event?.payload).toMatchObject({
+      questionId: question.questionId,
+      askedBy: 'planner',
+      priority: 'blocking',
+    })
+  })
 })

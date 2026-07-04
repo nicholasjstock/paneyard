@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # bin/live_claude_workflow_smoke.sh [OPTIONS]
 #
-# Run a real Claude-driven workflow smoke test through the packaged bin/
+# Run a real Claude-worker workflow smoke test through the packaged bin/
 # entrypoints. This runs a single supervisor tick via
-# bin/supervisor_launcher_claude, which drives the orchestrator turn through
-# the real `claude` CLI against the demo-pipeline agent, waits for the
-# baseline worker roles to spawn, verifies bus/worker state, then cleans up.
+# bin/supervisor_launcher_claude, waits for the baseline worker roles to
+# spawn, verifies bus/worker state, then cleans up.
 #
-# Note: workers are spawned via the `codex` CLI regardless of which CLI
-# drives the orchestrator turn (see workflow-worker-runtime.ts), so `codex`
-# must also be present in PATH for this smoke to reach a passing state.
+# Note: this path expects worker launches to use the `claude` driver, so
+# `claude` must be present in PATH.
 #
 # Options:
 #   --target-root PATH       Workflow target repo to orchestrate
@@ -60,11 +58,6 @@ done
 
 if [[ ! -x "$(command -v claude)" ]]; then
   echo "Missing claude in PATH." >&2
-  exit 1
-fi
-
-if [[ ! -x "$(command -v codex)" ]]; then
-  echo "Missing codex in PATH (workers are spawned via codex regardless of the orchestrator driver)." >&2
   exit 1
 fi
 
@@ -120,7 +113,7 @@ WORKFLOW_STATE_DIR="$STATE_DIR" \
   timeout "$TIMEOUT_SECONDS" \
   "$ROOT/bin/supervisor_launcher_claude" \
   --run-id="$RUN_ID" \
-  --task="Live Claude smoke: verify the baseline workflow spawn chain through the packaged claude supervisor launcher." \
+  --task="Live Claude smoke: verify the baseline workflow spawn chain through the packaged claude-worker supervisor launcher." \
   --scenario=phone \
   --frontend-url=http://127.0.0.1:4173 \
   >"$LOG_PATH" 2>&1

@@ -1,7 +1,10 @@
 import * as fs from 'fs'
+import * as path from 'path'
 
 export type WorkflowSpawnRequestPriority = 'advisory' | 'blocking'
 export type WorkflowSpawnRequestStatus = 'open' | 'fulfilled' | 'dismissed'
+export type WorkflowUserQuestionPriority = 'advisory' | 'blocking'
+export type WorkflowUserQuestionStatus = 'open' | 'dismissed'
 
 export type WorkflowSpawnRequest = {
   requestId: string
@@ -34,6 +37,19 @@ export type WorkflowBusEvent = {
   at: string
   type: string
   payload: Record<string, unknown>
+}
+
+export type WorkflowUserQuestion = {
+  questionId: string
+  runId: string
+  askedBy: string
+  askedAt: string
+  scope: string
+  text: string
+  context: string | null
+  priority: WorkflowUserQuestionPriority
+  status: WorkflowUserQuestionStatus
+  tags: string[]
 }
 
 export type WorkflowRunStatus = {
@@ -72,6 +88,16 @@ type AppendSpawnRequestArgs = {
   dependsOn?: string[]
 }
 
+type AppendUserQuestionArgs = {
+  runId: string
+  askedBy: string
+  scope: string
+  text: string
+  context?: string
+  priority?: WorkflowUserQuestionPriority
+  tags?: string[]
+}
+
 type FulfillSpawnRequestArgs = {
   requestId: string
   fulfilledBy: string
@@ -101,6 +127,10 @@ export type WorkflowBusOptions = {
 function resolveDefaultStoragePath(): string {
   if (typeof process !== 'undefined' && process.env?.WORKFLOW_STATE_DIR) {
     return `${process.env.WORKFLOW_STATE_DIR.replace(/\/$/, '')}/workflow-bus.json`
+  }
+
+  if (typeof process !== 'undefined' && process.env?.WORKFLOW_TARGET_ROOT) {
+    return path.join(process.env.WORKFLOW_TARGET_ROOT, 'front', 'demo-output', 'agents-sdk', 'workflow-bus.json')
   }
 
   const cwd = typeof process !== 'undefined' && typeof process.cwd === 'function' ? process.cwd() : '.'
@@ -133,10 +163,13 @@ type PublishWorkerLifecycleEventArgs = {
 export type WorkflowBus = {
   publishRunStatus: (args: PublishRunStatusArgs) => WorkflowRunStatus
   appendSpawnRequest: (args: AppendSpawnRequestArgs) => WorkflowSpawnRequest
+  appendUserQuestion: (args: AppendUserQuestionArgs) => WorkflowUserQuestion
   fulfillSpawnRequest: (args: FulfillSpawnRequestArgs) => WorkflowSpawnRequest
   listRunStatuses: () => WorkflowRunStatus[]
   listOpenSpawnRequests: () => WorkflowSpawnRequest[]
   listSpawnRequests: () => WorkflowSpawnRequest[]
+  listOpenUserQuestions: () => WorkflowUserQuestion[]
+  listUserQuestions: () => WorkflowUserQuestion[]
   listRecentEvents: (limit?: number) => WorkflowBusEvent[]
   subscribe: (listener: (event: WorkflowBusEvent) => void) => () => void
   publishWorkerSpawned: (args: PublishWorkerLifecycleEventArgs) => WorkflowBusEvent
@@ -166,6 +199,13 @@ function cloneSpawnRequest(request: WorkflowSpawnRequest): WorkflowSpawnRequest 
   }
 }
 
+function cloneUserQuestion(question: WorkflowUserQuestion): WorkflowUserQuestion {
+  return {
+    ...question,
+    tags: [...question.tags],
+  }
+}
+
 export function createWorkflowBus(options: WorkflowBusOptions = {}): WorkflowBus {
   return createPersistentWorkflowBus(options)
 }
@@ -175,6 +215,7 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
   const storagePath = options.storagePath ?? resolveDefaultStoragePath()
   const persistent = hasStorageApi(fileSystem)
   const spawnRequests = new Map<string, WorkflowSpawnRequest>()
+  const userQuestions = new Map<string, WorkflowUserQuestion>()
   const events: WorkflowBusEvent[] = []
   const runStatuses = new Map<string, WorkflowRunStatus>()
   const listeners = new Set<(event: WorkflowBusEvent) => void>()
@@ -187,11 +228,13 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
       const content = fileSystem.readFileSync(storagePath, 'utf8')
       const parsed = JSON.parse(content) as {
         spawnRequests?: WorkflowSpawnRequest[]
+        userQuestions?: WorkflowUserQuestion[]
         events?: WorkflowBusEvent[]
         runStatuses?: WorkflowRunStatus[]
       }
 
       spawnRequests.clear()
+      userQuestions.clear()
       events.length = 0
       runStatuses.clear()
 
@@ -204,6 +247,16 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
         })
       }
 
+      for (const question of parsed.userQuestions ?? []) {
+        userQuestions.set(question.questionId, {
+          ...question,
+          context: question.context ?? null,
+          priority: question.priority ?? 'advisory',
+          status: question.status ?? 'open',
+          tags: [...(question.tags ?? [])],
+        })
+      }
+
       for (const event of parsed.events ?? []) {
         events.push(event)
       }
@@ -213,6 +266,7 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
       }
     } catch {
       spawnRequests.clear()
+      userQuestions.clear()
       events.length = 0
       runStatuses.clear()
     }
@@ -223,6 +277,7 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
 
     const payload = {
       spawnRequests: [...spawnRequests.values()],
+      userQuestions: [...userQuestions.values()],
       events,
       runStatuses: [...runStatuses.values()],
     }
@@ -299,6 +354,35 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
       return cloneSpawnRequest(request)
     },
 
+    appendUserQuestion(args) {
+      loadStateFromDisk()
+      const question: WorkflowUserQuestion = {
+        questionId: createId(),
+        runId: args.runId,
+        askedBy: args.askedBy,
+        askedAt: new Date().toISOString(),
+        scope: args.scope,
+        text: args.text,
+        context: args.context ?? null,
+        priority: args.priority ?? 'advisory',
+        status: 'open',
+        tags: [...(args.tags ?? [])],
+      }
+
+      userQuestions.set(question.questionId, question)
+      emit('user_question.created', {
+        questionId: question.questionId,
+        runId: question.runId,
+        askedBy: question.askedBy,
+        scope: question.scope,
+        priority: question.priority,
+        context: question.context,
+        tags: question.tags,
+      })
+      persistStateToDisk()
+      return cloneUserQuestion(question)
+    },
+
     fulfillSpawnRequest({ requestId, fulfilledBy, fulfillmentNote, fulfilledWorkerId }) {
       loadStateFromDisk()
       const request = spawnRequests.get(requestId)
@@ -348,6 +432,16 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
     listSpawnRequests() {
       loadStateFromDisk()
       return [...spawnRequests.values()].map(cloneSpawnRequest)
+    },
+
+    listOpenUserQuestions() {
+      loadStateFromDisk()
+      return [...userQuestions.values()].filter((question) => question.status === 'open').map(cloneUserQuestion)
+    },
+
+    listUserQuestions() {
+      loadStateFromDisk()
+      return [...userQuestions.values()].map(cloneUserQuestion)
     },
 
     listRecentEvents(limit = 20) {

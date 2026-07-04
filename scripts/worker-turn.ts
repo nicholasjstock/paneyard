@@ -6,6 +6,7 @@ import {
   type PlanWorkflowIterationResult,
   type PlannerBusJob,
 } from './workflow-mcp'
+import type { WorkflowBus } from './workflow-bus'
 import type { WorkflowManagedRole, WorkflowWorkerRecord } from './workflow-worker-runtime'
 
 export type WorkerTurnWorkerRuntime = {
@@ -17,6 +18,7 @@ export type WorkerTurnWorkerRuntime = {
     scope: string
     prompt: string
   }) => WorkflowWorkerRecord
+  listWorkers?: (args?: { runId?: string; activeOnly?: boolean }) => WorkflowWorkerRecord[]
 }
 
 export type WorkerTurnArgs = {
@@ -28,7 +30,7 @@ export type WorkerTurnArgs = {
   task: string
   scenario: DemoScenario
   frontendUrl: string
-  bus: Parameters<typeof publishPlannerJobs>[0]
+  bus: Parameters<typeof publishPlannerJobs>[0] & Pick<WorkflowBus, 'listRunStatuses' | 'listSpawnRequests' | 'listUserQuestions'>
   planner?: (args: PlanWorkflowIterationArgs) => PlanWorkflowIterationResult
   workerRuntime?: WorkerTurnWorkerRuntime
 }
@@ -43,7 +45,7 @@ function buildPlannerPrompt(args: WorkerTurnArgs): string {
   return [
     `Worker ${args.nickname} (role ${args.role}) reported this result for run ${args.runId}, scope ${args.scope}:`,
     args.result,
-    'Inspect the current bus/workflow state and decide whether additional or refined next steps are needed beyond the baseline routing already published. If so, write worker_request questions to the bus with the requested_role.',
+    'Inspect the current workflow context and decide whether additional or refined next steps are needed. If so, publish them with planner_turn. If blocked on a user decision, call append_user_question.',
   ].join('\n')
 }
 

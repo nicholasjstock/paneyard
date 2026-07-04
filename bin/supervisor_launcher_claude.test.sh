@@ -16,7 +16,6 @@ log_path="${TSX_LOG_PATH:?}"
 
 {
   printf 'pwd=%s\n' "$PWD"
-  printf 'ORCHESTRATOR_LAUNCHER=%s\n' "${ORCHESTRATOR_LAUNCHER:-}"
   printf 'WORKFLOW_WORKER_DRIVER=%s\n' "${WORKFLOW_WORKER_DRIVER:-}"
   printf 'argc=%s\n' "$#"
   idx=0
@@ -62,12 +61,6 @@ fi
 
 if ! grep -q '^arg\[[0-9]\+\]=--run-id=demo-2026-07-03$' "$TSX_LOG"; then
   echo "Expected bin/supervisor_launcher_claude to pass through caller CLI arguments." >&2
-  exit 1
-fi
-
-if ! grep -q "^ORCHESTRATOR_LAUNCHER=$ROOT/bin/orchestrator_launcher_claude$" "$TSX_LOG"; then
-  echo "Expected bin/supervisor_launcher_claude to point the supervisor loop at the claude orchestrator launcher." >&2
-  cat "$TSX_LOG"
   exit 1
 fi
 

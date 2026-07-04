@@ -21,7 +21,7 @@ afterEach(() => {
 })
 
 describe('workflow MCP integration', () => {
-  test('runs the orchestrator tool end to end and fans out planner and worker roles', async () => {
+  test('runs the orchestrator tool end to end and publishes a planner recovery job for stalled workers', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-mcp-'))
     tempDirs.push(tempDir)
 
@@ -99,28 +99,11 @@ describe('workflow MCP integration', () => {
         jobs: Array<{ step: { owner: string; artifact: string } }>
       }
 
-      expect(structuredContent.plan.steps.map((step) => step.owner)).toEqual([
-        'orchestrator',
-        'demo_recorder',
-        'demo_verifier',
-        'front_fixer',
-        'demo_recorder',
-        'demo_verifier',
-      ])
-      expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual([
-        'demo_recorder',
-        'demo_verifier',
-        'front_fixer',
-        'demo_recorder',
-        'demo_verifier',
-      ])
+      expect(structuredContent.plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'planner'])
+      expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['planner'])
       expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toEqual([
         'planner',
-        'demo_recorder',
-        'demo_verifier',
-        'front_fixer',
-        'demo_recorder',
-        'demo_verifier',
+        'planner',
       ])
       expect(runtime.listWorkers({ runId: 'demo-20260702-130619', activeOnly: true }).map((worker) => worker.role)).toEqual([
         'back_fixer',
@@ -132,7 +115,7 @@ describe('workflow MCP integration', () => {
     }
   })
 
-  test('routes infrastructure stalls to the infra fixer through the orchestrator tool', async () => {
+  test('routes infrastructure stalls to the planner through the orchestrator tool', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-mcp-'))
     tempDirs.push(tempDir)
 
@@ -204,22 +187,9 @@ describe('workflow MCP integration', () => {
         jobs: Array<{ step: { owner: string; artifact: string } }>
       }
 
-      expect(structuredContent.plan.steps.map((step) => step.owner)).toEqual([
-        'orchestrator',
-        'demo_recorder',
-        'demo_verifier',
-        'infra_fixer',
-        'demo_recorder',
-        'demo_verifier',
-      ])
-      expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual([
-        'demo_recorder',
-        'demo_verifier',
-        'infra_fixer',
-        'demo_recorder',
-        'demo_verifier',
-      ])
-      expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toContain('infra_fixer')
+      expect(structuredContent.plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'planner'])
+      expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['planner'])
+      expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toEqual(['planner'])
       expect(runtime.listWorkers({ runId: 'demo-20260702-130620', activeOnly: true }).map((worker) => worker.role)).toEqual([
         'front_fixer',
       ])

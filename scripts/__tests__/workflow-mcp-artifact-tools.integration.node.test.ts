@@ -14,22 +14,21 @@ afterEach(async () => {
   }
 })
 
-const MANAGED_ARTIFACTS = ['workflow-plan.md', 'recorder-report.md', 'verifier-report.md', 'fix-summary.md', 'final-summary.md']
+const RUN_ID = 'test-run'
 
 describe('workflow MCP artifact tools', () => {
-  test('collect_workflow_state reports all managed artifacts as missing in a fresh output dir', async () => {
+  test('collect_workflow_state reports zero artifacts when nothing has been planner-declared for this runId yet', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
-    const result = await harness.client.callTool({ name: 'collect_workflow_state', arguments: {} })
+    const result = await harness.client.callTool({ name: 'collect_workflow_state', arguments: { runId: RUN_ID } })
 
     expect(result.isError).toBeFalsy()
     const structuredContent = result.structuredContent as {
       outputDir: string
       artifacts: Array<{ name: string; exists: boolean }>
     }
-    expect(structuredContent.artifacts.map((artifact) => artifact.name)).toEqual(MANAGED_ARTIFACTS)
-    expect(structuredContent.artifacts.every((artifact) => !artifact.exists)).toBe(true)
+    expect(structuredContent.artifacts).toEqual([])
   })
 
   test('write_workflow_artifact writes to the managed output dir and the file actually exists on disk', async () => {
@@ -66,27 +65,27 @@ describe('workflow MCP artifact tools', () => {
     expect(structuredContent.content).toBe('Recorded successfully.')
   })
 
-  test('write_workflow_artifact rejects an artifact name outside the allowlist', async () => {
+  test('write_workflow_artifact rejects an unsafe artifact name', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
     const result = await harness.client.callTool({
       name: 'write_workflow_artifact',
-      arguments: { artifactName: 'not-a-real-artifact.md', content: 'irrelevant' },
+      arguments: { artifactName: '../escape.md', content: 'irrelevant' },
     })
 
     expect(result.isError).toBe(true)
     const [content] = result.content as Array<{ type: string; text: string }>
-    expect(content?.text).toContain('Unsupported workflow artifact')
+    expect(content?.text).toContain('Unsafe workflow artifact name')
   })
 
-  test('read_workflow_artifact rejects an artifact name outside the allowlist', async () => {
+  test('read_workflow_artifact rejects an unsafe artifact name', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
     const result = await harness.client.callTool({
       name: 'read_workflow_artifact',
-      arguments: { artifactName: 'not-a-real-artifact.md' },
+      arguments: { artifactName: '../escape.md' },
     })
 
     expect(result.isError).toBe(true)
@@ -96,12 +95,20 @@ describe('workflow MCP artifact tools', () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
+    harness.bus.appendSpawnRequest({
+      runId: RUN_ID,
+      askedBy: 'planner',
+      scope: 'verifier-report.md',
+      text: 'Confirms visible UI state transitions.',
+      requestedRole: 'demo_verifier',
+    })
+
     await harness.client.callTool({
       name: 'write_workflow_artifact',
       arguments: { artifactName: 'verifier-report.md', content: 'All checks passed.' },
     })
 
-    const result = await harness.client.callTool({ name: 'collect_workflow_state', arguments: {} })
+    const result = await harness.client.callTool({ name: 'collect_workflow_state', arguments: { runId: RUN_ID } })
     const structuredContent = result.structuredContent as {
       artifacts: Array<{ name: string; exists: boolean; sizeBytes: number | null; updatedAt: string | null; preview: string | null }>
     }

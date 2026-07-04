@@ -1,8 +1,8 @@
 # Codex Multi-Agent Workflow
 
-This project uses Codex `multi_agent` orchestration with a bus-led fan-out model:
+This project uses Codex `multi_agent` workers with a deterministic supervisor/orchestrator loop and a bus-led fan-out model:
 
-- `orchestrator` coordinates record -> verify -> fix -> re-record loops and uses the shared bus as the state ledger.
+- `orchestrator` is deterministic loop logic in `scripts/orchestrator-turn.ts`; it coordinates record -> verify -> fix -> re-record loops and uses the shared bus as the state ledger.
 - `planner` decides handoff payloads and uses `gpt-5.4` for more capable planning.
 - `demo_recorder` records demo runs via the `record-demo` skill, monitors progress, and validates artifacts after planner gives the work order.
 - `demo_verifier` runs evidence-based verification passes after planner gives the work order, starting with the fastest evidence source that can answer the question.
@@ -13,7 +13,7 @@ This project uses Codex `multi_agent` orchestration with a bus-led fan-out model
 - For critical demo runs, `orchestrator` should prefer paired workers per specialized role so liveness is always covered.
 - Keep `multi_agent` enabled so Codex can fan out parallel subagents when the task is split across independent roles.
 
-Before Codex launches `orchestrator`, invoke `planner` to determine the current run context and initial handoff shape. Do not route orchestration back through repo CLI wrappers or ask the parent to run `npm` just to start orchestration.
+The supervisor calls the orchestrator logic directly in-process. Do not route orchestration through repo CLI wrappers or a standalone LLM orchestrator prompt.
 Normal worker completions are handled deterministically: each worker calls the `worker_turn` MCP tool itself when it finishes, which feeds its result into the planner's routing logic and publishes the next steps to the bus automatically. The orchestrator only needs to invoke `planner` directly for cases `worker_turn` doesn't cover, such as stalled/unresponsive workers.
 
 ## Running Nicknames
@@ -43,7 +43,7 @@ Keep write sets disjoint and verify before reporting success.
 ## Workflow Notes
 
 - Use structured updates from [MESSAGING_PROTOCOL.md](./MESSAGING_PROTOCOL.md).
-- Invoke `orchestrator`; it is responsible for spawning only the worker roles required for the current phase.
+- The deterministic orchestrator logic is responsible for publishing only the worker roles required for the current phase; the supervisor performs the actual spawns.
 - Treat `multi_agent` as the default execution model for this repo's orchestration tasks.
 - Any recording task must go through the `record-demo` skill and `bin/record_demo`.
 - All user questions and unresolved blockers should be aggregated on the shared bus, with the orchestrator owning the lifecycle and pulling from that state rather than waiting on a separate manager role.

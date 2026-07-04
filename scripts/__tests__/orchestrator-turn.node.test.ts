@@ -7,7 +7,6 @@ import * as path from 'path'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import { createWorkflowBus } from '../workflow-bus'
-import { planWorkflowIteration } from '../workflow-mcp'
 import { runOrchestratorTurn } from '../orchestrator-turn'
 import { createWorkflowWorkerRuntime } from '../workflow-worker-runtime'
 
@@ -20,7 +19,7 @@ afterEach(() => {
 })
 
 describe('orchestrator turn', () => {
-  test('detects a stalled worker and calls the planner with stall context', () => {
+  test('detects a stalled worker and publishes a planner recovery job', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
 
@@ -98,8 +97,6 @@ describe('orchestrator turn', () => {
       },
     })
     const bus = createWorkflowBus({ storagePath: busStoragePath })
-    let capturedFinding: string | undefined
-
     const result = runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
@@ -109,17 +106,15 @@ describe('orchestrator turn', () => {
       bus,
       fileSystem: fs,
       now: new Date('2026-07-02T10:05:00.000Z'),
-      planner: (args) => {
-        capturedFinding = args.stallFinding
-        return planWorkflowIteration(args)
-      },
     })
 
     expect(result.stalledWorkers).toHaveLength(1)
-    expect(capturedFinding).toContain('Stalled worker front-fixer')
-    expect(capturedFinding).toContain('frontend video review')
-    expect(result.plan.steps.map((step) => step.owner)).toContain('front_fixer')
-    expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toContain('front_fixer')
+    expect(result.nextState.phase).toBe('stalled')
+    expect(result.nextState.lastStallFinding).toContain('Stalled worker front-fixer')
+    expect(result.nextState.lastStallFinding).toContain('frontend video review')
+    expect(result.plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'planner'])
+    expect(result.jobs.map((job) => job.step.owner)).toEqual(['planner'])
+    expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toContain('planner')
   })
 
   test('does not spawn planner workers during the orchestrator tick', () => {
@@ -229,7 +224,8 @@ describe('orchestrator turn', () => {
       now: new Date('2026-07-02T10:05:00.000Z'),
     })
 
-    expect(result.jobs.map((job) => job.step.owner)).toEqual(['demo_recorder', 'demo_verifier'])
+    expect(result.jobs).toEqual([])
+    expect(result.nextState.phase).toBe('waiting_on_workers')
     expect(spawned).toEqual([])
     expect(bus.listRecentEvents(10).map((event) => event.type)).not.toContain('worker.spawned')
   })
@@ -275,10 +271,10 @@ describe('orchestrator turn', () => {
       },
       bus,
       fileSystem: fs,
-      planner: (args) => planWorkflowIteration(args),
     })
 
-    expect(result.jobs.map((job) => job.step.owner)).toEqual(['demo_recorder', 'demo_verifier'])
+    expect(result.jobs).toEqual([])
+    expect(result.nextState.phase).toBe('waiting_on_workers')
     expect(spawned).toEqual([])
     expect(bus.listRecentEvents(5).map((event) => event.type)).not.toContain('worker.spawned')
   })
@@ -306,7 +302,6 @@ describe('orchestrator turn', () => {
       workerRuntime,
       bus,
       fileSystem: fs,
-      planner: (args) => planWorkflowIteration(args),
     })
 
     runOrchestratorTurn({
@@ -317,7 +312,6 @@ describe('orchestrator turn', () => {
       workerRuntime,
       bus,
       fileSystem: fs,
-      planner: (args) => planWorkflowIteration(args),
     })
 
     expect(
@@ -325,10 +319,7 @@ describe('orchestrator turn', () => {
         .listOpenSpawnRequests()
         .map((request) => [request.runId, request.requestedRole, request.scope].join('|'))
         .sort()
-    ).toEqual([
-      'demo-20260702-130619|demo_recorder|recorder-report.md',
-      'demo-20260702-130619|demo_verifier|verifier-report.md',
-    ])
+    ).toEqual([])
   })
 
   test('returns updated orchestrator decision state that carries forward the prior tick count and summary', () => {
@@ -354,23 +345,19 @@ describe('orchestrator turn', () => {
       fileSystem: fs,
       previousState: {
         runId: 'demo-20260702-130619',
-        phase: 'planning',
+        phase: 'waiting_on_workers',
         tickCount: 3,
         lastPlanSummary: 'Previous planner summary.',
-        pendingSpawnKeys: ['["demo-20260702-130619","demo_recorder","recorder-report.md"]'],
+        pendingSpawnKeys: [],
         lastStallFinding: null,
         lastUpdatedAt: '2026-07-02T10:00:00.000Z',
       },
-      planner: (args) => planWorkflowIteration(args),
     })
 
     expect(result.nextState.runId).toBe('demo-20260702-130619')
     expect(result.nextState.tickCount).toBe(4)
-    expect(result.nextState.phase).toBe('planning')
+    expect(result.nextState.phase).toBe('waiting_on_workers')
     expect(result.nextState.lastPlanSummary).toBe(result.plan.summary)
-    expect(result.nextState.pendingSpawnKeys).toEqual([
-      '["demo-20260702-130619","demo_recorder","recorder-report.md"]',
-      '["demo-20260702-130619","demo_verifier","verifier-report.md"]',
-    ])
+    expect(result.nextState.pendingSpawnKeys).toEqual([])
   })
 })

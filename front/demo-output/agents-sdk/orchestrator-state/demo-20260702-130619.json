@@ -1,13 +1,14 @@
 {
   "runId": "demo-20260702-130619",
-  "phase": "planning",
-  "tickCount": 9,
-  "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174.",
+  "phase": "stalled",
+  "tickCount": 15,
+  "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (back_fixer) | runId=demo-20260702-130619 | idleForMs=165012523 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=back_fixer; idleForMs=165012523; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
   "pendingSpawnKeys": [
     "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
     "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
-    "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]"
+    "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+    "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
   ],
-  "lastStallFinding": "Stalled worker back-fixer (back_fixer) | runId=demo-20260702-130619 | idleForMs=120484268 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=back_fixer; idleForMs=120484268; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
-  "lastUpdatedAt": "2026-07-03T19:28:04.277Z"
+  "lastStallFinding": "Stalled worker back-fixer (back_fixer) | runId=demo-20260702-130619 | idleForMs=165012523 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=back_fixer; idleForMs=165012523; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+  "lastUpdatedAt": "2026-07-04T07:50:12.527Z"
 }

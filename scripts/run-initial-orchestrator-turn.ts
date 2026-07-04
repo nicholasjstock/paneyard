@@ -15,8 +15,8 @@ import { fileURLToPath } from 'url'
 
 import { createWorkflowBus } from './workflow-bus'
 import {
+  buildWaitingPlan,
   buildWorkflowContext,
-  planWorkflowIteration,
   publishPlannerJobs,
   writeOrchestratorState,
   appendOrchestratorTickHistory,
@@ -97,12 +97,12 @@ async function main(): Promise<number> {
 
   // Call planning logic
   process.stdout.write(`[STATUS] Calling planning logic\n`)
-  const plan = planWorkflowIteration({
+  const plan = buildWaitingPlan({
     task,
     scenario,
     frontendUrl,
-    verifierFinding: undefined,
-    stallFinding: undefined,
+    activeWorkers: 0,
+    openSpawnRequests: 0,
   })
 
   process.stdout.write(`[STATUS] Plan summary: ${plan.summary}\n`)
@@ -145,10 +145,7 @@ async function main(): Promise<number> {
   process.stdout.write(`\n[DONE] Orchestrator turn complete\n`)
   process.stdout.write(`\nTurn Result Summary:\n`)
   process.stdout.write(`  Spawn requests published: ${jobs.length}\n`)
-  process.stdout.write(`  Workers to spawn:\n`)
-  for (const step of plan.steps.slice(1)) { // Skip orchestrator itself
-    process.stdout.write(`    - ${step.owner} (scope: ${step.artifact})\n`)
-  }
+  process.stdout.write(`  Workers to spawn: ${jobs.length}\n`)
   process.stdout.write(`  Next phase: ${nextState.phase}\n`)
   process.stdout.write(`  Tick count: ${nextState.tickCount}\n`)
 

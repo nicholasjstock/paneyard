@@ -1,10 +1,14 @@
 import * as fs from 'fs'
-import { spawnSync } from 'child_process'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 
-import { buildRequestedWorkerPrompt, buildWorkerNickname } from './orchestrator-turn'
-import { buildWorkflowContext, readOrchestratorState } from './workflow-mcp'
+import { buildRequestedWorkerPrompt, buildWorkerNickname, runOrchestratorTurn } from './orchestrator-turn'
+import {
+  appendOrchestratorTickHistory,
+  buildWorkflowContext,
+  readOrchestratorState,
+  writeOrchestratorState,
+} from './workflow-mcp'
 import { createWorkflowBus } from './workflow-bus'
 import { createNodeWorkerProcessAdapter } from './workflow-worker-runtime-node'
 import { createWorkflowWorkerRuntime, type WorkerDriver, type WorkflowWorkerRecord } from './workflow-worker-runtime'
@@ -35,13 +39,16 @@ type SpawnRequest = {
 type WorkerRuntimeLike = Pick<ReturnType<typeof createWorkflowWorkerRuntime>, 'listWorkers' | 'spawnWorker'>
 type WorkflowBusLike = Pick<
   ReturnType<typeof createWorkflowBus>,
-  'listOpenSpawnRequests' | 'listSpawnRequests' | 'publishWorkerSpawned' | 'fulfillSpawnRequest'
+  | 'listOpenSpawnRequests'
+  | 'listSpawnRequests'
+  | 'publishWorkerSpawned'
+  | 'fulfillSpawnRequest'
 >
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// PKG_ROOT: this package's own install location (where bin/orchestrator_launcher lives).
+// PKG_ROOT: this package's own install location.
 const PKG_ROOT = path.resolve(__dirname, '..')
 // ROOT_DIR: the project being orchestrated (e.g. simple-retail-planner). See
 // workflow-mcp-app.ts for the same pattern/rationale.
@@ -54,20 +61,10 @@ const BUS_PATH = path.join(OUTPUT_DIR, 'workflow-bus.json')
 const ORCHESTRATOR_STATE_DIR = path.join(OUTPUT_DIR, 'orchestrator-state')
 const WORKER_DRIVER: WorkerDriver = process.env.WORKFLOW_WORKER_DRIVER === 'claude' ? 'claude' : 'codex'
 
-export function resolveOrchestratorLauncher(env: NodeJS.ProcessEnv, rootDir: string): string {
-  return env.ORCHESTRATOR_LAUNCHER
-    ? path.resolve(env.ORCHESTRATOR_LAUNCHER)
-    : path.join(rootDir, 'bin', 'orchestrator_launcher')
-}
-
 type LatestPersistedRun = {
   runId: string
   summary: string | null
 }
-
-// orchestrator_launcher ships inside this package, not inside the target
-// project, so resolve it against PKG_ROOT rather than ROOT_DIR.
-const ORCHESTRATOR_LAUNCHER = resolveOrchestratorLauncher(process.env, PKG_ROOT)
 
 function parseArgs(argv: string[]): SupervisorLoopOptions {
   const options: SupervisorLoopOptions = {
@@ -324,36 +321,6 @@ export function spawnRequestedWorkers(args: {
   return spawnedWorkers
 }
 
-function runOrchestratorSubprocess(args: {
-  runId: string
-  task: string
-  scenario: NonNullable<SupervisorLoopOptions['scenario']>
-  frontendUrl: string
-  staleAfterMs?: number
-}): { exitCode: number; stdout: string; stderr: string } {
-  const result = spawnSync(
-    ORCHESTRATOR_LAUNCHER,
-    [
-      `--run-id=${args.runId}`,
-      `--task=${args.task}`,
-      `--scenario=${args.scenario}`,
-      `--frontend-url=${args.frontendUrl}`,
-      ...(args.staleAfterMs ? [`--stale-after-ms=${args.staleAfterMs}`] : []),
-    ],
-    {
-      cwd: ROOT_DIR,
-      encoding: 'utf8',
-      env: process.env,
-    }
-  )
-
-  return {
-    exitCode: result.status ?? 1,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
-  }
-}
-
 async function main(): Promise<number> {
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
     process.stdout.write(`${usage()}\n`)
@@ -367,6 +334,11 @@ async function main(): Promise<number> {
     outputDir: OUTPUT_DIR,
     processAdapter: createNodeWorkerProcessAdapter(),
     workerDriver: WORKER_DRIVER,
+  })
+  const workflowContext = buildWorkflowContext({
+    rootDir: ROOT_DIR,
+    frontDir: FRONT_DIR,
+    outputDir: OUTPUT_DIR,
   })
 
   const latestRunStatus = [...bus.listRunStatuses()].sort((left, right) => left.at.localeCompare(right.at)).at(-1)
@@ -398,39 +370,21 @@ async function main(): Promise<number> {
 
   while (keepRunning) {
     tickNumber += 1
-    const orchestratorResult = runOrchestratorSubprocess({
+    const previousState = readOrchestratorState(workflowContext, runId)
+    const orchestratorResult = runOrchestratorTurn({
       runId,
       task,
       scenario,
       frontendUrl,
+      workerRuntime,
+      bus,
       staleAfterMs: options.staleAfterMs,
+      previousState,
     })
-    if (orchestratorResult.stdout.trim().length > 0) {
-      process.stdout.write(orchestratorResult.stdout)
-      if (!orchestratorResult.stdout.endsWith('\n')) {
-        process.stdout.write('\n')
-      }
-    }
+    writeOrchestratorState(workflowContext, orchestratorResult.nextState)
+    appendOrchestratorTickHistory(workflowContext, orchestratorResult.nextState)
 
-    if (orchestratorResult.exitCode !== 0) {
-      if (orchestratorResult.stderr.trim().length > 0) {
-        process.stderr.write(orchestratorResult.stderr)
-        if (!orchestratorResult.stderr.endsWith('\n')) {
-          process.stderr.write('\n')
-        }
-      }
-      process.stderr.write(`Orchestrator tick failed with exit code ${orchestratorResult.exitCode}.\n`)
-      return orchestratorResult.exitCode
-    }
-
-    const persistedState = readOrchestratorState(
-      buildWorkflowContext({
-        rootDir: ROOT_DIR,
-        frontDir: FRONT_DIR,
-        outputDir: OUTPUT_DIR,
-      }),
-      runId
-    )
+    const persistedState = readOrchestratorState(workflowContext, runId)
     const spawnedWorkers = spawnRequestedWorkers({ runId, workerRuntime, bus })
     const openSpawnRequests = bus.listOpenSpawnRequests().filter((request) => request.runId === runId).length
     const activeWorkers = workerRuntime.listWorkers({ runId, activeOnly: true }).length

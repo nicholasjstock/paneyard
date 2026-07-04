@@ -185,6 +185,71 @@ describe('workflow MCP planning tools', () => {
     expect(result.isError).toBe(true)
   })
 
+  test('append_user_question writes a planner-blocked user question to the bus and list_open_user_questions returns it', async () => {
+    const harness = await createMcpTestHarness()
+    harnesses.push(harness)
+
+    const appendResult = await harness.client.callTool({
+      name: 'append_user_question',
+      arguments: {
+        runId: 'run-question',
+        askedBy: 'planner',
+        scope: 'environment choice',
+        text: 'Should this workflow continue against staging or production?',
+        context: 'The planner is blocked until the target environment is chosen.',
+        priority: 'blocking',
+        tags: ['planner', 'blocked'],
+      },
+    })
+
+    expect(appendResult.isError).toBeFalsy()
+    const question = appendResult.structuredContent as { questionId: string; askedBy: string; priority: string }
+    expect(question.askedBy).toBe('planner')
+    expect(question.priority).toBe('blocking')
+
+    const listResult = await harness.client.callTool({
+      name: 'list_open_user_questions',
+      arguments: {},
+    })
+
+    expect(listResult.isError).toBeFalsy()
+    const structuredContent = listResult.structuredContent as {
+      questions: Array<{ questionId: string; askedBy: string; text: string }>
+    }
+    expect(structuredContent.questions).toHaveLength(1)
+    expect(structuredContent.questions[0]?.questionId).toBe(question.questionId)
+    expect(structuredContent.questions[0]?.askedBy).toBe('planner')
+  })
+
+  test('queue_long_phone_demo_planner_job appends a blocking planner seed request for the long phone demo video', async () => {
+    const harness = await createMcpTestHarness()
+    harnesses.push(harness)
+
+    const result = await harness.client.callTool({
+      name: 'queue_long_phone_demo_planner_job',
+      arguments: {
+        runId: 'run-phone-demo-long',
+        frontendUrl: 'http://localhost:5174',
+      },
+    })
+
+    expect(result.isError).toBeFalsy()
+    const structuredContent = result.structuredContent as {
+      requestId: string
+      requestedRole: string
+      priority: string
+      text: string
+    }
+    expect(structuredContent.requestedRole).toBe('planner')
+    expect(structuredContent.priority).toBe('blocking')
+    expect(structuredContent.text).toContain('long phone demo video')
+
+    const openRequests = harness.bus.listOpenSpawnRequests()
+    expect(openRequests).toHaveLength(1)
+    expect(openRequests[0]?.requestedRole).toBe('planner')
+    expect(openRequests[0]?.scope).toBe('workflow-plan.md')
+  })
+
   test('publish_planner_jobs runs the planner and appends spawn requests in step order', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)

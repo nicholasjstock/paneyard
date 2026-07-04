@@ -70,6 +70,13 @@ describe('workflow MCP app state snapshot', () => {
       scope: 'recorder-report.md',
       prompt: 'Record the demo.',
     })
+    bus.appendUserQuestion({
+      runId: 'demo-2026-07-02',
+      askedBy: 'planner',
+      scope: 'environment choice',
+      text: 'Should this continue against staging or production?',
+      priority: 'blocking',
+    })
 
     const state = collectWorkflowServerState({
       bus,
@@ -78,9 +85,11 @@ describe('workflow MCP app state snapshot', () => {
 
     expect(state.runStatuses).toHaveLength(1)
     expect(state.openSpawnRequests).toHaveLength(1)
+    expect(state.openUserQuestions).toHaveLength(1)
     expect(state.workers).toHaveLength(1)
     expect(state.recentEvents.length).toBeGreaterThan(0)
     expect(state.workers[0]?.nickname).toBe('demo-recorder')
     expect(state.openSpawnRequests[0]?.requestedRole).toBe('demo_recorder')
+    expect(state.openUserQuestions[0]?.askedBy).toBe('planner')
   })
 })

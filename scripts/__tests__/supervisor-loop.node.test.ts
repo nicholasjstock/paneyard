@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { createWorkflowBus } from '../workflow-bus'
 import { createWorkflowWorkerRuntime, type WorkflowManagedRole } from '../workflow-worker-runtime'
 import { createNodeWorkerProcessAdapter } from '../workflow-worker-runtime-node'
-import { resolveLatestPersistedRun, resolveOrchestratorLauncher, spawnRequestedWorkers } from '../supervisor-loop'
+import { resolveLatestPersistedRun, spawnRequestedWorkers } from '../supervisor-loop'
 
 const tempDirs: string[] = []
 
@@ -293,18 +293,6 @@ setInterval(() => {}, 1000)
         })
       }
     )
-  })
-})
-
-describe('resolveOrchestratorLauncher', () => {
-  test('defaults to bin/orchestrator_launcher under the given root', () => {
-    expect(resolveOrchestratorLauncher({}, '/repo')).toBe('/repo/bin/orchestrator_launcher')
-  })
-
-  test('honors an ORCHESTRATOR_LAUNCHER override for the claude-driven orchestrator', () => {
-    expect(
-      resolveOrchestratorLauncher({ ORCHESTRATOR_LAUNCHER: '/repo/bin/orchestrator_launcher_claude' }, '/repo')
-    ).toBe('/repo/bin/orchestrator_launcher_claude')
   })
 })
 

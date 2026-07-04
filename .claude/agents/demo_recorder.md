@@ -29,7 +29,7 @@ Handles all demo video recording tasks. Responsible for:
 - Using `run_guarded_command` (operation `record_demo`) to execute the recording.
 - Monitoring for errors and failures.
 - Validating video output quality.
-- Using `write_workflow_artifact` to persist `recorder-report.md`.
+- Using `write_workflow_artifact` to persist your report under the artifact name given in your bus request.
 - Reporting results and diagnostics.
 
 When you finish (recording captured and reported, or blocked), call `worker_turn` with `role="demo_recorder"`, your `nickname`, `scope`, and a free-text `result` describing what happened. This deterministically feeds the planner's routing logic and publishes the next steps to the bus — it replaces ad hoc `append_question`-to-planner calls for reporting completion.

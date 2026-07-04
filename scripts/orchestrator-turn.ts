@@ -1,12 +1,12 @@
 import * as fs from 'fs'
 
 import {
-  planWorkflowIteration,
+  buildStalledWorkerRecoveryPlan,
+  buildWaitingPlan,
   publishPlannerJobs,
   type DemoScenario,
   type FileSystemAdapter,
   type OrchestratorDecisionState,
-  type PlanWorkflowIterationArgs,
   type PlanWorkflowIterationResult,
   type PlannerBusJob,
 } from './workflow-mcp'
@@ -68,7 +68,6 @@ export type OrchestratorTurnArgs = {
   now?: Date
   staleAfterMs?: number
   previousState?: OrchestratorDecisionState
-  planner?: (args: PlanWorkflowIterationArgs) => PlanWorkflowIterationResult
 }
 
 export type OrchestratorTurnResult = {
@@ -120,7 +119,7 @@ export function buildRequestedWorkerPrompt(args: {
     args.request.requestedRole ? `Target role: ${args.request.requestedRole}.` : null,
     args.request.text,
     args.request.context ? `Context: ${args.request.context}.` : null,
-    'Use the shared workflow bus for blockers and report progress through your standard artifact.',
+    `Write your report via write_workflow_artifact using artifactName="${args.request.scope}". Use the shared workflow bus for blockers.`,
   ]
     .filter((part): part is string => typeof part === 'string' && part.length > 0)
     .join(' ')
@@ -236,28 +235,38 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
     summary: `Opening orchestrator phase for ${args.scenario} scenario on ${trimTrailingSlash(args.frontendUrl)}; coordinating the next recorder and verifier handoff.`,
   })
   const workers = args.workerRuntime.listWorkers({ runId: args.runId, activeOnly: true })
+  const openSpawnRequests = args.bus.listOpenSpawnRequests().filter((request) => request.runId === args.runId)
   const stalledWorkers = detectStalledWorkers({
     workers,
     fileSystem,
     now: args.now,
     staleAfterMs: args.staleAfterMs,
   })
-  const planner = args.planner ?? planWorkflowIteration
-  const plan = planner({
-    task: args.task,
-    scenario: args.scenario,
-    frontendUrl: trimTrailingSlash(args.frontendUrl),
-    stallFinding: stalledWorkers.length > 0 ? buildStallFinding(stalledWorkers) : undefined,
-  })
+  const stallFinding = stalledWorkers.length > 0 ? buildStallFinding(stalledWorkers) : undefined
+  const plan =
+    stallFinding && stallFinding.trim().length > 0
+      ? buildStalledWorkerRecoveryPlan({
+          task: args.task,
+          scenario: args.scenario,
+          frontendUrl: trimTrailingSlash(args.frontendUrl),
+          stallFinding,
+        })
+      : buildWaitingPlan({
+          task: args.task,
+          scenario: args.scenario,
+          frontendUrl: trimTrailingSlash(args.frontendUrl),
+          activeWorkers: workers.length,
+          openSpawnRequests: openSpawnRequests.length,
+        })
   const jobs = publishPlannerJobs(args.bus, {
     runId: args.runId,
     summary: plan.summary,
     plan,
   })
-  const lastStallFinding = stalledWorkers.length > 0 ? buildStallFinding(stalledWorkers) : null
+  const lastStallFinding = stallFinding ?? null
   const nextState: OrchestratorDecisionState = {
     runId: args.runId,
-    phase: 'planning',
+    phase: stallFinding ? 'stalled' : jobs.length > 0 ? 'planning' : 'waiting_on_workers',
     tickCount: (previousState?.tickCount ?? 0) + 1,
     lastPlanSummary: plan.summary,
     pendingSpawnKeys: [...new Set([...(previousState?.pendingSpawnKeys ?? []), ...buildPendingSpawnKeys(args.runId, jobs)])],

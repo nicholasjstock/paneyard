@@ -1,0 +1,51 @@
+{
+  "spawnRequests": [
+    {
+      "requestId": "20da7815-8686-49c8-b51f-31014fa3ea01",
+      "runId": "demo-20260703-202241",
+      "askedBy": "user",
+      "askedAt": "2026-07-03T22:12:05.324Z",
+      "scope": "workflow-plan.md",
+      "text": "Create the long phone demo video.",
+      "context": "Plan the full worker chain needed to produce the long phone demo video against http://localhost:5174. Publish the next bounded handoff with planner_turn.",
+      "requestedRole": "planner",
+      "priority": "blocking",
+      "status": "open",
+      "fulfilledBy": null,
+      "fulfilledAt": null,
+      "fulfillmentNote": null,
+      "fulfilledWorkerId": null,
+      "tags": [
+        "planner",
+        "phone-demo",
+        "long-demo-video",
+        "seed-job"
+      ],
+      "dependsOn": []
+    }
+  ],
+  "userQuestions": [],
+  "events": [
+    {
+      "eventId": "2fda28a4-23b5-4c46-9b3f-d29781a66c8d",
+      "at": "2026-07-03T22:12:05.325Z",
+      "type": "spawn_request.created",
+      "payload": {
+        "requestId": "20da7815-8686-49c8-b51f-31014fa3ea01",
+        "askedBy": "user",
+        "scope": "workflow-plan.md",
+        "requestedRole": "planner",
+        "priority": "blocking",
+        "context": "Plan the full worker chain needed to produce the long phone demo video against http://localhost:5174. Publish the next bounded handoff with planner_turn.",
+        "tags": [
+          "planner",
+          "phone-demo",
+          "long-demo-video",
+          "seed-job"
+        ],
+        "dependsOn": []
+      }
+    }
+  ],
+  "runStatuses": []
+}

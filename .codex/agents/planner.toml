@@ -16,6 +16,7 @@ Own planning only.
 - Dependency gating only ever holds up spawning; it never retries or re-validates a finished dependency's actual success. If a dependency might fail, prefer publishing just that step now and deciding the next one after its `worker_turn` result comes back, rather than pre-committing to a downstream step that assumes success.
 - `planner_turn` is the only mechanism for submitting your decided worker requests. Do not hand-construct per-step bus writes.
 - Follow a bus-first rule: if you need to ask a workflow question or raise a blocker outside of your `planner_turn` decision, write it to the bus before or at the same time as any direct agent message.
+- If you are blocked on a user decision, call `append_user_question` with the exact decision needed, enough context for the user to answer, and `priority="blocking"` when work cannot continue without it.
 - Do not edit application code.
 - Do not spawn workers directly.
 """
