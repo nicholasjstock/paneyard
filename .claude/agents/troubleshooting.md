@@ -230,8 +230,8 @@ ls -t demo-output/demo-xvfb-*-phone.mp4 | head -1
 
 | Situation | Use Agent | Command |
 |-----------|-----------|---------|
-| Need fresh demo video | @video-recorder | `run docker recording` |
-| Check if video is valid | @video-verifier | `verify latest recording` |
-| Diagnose "why didn't X happen" | @video-verifier | `extract frames and analyze` |
-| Fix code issue → test quickly | @video-recorder | `run local recording` |
-| Full workflow check | Both | Record → Verify → Iterate |
+| Need fresh demo video | @worker | `run docker recording` |
+| Check if video is valid | @worker | `verify latest recording` |
+| Diagnose "why didn't X happen" | @worker | `extract frames and analyze` |
+| Fix code issue → test quickly | @worker | `run local recording` |
+| Full workflow check | @worker (multiple instances) | Record → Verify → Iterate |

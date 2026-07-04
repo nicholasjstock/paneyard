@@ -12,7 +12,7 @@ cat > "$TMP_DIR/tsx" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 if printf '%s\n' "\$*" | grep -q -- '--log-path'; then
-  printf '/tmp/workflow-workers/front-fixer.log\n'
+  printf '/tmp/workflow-workers/worker.log\n'
   exit 0
 fi
 {
@@ -33,9 +33,9 @@ printf '%s\n' "\$*" >> "$TAIL_LOG"
 EOF
 chmod +x "$TMP_DIR/tail"
 
-PATH="$TMP_DIR:$PATH" TSX_BIN="$TMP_DIR/tsx" "$ROOT/bin/workflow_worker_follow" front-fixer --tail 12 --path /tmp/workers.json >/dev/null || true
+PATH="$TMP_DIR:$PATH" TSX_BIN="$TMP_DIR/tsx" "$ROOT/bin/workflow_worker_follow" worker --tail 12 --path /tmp/workers.json >/dev/null || true
 
-if ! grep -q '^-n 12 -F /tmp/workflow-workers/front-fixer.log$' "$TAIL_LOG"; then
+if ! grep -q '^-n 12 -F /tmp/workflow-workers/worker.log$' "$TAIL_LOG"; then
   echo "Expected bin/workflow_worker_follow to tail the resolved worker log path." >&2
   exit 1
 fi

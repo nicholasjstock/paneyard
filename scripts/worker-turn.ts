@@ -1,7 +1,9 @@
 import {
+  buildPendingSpawnKeys,
   planWorkflowIteration,
   publishPlannerJobs,
   type DemoScenario,
+  type OrchestratorDecisionState,
   type PlanWorkflowIterationArgs,
   type PlanWorkflowIterationResult,
   type PlannerBusJob,
@@ -33,12 +35,15 @@ export type WorkerTurnArgs = {
   bus: Parameters<typeof publishPlannerJobs>[0] & Pick<WorkflowBus, 'listRunStatuses' | 'listSpawnRequests' | 'listUserQuestions'>
   planner?: (args: PlanWorkflowIterationArgs) => PlanWorkflowIterationResult
   workerRuntime?: WorkerTurnWorkerRuntime
+  previousState?: OrchestratorDecisionState
+  now?: Date
 }
 
 export type WorkerTurnResult = {
   plan: PlanWorkflowIterationResult
   jobs: PlannerBusJob[]
   plannerWorker: WorkflowWorkerRecord | null
+  nextState: OrchestratorDecisionState
 }
 
 function buildPlannerPrompt(args: WorkerTurnArgs): string {
@@ -63,16 +68,35 @@ export function runWorkerTurn(args: WorkerTurnArgs): WorkerTurnResult {
     plan,
   })
 
-  const plannerWorker = args.workerRuntime
-    ? args.workerRuntime.spawnWorker({
-        runId: args.runId,
-        role: 'planner',
-        nickname: `planner-${args.nickname}-${Date.now()}`,
-        reason: `Reasoning follow-up for ${args.nickname}'s reported result.`,
-        scope: args.scope,
-        prompt: buildPlannerPrompt(args),
-      })
-    : null
+  const activeWorkers = args.workerRuntime?.listWorkers?.({ runId: args.runId, activeOnly: true }) ?? []
+  const plannerAlreadyActive = activeWorkers.some((worker) => worker.role === 'planner')
 
-  return { plan, jobs, plannerWorker }
+  const plannerWorker =
+    args.workerRuntime && !plannerAlreadyActive
+      ? args.workerRuntime.spawnWorker({
+          runId: args.runId,
+          role: 'planner',
+          nickname: `planner-${args.nickname}-${Date.now()}`,
+          reason: `Reasoning follow-up for ${args.nickname}'s reported result.`,
+          scope: args.scope,
+          prompt: buildPlannerPrompt(args),
+        })
+      : null
+
+  const previousState = args.previousState
+  const nextState: OrchestratorDecisionState = {
+    runId: args.runId,
+    // phase / tickCount / lastStallFinding are owned by the orchestrator-turn
+    // decision loop, not by worker_turn — carry them forward untouched so a
+    // worker completion can never clobber orchestrator-observed state.
+    phase: previousState?.phase ?? 'starting',
+    tickCount: previousState?.tickCount ?? 0,
+    lastStallFinding: previousState?.lastStallFinding ?? null,
+    lastPlanSummary: plan.summary,
+    pendingSpawnKeys: [...new Set([...(previousState?.pendingSpawnKeys ?? []), ...buildPendingSpawnKeys(args.runId, jobs)])],
+    recommendedNextSteps: plan.steps,
+    lastUpdatedAt: (args.now ?? new Date()).toISOString(),
+  }
+
+  return { plan, jobs, plannerWorker, nextState }
 }

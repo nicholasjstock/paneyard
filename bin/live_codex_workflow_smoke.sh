@@ -136,8 +136,8 @@ while (( SECONDS < deadline )); do
       const fs = require("fs")
       const file = process.argv[1]
       const data = JSON.parse(fs.readFileSync(file, "utf8"))
-      const running = new Set((data.workers || []).filter((w) => w.status === "running").map((w) => w.role))
-      if (running.has("demo_recorder") && running.has("demo_verifier")) process.exit(0)
+      const runningWorkerCount = (data.workers || []).filter((w) => w.status === "running" && w.role === "worker").length
+      if (runningWorkerCount >= 2) process.exit(0)
       process.exit(1)
     ' "$WORKERS_PATH"; then
       spawn_ok=true
@@ -154,7 +154,7 @@ while (( SECONDS < deadline )); do
 done
 
 if [[ "$spawn_ok" != true ]]; then
-  echo "Timed out waiting for demo_recorder and demo_verifier to spawn." >&2
+  echo "Timed out waiting for at least 2 concurrent worker-role workers (recorder + verifier) to spawn." >&2
   echo "" >&2
   echo "Supervisor log:" >&2
   sed -n '1,240p' "$LOG_PATH" >&2 || true
@@ -182,8 +182,8 @@ node -e '
     }
   }
 
-  assert(roles.includes("demo_recorder"), "demo_recorder was not left running")
-  assert(roles.includes("demo_verifier"), "demo_verifier was not left running")
+  const workerRoleCount = roles.filter((role) => role === "worker").length
+  assert(workerRoleCount >= 2, `expected at least 2 running 'worker' role workers (recorder + verifier), saw ${workerRoleCount}`)
   assert(eventTypes.includes("run.status"), "run.status event was not recorded")
   assert(eventTypes.includes("spawn_request.created"), "spawn_request.created event was not recorded")
   assert(eventTypes.includes("worker.spawned"), "worker.spawned event was not recorded")

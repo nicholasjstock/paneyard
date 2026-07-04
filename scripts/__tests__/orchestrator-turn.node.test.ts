@@ -27,17 +27,17 @@ describe('orchestrator turn', () => {
     const workersDir = path.join(outputDir, 'workers')
     fs.mkdirSync(workersDir, { recursive: true })
 
-    const logPath = path.join(workersDir, 'front-fixer.log')
-    const lastMessagePath = path.join(workersDir, 'front-fixer.last-message.txt')
-    const promptPath = path.join(workersDir, 'front-fixer.prompt.txt')
-    const envPath = path.join(workersDir, 'front-fixer.env.json')
+    const logPath = path.join(workersDir, 'worker.log')
+    const lastMessagePath = path.join(workersDir, 'worker.last-message.txt')
+    const promptPath = path.join(workersDir, 'worker.prompt.txt')
+    const envPath = path.join(workersDir, 'worker.env.json')
     let nextPid = 42000
     const busStoragePath = path.join(tempDir, 'workflow-bus.json')
     const workerRecord = {
       workerId: 'worker-1',
       runId: 'demo-20260702-130619',
-      role: 'front_fixer' as const,
-      nickname: 'front-fixer',
+      role: 'worker' as const,
+      nickname: 'worker',
       reason: 'Frontend recording stalled on cursor overlay.',
       scope: 'frontend video review',
       status: 'running' as const,
@@ -60,8 +60,8 @@ describe('orchestrator turn', () => {
     fs.writeFileSync(
       logPath,
       [
-        '[workflow] 2026-07-02T10:00:00.000Z worker:lifecycle: spawned front-fixer {"pid":41001}',
-        'front fixer is still waiting on a browser frame',
+        '[workflow] 2026-07-02T10:00:00.000Z worker:lifecycle: spawned worker {"pid":41001}',
+        'worker is still waiting on a browser frame',
       ].join('\n')
     )
     fs.writeFileSync(lastMessagePath, 'Waiting on the browser frame to move.')
@@ -110,7 +110,7 @@ describe('orchestrator turn', () => {
 
     expect(result.stalledWorkers).toHaveLength(1)
     expect(result.nextState.phase).toBe('stalled')
-    expect(result.nextState.lastStallFinding).toContain('Stalled worker front-fixer')
+    expect(result.nextState.lastStallFinding).toContain('Stalled worker worker')
     expect(result.nextState.lastStallFinding).toContain('frontend video review')
     expect(result.plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'planner'])
     expect(result.jobs.map((job) => job.step.owner)).toEqual(['planner'])
@@ -131,7 +131,7 @@ describe('orchestrator turn', () => {
 
     bus.appendSpawnRequest({
       runId,
-      askedBy: 'demo_recorder',
+      askedBy: 'worker',
       scope: 'recorder-report.md',
       text: 'Review the recorder report and publish the next worker_request set.',
       context:
@@ -144,7 +144,7 @@ describe('orchestrator turn', () => {
     const activeRecorder = {
       workerId: 'worker-recorder',
       runId,
-      role: 'demo_recorder' as const,
+      role: 'worker' as const,
       nickname: 'demo-recorder',
       reason: 'Recorder is already active.',
       scope: 'recorder-report.md',
@@ -163,7 +163,7 @@ describe('orchestrator turn', () => {
     const activeVerifier = {
       workerId: 'worker-verifier',
       runId,
-      role: 'demo_verifier' as const,
+      role: 'worker' as const,
       nickname: 'demo-verifier',
       reason: 'Verifier is already active.',
       scope: 'verifier-report.md',
@@ -349,6 +349,7 @@ describe('orchestrator turn', () => {
         tickCount: 3,
         lastPlanSummary: 'Previous planner summary.',
         pendingSpawnKeys: [],
+        recommendedNextSteps: [],
         lastStallFinding: null,
         lastUpdatedAt: '2026-07-02T10:00:00.000Z',
       },
@@ -357,6 +358,7 @@ describe('orchestrator turn', () => {
     expect(result.nextState.runId).toBe('demo-20260702-130619')
     expect(result.nextState.tickCount).toBe(4)
     expect(result.nextState.phase).toBe('waiting_on_workers')
+    expect(result.nextState.recommendedNextSteps).toEqual(result.plan.steps)
     expect(result.nextState.lastPlanSummary).toBe(result.plan.summary)
     expect(result.nextState.pendingSpawnKeys).toEqual([])
   })

@@ -166,7 +166,7 @@ describe('workflow worker runtime', () => {
 
     const worker = harness.runtime.spawnWorker({
       runId: 'demo-xvfb-20260701-200813',
-      role: 'demo_recorder',
+      role: 'worker',
       nickname: 'demo-recorder-1',
       reason: 'Run the both scenario recorder pass.',
       scope: 'recorder-report.md',
@@ -188,7 +188,7 @@ describe('workflow worker runtime', () => {
     expect(harness.spawnCalls[0]?.args).toContain('-C')
     expect(worker).toMatchObject({
       runId: 'demo-xvfb-20260701-200813',
-      role: 'demo_recorder',
+      role: 'worker',
       nickname: 'demo-recorder-1',
       reason: 'Run the both scenario recorder pass.',
       scope: 'recorder-report.md',
@@ -243,7 +243,7 @@ describe('workflow worker runtime', () => {
     const harness = createRuntimeHarness()
     const worker = harness.runtime.spawnWorker({
       runId: 'demo-xvfb-20260701-200813',
-      role: 'demo_verifier',
+      role: 'worker',
       nickname: 'demo-verifier-fast',
       reason: 'Inspect current artifacts.',
       scope: 'verifier-report.md',

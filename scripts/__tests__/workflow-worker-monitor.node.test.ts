@@ -30,7 +30,7 @@ describe('workflow worker monitor', () => {
             {
               workerId: 'worker-1',
               runId: 'demo-run',
-              role: 'front_fixer',
+              role: 'worker',
               nickname: 'front-fixer',
               reason: 'Fix the mobile cursor.',
               scope: 'record-demo',
@@ -49,7 +49,7 @@ describe('workflow worker monitor', () => {
             {
               workerId: 'worker-2',
               runId: 'demo-run',
-              role: 'demo_verifier',
+              role: 'worker',
               nickname: 'demo-verifier',
               reason: 'Verify the capture.',
               scope: 'verifier-report.md',
@@ -96,7 +96,7 @@ describe('workflow worker monitor', () => {
             {
               workerId: 'worker-1',
               runId: 'demo-run',
-              role: 'front_fixer',
+              role: 'worker',
               nickname: 'front-fixer',
               reason: 'Fix the mobile cursor.',
               scope: 'record-demo',

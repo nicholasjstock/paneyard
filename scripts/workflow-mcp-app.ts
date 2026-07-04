@@ -86,26 +86,9 @@ export type WorkflowServerDeps = {
   commandRunner?: GuardedCommandRunner
 }
 
-const workerRoleSchema = z.enum([
-  'planner',
-  'orchestrator',
-  'demo_recorder',
-  'demo_verifier',
-  'front_fixer',
-  'back_fixer',
-  'infra_fixer',
-  'general_fixer',
-])
+const workerRoleSchema = z.enum(['planner', 'orchestrator', 'worker'])
 
-const workflowAgentSchema = z.enum([
-  'orchestrator',
-  'demo_recorder',
-  'demo_verifier',
-  'front_fixer',
-  'back_fixer',
-  'infra_fixer',
-  'general_fixer',
-])
+const workflowAgentSchema = z.enum(['orchestrator', 'worker'])
 
 const workerRecordSchema = z.object({
   workerId: z.string(),
@@ -140,12 +123,20 @@ const workflowUserQuestionSchema = z.object({
   tags: z.array(z.string()),
 })
 
+const workflowStepSchema = z.object({
+  owner: z.string(),
+  artifact: z.string(),
+  successCheck: z.string(),
+  dependsOnArtifacts: z.array(z.string()).optional(),
+})
+
 const orchestratorDecisionStateSchema = z.object({
   runId: z.string(),
   phase: z.enum(['starting', 'planning', 'waiting_on_workers', 'stalled', 'completed']),
   tickCount: z.number().int().min(0),
   lastPlanSummary: z.string().nullable(),
   pendingSpawnKeys: z.array(z.string()),
+  recommendedNextSteps: z.array(workflowStepSchema),
   lastStallFinding: z.string().nullable(),
   lastUpdatedAt: z.string().nullable(),
 })
@@ -780,29 +771,21 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
       outputSchema: {
         plan: z.object({
           summary: z.string(),
-          steps: z.array(
-            z.object({
-              owner: z.string(),
-              artifact: z.string(),
-              successCheck: z.string(),
-            })
-          ),
+          steps: z.array(workflowStepSchema),
         }),
         jobs: z.array(
           z.object({
             requestId: z.string(),
-            step: z.object({
-              owner: z.string(),
-              artifact: z.string(),
-              successCheck: z.string(),
-            }),
+            step: workflowStepSchema,
           })
         ),
         plannerWorker: workerRecordSchema.nullable(),
+        nextState: orchestratorDecisionStateSchema,
       },
     },
     async ({ runId, role, nickname, scope, result, task, scenario, frontendUrl }) => {
       logWorkflow('tool:worker_turn', 'requested', { runId, role, nickname, scope })
+      const previousState = readOrchestratorState(activeContext, runId)
       const structuredContent = runWorkerTurn({
         runId,
         role,
@@ -814,7 +797,9 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         frontendUrl,
         bus: activeBus,
         workerRuntime: activeWorkerRuntime,
+        previousState,
       })
+      writeOrchestratorState(activeContext, structuredContent.nextState)
       logWorkflow('tool:worker_turn', 'completed', {
         runId,
         role,
@@ -986,7 +971,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     async ({ runId }) => {
       logWorkflow('tool:collect_workflow_state', 'requested', { runId })
       const artifactNames = listPlannerDeclaredArtifacts(activeBus, runId)
-      const structuredContent = collectWorkflowState(activeContext, artifactNames)
+      const structuredContent = collectWorkflowState(activeContext, runId, artifactNames)
       logWorkflow('tool:collect_workflow_state', 'completed', {
         runId,
         artifacts: structuredContent.artifacts.filter((artifact) => artifact.exists).length,
@@ -1002,8 +987,10 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
   server.registerTool(
     'read_workflow_artifact',
     {
-      description: 'Read one managed workflow artifact from front/demo-output/agents-sdk.',
+      description:
+        'Read one managed workflow artifact from front/demo-output/agents-sdk, scoped to the given run so concurrent runs never read each other\'s files.',
       inputSchema: {
+        runId: z.string().min(1),
         artifactName: z.string(),
       },
       outputSchema: {
@@ -1011,9 +998,9 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         content: z.string(),
       },
     },
-    async ({ artifactName }) => {
-      logWorkflow('tool:read_workflow_artifact', 'requested', { artifactName })
-      const content = readWorkflowArtifact(activeContext, artifactName)
+    async ({ runId, artifactName }) => {
+      logWorkflow('tool:read_workflow_artifact', 'requested', { runId, artifactName })
+      const content = readWorkflowArtifact(activeContext, runId, artifactName)
       const structuredContent = { artifactName, content }
       logWorkflow('tool:read_workflow_artifact', 'completed', {
         artifactName,
@@ -1030,8 +1017,10 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
   server.registerTool(
     'write_workflow_artifact',
     {
-      description: 'Write one managed workflow artifact into front/demo-output/agents-sdk.',
+      description:
+        'Write one managed workflow artifact into front/demo-output/agents-sdk, scoped to the given run so concurrent runs and workers never overwrite each other\'s files.',
       inputSchema: {
+        runId: z.string().min(1),
         artifactName: z.string(),
         content: z.string(),
       },
@@ -1040,12 +1029,13 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         path: z.string(),
       },
     },
-    async ({ artifactName, content }) => {
+    async ({ runId, artifactName, content }) => {
       logWorkflow('tool:write_workflow_artifact', 'requested', {
+        runId,
         artifactName,
         bytes: content.length,
       })
-      const artifactPath = writeWorkflowArtifact(activeContext, artifactName, content)
+      const artifactPath = writeWorkflowArtifact(activeContext, runId, artifactName, content)
       const structuredContent = { artifactName, path: artifactPath }
       logWorkflow('tool:write_workflow_artifact', 'completed', {
         artifactName,

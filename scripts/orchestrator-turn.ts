@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 
 import {
+  buildPendingSpawnKeys,
   buildStalledWorkerRecoveryPlan,
   buildWaitingPlan,
   publishPlannerJobs,
@@ -83,18 +84,8 @@ function trimTrailingSlash(value: string): string {
 
 export function buildWorkerNickname(role: WorkflowWorkerRecord['role']): string {
   switch (role) {
-    case 'demo_recorder':
-      return 'demo-recorder'
-    case 'demo_verifier':
-      return 'demo-verifier'
-    case 'front_fixer':
-      return 'front-fixer'
-    case 'back_fixer':
-      return 'back-fixer'
-    case 'infra_fixer':
-      return 'infra-fixer'
-    case 'general_fixer':
-      return 'general-fixer'
+    case 'worker':
+      return 'worker'
     case 'planner':
       return 'planner'
     case 'orchestrator':
@@ -221,10 +212,6 @@ export function buildStallFinding(stalls: OrchestratorTurnFinding[]): string {
     .join('\n')
 }
 
-function buildPendingSpawnKeys(runId: string, jobs: PlannerBusJob[]): string[] {
-  return jobs.map((job) => JSON.stringify([runId, job.step.owner, job.step.artifact]))
-}
-
 export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTurnResult {
   const fileSystem = args.fileSystem ?? fs
   const previousState = args.previousState
@@ -270,6 +257,7 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
     tickCount: (previousState?.tickCount ?? 0) + 1,
     lastPlanSummary: plan.summary,
     pendingSpawnKeys: [...new Set([...(previousState?.pendingSpawnKeys ?? []), ...buildPendingSpawnKeys(args.runId, jobs)])],
+    recommendedNextSteps: plan.steps,
     lastStallFinding,
     lastUpdatedAt: (args.now ?? new Date()).toISOString(),
   }

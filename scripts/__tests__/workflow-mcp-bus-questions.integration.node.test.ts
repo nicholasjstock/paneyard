@@ -24,9 +24,9 @@ describe('workflow MCP spawn-request tools', () => {
         askedBy: 'planner',
         scope: 'fix-summary.md',
         text: 'Need a frontend fixer.',
-        requestedRole: 'front_fixer',
+        requestedRole: 'worker',
         priority: 'blocking',
-        tags: ['front_fixer', 'planner-job'],
+        tags: ['worker', 'planner-job'],
       },
     })
 
@@ -36,7 +36,7 @@ describe('workflow MCP spawn-request tools', () => {
       priority: string
       status: string
     }
-    expect(structuredContent.requestedRole).toBe('front_fixer')
+    expect(structuredContent.requestedRole).toBe('worker')
     expect(structuredContent.priority).toBe('blocking')
     expect(structuredContent.status).toBe('open')
     expect(harness.bus.listOpenSpawnRequests()).toHaveLength(1)
@@ -51,14 +51,14 @@ describe('workflow MCP spawn-request tools', () => {
       askedBy: 'planner',
       scope: 'a.md',
       text: 'First request.',
-      requestedRole: 'front_fixer',
+      requestedRole: 'worker',
     })
     harness.bus.appendSpawnRequest({
       runId: 'run-1',
       askedBy: 'planner',
       scope: 'b.md',
       text: 'Second request.',
-      requestedRole: 'back_fixer',
+      requestedRole: 'worker',
     })
     harness.bus.fulfillSpawnRequest({
       requestId: first.requestId,
@@ -80,7 +80,7 @@ describe('workflow MCP spawn-request tools', () => {
       askedBy: 'planner',
       scope: 'a.md',
       text: 'Need a fixer.',
-      requestedRole: 'front_fixer',
+      requestedRole: 'worker',
       priority: 'blocking',
     })
 

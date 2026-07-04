@@ -27,7 +27,21 @@ SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
 ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 DEFAULT_TARGET_ROOT="/Users/stockn/Source/simple-retail-planner/main"
 TARGET_ROOT="${WORKFLOW_LIVE_TARGET_ROOT:-$DEFAULT_TARGET_ROOT}"
-TIMEOUT_SECONDS=90
+# The supervisor only reacts to what's already on the bus — it never seeds the
+# first request itself, and a real planner subprocess reasoning about the task
+# takes minutes, not seconds. 90s was never actually validated against a real
+# end-to-end run; 240s gives the planner -> recorder/verifier chain a
+# realistic shot at completing within one supervisor process lifetime.
+TIMEOUT_SECONDS=240
+
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="gtimeout"
+else
+  echo "Missing timeout/gtimeout in PATH (macOS: brew install coreutils)." >&2
+  exit 1
+fi
 
 usage() {
   grep '^#' "$0" | grep -v '^#!/' | sed 's/^# \{0,1\}//'
@@ -107,10 +121,31 @@ echo "Target root: $TARGET_ROOT"
 echo "State dir: $STATE_DIR"
 echo "Run id: $RUN_ID"
 
+echo "Seeding an initial planner job onto the bus (the supervisor never seeds one itself)."
+TSX_BIN="${TSX_BIN:-$ROOT/node_modules/.bin/tsx}"
+if [[ ! -x "$TSX_BIN" ]]; then
+  echo "Missing tsx binary at $TSX_BIN" >&2
+  exit 1
+fi
+(
+  cd "$ROOT"
+  WORKFLOW_STATE_DIR="$STATE_DIR" "$TSX_BIN" -e '
+    import { createWorkflowBus } from "./scripts/workflow-bus"
+    import { queueLongPhoneDemoPlannerJob } from "./scripts/workflow-mcp"
+    const bus = createWorkflowBus()
+    const request = queueLongPhoneDemoPlannerJob(bus, {
+      runId: process.argv[1],
+      frontendUrl: process.argv[2],
+      task: "Live Claude smoke: verify the baseline workflow spawn chain through the packaged claude-worker supervisor launcher.",
+    })
+    console.log(`Seeded planner request ${request.requestId}.`)
+  ' "$RUN_ID" "http://127.0.0.1:4173"
+)
+
 set +e
 WORKFLOW_TARGET_ROOT="$TARGET_ROOT" \
 WORKFLOW_STATE_DIR="$STATE_DIR" \
-  timeout "$TIMEOUT_SECONDS" \
+  "$TIMEOUT_BIN" "$TIMEOUT_SECONDS" \
   "$ROOT/bin/supervisor_launcher_claude" \
   --run-id="$RUN_ID" \
   --task="Live Claude smoke: verify the baseline workflow spawn chain through the packaged claude-worker supervisor launcher." \
@@ -137,8 +172,8 @@ while (( SECONDS < deadline )); do
       const fs = require("fs")
       const file = process.argv[1]
       const data = JSON.parse(fs.readFileSync(file, "utf8"))
-      const running = new Set((data.workers || []).filter((w) => w.status === "running").map((w) => w.role))
-      if (running.has("demo_recorder") && running.has("demo_verifier")) process.exit(0)
+      const runningWorkerCount = (data.workers || []).filter((w) => w.status === "running" && w.role === "worker").length
+      if (runningWorkerCount >= 2) process.exit(0)
       process.exit(1)
     ' "$WORKERS_PATH"; then
       spawn_ok=true
@@ -150,7 +185,7 @@ while (( SECONDS < deadline )); do
 done
 
 if [[ "$spawn_ok" != true ]]; then
-  echo "Timed out waiting for demo_recorder and demo_verifier to spawn." >&2
+  echo "Timed out waiting for at least 2 concurrent worker-role workers (recorder + verifier) to spawn." >&2
   echo "" >&2
   echo "Supervisor log:" >&2
   sed -n '1,240p' "$LOG_PATH" >&2 || true
@@ -178,8 +213,8 @@ node -e '
     }
   }
 
-  assert(roles.includes("demo_recorder"), "demo_recorder was not left running")
-  assert(roles.includes("demo_verifier"), "demo_verifier was not left running")
+  const workerRoleCount = roles.filter((role) => role === "worker").length
+  assert(workerRoleCount >= 2, `expected at least 2 running 'worker' role workers (recorder + verifier), saw ${workerRoleCount}`)
   assert(eventTypes.includes("run.status"), "run.status event was not recorded")
   assert(eventTypes.includes("spawn_request.created"), "spawn_request.created event was not recorded")
   assert(eventTypes.includes("worker.spawned"), "worker.spawned event was not recorded")

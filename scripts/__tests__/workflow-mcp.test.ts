@@ -60,7 +60,7 @@ function createPreviewFs(): FileSystemAdapter {
     reads: [] as Array<{ length: number; position: number | null }>,
   }
 
-  files.set('/virtual-repo/front/demo-output/agents-sdk/recorder-report.md', {
+  files.set('/virtual-repo/front/demo-output/agents-sdk/run-1/recorder-report.md', {
     content,
     mtime: new Date('2026-07-01T00:00:00.000Z'),
   })
@@ -126,10 +126,7 @@ describe('workflow-mcp planning helpers', () => {
 
     expect(context.recording.entryPoint).toBe('bin/record_demo')
     expect(context.recording.scriptPath).toBe('/repo/front/scripts/record-demo.ts')
-    expect(context.workflow.agents).toContain('orchestrator')
-    expect(context.workflow.agents).toContain('infra_fixer')
-    expect(context.workflow.agents).toContain('general_fixer')
-    expect(context.workflow.agents).not.toContain('project_manager')
+    expect(context.workflow.agents).toEqual(['orchestrator', 'worker'])
   })
 
   test('planWorkflowIteration keeps the baseline record to verify flow when no fix is needed', () => {
@@ -140,9 +137,10 @@ describe('workflow-mcp planning helpers', () => {
     })
 
     expect(plan.summary).toContain('phone')
-    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'demo_recorder', 'demo_verifier'])
+    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
     expect(plan.steps[0]?.artifact).toBe('workflow-plan.md')
     expect(plan.steps[1]?.successCheck).toContain('recorder-report.md')
+    expect(plan.steps[2]?.dependsOnArtifacts).toEqual(['recorder-report.md'])
   })
 
   test('planWorkflowIteration inserts the narrowest fixer when verifier findings point at frontend-only defects', () => {
@@ -155,13 +153,16 @@ describe('workflow-mcp planning helpers', () => {
 
     expect(plan.steps.map((step) => step.owner)).toEqual([
       'orchestrator',
-      'demo_recorder',
-      'demo_verifier',
-      'front_fixer',
-      'demo_recorder',
-      'demo_verifier',
+      'worker',
+      'worker',
+      'worker',
+      'worker',
+      'worker',
     ])
     expect(plan.steps[3]?.artifact).toBe('fix-summary.md')
+    expect(plan.steps[3]?.successCheck).toContain('front/**')
+    expect(plan.steps[4]?.dependsOnArtifacts).toEqual(['fix-summary.md'])
+    expect(plan.steps[5]?.dependsOnArtifacts).toEqual(['recorder-report.md'])
   })
 
   test('planWorkflowIteration ignores raw stall context and keeps the baseline route', () => {
@@ -172,7 +173,7 @@ describe('workflow-mcp planning helpers', () => {
       stallFinding: 'Stalled on a frontend-only defect: employee phone page fails to render the request state.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'demo_recorder', 'demo_verifier'])
+    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
   })
 
   test('planWorkflowIteration does not route infrastructure stalls directly', () => {
@@ -184,7 +185,7 @@ describe('workflow-mcp planning helpers', () => {
         'Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'demo_recorder', 'demo_verifier'])
+    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
   })
 
   test('planWorkflowIteration does not route unmatched stall blockers directly', () => {
@@ -195,7 +196,7 @@ describe('workflow-mcp planning helpers', () => {
       stallFinding: 'Unhandled worker startup error: the orchestrator can no longer classify this blocker.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'demo_recorder', 'demo_verifier'])
+    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
   })
 
   test('publishPlannerJobs converts planner steps into spawn requests', () => {
@@ -233,10 +234,10 @@ describe('workflow-mcp planning helpers', () => {
       plan,
     })
 
-    expect(jobs.map((job) => job.step.owner)).toEqual(['demo_recorder', 'demo_verifier'])
+    expect(jobs.map((job) => job.step.owner)).toEqual(['worker', 'worker'])
     expect(bus.requests.map((request) => request.requestedRole)).toEqual([
-      'demo_recorder',
-      'demo_verifier',
+      'worker',
+      'worker',
     ])
     expect(bus.requests.map((request) => request.scope)).toEqual([
       'recorder-report.md',
@@ -343,6 +344,12 @@ describe('workflow-mcp planning helpers', () => {
       listSpawnRequests() {
         return requests
       },
+      fulfillSpawnRequest({ requestId }: { requestId: string }) {
+        const request = requests.find((entry) => entry.requestId === requestId)
+        if (request) {
+          request.status = 'fulfilled'
+        }
+      },
     }
   }
 
@@ -355,9 +362,9 @@ describe('workflow-mcp planning helpers', () => {
       plan: {
         summary: 'Repair the recording loop.',
         steps: [
-          { owner: 'infra_fixer', artifact: 'colima-status.md', successCheck: 'colima is running' },
+          { owner: 'worker', artifact: 'colima-status.md', successCheck: 'colima is running' },
           {
-            owner: 'demo_recorder',
+            owner: 'worker',
             artifact: 'recorder-report.md',
             successCheck: 'recording succeeds',
             dependsOnArtifacts: ['colima-status.md'],
@@ -366,8 +373,8 @@ describe('workflow-mcp planning helpers', () => {
       },
     })
 
-    const infraJob = jobs.find((job) => job.step.owner === 'infra_fixer')
-    const recorderRequest = bus.requests.find((request) => request.requestedRole === 'demo_recorder')
+    const infraJob = jobs.find((job) => job.step.artifact === 'colima-status.md')
+    const recorderRequest = bus.requests.find((request) => request.scope === 'recorder-report.md')
 
     expect(infraJob).toBeDefined()
     expect(recorderRequest?.dependsOn).toEqual([infraJob?.requestId])
@@ -380,7 +387,7 @@ describe('workflow-mcp planning helpers', () => {
       askedBy: 'planner',
       scope: 'colima-status.md',
       text: 'colima is running',
-      requestedRole: 'infra_fixer',
+      requestedRole: 'worker',
     })
 
     publishPlannerJobs(bus, {
@@ -390,7 +397,7 @@ describe('workflow-mcp planning helpers', () => {
         summary: 'Retry the recording after the infra fix.',
         steps: [
           {
-            owner: 'demo_recorder',
+            owner: 'worker',
             artifact: 'recorder-report.md',
             successCheck: 'recording succeeds',
             dependsOnArtifacts: ['colima-status.md'],
@@ -399,10 +406,33 @@ describe('workflow-mcp planning helpers', () => {
       },
     })
 
-    const infraRequest = bus.requests.find((request) => request.requestedRole === 'infra_fixer')
-    const recorderRequest = bus.requests.find((request) => request.requestedRole === 'demo_recorder')
+    const infraRequest = bus.requests.find((request) => request.scope === 'colima-status.md')
+    const recorderRequest = bus.requests.find((request) => request.scope === 'recorder-report.md')
 
     expect(recorderRequest?.dependsOn).toEqual([infraRequest?.requestId])
+  })
+
+  test('publishPlannerJobs does not re-request a step whose earlier identical request was already fulfilled', () => {
+    const bus = createDependencyTestBus()
+
+    const step = { owner: 'worker' as const, artifact: 'recorder-report.md', successCheck: 'recording succeeds' }
+
+    const firstJobs = publishPlannerJobs(bus, {
+      runId: 'demo-7',
+      summary: 'Record the demo.',
+      plan: { summary: 'Record the demo.', steps: [step] },
+    })
+
+    bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId })
+
+    const secondJobs = publishPlannerJobs(bus, {
+      runId: 'demo-7',
+      summary: 'Record the demo.',
+      plan: { summary: 'Record the demo.', steps: [step] },
+    })
+
+    expect(secondJobs[0]?.requestId).toBe(firstJobs[0]?.requestId)
+    expect(bus.requests).toHaveLength(1)
   })
 
   test('buildRecordDemoCommand chooses the right entrypoint for docker and local runs', () => {
@@ -432,11 +462,27 @@ describe('workflow-mcp planning helpers', () => {
       outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
     })
 
-    writeWorkflowArtifact(context, 'workflow-plan.md', '# plan\n', fileSystem)
+    writeWorkflowArtifact(context, 'run-1', 'workflow-plan.md', '# plan\n', fileSystem)
 
-    expect(readWorkflowArtifact(context, 'workflow-plan.md', fileSystem)).toBe('# plan\n')
-    expect(() => writeWorkflowArtifact(context, '../escape.md', 'x', fileSystem)).toThrow('Unsafe workflow artifact name')
-    expect(() => writeWorkflowArtifact(context, 'nested/path.md', 'x', fileSystem)).toThrow('Unsafe workflow artifact name')
+    expect(readWorkflowArtifact(context, 'run-1', 'workflow-plan.md', fileSystem)).toBe('# plan\n')
+    expect(() => writeWorkflowArtifact(context, 'run-1', '../escape.md', 'x', fileSystem)).toThrow('Unsafe workflow artifact name')
+    expect(() => writeWorkflowArtifact(context, 'run-1', 'nested/path.md', 'x', fileSystem)).toThrow('Unsafe workflow artifact name')
+  })
+
+  test('writeWorkflowArtifact namespaces artifacts per run so concurrent runs cannot collide', () => {
+    const fileSystem = createMemoryFs()
+    const tempRoot = '/virtual-repo'
+    const context = buildWorkflowContext({
+      rootDir: tempRoot,
+      frontDir: `${tempRoot}/front`,
+      outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
+    })
+
+    writeWorkflowArtifact(context, 'run-1', 'fix-summary.md', 'run 1 fix', fileSystem)
+    writeWorkflowArtifact(context, 'run-2', 'fix-summary.md', 'run 2 fix', fileSystem)
+
+    expect(readWorkflowArtifact(context, 'run-1', 'fix-summary.md', fileSystem)).toBe('run 1 fix')
+    expect(readWorkflowArtifact(context, 'run-2', 'fix-summary.md', fileSystem)).toBe('run 2 fix')
   })
 
   test('writeOrchestratorState and readOrchestratorState persist decision state per run', () => {
@@ -452,7 +498,8 @@ describe('workflow-mcp planning helpers', () => {
       phase: 'planning',
       tickCount: 2,
       lastPlanSummary: 'Latest planner summary.',
-      pendingSpawnKeys: ['["demo-2026-07-03","demo_recorder","recorder-report.md"]'],
+      pendingSpawnKeys: ['["demo-2026-07-03","worker","recorder-report.md"]'],
+      recommendedNextSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: '2026-07-03T12:00:00.000Z',
     }
@@ -478,6 +525,7 @@ describe('workflow-mcp planning helpers', () => {
       tickCount: 0,
       lastPlanSummary: null,
       pendingSpawnKeys: [],
+      recommendedNextSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: null,
     })
@@ -497,6 +545,7 @@ describe('workflow-mcp planning helpers', () => {
       tickCount: 1,
       lastPlanSummary: 'First tick summary.',
       pendingSpawnKeys: [],
+      recommendedNextSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: '2026-07-03T12:00:00.000Z',
     }
@@ -530,6 +579,7 @@ describe('workflow-mcp planning helpers', () => {
       tickCount,
       lastPlanSummary: `Tick ${tickCount} summary.`,
       pendingSpawnKeys: [],
+      recommendedNextSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: `2026-07-03T12:0${tickCount}:00.000Z`,
     })
@@ -587,9 +637,9 @@ describe('workflow-mcp planning helpers', () => {
       outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
     })
 
-    writeWorkflowArtifact(context, 'recorder-report.md', 'recorded ok', fileSystem)
+    writeWorkflowArtifact(context, 'run-1', 'recorder-report.md', 'recorded ok', fileSystem)
 
-    const state = collectWorkflowState(context, ['recorder-report.md', 'verifier-report.md'], fileSystem)
+    const state = collectWorkflowState(context, 'run-1', ['recorder-report.md', 'verifier-report.md'], fileSystem)
 
     expect(state.artifacts.find((artifact) => artifact.name === 'recorder-report.md')).toMatchObject({
       exists: true,
@@ -609,7 +659,7 @@ describe('workflow-mcp planning helpers', () => {
       outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
     })
 
-    const state = collectWorkflowState(context, ['recorder-report.md'], fileSystem)
+    const state = collectWorkflowState(context, 'run-1', ['recorder-report.md'], fileSystem)
 
     expect(state.artifacts.find((artifact) => artifact.name === 'recorder-report.md')).toMatchObject({
       exists: true,

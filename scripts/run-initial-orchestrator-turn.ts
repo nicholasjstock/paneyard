@@ -132,6 +132,7 @@ async function main(): Promise<number> {
     tickCount: 1,
     lastPlanSummary: plan.summary,
     pendingSpawnKeys: jobs.map((job) => JSON.stringify([runId, job.step.owner, job.step.artifact])),
+    recommendedNextSteps: plan.steps,
     lastStallFinding: null,
     lastUpdatedAt: new Date().toISOString(),
   }

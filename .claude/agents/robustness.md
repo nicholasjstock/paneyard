@@ -81,9 +81,9 @@ if (!recordingComplete) {
 }
 ```
 
-## Implementation for @demo-pipeline
+## Implementation for the orchestrator
 
-The orchestrator agent should:
+The orchestrator (deterministic loop logic, not a separate agent) should:
 
 ```typescript
 async function launchJobSafely(job) {
@@ -156,14 +156,14 @@ Agent decision:
 Agent reports: "Recording hung after 300s, killed process, attempt 2/3"
 ```
 
-## For @front-fixer / @back-fixer
+## For @worker (scoped fix tasks)
 
 Agents that apply code fixes should verify:
 
 ```typescript
 // After applying fix
-const syntaxValid = await verifyTypescript()  // front-fixer: typecheck
-const syntaxValid = await verifyRails()       // back-fixer: rspec
+const syntaxValid = await verifyTypescript()  // frontend scope: typecheck
+const syntaxValid = await verifyRails()       // backend scope: rspec
 if (!syntaxValid) {
   throw new Error('Applied fix broke compilation/tests')
 }
@@ -175,7 +175,7 @@ if (!videoProduced) {
 }
 ```
 
-## For @video-verifier
+## For @worker (verification tasks)
 
 Agents analyzing output should verify:
 

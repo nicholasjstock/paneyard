@@ -19,10 +19,10 @@ function makeFakeFileSystem(files: Record<string, string>): FakeFileSystem {
 describe('loadAgentPersona', () => {
   test('reads the role .toml file content when it exists', () => {
     const fileSystem = makeFakeFileSystem({
-      '/repo/.codex/agents/front_fixer.toml': 'name = "front_fixer"\ndeveloper_instructions = "Own frontend writes only."',
+      '/repo/.codex/agents/worker.toml': 'name = "worker"\ndeveloper_instructions = "Own frontend writes only."',
     })
 
-    const persona = loadAgentPersona('/repo', 'front_fixer', fileSystem)
+    const persona = loadAgentPersona('/repo', 'worker', fileSystem)
 
     expect(persona).toContain('Own frontend writes only.')
   })

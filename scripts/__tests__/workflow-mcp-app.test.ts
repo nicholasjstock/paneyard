@@ -59,12 +59,12 @@ describe('workflow MCP app state snapshot', () => {
       askedBy: 'planner',
       scope: 'recorder-report.md',
       text: 'Re-run the recorder after the fix.',
-      requestedRole: 'demo_recorder',
+      requestedRole: 'worker',
       priority: 'blocking',
     })
     runtime.spawnWorker({
       runId: 'demo-2026-07-02',
-      role: 'demo_recorder',
+      role: 'worker',
       nickname: 'demo-recorder',
       reason: 'Recording the flow.',
       scope: 'recorder-report.md',
@@ -89,7 +89,7 @@ describe('workflow MCP app state snapshot', () => {
     expect(state.workers).toHaveLength(1)
     expect(state.recentEvents.length).toBeGreaterThan(0)
     expect(state.workers[0]?.nickname).toBe('demo-recorder')
-    expect(state.openSpawnRequests[0]?.requestedRole).toBe('demo_recorder')
+    expect(state.openSpawnRequests[0]?.requestedRole).toBe('worker')
     expect(state.openUserQuestions[0]?.askedBy).toBe('planner')
   })
 })

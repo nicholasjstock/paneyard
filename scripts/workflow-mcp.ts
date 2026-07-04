@@ -3,14 +3,7 @@ import * as fs from 'fs'
 export type DemoScenario = 'admin' | 'phone' | 'both'
 export type ExecutionMode = 'local' | 'docker'
 export type GuardedOperation = 'record_demo' | 'frontend_typecheck' | 'frontend_test'
-export type WorkflowAgent =
-  | 'orchestrator'
-  | 'demo_recorder'
-  | 'demo_verifier'
-  | 'front_fixer'
-  | 'back_fixer'
-  | 'infra_fixer'
-  | 'general_fixer'
+export type WorkflowAgent = 'orchestrator' | 'worker'
 
 export type WorkflowStepOwner = WorkflowAgent | 'planner'
 
@@ -110,6 +103,11 @@ export type OrchestratorDecisionState = {
   tickCount: number
   lastPlanSummary: string | null
   pendingSpawnKeys: string[]
+  // The most recently decided plan steps for this run, replaced (not
+  // accumulated) each tick. Informational only — dedup against re-publishing
+  // is handled by publishPlannerJobs directly against bus request status, not
+  // by consulting this field.
+  recommendedNextSteps: WorkflowStep[]
   lastStallFinding: string | null
   lastUpdatedAt: string | null
 }
@@ -175,15 +173,7 @@ const defaultFileSystemAdapter: FileSystemAdapter = {
 // agents/recording shape instead of relying on these. Artifact names are not
 // part of this static config at all — they're decided per run by whichever
 // planner is active (see WorkflowStep.artifact / listPlannerDeclaredArtifacts).
-const DEFAULT_WORKFLOW_AGENTS: WorkflowAgent[] = [
-  'orchestrator',
-  'demo_recorder',
-  'demo_verifier',
-  'front_fixer',
-  'back_fixer',
-  'infra_fixer',
-  'general_fixer',
-]
+const DEFAULT_WORKFLOW_AGENTS: WorkflowAgent[] = ['orchestrator', 'worker']
 
 const DEFAULT_PREFERRED_LOOP: string[] = ['record', 'verify', 'fix-if-needed', 're-record', 're-verify']
 
@@ -226,7 +216,7 @@ export function planWorkflowIteration(args: PlanWorkflowIterationArgs): PlanWork
       successCheck: `Defines the next owner, required artifact, and scenario ${args.scenario} before any specialist work begins.`,
     },
     {
-      owner: 'demo_recorder',
+      owner: 'worker',
       artifact: 'recorder-report.md',
       successCheck: `Runs ${buildRecordDemoCommand({
         scenario: args.scenario,
@@ -235,43 +225,48 @@ export function planWorkflowIteration(args: PlanWorkflowIterationArgs): PlanWork
       })} and writes recorder-report.md with artifact paths plus exit status.`,
     },
     {
-      owner: 'demo_verifier',
+      owner: 'worker',
       artifact: 'verifier-report.md',
       successCheck: 'Confirms visible UI state transitions and cites positive evidence from generated artifacts.',
+      dependsOnArtifacts: ['recorder-report.md'],
     },
   ]
 
   if (findingText.includes('frontend')) {
     steps.push({
-      owner: 'front_fixer',
+      owner: 'worker',
       artifact: 'fix-summary.md',
       successCheck: 'Adds or updates the preferred frontend test first, then lands the narrowest front/** fix.',
     })
     steps.push({
-      owner: 'demo_recorder',
+      owner: 'worker',
       artifact: 'recorder-report.md',
       successCheck: 'Re-runs the recording flow after the frontend fix.',
+      dependsOnArtifacts: ['fix-summary.md'],
     })
     steps.push({
-      owner: 'demo_verifier',
+      owner: 'worker',
       artifact: 'verifier-report.md',
       successCheck: 'Verifies the latest artifacts support success after the frontend fix.',
+      dependsOnArtifacts: ['recorder-report.md'],
     })
   } else if (findingText.includes('backend')) {
     steps.push({
-      owner: 'back_fixer',
+      owner: 'worker',
       artifact: 'fix-summary.md',
       successCheck: 'Adds or updates a failing request spec first, then lands the narrowest back/** fix.',
     })
     steps.push({
-      owner: 'demo_recorder',
+      owner: 'worker',
       artifact: 'recorder-report.md',
       successCheck: 'Re-runs the recording flow after the backend fix.',
+      dependsOnArtifacts: ['fix-summary.md'],
     })
     steps.push({
-      owner: 'demo_verifier',
+      owner: 'worker',
       artifact: 'verifier-report.md',
       successCheck: 'Verifies the latest artifacts support success after the backend fix.',
+      dependsOnArtifacts: ['recorder-report.md'],
     })
   } else if (
     findingText.includes('playwright') ||
@@ -280,35 +275,39 @@ export function planWorkflowIteration(args: PlanWorkflowIterationArgs): PlanWork
     findingText.includes('toolchain')
   ) {
     steps.push({
-      owner: 'infra_fixer',
+      owner: 'worker',
       artifact: 'fix-summary.md',
       successCheck: 'Adds or updates the preferred infrastructure test first, then lands the narrowest repo-local toolchain or environment fix.',
     })
     steps.push({
-      owner: 'demo_recorder',
+      owner: 'worker',
       artifact: 'recorder-report.md',
       successCheck: 'Re-runs the recording flow after the infrastructure fix.',
+      dependsOnArtifacts: ['fix-summary.md'],
     })
     steps.push({
-      owner: 'demo_verifier',
+      owner: 'worker',
       artifact: 'verifier-report.md',
       successCheck: 'Verifies the latest artifacts support success after the infrastructure fix.',
+      dependsOnArtifacts: ['recorder-report.md'],
     })
   } else if (findingText.trim().length > 0) {
     steps.push({
-      owner: 'general_fixer',
+      owner: 'worker',
       artifact: 'fix-summary.md',
       successCheck: 'Adds or updates the narrowest repo-wide regression test first, then lands the smallest general-purpose fix.',
     })
     steps.push({
-      owner: 'demo_recorder',
+      owner: 'worker',
       artifact: 'recorder-report.md',
       successCheck: 'Re-runs the recording flow after the general fix.',
+      dependsOnArtifacts: ['fix-summary.md'],
     })
     steps.push({
-      owner: 'demo_verifier',
+      owner: 'worker',
       artifact: 'verifier-report.md',
       successCheck: 'Verifies the latest artifacts support success after the general fix.',
+      dependsOnArtifacts: ['recorder-report.md'],
     })
   }
 
@@ -409,6 +408,10 @@ export function queueLongPhoneDemoPlannerJob(
   })
 }
 
+export function buildPendingSpawnKeys(runId: string, jobs: PlannerBusJob[]): string[] {
+  return jobs.map((job) => JSON.stringify([runId, job.step.owner, job.step.artifact]))
+}
+
 export function publishPlannerJobs(
   bus: {
     appendSpawnRequest: (args: {
@@ -422,7 +425,7 @@ export function publishPlannerJobs(
       tags?: string[]
       dependsOn?: string[]
     }) => { requestId: string }
-    listOpenSpawnRequests?: () => Array<{
+    listSpawnRequests?: () => Array<{
       requestId: string
       runId: string
       askedBy: string
@@ -430,11 +433,6 @@ export function publishPlannerJobs(
       text: string
       requestedRole: string
       status: 'open' | 'fulfilled' | 'dismissed'
-    }>
-    listSpawnRequests?: () => Array<{
-      requestId: string
-      runId: string
-      scope: string
     }>
   },
   args: {
@@ -457,10 +455,15 @@ export function publishPlannerJobs(
     .filter((step) => step.owner !== 'orchestrator')
     .map((step) => {
       const existingRequest = bus
-        .listOpenSpawnRequests?.()
+        .listSpawnRequests?.()
         .find(
           (request) =>
-            request.status === 'open' &&
+            // 'open' or 'fulfilled' both count as "already asked, identically" —
+            // a fulfilled request means the work already happened, so it must
+            // not be re-requested just because a later worker_turn call
+            // re-derives the same plan from scratch. Only 'dismissed' requests
+            // are treated as no longer representing this decision.
+            request.status !== 'dismissed' &&
             request.askedBy === 'planner' &&
             request.runId === args.runId &&
             request.requestedRole === step.owner &&
@@ -507,7 +510,7 @@ export function buildRecordDemoCommand(args: BuildRecordDemoCommandArgs): string
   return parts.join(' ')
 }
 
-export function resolveWorkflowArtifactPath(context: WorkflowContext, artifactName: string): string {
+export function resolveWorkflowArtifactPath(context: WorkflowContext, runId: string, artifactName: string): string {
   if (
     artifactName.length === 0 ||
     artifactName === '.' ||
@@ -519,7 +522,7 @@ export function resolveWorkflowArtifactPath(context: WorkflowContext, artifactNa
     throw new Error(`Unsafe workflow artifact name: ${artifactName}`)
   }
 
-  return `${context.workspace.outputDir.replace(/\/$/, '')}/${artifactName}`
+  return `${context.workspace.outputDir.replace(/\/$/, '')}/${sanitizeRunId(runId)}/${artifactName}`
 }
 
 function sanitizeRunId(runId: string): string {
@@ -538,9 +541,20 @@ function buildDefaultOrchestratorState(runId: string): OrchestratorDecisionState
     tickCount: 0,
     lastPlanSummary: null,
     pendingSpawnKeys: [],
+    recommendedNextSteps: [],
     lastStallFinding: null,
     lastUpdatedAt: null,
   }
+}
+
+function isWorkflowStep(value: unknown): value is WorkflowStep {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Partial<WorkflowStep>).owner === 'string' &&
+    typeof (value as Partial<WorkflowStep>).artifact === 'string' &&
+    typeof (value as Partial<WorkflowStep>).successCheck === 'string'
+  )
 }
 
 export function resolveOrchestratorStatePath(context: WorkflowContext, runId: string): string {
@@ -597,28 +611,32 @@ export function readOrchestratorTickHistory(
 
 export function writeWorkflowArtifact(
   context: WorkflowContext,
+  runId: string,
   artifactName: string,
   content: string,
   fileSystem: FileSystemAdapter = defaultFileSystemAdapter
 ): string {
-  const artifactPath = resolveWorkflowArtifactPath(context, artifactName)
-  fileSystem.mkdirSync(context.workspace.outputDir, { recursive: true })
+  const artifactPath = resolveWorkflowArtifactPath(context, runId, artifactName)
+  const artifactDir = artifactPath.slice(0, artifactPath.lastIndexOf('/'))
+  fileSystem.mkdirSync(artifactDir, { recursive: true })
   fileSystem.writeFileSync(artifactPath, content)
   return artifactPath
 }
 
 export function readWorkflowArtifact(
   context: WorkflowContext,
+  runId: string,
   artifactName: string,
   fileSystem: Pick<FileSystemAdapter, 'readFileSync'>
 ): string
-export function readWorkflowArtifact(context: WorkflowContext, artifactName: string): string
+export function readWorkflowArtifact(context: WorkflowContext, runId: string, artifactName: string): string
 export function readWorkflowArtifact(
   context: WorkflowContext,
+  runId: string,
   artifactName: string,
   fileSystem: Pick<FileSystemAdapter, 'readFileSync'> = defaultFileSystemAdapter
 ): string {
-  const artifactPath = resolveWorkflowArtifactPath(context, artifactName)
+  const artifactPath = resolveWorkflowArtifactPath(context, runId, artifactName)
   return fileSystem.readFileSync(artifactPath, 'utf8')
 }
 
@@ -655,6 +673,9 @@ export function readOrchestratorState(
       pendingSpawnKeys: Array.isArray(parsed.pendingSpawnKeys)
         ? parsed.pendingSpawnKeys.filter((entry): entry is string => typeof entry === 'string')
         : [],
+      recommendedNextSteps: Array.isArray(parsed.recommendedNextSteps)
+        ? parsed.recommendedNextSteps.filter(isWorkflowStep)
+        : [],
       lastStallFinding: parsed.lastStallFinding ?? null,
       lastUpdatedAt: parsed.lastUpdatedAt ?? null,
     }
@@ -678,6 +699,7 @@ export function listPlannerDeclaredArtifacts(
 
 export function collectWorkflowState(
   context: WorkflowContext,
+  runId: string,
   artifactNames: string[],
   fileSystem: FileSystemAdapter = defaultFileSystemAdapter
 ): WorkflowState {
@@ -701,7 +723,7 @@ export function collectWorkflowState(
   return {
     outputDir: context.workspace.outputDir,
     artifacts: artifactNames.map((name) => {
-      const artifactPath = resolveWorkflowArtifactPath(context, name)
+      const artifactPath = resolveWorkflowArtifactPath(context, runId, name)
 
       if (!fileSystem.existsSync(artifactPath)) {
         return {

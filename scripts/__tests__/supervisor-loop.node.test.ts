@@ -69,27 +69,27 @@ describe('supervisor loop worker spawning', () => {
       askedBy: 'planner',
       scope: 'recorder-report.md',
       text: 'Run the recorder.',
-      requestedRole: 'demo_recorder',
+      requestedRole: 'worker',
       priority: 'blocking',
-      tags: ['demo_recorder', 'recorder-report.md', 'planner-job'],
+      tags: ['worker', 'recorder-report.md', 'planner-job'],
     })
     bus.appendSpawnRequest({
       runId: 'demo-20260702-130619',
       askedBy: 'planner',
       scope: 'recorder-report.md',
       text: 'Run the recorder again.',
-      requestedRole: 'demo_recorder',
+      requestedRole: 'worker',
       priority: 'blocking',
-      tags: ['demo_recorder', 'recorder-report.md', 'planner-job'],
+      tags: ['worker', 'recorder-report.md', 'planner-job'],
     })
     bus.appendSpawnRequest({
       runId: 'demo-20260702-130619',
       askedBy: 'planner',
       scope: 'verifier-report.md',
       text: 'Run the verifier.',
-      requestedRole: 'demo_verifier',
+      requestedRole: 'worker',
       priority: 'blocking',
-      tags: ['demo_verifier', 'verifier-report.md', 'planner-job'],
+      tags: ['worker', 'verifier-report.md', 'planner-job'],
     })
 
     const spawnedWorkers = spawnRequestedWorkers({
@@ -124,9 +124,9 @@ describe('supervisor loop worker spawning', () => {
       bus,
     })
 
-    expect(spawnedWorkers.map((worker) => worker.role)).toEqual(['demo_recorder', 'demo_verifier'])
-    expect(spawned.map((call) => call.role)).toEqual(['demo_recorder', 'demo_verifier'])
-    expect(spawned.map((call) => call.nickname)).toEqual(['demo-recorder', 'demo-verifier'])
+    expect(spawnedWorkers.map((worker) => worker.role)).toEqual(['worker', 'worker'])
+    expect(spawned.map((call) => call.role)).toEqual(['worker', 'worker'])
+    expect(spawned.map((call) => call.nickname)).toEqual(['worker', 'worker-1'])
   })
 
   test('holds a dependent request until the dependency worker actually stops, not just spawns', () => {
@@ -146,7 +146,7 @@ describe('supervisor loop worker spawning', () => {
           .filter((worker) => (listArgs.activeOnly ? worker.status === 'running' : true))
           .map((worker) => ({ ...worker, runId, scope: '', reason: '', pid: 0 })) as any
       },
-      spawnWorker(spawnArgs: { role: WorkflowManagedRole; nickname: string }) {
+      spawnWorker(spawnArgs: { role: WorkflowManagedRole; nickname: string; scope: string }) {
         const workerId = `worker-${nextWorkerId}`
         nextWorkerId += 1
         workers.push({ workerId, role: spawnArgs.role, nickname: spawnArgs.nickname, status: 'running' })
@@ -156,7 +156,7 @@ describe('supervisor loop worker spawning', () => {
           role: spawnArgs.role,
           nickname: spawnArgs.nickname,
           reason: '',
-          scope: '',
+          scope: spawnArgs.scope,
           status: 'running' as const,
           pid: 50000 + workers.length,
           promptPath: '',
@@ -177,34 +177,34 @@ describe('supervisor loop worker spawning', () => {
       askedBy: 'planner',
       scope: 'colima-status.md',
       text: 'colima is running',
-      requestedRole: 'infra_fixer',
+      requestedRole: 'worker',
       priority: 'blocking',
-      tags: ['infra_fixer', 'colima-status.md', 'planner-job'],
+      tags: ['worker', 'colima-status.md', 'planner-job'],
     })
     bus.appendSpawnRequest({
       runId,
       askedBy: 'planner',
       scope: 'recorder-report.md',
       text: 'recording succeeds after the infra fix',
-      requestedRole: 'demo_recorder',
+      requestedRole: 'worker',
       priority: 'blocking',
-      tags: ['demo_recorder', 'recorder-report.md', 'planner-job'],
+      tags: ['worker', 'recorder-report.md', 'planner-job'],
       dependsOn: [infraRequest.requestId],
     })
 
     const firstTick = spawnRequestedWorkers({ runId, workerRuntime, bus })
-    expect(firstTick.map((worker) => worker.role)).toEqual(['infra_fixer'])
+    expect(firstTick.map((worker) => worker.scope)).toEqual(['colima-status.md'])
 
-    // The infra_fixer worker was spawned (request marked fulfilled) but is
+    // The infra worker was spawned (request marked fulfilled) but is
     // still running: the dependent must stay blocked on this tick too.
     const secondTick = spawnRequestedWorkers({ runId, workerRuntime, bus })
     expect(secondTick).toEqual([])
 
-    // Now the infra_fixer worker actually finishes.
+    // Now the infra worker actually finishes.
     workers[0].status = 'stopped'
 
     const thirdTick = spawnRequestedWorkers({ runId, workerRuntime, bus })
-    expect(thirdTick.map((worker) => worker.role)).toEqual(['demo_recorder'])
+    expect(thirdTick.map((worker) => worker.scope)).toEqual(['recorder-report.md'])
   })
 })
 
@@ -236,9 +236,9 @@ setInterval(() => {}, 1000)
       askedBy: 'orchestrator',
       scope: 'recorder-report.md',
       text: 'Run the recorder.',
-      requestedRole: 'demo_recorder',
+      requestedRole: 'worker',
       priority: 'blocking',
-      tags: ['demo_recorder', 'recorder-report.md', 'planner-job'],
+      tags: ['worker', 'recorder-report.md', 'planner-job'],
     })
 
     const workerRuntime = createWorkflowWorkerRuntime({
@@ -255,15 +255,15 @@ setInterval(() => {}, 1000)
       async () => {
         const spawnedWorkers = spawnRequestedWorkers({ runId, workerRuntime, bus })
 
-        expect(spawnedWorkers.map((worker) => worker.role)).toEqual(['demo_recorder'])
+        expect(spawnedWorkers.map((worker) => worker.role)).toEqual(['worker'])
 
         await waitForFile(promptCapturePath)
 
         const activeWorkers = workerRuntime.listWorkers({ runId, activeOnly: true })
         expect(activeWorkers).toHaveLength(1)
         expect(activeWorkers[0]).toMatchObject({
-          role: 'demo_recorder',
-          nickname: 'demo-recorder',
+          role: 'worker',
+          nickname: 'worker',
           status: 'running',
         })
         expect(typeof activeWorkers[0].pid).toBe('number')
@@ -276,7 +276,7 @@ setInterval(() => {}, 1000)
               (event.payload as { runId?: string }).runId === runId
           )
         expect(spawnedEvents).toHaveLength(1)
-        expect(spawnedEvents[0].payload).toMatchObject({ role: 'demo_recorder', nickname: 'demo-recorder' })
+        expect(spawnedEvents[0].payload).toMatchObject({ role: 'worker', nickname: 'worker' })
 
         const openRequests = bus.listOpenSpawnRequests()
         expect(openRequests.map((entry) => entry.requestId)).not.toContain(request.requestId)

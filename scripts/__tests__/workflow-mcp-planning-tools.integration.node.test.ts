@@ -31,7 +31,7 @@ describe('workflow MCP planning tools', () => {
 
     expect(result.isError).toBeFalsy()
     const structuredContent = result.structuredContent as { steps: Array<{ owner: string }> }
-    expect(structuredContent.steps.map((step) => step.owner)).toEqual(['orchestrator', 'demo_recorder', 'demo_verifier'])
+    expect(structuredContent.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
   })
 
   test('plan_workflow_iteration rejects a non-URL frontendUrl via the Zod schema', async () => {
@@ -58,8 +58,8 @@ describe('workflow MCP planning tools', () => {
       name: 'worker_turn',
       arguments: {
         runId: 'run-1',
-        role: 'demo_verifier',
-        nickname: 'demo-verifier',
+        role: 'worker',
+        nickname: 'worker',
         scope: 'verifier-report.md',
         result: 'The frontend coverage-request button does not respond to clicks.',
         task: 'Validate the phone flow',
@@ -70,11 +70,11 @@ describe('workflow MCP planning tools', () => {
 
     expect(result.isError).toBeFalsy()
     const structuredContent = result.structuredContent as {
-      plan: { steps: Array<{ owner: string }> }
+      plan: { steps: Array<{ owner: string; successCheck: string }> }
       jobs: Array<{ requestId: string; step: { owner: string } }>
     }
-    expect(structuredContent.plan.steps.map((step) => step.owner)).toContain('front_fixer')
-    expect(structuredContent.jobs.map((job) => job.step.owner)).toContain('front_fixer')
+    expect(structuredContent.plan.steps.some((step) => step.successCheck.includes('front/**'))).toBe(true)
+    expect(structuredContent.jobs.map((job) => job.step.owner)).toContain('worker')
 
     const openRequestIds = harness.bus.listOpenSpawnRequests().map((request) => request.requestId)
     for (const job of structuredContent.jobs) {
@@ -97,8 +97,8 @@ describe('workflow MCP planning tools', () => {
       name: 'worker_turn',
       arguments: {
         runId: 'run-2',
-        role: 'demo_verifier',
-        nickname: 'demo-verifier',
+        role: 'worker',
+        nickname: 'worker',
         scope: 'verifier-report.md',
         result: 'The frontend coverage-request button does not respond to clicks.',
         task: 'Validate the phone flow',
@@ -142,6 +142,94 @@ describe('workflow MCP planning tools', () => {
     expect(result.isError).toBe(true)
   })
 
+  test('worker_turn does not re-request an artifact whose earlier identical request was already fulfilled', async () => {
+    const harness = await createMcpTestHarness()
+    harnesses.push(harness)
+
+    const args = {
+      runId: 'run-dedup',
+      role: 'worker',
+      nickname: 'worker',
+      scope: 'verifier-report.md',
+      result: 'irrelevant',
+      task: 'Validate the phone flow',
+      scenario: 'phone',
+      frontendUrl: 'http://localhost:5174',
+    }
+
+    const first = await harness.client.callTool({ name: 'worker_turn', arguments: args })
+    const firstJobs = (first.structuredContent as { jobs: Array<{ requestId: string }> }).jobs
+
+    for (const job of firstJobs) {
+      await harness.client.callTool({
+        name: 'fulfill_spawn_request',
+        arguments: { requestId: job.requestId, fulfilledBy: 'test', fulfillmentNote: 'test fulfillment' },
+      })
+    }
+
+    const second = await harness.client.callTool({ name: 'worker_turn', arguments: args })
+    const secondJobs = (second.structuredContent as { jobs: Array<{ requestId: string }> }).jobs
+
+    expect(secondJobs.map((job) => job.requestId)).toEqual(firstJobs.map((job) => job.requestId))
+  })
+
+  test('worker_turn only ever has one planner worker running for a given run across repeated calls', async () => {
+    const harness = await createMcpTestHarness()
+    harnesses.push(harness)
+
+    const args = {
+      runId: 'run-single-planner',
+      role: 'worker',
+      nickname: 'worker',
+      scope: 'verifier-report.md',
+      result: 'irrelevant',
+      task: 'Validate the phone flow',
+      scenario: 'phone',
+      frontendUrl: 'http://localhost:5174',
+    }
+
+    await harness.client.callTool({ name: 'worker_turn', arguments: args })
+    await harness.client.callTool({ name: 'worker_turn', arguments: { ...args, nickname: 'worker-2' } })
+
+    const runningPlanners = harness.runtime
+      .listWorkers({ runId: 'run-single-planner', activeOnly: true })
+      .filter((worker) => worker.role === 'planner')
+    expect(runningPlanners).toHaveLength(1)
+  })
+
+  test('worker_turn returns a nextState whose recommendedNextSteps matches the decided plan', async () => {
+    const harness = await createMcpTestHarness()
+    harnesses.push(harness)
+
+    const result = await harness.client.callTool({
+      name: 'worker_turn',
+      arguments: {
+        runId: 'run-next-state',
+        role: 'worker',
+        nickname: 'worker',
+        scope: 'verifier-report.md',
+        result: 'irrelevant',
+        task: 'Validate the phone flow',
+        scenario: 'phone',
+        frontendUrl: 'http://localhost:5174',
+      },
+    })
+
+    expect(result.isError).toBeFalsy()
+    const structuredContent = result.structuredContent as {
+      plan: { steps: unknown[] }
+      nextState: { recommendedNextSteps: unknown[] }
+    }
+    expect(structuredContent.nextState.recommendedNextSteps).toEqual(structuredContent.plan.steps)
+
+    const readResult = await harness.client.callTool({
+      name: 'read_orchestrator_state',
+      arguments: { runId: 'run-next-state' },
+    })
+    const readState = readResult.structuredContent as { recommendedNextSteps: unknown[] }
+    expect(readState.recommendedNextSteps).toEqual(structuredContent.plan.steps)
+  })
+
   test('planner_turn publishes one spawn request per decided step', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
@@ -150,20 +238,20 @@ describe('workflow MCP planning tools', () => {
       name: 'planner_turn',
       arguments: {
         runId: 'run-3',
-        summary: 'Frontend button unresponsive; route to front_fixer, then re-verify.',
+        summary: 'Frontend button unresponsive; route to a scoped fix, then re-verify.',
         steps: [
-          { owner: 'front_fixer', artifact: 'fix-summary.md', successCheck: 'Button responds to taps on the phone view.' },
-          { owner: 'demo_verifier', artifact: 'verifier-report.md', successCheck: 'Confirms the button now responds.' },
+          { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Button responds to taps on the phone view.' },
+          { owner: 'worker', artifact: 'verifier-report.md', successCheck: 'Confirms the button now responds.' },
         ],
       },
     })
 
     expect(result.isError).toBeFalsy()
     const structuredContent = result.structuredContent as { jobs: Array<{ requestId: string; step: { owner: string } }> }
-    expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['front_fixer', 'demo_verifier'])
+    expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['worker', 'worker'])
 
     const openRequests = harness.bus.listOpenSpawnRequests()
-    expect(openRequests.map((request) => request.requestedRole)).toEqual(['front_fixer', 'demo_verifier'])
+    expect(openRequests.map((request) => request.requestedRole)).toEqual(['worker', 'worker'])
     for (const request of openRequests) {
       expect(request.askedBy).toBe('planner')
     }
@@ -266,7 +354,7 @@ describe('workflow MCP planning tools', () => {
 
     expect(result.isError).toBeFalsy()
     const structuredContent = result.structuredContent as { jobs: Array<{ requestId: string; step: { owner: string } }> }
-    expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['demo_recorder', 'demo_verifier'])
+    expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['worker', 'worker'])
 
     const openRequestIds = harness.bus.listOpenSpawnRequests().map((request) => request.requestId)
     for (const job of structuredContent.jobs) {

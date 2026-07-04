@@ -23,7 +23,7 @@ Other agents should call this agent when they encounter:
 ### When Other Agents Invoke It
 
 ```typescript
-// Inside @video-recorder or @video-verifier:
+// Inside @worker:
 @planner create a plan for: [task description]
 
 // The planner responds with:
@@ -73,9 +73,9 @@ If [condition], try: [alternative approach]
 
 ## How Agents Should Invoke It
 
-### Recording Agent Invoking Planner
+### Worker Invoking Planner (Recording Task)
 
-**Scenario:** @video-recorder encounters a compilation error and doesn't know how to proceed
+**Scenario:** @worker, mid-recording task, encounters a compilation error and doesn't know how to proceed
 
 ```
 @planner create a plan for: diagnose and fix esbuild syntax errors in record-demo.ts
@@ -107,11 +107,11 @@ If [condition], try: [alternative approach]
    - Expected: No errors
 ```
 
-Then @video-recorder executes this plan.
+Then @worker executes this plan.
 
-### Verifier Invoking Planner
+### Worker Invoking Planner (Verification Task)
 
-**Scenario:** @video-verifier can't determine why phone window isn't showing
+**Scenario:** @worker, mid-verification task, can't determine why phone window isn't showing
 
 ```
 @planner create a plan for: diagnose why phone window is not visible in video frames
@@ -141,11 +141,11 @@ Then @video-recorder executes this plan.
    - Identify missing moveWindow() call
 ```
 
-Then @video-verifier uses this to guide analysis.
+Then @worker uses this to guide analysis.
 
-### Pipeline Invoking Planner
+### Orchestrator Invoking Planner
 
-**Scenario:** @demo-pipeline needs to coordinate a complex workflow
+**Scenario:** the orchestrator (deterministic loop logic called by @supervisor) needs to coordinate a complex workflow
 
 ```
 @planner create a plan for: orchestrate recording → verification → analysis → reporting with error recovery
@@ -170,7 +170,7 @@ if (unsureAboutNextSteps) {
 
 ## Agent-Specific Plans
 
-### For @video-recorder
+### For @worker (recording tasks)
 
 Plans it might request:
 - "Record a demo video end-to-end"
@@ -178,7 +178,7 @@ Plans it might request:
 - "Validate video output quality"
 - "Recover from recording timeout"
 
-### For @video-verifier
+### For @worker (verification tasks)
 
 Plans it might request:
 - "Extract and analyze video frames"
@@ -186,12 +186,12 @@ Plans it might request:
 - "Diagnose why feature X didn't appear"
 - "Generate visual comparison report"
 
-### For @demo-pipeline
+### For the orchestrator
 
 Plans it might request:
 - "Orchestrate full record → verify → report cycle"
 - "Handle recording failure with retry logic"
-- "Coordinate agents with error recovery"
+- "Coordinate worker instances with error recovery"
 
 ## Benefits
 
@@ -204,22 +204,22 @@ Plans it might request:
 ## Example: Full Workflow
 
 ```
-User: @demo-pipeline run recording and verification
+User: @supervisor run recording and verification
 
-→ @demo-pipeline calls @planner:
+→ orchestrator calls @planner:
   "Create plan for: orchestrate record → verify → report with error handling"
 
 ← @planner returns detailed plan with steps, dependencies, error handling
 
-→ @demo-pipeline executes plan step 1: record
-  → Calls @video-recorder
+→ supervisor executes plan step 1: record
+  → Spawns @worker (recording task)
   ← Gets: video file path or error
 
-→ @demo-pipeline executes plan step 2: verify
-  → Calls @video-verifier with video file
+→ supervisor executes plan step 2: verify
+  → Spawns @worker (verification task) with video file
   ← Gets: analysis report
 
-→ @demo-pipeline executes plan step 3: synthesize
+→ supervisor executes plan step 3: synthesize
   → Combines findings
   ← Returns: complete report to user
 ```

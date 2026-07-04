@@ -52,7 +52,7 @@ describe('workflow MCP integration', () => {
 
     const staleWorker = runtime.spawnWorker({
       runId: 'demo-20260702-130619',
-      role: 'back_fixer',
+      role: 'worker',
       nickname: 'back-fixer',
       reason: 'Frontend-only defect: request CTA resolution needs a frontend route fix.',
       scope: 'fix-summary.md',
@@ -106,7 +106,7 @@ describe('workflow MCP integration', () => {
         'planner',
       ])
       expect(runtime.listWorkers({ runId: 'demo-20260702-130619', activeOnly: true }).map((worker) => worker.role)).toEqual([
-        'back_fixer',
+        'worker',
       ])
     } finally {
       await client.close().catch(() => {})
@@ -146,7 +146,7 @@ describe('workflow MCP integration', () => {
 
     const staleWorker = runtime.spawnWorker({
       runId: 'demo-20260702-130620',
-      role: 'front_fixer',
+      role: 'worker',
       nickname: 'front-fixer',
       reason:
         'Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1.',
@@ -191,7 +191,7 @@ describe('workflow MCP integration', () => {
       expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['planner'])
       expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toEqual(['planner'])
       expect(runtime.listWorkers({ runId: 'demo-20260702-130620', activeOnly: true }).map((worker) => worker.role)).toEqual([
-        'front_fixer',
+        'worker',
       ])
     } finally {
       await client.close().catch(() => {})

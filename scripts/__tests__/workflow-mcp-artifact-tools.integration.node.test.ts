@@ -37,7 +37,7 @@ describe('workflow MCP artifact tools', () => {
 
     const result = await harness.client.callTool({
       name: 'write_workflow_artifact',
-      arguments: { artifactName: 'workflow-plan.md', content: '# Plan\n\nStep one.' },
+      arguments: { runId: RUN_ID, artifactName: 'workflow-plan.md', content: '# Plan\n\nStep one.' },
     })
 
     expect(result.isError).toBeFalsy()
@@ -52,12 +52,12 @@ describe('workflow MCP artifact tools', () => {
 
     await harness.client.callTool({
       name: 'write_workflow_artifact',
-      arguments: { artifactName: 'recorder-report.md', content: 'Recorded successfully.' },
+      arguments: { runId: RUN_ID, artifactName: 'recorder-report.md', content: 'Recorded successfully.' },
     })
 
     const result = await harness.client.callTool({
       name: 'read_workflow_artifact',
-      arguments: { artifactName: 'recorder-report.md' },
+      arguments: { runId: RUN_ID, artifactName: 'recorder-report.md' },
     })
 
     expect(result.isError).toBeFalsy()
@@ -71,7 +71,7 @@ describe('workflow MCP artifact tools', () => {
 
     const result = await harness.client.callTool({
       name: 'write_workflow_artifact',
-      arguments: { artifactName: '../escape.md', content: 'irrelevant' },
+      arguments: { runId: RUN_ID, artifactName: '../escape.md', content: 'irrelevant' },
     })
 
     expect(result.isError).toBe(true)
@@ -85,7 +85,7 @@ describe('workflow MCP artifact tools', () => {
 
     const result = await harness.client.callTool({
       name: 'read_workflow_artifact',
-      arguments: { artifactName: '../escape.md' },
+      arguments: { runId: RUN_ID, artifactName: '../escape.md' },
     })
 
     expect(result.isError).toBe(true)
@@ -100,12 +100,12 @@ describe('workflow MCP artifact tools', () => {
       askedBy: 'planner',
       scope: 'verifier-report.md',
       text: 'Confirms visible UI state transitions.',
-      requestedRole: 'demo_verifier',
+      requestedRole: 'worker',
     })
 
     await harness.client.callTool({
       name: 'write_workflow_artifact',
-      arguments: { artifactName: 'verifier-report.md', content: 'All checks passed.' },
+      arguments: { runId: RUN_ID, artifactName: 'verifier-report.md', content: 'All checks passed.' },
     })
 
     const result = await harness.client.callTool({ name: 'collect_workflow_state', arguments: { runId: RUN_ID } })

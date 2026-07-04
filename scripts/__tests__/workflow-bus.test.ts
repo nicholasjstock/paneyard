@@ -37,11 +37,11 @@ describe('workflow bus', () => {
 
     const request = bus.appendSpawnRequest({
       runId: 'demo-need-worker',
-      askedBy: 'demo_recorder',
+      askedBy: 'worker',
       scope: 'deeper verification',
       text: 'Need a verifier focused on crop geometry and frame composition.',
       context: 'Planner identified a missing verifier and queued a spawn request.',
-      requestedRole: 'demo_verifier',
+      requestedRole: 'worker',
       priority: 'blocking',
       tags: ['verification', 'blocking'],
     })
@@ -67,16 +67,16 @@ describe('workflow bus', () => {
       askedBy: 'orchestrator',
       scope: 'fix-summary.md',
       text: 'Need a frontend fixer.',
-      requestedRole: 'front_fixer',
+      requestedRole: 'worker',
       priority: 'blocking',
-      tags: ['front_fixer', 'planner-job'],
+      tags: ['worker', 'planner-job'],
     })
 
     const events = bus.listRecentEvents(1)
     expect(events[0]?.type).toBe('spawn_request.created')
     expect(events[0]?.payload).toMatchObject({
       requestId: request.requestId,
-      requestedRole: 'front_fixer',
+      requestedRole: 'worker',
       priority: 'blocking',
     })
   })
@@ -110,7 +110,7 @@ describe('workflow bus', () => {
     const spawned = bus.publishWorkerSpawned({
       runId: 'demo-4',
       owner: 'orchestrator',
-      role: 'demo_recorder',
+      role: 'worker',
       nickname: 'demo-recorder',
       reason: 'Recorder needed for the next recording pass.',
     })
@@ -118,7 +118,7 @@ describe('workflow bus', () => {
     const stopped = bus.publishWorkerStopped({
       runId: 'demo-4',
       owner: 'orchestrator',
-      role: 'demo_recorder',
+      role: 'worker',
       nickname: 'demo-recorder',
       reason: 'Recorder finished its handoff and is no longer active.',
     })
@@ -140,7 +140,7 @@ describe('workflow bus', () => {
       askedBy: 'planner',
       scope: 'shared state',
       text: 'Does the store survive a fresh process?',
-      requestedRole: 'demo_verifier',
+      requestedRole: 'worker',
     })
 
     const secondBus = createWorkflowBus({ storagePath, fileSystem: fs })

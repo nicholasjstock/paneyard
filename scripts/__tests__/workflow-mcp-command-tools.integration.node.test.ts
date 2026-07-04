@@ -31,6 +31,7 @@ describe('workflow MCP command tools', () => {
       tickCount: 0,
       lastPlanSummary: null,
       pendingSpawnKeys: [],
+      recommendedNextSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: null,
     })
@@ -45,7 +46,8 @@ describe('workflow MCP command tools', () => {
       phase: 'planning',
       tickCount: 2,
       lastPlanSummary: 'Latest planner summary.',
-      pendingSpawnKeys: ['["demo-2026-07-03","demo_recorder","recorder-report.md"]'],
+      pendingSpawnKeys: ['["demo-2026-07-03","worker","recorder-report.md"]'],
+      recommendedNextSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: '2026-07-03T12:00:00.000Z',
     }

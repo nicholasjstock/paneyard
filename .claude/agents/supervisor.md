@@ -63,7 +63,7 @@ Uses `run_supervisor_turn` from the `workflow` MCP server:
 
 - **Orchestrator** (internal function, not an agent): Called by supervisor each iteration for planning logic.
 - **@planner**: Called by orchestrator (via supervisor) when planning needs help with stalled/unresponsive workers or run-level decisions.
-- **Workers** (@video-recorder, @video-verifier, @front-fixer, @back-fixer): Spawned and managed by supervisor. Each reports completion via its own `worker_turn` call, which deterministically feeds the planner's routing logic — this is the primary reporting mechanism, not a manual `@planner`/blocker escalation.
+- **Workers** (@worker, one or more concurrent instances): Spawned and managed by supervisor. Each reports completion via its own `worker_turn` call, which deterministically feeds the planner's routing logic — this is the primary reporting mechanism, not a manual `@planner`/blocker escalation.
 
 ## Notes
 

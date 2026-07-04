@@ -29,18 +29,18 @@ describe('planner turn', () => {
 
     const result = runPlannerTurn({
       runId: 'run-1',
-      summary: 'Frontend button unresponsive; route to front_fixer, then re-verify.',
+      summary: 'Frontend button unresponsive; route to a scoped fix, then re-verify.',
       steps: [
-        { owner: 'front_fixer', artifact: 'fix-summary.md', successCheck: 'Button responds to taps on the phone view.' },
-        { owner: 'demo_verifier', artifact: 'verifier-report.md', successCheck: 'Confirms the button now responds.' },
+        { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Button responds to taps on the phone view.' },
+        { owner: 'worker', artifact: 'verifier-report.md', successCheck: 'Confirms the button now responds.' },
       ],
       bus,
     })
 
-    expect(result.jobs.map((job) => job.step.owner)).toEqual(['front_fixer', 'demo_verifier'])
+    expect(result.jobs.map((job) => job.step.owner)).toEqual(['worker', 'worker'])
 
     const openRequests = bus.listOpenSpawnRequests()
-    expect(openRequests.map((request) => request.requestedRole)).toEqual(['front_fixer', 'demo_verifier'])
+    expect(openRequests.map((request) => request.requestedRole)).toEqual(['worker', 'worker'])
     for (const request of openRequests) {
       expect(request.askedBy).toBe('planner')
       expect(request.status).toBe('open')
@@ -53,7 +53,7 @@ describe('planner turn', () => {
     const result = runPlannerTurn({
       runId: 'run-2',
       summary: 'Infra fix needed.',
-      steps: [{ owner: 'infra_fixer', artifact: 'fix-summary.md', successCheck: 'Docker image matches Playwright version.' }],
+      steps: [{ owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Docker image matches Playwright version.' }],
       bus,
     })
 
@@ -79,8 +79,8 @@ describe('planner turn', () => {
     const bus = makeBus()
     const args = {
       runId: 'run-4',
-      summary: 'Frontend button unresponsive; route to front_fixer.',
-      steps: [{ owner: 'front_fixer' as const, artifact: 'fix-summary.md', successCheck: 'Button responds to taps.' }],
+      summary: 'Frontend button unresponsive; route to a scoped fix.',
+      steps: [{ owner: 'worker' as const, artifact: 'fix-summary.md', successCheck: 'Button responds to taps.' }],
       bus,
     }
 

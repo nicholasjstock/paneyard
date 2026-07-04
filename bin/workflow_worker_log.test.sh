@@ -21,7 +21,7 @@ set -euo pipefail
 EOF
 chmod +x "$TMP_DIR/tsx"
 
-TSX_BIN="$TMP_DIR/tsx" "$ROOT/bin/workflow_worker_log" front-fixer --tail 12 --path /tmp/workers.json
+TSX_BIN="$TMP_DIR/tsx" "$ROOT/bin/workflow_worker_log" worker --tail 12 --path /tmp/workers.json
 
 if ! grep -q "^arg\\[0\\]=$ROOT/scripts/workflow-worker-monitor.ts\$" "$TSX_LOG"; then
   echo "Expected bin/workflow_worker_log to invoke the worker monitor script directly." >&2
@@ -53,7 +53,7 @@ if ! grep -q '^arg\[5\]=--nickname$' "$TSX_LOG"; then
   exit 1
 fi
 
-if ! grep -q '^arg\[6\]=front-fixer$' "$TSX_LOG"; then
+if ! grep -q '^arg\[6\]=worker$' "$TSX_LOG"; then
   echo "Expected bin/workflow_worker_log to forward the worker nickname value." >&2
   exit 1
 fi

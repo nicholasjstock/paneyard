@@ -24,7 +24,7 @@ describe('workflow MCP worker lifecycle tools', () => {
       name: 'spawn_worker',
       arguments: {
         runId: 'run-1',
-        role: 'front_fixer',
+        role: 'worker',
         nickname: 'front-fixer',
         reason: 'Fix the coverage request CTA.',
         scope: 'fix-summary.md',
@@ -57,15 +57,15 @@ describe('workflow MCP worker lifecycle tools', () => {
     const agentsDir = path.join(harness.tempDir, '.codex', 'agents')
     fs.mkdirSync(agentsDir, { recursive: true })
     fs.writeFileSync(
-      path.join(agentsDir, 'front_fixer.toml'),
-      'name = "front_fixer"\ndeveloper_instructions = "Own frontend writes only."\n'
+      path.join(agentsDir, 'worker.toml'),
+      'name = "worker"\ndeveloper_instructions = "Own frontend writes only."\n'
     )
 
     const result = await harness.client.callTool({
       name: 'spawn_worker',
       arguments: {
         runId: 'run-1',
-        role: 'front_fixer',
+        role: 'worker',
         nickname: 'front-fixer',
         reason: 'Fix the coverage request CTA.',
         scope: 'fix-summary.md',
@@ -110,7 +110,7 @@ describe('workflow MCP worker lifecycle tools', () => {
       name: 'spawn_worker',
       arguments: {
         runId: 'run-a',
-        role: 'front_fixer',
+        role: 'worker',
         nickname: 'front-fixer',
         reason: 'n/a',
         scope: 'n/a',
@@ -121,7 +121,7 @@ describe('workflow MCP worker lifecycle tools', () => {
       name: 'spawn_worker',
       arguments: {
         runId: 'run-b',
-        role: 'back_fixer',
+        role: 'worker',
         nickname: 'back-fixer',
         reason: 'n/a',
         scope: 'n/a',
@@ -148,7 +148,7 @@ describe('workflow MCP worker lifecycle tools', () => {
       name: 'spawn_worker',
       arguments: {
         runId: 'run-1',
-        role: 'front_fixer',
+        role: 'worker',
         nickname: 'front-fixer',
         reason: 'n/a',
         scope: 'n/a',
