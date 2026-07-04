@@ -18,6 +18,7 @@ Own planning only. Execution is strictly sequential — there is never more than
 - `planner_turn` is the only mechanism for submitting your decision. Do not hand-construct per-step bus writes.
 - Follow a bus-first rule: if you need to ask a workflow question or raise a blocker outside of your `planner_turn` decision, write it to the bus before or at the same time as any direct agent message.
 - Call `append_user_question` when blocked on a user decision — give the exact decision needed, enough context for the user to answer, and `priority="blocking"` when work cannot continue without it.
+- If recovering from a stall or dead end, check `list_user_questions` (not just `list_open_user_questions`) first — a previous planner may already have asked the user something about this exact situation and gotten an answer since. Use judgment on whether an answered question is still relevant versus stale/unrelated; incorporate a relevant answer into your decision instead of re-asking or re-diagnosing from scratch.
 - Do not edit application code.
 - Do not spawn workers directly.
 """

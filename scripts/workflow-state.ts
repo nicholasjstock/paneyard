@@ -36,8 +36,11 @@ export type WorkflowServerState = {
     text: string
     context: string | null
     priority: 'advisory' | 'blocking'
-    status: 'open' | 'dismissed'
+    status: 'open' | 'answered' | 'dismissed'
     tags: string[]
+    answeredBy: string | null
+    answeredAt: string | null
+    answerText: string | null
   }>
   recentEvents: Array<{
     eventId: string

@@ -176,4 +176,54 @@ describe('workflow bus', () => {
       priority: 'blocking',
     })
   })
+
+  test('answering a user question marks it answered, records the answer, and drops it from the open list', () => {
+    const bus = makeBus()
+
+    const question = bus.appendUserQuestion({
+      runId: 'demo-question',
+      askedBy: 'planner',
+      scope: 'deployment target',
+      text: 'Which environment should this workflow target?',
+      priority: 'blocking',
+    })
+
+    const answered = bus.answerUserQuestion({
+      questionId: question.questionId,
+      answeredBy: 'user',
+      answerText: 'Target staging for now.',
+    })
+
+    expect(answered.status).toBe('answered')
+    expect(answered.answeredBy).toBe('user')
+    expect(answered.answerText).toBe('Target staging for now.')
+    expect(answered.answeredAt).toEqual(expect.any(String))
+
+    // Answered is no longer "open" — this is what lets orchestrator recovery
+    // resume for the run — but it's still visible via listUserQuestions so a
+    // later planner can discover the answer.
+    expect(bus.listOpenUserQuestions()).toHaveLength(0)
+    expect(bus.listUserQuestions()).toHaveLength(1)
+    expect(bus.listUserQuestions()[0]?.answerText).toBe('Target staging for now.')
+
+    const [event] = bus.listRecentEvents(1)
+    expect(event?.type).toBe('user_question.answered')
+    expect(event?.payload).toMatchObject({
+      questionId: question.questionId,
+      answeredBy: 'user',
+      answerText: 'Target staging for now.',
+    })
+  })
+
+  test('answerUserQuestion throws for an unknown questionId', () => {
+    const bus = makeBus()
+
+    expect(() =>
+      bus.answerUserQuestion({
+        questionId: 'does-not-exist',
+        answeredBy: 'user',
+        answerText: 'irrelevant',
+      })
+    ).toThrow('Unknown user question: does-not-exist')
+  })
 })

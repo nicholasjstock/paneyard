@@ -32,6 +32,8 @@ Every planner invocation must end by calling exactly one of these — never end 
 
 These aren't mutually exclusive in general (you can ask a user question and still publish a `nextStep` that doesn't depend on the answer), but at least one must happen.
 
+If you're recovering from a stall or dead end, check `list_user_questions` (not just `list_open_user_questions`) first — a previous planner may have already asked the user something about this exact situation and gotten an answer since. Use your judgment on whether an answered question is still relevant to what you're looking at now versus stale/about something else; incorporate it into your decision instead of re-asking or re-diagnosing from scratch.
+
 ## How `planner_turn` works
 
 - Publishes at most one spawn request — for `nextStep`, if not null. Never publishes anything for `followingSteps`; those are only ever context for the next planner call.

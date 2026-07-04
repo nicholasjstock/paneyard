@@ -524,6 +524,75 @@ describe('orchestrator turn', () => {
     expect(bus.listOpenSpawnRequests()).toEqual([])
   })
 
+  test('resumes recovery once the blocking question has been answered', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
+    tempDirs.push(tempDir)
+    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
+    const bus = createWorkflowBus({ storagePath: busStoragePath })
+
+    const question = bus.appendUserQuestion({
+      runId: 'demo-20260702-130619',
+      askedBy: 'planner',
+      scope: 'phone-demo-video',
+      text: 'Both recorder attempts stalled identically — how should I proceed?',
+      priority: 'blocking',
+    })
+
+    const workerRuntime = {
+      listWorkers() {
+        return []
+      },
+      spawnWorker() {
+        throw new Error('orchestrator turn should not spawn workers')
+      },
+    }
+    const previousState = {
+      runId: 'demo-20260702-130619',
+      phase: 'waiting_on_workers' as const,
+      tickCount: 3,
+      lastPlanSummary: 'Previous planner summary.',
+      pendingSpawnKeys: [],
+      followingSteps: [],
+      lastStallFinding: null,
+      lastUpdatedAt: '2026-07-02T10:00:00.000Z',
+    }
+
+    // Still suppressed while the question is open.
+    const suppressed = runOrchestratorTurn({
+      runId: 'demo-20260702-130619',
+      task: 'Recover the stalled demo run',
+      scenario: 'both',
+      frontendUrl: 'http://localhost:5174',
+      workerRuntime,
+      bus,
+      fileSystem: fs,
+      previousState,
+    })
+    expect(suppressed.plan).toBeNull()
+    expect(suppressed.nextState.phase).toBe('blocked_on_user')
+
+    bus.answerUserQuestion({
+      questionId: question.questionId,
+      answeredBy: 'user',
+      answerText: 'Kill both stalled processes and retry once more.',
+    })
+
+    const resumed = runOrchestratorTurn({
+      runId: 'demo-20260702-130619',
+      task: 'Recover the stalled demo run',
+      scenario: 'both',
+      frontendUrl: 'http://localhost:5174',
+      workerRuntime,
+      bus,
+      fileSystem: fs,
+      previousState: suppressed.nextState,
+    })
+
+    expect(resumed.plan?.nextStep?.owner).toBe('planner')
+    expect(resumed.jobs.map((job) => job.step.owner)).toEqual(['planner'])
+    expect(resumed.nextState.phase).toBe('stalled')
+  })
+
   test('does not treat a legitimately completed run as a dead end', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)

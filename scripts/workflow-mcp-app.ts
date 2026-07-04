@@ -119,8 +119,11 @@ const workflowUserQuestionSchema = z.object({
   text: z.string(),
   context: z.string().nullable(),
   priority: z.enum(['advisory', 'blocking']),
-  status: z.enum(['open', 'dismissed']),
+  status: z.enum(['open', 'answered', 'dismissed']),
   tags: z.array(z.string()),
+  answeredBy: z.string().nullable(),
+  answeredAt: z.string().nullable(),
+  answerText: z.string().nullable(),
 })
 
 const workflowStepSchema = z.object({
@@ -410,6 +413,29 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
   )
 
   server.registerTool(
+    'answer_user_question',
+    {
+      description:
+        'Record a human answer to a previously-asked workflow question. Marks the question answered (no longer open), which lets orchestrator recovery resume for the run; the answer text is discoverable by any subsequent planner via list_user_questions.',
+      inputSchema: {
+        questionId: z.string().min(1),
+        answeredBy: z.string().min(1),
+        answerText: z.string().min(1),
+      },
+      outputSchema: workflowUserQuestionSchema.shape,
+    },
+    async ({ questionId, answeredBy, answerText }) => {
+      logWorkflow('tool:answer_user_question', 'requested', { questionId, answeredBy })
+      const structuredContent = activeBus.answerUserQuestion({ questionId, answeredBy, answerText })
+      logWorkflow('tool:answer_user_question', 'completed', { questionId, runId: structuredContent.runId })
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
+        structuredContent,
+      }
+    }
+  )
+
+  server.registerTool(
     'list_open_spawn_requests',
     {
       description: 'List all currently open worker spawn requests from the shared bus.',
@@ -463,6 +489,29 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         questions: activeBus.listOpenUserQuestions(),
       }
       logWorkflow('tool:list_open_user_questions', 'completed', { count: structuredContent.questions.length })
+      return {
+        content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
+        structuredContent,
+      }
+    }
+  )
+
+  server.registerTool(
+    'list_user_questions',
+    {
+      description:
+        'List every user-facing workflow question from the shared bus, including answered and dismissed ones — use this when recovering from a stall to check whether a prior planner already asked something relevant and got an answer.',
+      inputSchema: {},
+      outputSchema: {
+        questions: z.array(workflowUserQuestionSchema),
+      },
+    },
+    async () => {
+      logWorkflow('tool:list_user_questions', 'requested')
+      const structuredContent = {
+        questions: activeBus.listUserQuestions(),
+      }
+      logWorkflow('tool:list_user_questions', 'completed', { count: structuredContent.questions.length })
       return {
         content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
         structuredContent,

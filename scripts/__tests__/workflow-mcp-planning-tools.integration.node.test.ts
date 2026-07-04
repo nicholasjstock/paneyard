@@ -305,6 +305,70 @@ describe('workflow MCP planning tools', () => {
     expect(structuredContent.questions[0]?.askedBy).toBe('planner')
   })
 
+  test('answer_user_question marks a question answered and drops it from list_open_user_questions but not list_user_questions', async () => {
+    const harness = await createMcpTestHarness()
+    harnesses.push(harness)
+
+    const appendResult = await harness.client.callTool({
+      name: 'append_user_question',
+      arguments: {
+        runId: 'run-question',
+        askedBy: 'planner',
+        scope: 'environment choice',
+        text: 'Should this workflow continue against staging or production?',
+        priority: 'blocking',
+      },
+    })
+    const question = appendResult.structuredContent as { questionId: string }
+
+    const answerResult = await harness.client.callTool({
+      name: 'answer_user_question',
+      arguments: {
+        questionId: question.questionId,
+        answeredBy: 'user',
+        answerText: 'Continue against staging.',
+      },
+    })
+
+    expect(answerResult.isError).toBeFalsy()
+    const answered = answerResult.structuredContent as {
+      status: string
+      answeredBy: string
+      answerText: string
+    }
+    expect(answered.status).toBe('answered')
+    expect(answered.answeredBy).toBe('user')
+    expect(answered.answerText).toBe('Continue against staging.')
+
+    const openResult = await harness.client.callTool({ name: 'list_open_user_questions', arguments: {} })
+    expect((openResult.structuredContent as { questions: unknown[] }).questions).toHaveLength(0)
+
+    const allResult = await harness.client.callTool({ name: 'list_user_questions', arguments: {} })
+    const allQuestions = (allResult.structuredContent as { questions: Array<{ questionId: string; status: string }> })
+      .questions
+    expect(allQuestions).toHaveLength(1)
+    expect(allQuestions[0]?.questionId).toBe(question.questionId)
+    expect(allQuestions[0]?.status).toBe('answered')
+  })
+
+  test('answer_user_question surfaces an unknown questionId as isError instead of a transport rejection', async () => {
+    const harness = await createMcpTestHarness()
+    harnesses.push(harness)
+
+    const result = await harness.client.callTool({
+      name: 'answer_user_question',
+      arguments: {
+        questionId: 'does-not-exist',
+        answeredBy: 'user',
+        answerText: 'irrelevant',
+      },
+    })
+
+    expect(result.isError).toBe(true)
+    const [content] = result.content as Array<{ type: string; text: string }>
+    expect(content?.text).toContain('Unknown user question')
+  })
+
   test('queue_long_phone_demo_planner_job appends a blocking planner seed request for the long phone demo video', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)

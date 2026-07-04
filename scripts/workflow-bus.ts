@@ -4,7 +4,7 @@ import * as path from 'path'
 export type WorkflowSpawnRequestPriority = 'advisory' | 'blocking'
 export type WorkflowSpawnRequestStatus = 'open' | 'fulfilled' | 'dismissed'
 export type WorkflowUserQuestionPriority = 'advisory' | 'blocking'
-export type WorkflowUserQuestionStatus = 'open' | 'dismissed'
+export type WorkflowUserQuestionStatus = 'open' | 'answered' | 'dismissed'
 
 export type WorkflowSpawnRequest = {
   requestId: string
@@ -49,6 +49,9 @@ export type WorkflowUserQuestion = {
   priority: WorkflowUserQuestionPriority
   status: WorkflowUserQuestionStatus
   tags: string[]
+  answeredBy: string | null
+  answeredAt: string | null
+  answerText: string | null
 }
 
 export type WorkflowRunStatus = {
@@ -107,6 +110,12 @@ type DismissSpawnRequestArgs = {
   requestId: string
   dismissedBy: string
   dismissalNote: string
+}
+
+type AnswerUserQuestionArgs = {
+  questionId: string
+  answeredBy: string
+  answerText: string
 }
 
 type PublishRunStatusArgs = {
@@ -168,6 +177,7 @@ export type WorkflowBus = {
   publishRunStatus: (args: PublishRunStatusArgs) => WorkflowRunStatus
   appendSpawnRequest: (args: AppendSpawnRequestArgs) => WorkflowSpawnRequest
   appendUserQuestion: (args: AppendUserQuestionArgs) => WorkflowUserQuestion
+  answerUserQuestion: (args: AnswerUserQuestionArgs) => WorkflowUserQuestion
   fulfillSpawnRequest: (args: FulfillSpawnRequestArgs) => WorkflowSpawnRequest
   dismissSpawnRequest: (args: DismissSpawnRequestArgs) => WorkflowSpawnRequest
   listRunStatuses: () => WorkflowRunStatus[]
@@ -374,6 +384,9 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
         priority: args.priority ?? 'advisory',
         status: 'open',
         tags: [...(args.tags ?? [])],
+        answeredBy: null,
+        answeredAt: null,
+        answerText: null,
       }
 
       userQuestions.set(question.questionId, question)
@@ -385,6 +398,25 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
         priority: question.priority,
         context: question.context,
         tags: question.tags,
+      })
+      persistStateToDisk()
+      return cloneUserQuestion(question)
+    },
+
+    answerUserQuestion({ questionId, answeredBy, answerText }) {
+      loadStateFromDisk()
+      const question = userQuestions.get(questionId)
+      if (!question) throw new Error(`Unknown user question: ${questionId}`)
+
+      question.status = 'answered'
+      question.answeredBy = answeredBy
+      question.answeredAt = new Date().toISOString()
+      question.answerText = answerText
+      emit('user_question.answered', {
+        questionId,
+        runId: question.runId,
+        answeredBy,
+        answerText,
       })
       persistStateToDisk()
       return cloneUserQuestion(question)
