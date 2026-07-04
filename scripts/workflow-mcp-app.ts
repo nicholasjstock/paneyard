@@ -131,7 +131,7 @@ const workflowStepSchema = z.object({
 
 const orchestratorDecisionStateSchema = z.object({
   runId: z.string(),
-  phase: z.enum(['starting', 'planning', 'waiting_on_workers', 'stalled', 'completed']),
+  phase: z.enum(['starting', 'planning', 'waiting_on_workers', 'stalled', 'blocked_on_user', 'completed']),
   tickCount: z.number().int().min(0),
   lastPlanSummary: z.string().nullable(),
   pendingSpawnKeys: z.array(z.string()),

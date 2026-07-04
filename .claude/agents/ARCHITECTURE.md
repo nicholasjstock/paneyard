@@ -60,11 +60,11 @@ Record → Verify → Implement → Record → Verify → Report
 
 ### Level 1: Workflow Control
 **Orchestrator** (deterministic loop logic, not a separate agent)
-- **Responsibility:** Detect trouble — it never decides real work itself. Two distinct conditions count as trouble: (1) a worker still running but idle past the stall threshold, or (2) the run has gone dead — no active workers, no open spawn requests, and it was never marked `completed` (this catches a worker that stopped, crashed or not, without ever completing its `worker_turn` handoff — invisible to (1) since there's no running worker left to check).
+- **Responsibility:** Detect trouble — it never decides real work itself. Two distinct conditions count as trouble: (1) a worker still running but idle past the stall threshold, or (2) the run has gone dead — no active workers, no open spawn requests, and it was never marked `completed` (this catches a worker that stopped, crashed or not, without ever completing its `worker_turn` handoff — invisible to (1) since there's no running worker left to check). Either condition is suppressed while a `blocking` user question is already open for the run — a prior recovery @planner already escalated it, so re-detecting the same still-idle state must not spawn another @planner to redundantly re-investigate something already awaiting a human answer.
 - **Inputs:** Execution request from the user, current bus/worker state
-- **Outputs:** Nothing, on a normal tick (a true no-op); on a stall or dead end, a spawn request for a recovery @planner
+- **Outputs:** Nothing, on a normal tick (a true no-op) or while blocked on an open user question; on a stall or dead end with no open question, a spawn request for a recovery @planner
 - **Calls:** Nothing directly — publishes a spawn request that the supervisor turns into a spawn
-- **When to call @planner:** When a worker has stalled (gone idle past the stall threshold), or when the run has gone dead with no active workers or open requests and no completion marker.
+- **When to call @planner:** When a worker has stalled (gone idle past the stall threshold), or when the run has gone dead with no active workers or open requests and no completion marker — but only if no blocking user question is already open for the run.
 
 ### Level 3: Planning (Implicit)
 **@planner** (Helper)
@@ -129,7 +129,7 @@ User: @supervisor run the full workflow
 - **@supervisor** calls orchestrator planning logic each iteration via `run_orchestrator_turn`.
 - **@supervisor** spawns workers via MCP-managed workers based on orchestrator decisions.
 - **@supervisor** deduplicates requests by `(runId, requestedRole, scope)` and publishes `worker_spawned` events.
-- **Orchestrator** never decides real work itself. A normal tick is a pure no-op; the only things it ever does are detect a stalled worker, or detect a dead-ended run (no active workers, no open requests, not marked `completed`), and publish a spawn request for a recovery @planner either way (via the same `appendSpawnRequest` path @planner's `planner_turn` uses).
+- **Orchestrator** never decides real work itself. A normal tick is a pure no-op; the only things it ever does are detect a stalled worker, or detect a dead-ended run (no active workers, no open requests, not marked `completed`), and publish a spawn request for a recovery @planner either way (via the same `appendSpawnRequest` path @planner's `planner_turn` uses) — unless a `blocking` user question is already open for the run, in which case it stays a no-op (`phase: 'blocked_on_user'`) until that question is answered.
 - **@worker** calls `worker_turn` when it finishes; this always requests a follow-up @planner via a bus spawn request (reused only while still open or still-active-fulfilled — a stopped fulfillment is stale, so a fresh ask is made instead) with the reported result and the current `followingSteps` queue as context — the supervisor spawns that planner on its next tick, and that planner decides and publishes the actual next step. @worker calls @planner directly only when it's stuck mid-task and needs help — a different path from the automatic post-completion request.
 - **@planner** never calls other agents or spawns workers; every planner turn ends by calling `planner_turn` (with `nextStep`, or `null` if none needed, plus `followingSteps`) or `append_user_question` — never silently.
 - If a worker needs a missing downstream role, append a spawn request to the shared bus with the `requestedRole`.

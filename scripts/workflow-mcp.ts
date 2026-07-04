@@ -95,6 +95,7 @@ export type OrchestratorDecisionPhase =
   | 'planning'
   | 'waiting_on_workers'
   | 'stalled'
+  | 'blocked_on_user'
   | 'completed'
 
 export type OrchestratorDecisionState = {

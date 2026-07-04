@@ -27,6 +27,7 @@ export type OrchestratorWorkerRuntime = {
 
 type OrchestratorBus = Parameters<typeof publishPlannerJobs>[0] & {
   listOpenSpawnRequests: () => Array<{ runId: string }>
+  listOpenUserQuestions: () => Array<{ runId: string; priority: 'advisory' | 'blocking' }>
   publishRunStatus: (args: {
     runId: string
     phase: string
@@ -256,12 +257,23 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
     : undefined
   const recoveryFinding = stallFinding ?? deadEndFinding
 
+  // A recovery planner may have already escalated this exact stall/dead-end
+  // to a blocking user question (e.g. after a retry also failed). Without
+  // this check, the orchestrator has no memory of that — it just re-detects
+  // the same still-idle workers next tick and spawns *another* recovery
+  // planner to redundantly re-investigate something already awaiting a
+  // human answer, ignoring whatever policy that first planner decided on.
+  const hasOpenBlockingQuestion = args.bus
+    .listOpenUserQuestions()
+    .some((question) => question.runId === args.runId && question.priority === 'blocking')
+
   // A non-stalled, non-dead-end tick is a pure no-op: worker_turn/planner_turn
   // own all real progress, so there is nothing for the orchestrator to
   // decide or publish here. Only a detected stall or dead end gives the
-  // orchestrator a reason to act.
+  // orchestrator a reason to act — and only while nothing about it is
+  // already sitting in front of the user.
   const plan =
-    recoveryFinding && recoveryFinding.trim().length > 0
+    recoveryFinding && recoveryFinding.trim().length > 0 && !hasOpenBlockingQuestion
       ? buildStalledWorkerRecoveryPlan({
           task: args.task,
           scenario: args.scenario,
@@ -281,7 +293,13 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
   const lastStallFinding = recoveryFinding ?? null
   const nextState: OrchestratorDecisionState = {
     runId: args.runId,
-    phase: recoveryFinding ? 'stalled' : workers.length > 0 ? 'waiting_on_workers' : previousState?.phase ?? 'starting',
+    phase: hasOpenBlockingQuestion
+      ? 'blocked_on_user'
+      : recoveryFinding
+        ? 'stalled'
+        : workers.length > 0
+          ? 'waiting_on_workers'
+          : previousState?.phase ?? 'starting',
     tickCount: (previousState?.tickCount ?? 0) + 1,
     lastPlanSummary: plan?.summary ?? previousState?.lastPlanSummary ?? null,
     pendingSpawnKeys: [...new Set([...(previousState?.pendingSpawnKeys ?? []), ...buildPendingSpawnKeys(args.runId, jobs)])],

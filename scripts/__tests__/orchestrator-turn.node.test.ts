@@ -473,6 +473,57 @@ describe('orchestrator turn', () => {
     ])
   })
 
+  test('does not spawn another recovery planner while a blocking user question is already open for the run', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
+    tempDirs.push(tempDir)
+    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
+    const bus = createWorkflowBus({ storagePath: busStoragePath })
+
+    // A prior recovery planner already escalated this exact dead end to the
+    // user instead of retrying again — the orchestrator must not ignore that
+    // and spawn yet another recovery planner to redundantly re-investigate
+    // the same thing while it's still awaiting a human answer.
+    bus.appendUserQuestion({
+      runId: 'demo-20260702-130619',
+      askedBy: 'planner',
+      scope: 'phone-demo-video',
+      text: 'Both recorder attempts stalled identically — how should I proceed?',
+      priority: 'blocking',
+    })
+
+    const result = runOrchestratorTurn({
+      runId: 'demo-20260702-130619',
+      task: 'Recover the stalled demo run',
+      scenario: 'both',
+      frontendUrl: 'http://localhost:5174',
+      workerRuntime: {
+        listWorkers() {
+          return []
+        },
+        spawnWorker() {
+          throw new Error('orchestrator turn should not spawn workers')
+        },
+      },
+      bus,
+      fileSystem: fs,
+      previousState: {
+        runId: 'demo-20260702-130619',
+        phase: 'waiting_on_workers',
+        tickCount: 3,
+        lastPlanSummary: 'Previous planner summary.',
+        pendingSpawnKeys: [],
+        followingSteps: [],
+        lastStallFinding: null,
+        lastUpdatedAt: '2026-07-02T10:00:00.000Z',
+      },
+    })
+
+    expect(result.plan).toBeNull()
+    expect(result.jobs).toEqual([])
+    expect(result.nextState.phase).toBe('blocked_on_user')
+    expect(bus.listOpenSpawnRequests()).toEqual([])
+  })
+
   test('does not treat a legitimately completed run as a dead end', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
