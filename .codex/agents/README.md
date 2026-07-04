@@ -9,7 +9,7 @@ This project uses Codex `multi_agent` workers with a deterministic supervisor/or
 - Keep `multi_agent` enabled so Codex can still fan out its own built-in `explorer`/`worker` subagents for read-only research or bounded edits within a single agent's own turn — this is separate from the workflow's sequential step execution.
 
 The supervisor calls the orchestrator logic directly in-process. Do not route orchestration through repo CLI wrappers or a standalone LLM orchestrator prompt.
-Normal worker completions are handled deterministically: each worker calls the `worker_turn` MCP tool itself when it finishes, which feeds its result into the planner's routing logic and publishes the next steps to the bus automatically. The orchestrator only needs to invoke `planner` directly for cases `worker_turn` doesn't cover, such as stalled/unresponsive workers.
+Normal worker completions are handled deterministically: each worker calls the `worker_turn` MCP tool itself when it finishes, which requests a follow-up planner via a bus spawn request (reused if one is open, or fulfilled by a still-active planner — a stopped fulfillment is stale and gets a fresh request instead) — the supervisor spawns that planner on its next tick, and it decides and publishes the actual next step. The orchestrator only needs to invoke `planner` directly for cases `worker_turn` doesn't cover, such as stalled/unresponsive workers.
 
 ## Running Nicknames
 
@@ -21,7 +21,7 @@ When subagents are running, look for these role-based nicknames:
 | `worker` | `worker` (or `worker-2`, `worker-3`, ... for concurrent instances) |
 
 When the orchestrator needs to re-ask an active worker through the bus, target the matching nickname for the role above instead of inventing a new recipient.
-Workers report completion via `worker_turn`, which deterministically routes their result through the planner's logic and publishes the resulting bus entries — this is the primary reporting mechanism, not ad hoc bus writes.
+Workers report completion via `worker_turn`, which requests a follow-up planner via the bus (spawned by the supervisor) with the result and the current `followingSteps` queue as context — this is the primary reporting mechanism, not ad hoc bus writes.
 
 When the orchestrator needs a handoff plan or worker request payload, invoke `planner` first and then publish the result to the bus.
 When `list_open_spawn_requests` reveals a new open request, spawn the requested role immediately instead of waiting for the next handoff cycle.
@@ -41,5 +41,5 @@ Keep write sets disjoint and verify before reporting success.
 - Treat verification as streaming work within a single worker turn: run a fast pass first, using the cheapest evidence source that can answer the question, then deeper passes if needed, before reporting via `worker_turn`.
 - After a fix, re-run the recorder and verifier rather than reporting success from the code diff alone.
 - Long-running work must heartbeat. A recorder or verifier that goes silent should become `BLOCKED`, not invisible.
-- If the orchestrator sees a stalled child or a repeated failure pattern, it should call `planner` with the stall context before choosing the next handoff.
+- If the orchestrator sees a stalled child, or a run that's gone dead (no active workers, no open requests, never marked completed — e.g. a worker that stopped without finishing its handoff), it should call `planner` with that context before choosing the next handoff.
 - When the orchestrator needs to inspect workers and plan the next move in one turn, use `run_orchestrator_turn`.

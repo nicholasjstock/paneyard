@@ -83,6 +83,8 @@ SUPERVISOR_PID=""
 
 mkdir -p "$STATE_DIR"
 
+ARCHIVE_DIR="$ROOT/.smoke-logs/$RUN_ID"
+
 cleanup() {
   set +e
 
@@ -103,6 +105,13 @@ cleanup() {
       }
     ' "$WORKERS_PATH" || true
   fi
+
+  # Archive worker/planner logs and bus state before deleting the temp dir —
+  # this is the only forensic evidence for diagnosing a stall or crash after
+  # the fact, and it was previously destroyed unconditionally on every run.
+  mkdir -p "$(dirname "$ARCHIVE_DIR")"
+  cp -R "$TMP_DIR" "$ARCHIVE_DIR" 2>/dev/null || true
+  echo "Archived run state to: $ARCHIVE_DIR" >&2
 
   rm -rf "$TMP_DIR"
 }
@@ -137,7 +146,7 @@ while (( SECONDS < deadline )); do
       const file = process.argv[1]
       const data = JSON.parse(fs.readFileSync(file, "utf8"))
       const runningWorkerCount = (data.workers || []).filter((w) => w.status === "running" && w.role === "worker").length
-      if (runningWorkerCount >= 2) process.exit(0)
+      if (runningWorkerCount >= 1) process.exit(0)
       process.exit(1)
     ' "$WORKERS_PATH"; then
       spawn_ok=true
@@ -154,7 +163,7 @@ while (( SECONDS < deadline )); do
 done
 
 if [[ "$spawn_ok" != true ]]; then
-  echo "Timed out waiting for at least 2 concurrent worker-role workers (recorder + verifier) to spawn." >&2
+  echo "Timed out waiting for the planner's decided nextStep worker to spawn." >&2
   echo "" >&2
   echo "Supervisor log:" >&2
   sed -n '1,240p' "$LOG_PATH" >&2 || true
@@ -182,8 +191,13 @@ node -e '
     }
   }
 
+  // A single planner_turn call only ever requests one nextStep, so under
+  // normal handoff there is just one worker-role instance running. A worker
+  // can still explicitly request an extra helper role via
+  // append_spawn_request when it needs one outside its own scope, so this
+  // only asserts a lower bound, not a hard cap.
   const workerRoleCount = roles.filter((role) => role === "worker").length
-  assert(workerRoleCount >= 2, `expected at least 2 running 'worker' role workers (recorder + verifier), saw ${workerRoleCount}`)
+  assert(workerRoleCount >= 1, `expected at least 1 running "worker" role worker (the planner-decided nextStep), saw ${workerRoleCount}`)
   assert(eventTypes.includes("run.status"), "run.status event was not recorded")
   assert(eventTypes.includes("spawn_request.created"), "spawn_request.created event was not recorded")
   assert(eventTypes.includes("worker.spawned"), "worker.spawned event was not recorded")

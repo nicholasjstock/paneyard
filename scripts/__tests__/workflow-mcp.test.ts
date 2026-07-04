@@ -314,6 +314,7 @@ describe('workflow-mcp planning helpers', () => {
       text: string
       requestedRole: string
       status: 'open' | 'fulfilled' | 'dismissed'
+      fulfilledWorkerId?: string | null
     }> = []
     let nextId = 1
 
@@ -345,10 +346,11 @@ describe('workflow-mcp planning helpers', () => {
       listSpawnRequests() {
         return requests
       },
-      fulfillSpawnRequest({ requestId }: { requestId: string }) {
+      fulfillSpawnRequest({ requestId, fulfilledWorkerId }: { requestId: string; fulfilledWorkerId?: string | null }) {
         const request = requests.find((entry) => entry.requestId === requestId)
         if (request) {
           request.status = 'fulfilled'
+          request.fulfilledWorkerId = fulfilledWorkerId ?? null
         }
       },
     }
@@ -375,6 +377,53 @@ describe('workflow-mcp planning helpers', () => {
 
     expect(secondJobs[0]?.requestId).toBe(firstJobs[0]?.requestId)
     expect(bus.requests).toHaveLength(1)
+  })
+
+  test('publishPlannerJobs reuses a fulfilled planner-role request while its worker is still active', () => {
+    const bus = createDependencyTestBus()
+    const step = { owner: 'planner' as const, artifact: 'workflow-plan.md', successCheck: 'Recover the stall.' }
+
+    const firstJobs = publishPlannerJobs(bus, {
+      runId: 'demo-8',
+      summary: 'Recover the stall.',
+      plan: { summary: 'Recover the stall.', nextStep: step, followingSteps: [] },
+    })
+    bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId, fulfilledWorkerId: 'planner-1' })
+
+    const secondJobs = publishPlannerJobs(bus, {
+      runId: 'demo-8',
+      summary: 'Recover the stall.',
+      plan: { summary: 'Recover the stall.', nextStep: step, followingSteps: [] },
+      activeWorkerIds: new Set(['planner-1']),
+    })
+
+    expect(secondJobs[0]?.requestId).toBe(firstJobs[0]?.requestId)
+    expect(bus.requests).toHaveLength(1)
+  })
+
+  test('publishPlannerJobs asks fresh for a planner-role step once the previously fulfilled worker has stopped', () => {
+    const bus = createDependencyTestBus()
+    const step = { owner: 'planner' as const, artifact: 'workflow-plan.md', successCheck: 'Recover the stall.' }
+
+    const firstJobs = publishPlannerJobs(bus, {
+      runId: 'demo-9',
+      summary: 'Recover the first stall.',
+      plan: { summary: 'Recover the first stall.', nextStep: step, followingSteps: [] },
+    })
+    bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId, fulfilledWorkerId: 'planner-1' })
+
+    // That recovery planner has since stopped — a second, independent
+    // problem later in the same run must get its own fresh recovery ask,
+    // not silently reuse the first one's already-resolved request.
+    const secondJobs = publishPlannerJobs(bus, {
+      runId: 'demo-9',
+      summary: 'Recover the second stall.',
+      plan: { summary: 'Recover the second stall.', nextStep: step, followingSteps: [] },
+      activeWorkerIds: new Set(),
+    })
+
+    expect(secondJobs[0]?.requestId).not.toBe(firstJobs[0]?.requestId)
+    expect(bus.requests).toHaveLength(2)
   })
 
   test('buildRecordDemoCommand chooses the right entrypoint for docker and local runs', () => {

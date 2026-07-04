@@ -262,21 +262,25 @@ export function planWorkflowIteration(args: PlanWorkflowIterationArgs): PlanWork
   }
 }
 
+// Used both for a worker that's stalled (still running, idle too long) and
+// for a run that's gone dead (no active workers, no open requests, not
+// marked completed) — either way the fix is the same: ask a planner to
+// inspect what happened and decide the next bounded handoff.
 export function buildStalledWorkerRecoveryPlan(args: {
   task: string
   scenario: DemoScenario
   frontendUrl: string
-  stallFinding: string
+  recoveryFinding: string
   followingSteps: WorkflowStep[]
 }): PlanWorkflowIterationResult {
-  const summarizedFinding = args.stallFinding.replace(/\s+/g, ' ').trim()
+  const summarizedFinding = args.recoveryFinding.replace(/\s+/g, ' ').trim()
 
   return {
-    summary: `${args.task} for the ${args.scenario} scenario against ${args.frontendUrl}. Recover the stalled worker via planner. ${summarizedFinding}`,
+    summary: `${args.task} for the ${args.scenario} scenario against ${args.frontendUrl}. Recover the run via planner. ${summarizedFinding}`,
     nextStep: {
       owner: 'planner',
       artifact: 'workflow-plan.md',
-      successCheck: `Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: ${summarizedFinding}`,
+      successCheck: `Inspect this recovery context, determine the next bounded handoff, and publish it with planner_turn: ${summarizedFinding}`,
     },
     followingSteps: args.followingSteps,
   }
@@ -344,12 +348,19 @@ export function publishPlannerJobs(
       text: string
       requestedRole: string
       status: 'open' | 'fulfilled' | 'dismissed'
+      fulfilledWorkerId?: string | null
     }>
   },
   args: {
     runId: string
     summary: string
     plan: PlanWorkflowIterationResult
+    // workerIds currently active for this run — used to tell a stale
+    // fulfilled recovery request apart from one that's still in flight (see
+    // below). Safe to omit for callers that can never produce a
+    // requestedRole: 'planner' step (e.g. the planner_turn MCP tool, whose
+    // schema restricts nextStep.owner to 'orchestrator' | 'worker').
+    activeWorkerIds?: ReadonlySet<string>
   }
 ): PlannerBusJob[] {
   const step = args.plan.nextStep
@@ -357,23 +368,45 @@ export function publishPlannerJobs(
     return []
   }
 
-  // 'open' or 'fulfilled' both count as "already asked for this artifact" —
-  // a fulfilled request means the work already happened, so it must not be
-  // re-requested just because this is called again for the same run. Only
-  // 'dismissed' requests are treated as no longer representing this
-  // decision. Matched on (runId, role, scope) only — not on the free-text
-  // successCheck, which can vary call to call without the underlying ask
-  // actually being different.
+  const activeWorkerIds = args.activeWorkerIds ?? new Set<string>()
+
   const existingRequest = bus
     .listSpawnRequests?.()
-    .find(
-      (request) =>
-        request.status !== 'dismissed' &&
-        request.askedBy === 'planner' &&
-        request.runId === args.runId &&
-        request.requestedRole === step.owner &&
-        request.scope === step.artifact
-    )
+    .find((request) => {
+      if (
+        request.status === 'dismissed' ||
+        request.askedBy !== 'planner' ||
+        request.runId !== args.runId ||
+        request.requestedRole !== step.owner ||
+        request.scope !== step.artifact
+      ) {
+        return false
+      }
+
+      if (request.status === 'open') {
+        // Already asked, not yet fulfilled — reuse it rather than
+        // duplicating the same pending ask.
+        return true
+      }
+
+      // status === 'fulfilled'. For a requestedRole: 'worker' step this
+      // means a concrete artifact (e.g. recorder-report.md) already got
+      // produced — that stays done forever, regardless of whether the
+      // worker that made it is still running, so it's always reused.
+      //
+      // For a requestedRole: 'planner' step, "fulfilled" only means a
+      // planner was *spawned* to handle whatever was happening at the
+      // time — it's a repeatable recovery/follow-up ask, not a one-time
+      // artifact. Once that planner has stopped, this slot is free again;
+      // otherwise a genuinely new problem occurring later in the same run
+      // would be silently swallowed by an old, already-resolved fulfillment
+      // and never get a fresh planner of its own.
+      if (step.owner === 'planner') {
+        return Boolean(request.fulfilledWorkerId && activeWorkerIds.has(request.fulfilledWorkerId))
+      }
+
+      return true
+    })
 
   if (existingRequest) {
     return [{ step, requestId: existingRequest.requestId }]

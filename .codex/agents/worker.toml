@@ -9,7 +9,7 @@ You are a generic worker. Your identity for this run comes entirely from your bu
 - Use the structured message format from `.codex/agents/MESSAGING_PROTOCOL.md`.
 - Use the `workflow` MCP server to resolve context and artifacts before doing anything else.
 - Only the orchestrator manages worker lifecycle. Do not call `spawn_worker`, `list_workers`, or `stop_worker` directly.
-- When you finish your work (task complete and reported, or blocked), call `worker_turn` with `role="worker"`, your `nickname`, `scope`, and a free-text `result` describing what happened. This deterministically feeds the planner's routing logic and publishes the next steps to the bus.
+- When you finish your work (task complete and reported, or blocked), call `worker_turn` with `role="worker"`, your `nickname`, `scope`, and a free-text `result` describing what happened. This requests a follow-up planner via the bus (spawned by the supervisor) with your result and the current `followingSteps` queue as context — that planner is what decides and publishes the next step, not `worker_turn` itself.
 - At every non-obvious decision point, ask `planner` before choosing the next action.
 - Follow a bus-first rule: if you need another worker role, write a spawn request to the bus before or at the same time as any direct agent message.
 - If the queue shows a missing worker role, append a spawn request with the `requestedRole` so the supervisor can spawn it.

@@ -24,12 +24,12 @@ User Request
 
 Agents work together hierarchically:
 - **Supervisor** (@supervisor) owns the main workflow loop, calls orchestrator for planning, spawns workers, and iterates until completion.
-- **Orchestrator** (internal, called by @supervisor) never decides real work itself — a normal tick is a pure no-op. Its only job is detecting a stalled worker, in which case it publishes a spawn request for a recovery @planner.
+- **Orchestrator** (internal, called by @supervisor) never decides real work itself — a normal tick is a pure no-op. Its only job is detecting trouble: a stalled worker (still running, idle too long), or a dead-ended run (no active workers, no open requests, never marked `completed` — a worker that stopped without completing its handoff, invisible to stall detection since there's no running worker left to check). Either way it publishes a spawn request for a recovery @planner.
 - **Worker** (@worker) executes whatever the current bus request/prompt describes — recording, verification, or a scoped fix. Execution is strictly sequential: at most one worker instance runs per run at a time, per the planner's `nextStep`/`followingSteps` decision.
 - **Planner** (@planner) is spawned for stalled-worker recovery, and after every `worker_turn` completion, to decide the single next step (`nextStep`) plus the queue for later (`followingSteps`). Every planner turn ends by publishing a decision (`planner_turn`, with `nextStep` possibly `null`) or a user question (`append_user_question`) — never silently.
 
 All agents should route unmet worker needs back through the shared bus so the supervisor can spawn the missing role instead of fragmenting state across direct side channels.
-Workers report completion via the `worker_turn` MCP tool, which spawns a fresh @planner instance with the result and the current `followingSteps` queue so that planner can decide and publish the next step — this is the primary reporting mechanism. Workers should call @planner directly only when they're stuck mid-task and need help (a separate path from the automatic post-completion spawn).
+Workers report completion via the `worker_turn` MCP tool, which requests a follow-up @planner via a bus spawn request (reused if one is open, or fulfilled by a still-active planner — a stopped fulfillment is stale and gets a fresh request, so a later problem always gets its own planner) with the result and the current `followingSteps` queue as context — the supervisor spawns that planner on its next tick, and this is the primary reporting mechanism. Workers should call @planner directly only when they're stuck mid-task and need help (a separate path from the automatic post-completion request).
 
 ## Quick Start
 

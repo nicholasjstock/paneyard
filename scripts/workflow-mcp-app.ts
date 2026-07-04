@@ -747,9 +747,10 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     'worker_turn',
     {
       description:
-        'Report one worker turn result. Always spawns a planner (unless one is already active for this run) with ' +
-        'the result and the current followingSteps queue as context, so the planner can decide the next nextStep ' +
-        'and followingSteps itself via its own planner_turn call — worker_turn never publishes a plan itself.',
+        'Report one worker turn result. Always requests a follow-up planner via a bus spawn request (reusing an ' +
+        'existing open or still-in-flight-fulfilled one, rather than duplicating it) with the result and the ' +
+        'current followingSteps queue as context, so the supervisor spawns it and that planner decides the next ' +
+        'nextStep/followingSteps via planner_turn — worker_turn never publishes a plan or spawns a process itself.',
       inputSchema: {
         runId: z.string().min(1),
         role: workerRoleSchema,
@@ -761,13 +762,16 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         frontendUrl: z.string().url(),
       },
       outputSchema: {
-        plannerWorker: workerRecordSchema.nullable(),
+        plannerRequest: z.object({ requestId: z.string() }),
         nextState: orchestratorDecisionStateSchema,
       },
     },
     async ({ runId, role, nickname, scope, result, task, scenario, frontendUrl }) => {
       logWorkflow('tool:worker_turn', 'requested', { runId, role, nickname, scope })
       const previousState = readOrchestratorState(activeContext, runId)
+      const activeWorkerIds = new Set(
+        activeWorkerRuntime.listWorkers({ runId, activeOnly: true }).map((worker) => worker.workerId)
+      )
       const structuredContent = runWorkerTurn({
         runId,
         role,
@@ -777,14 +781,15 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         task,
         scenario,
         frontendUrl,
-        workerRuntime: activeWorkerRuntime,
+        bus: activeBus,
+        activeWorkerIds,
         previousState,
       })
       writeOrchestratorState(activeContext, structuredContent.nextState)
       logWorkflow('tool:worker_turn', 'completed', {
         runId,
         role,
-        plannerWorker: structuredContent.plannerWorker?.nickname ?? null,
+        plannerRequestId: structuredContent.plannerRequest.requestId,
       })
 
       return {

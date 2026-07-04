@@ -9,6 +9,7 @@ import {
   type OrchestratorDecisionState,
   type PlanWorkflowIterationResult,
   type PlannerBusJob,
+  type WorkflowStep,
 } from './workflow-mcp'
 import type { WorkflowWorkerRecord } from './workflow-worker-runtime'
 
@@ -25,6 +26,7 @@ export type OrchestratorWorkerRuntime = {
 }
 
 type OrchestratorBus = Parameters<typeof publishPlannerJobs>[0] & {
+  listOpenSpawnRequests: () => Array<{ runId: string }>
   publishRunStatus: (args: {
     runId: string
     phase: string
@@ -202,6 +204,22 @@ export function buildStallFinding(stalls: OrchestratorTurnFinding[]): string {
     .join('\n')
 }
 
+// A run can go dead without ever looking "stalled": a worker stops (crash,
+// or a clean exit whose worker_turn call never landed) without producing a
+// follow-up spawn request. detectStalledWorkers can't see this — it only
+// looks at workers still status==='running'. Once a run has made real
+// progress (phase advanced past 'starting') but ends up with nothing
+// active and nothing pending, and was never told it's done ('completed'),
+// that's the same class of problem as a stalled worker: ask a planner to
+// look at what happened and decide the next bounded handoff.
+export function buildDeadEndFinding(args: { runId: string; followingSteps: WorkflowStep[] }): string {
+  return [
+    `Run ${args.runId} has no active workers and no open spawn requests, but was not marked completed.`,
+    `followingSteps queue at last check: ${JSON.stringify(args.followingSteps)}`,
+    'The most recent worker likely stopped without completing its worker_turn handoff (crashed, or the call failed) — inspect its last known report/artifact and decide whether to retry, fix, or escalate to the user.',
+  ].join(' ')
+}
+
 export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTurnResult {
   const fileSystem = args.fileSystem ?? fs
   const previousState = args.previousState
@@ -220,16 +238,35 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
   })
   const stallFinding = stalledWorkers.length > 0 ? buildStallFinding(stalledWorkers) : undefined
 
-  // A non-stalled tick is a pure no-op: worker_turn/planner_turn own all real
-  // progress, so there is nothing for the orchestrator to decide or publish
-  // here. Only a detected stall gives the orchestrator a reason to act.
+  // A run that made real progress (phase advanced past 'starting') but now
+  // has nothing active and nothing pending, and was never marked
+  // 'completed', has gone dead — the same class of problem as a stalled
+  // worker, just invisible to detectStalledWorkers because there's no
+  // running worker left to look at.
+  const openSpawnRequests = args.bus.listOpenSpawnRequests().filter((request) => request.runId === args.runId)
+  const isDeadEnd =
+    !stallFinding &&
+    workers.length === 0 &&
+    openSpawnRequests.length === 0 &&
+    previousState !== undefined &&
+    previousState.phase !== 'starting' &&
+    previousState.phase !== 'completed'
+  const deadEndFinding = isDeadEnd
+    ? buildDeadEndFinding({ runId: args.runId, followingSteps: previousState?.followingSteps ?? [] })
+    : undefined
+  const recoveryFinding = stallFinding ?? deadEndFinding
+
+  // A non-stalled, non-dead-end tick is a pure no-op: worker_turn/planner_turn
+  // own all real progress, so there is nothing for the orchestrator to
+  // decide or publish here. Only a detected stall or dead end gives the
+  // orchestrator a reason to act.
   const plan =
-    stallFinding && stallFinding.trim().length > 0
+    recoveryFinding && recoveryFinding.trim().length > 0
       ? buildStalledWorkerRecoveryPlan({
           task: args.task,
           scenario: args.scenario,
           frontendUrl: trimTrailingSlash(args.frontendUrl),
-          stallFinding,
+          recoveryFinding,
           followingSteps: previousState?.followingSteps ?? [],
         })
       : null
@@ -238,12 +275,13 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
         runId: args.runId,
         summary: plan.summary,
         plan,
+        activeWorkerIds: new Set(workers.map((worker) => worker.workerId)),
       })
     : []
-  const lastStallFinding = stallFinding ?? null
+  const lastStallFinding = recoveryFinding ?? null
   const nextState: OrchestratorDecisionState = {
     runId: args.runId,
-    phase: stallFinding ? 'stalled' : workers.length > 0 ? 'waiting_on_workers' : previousState?.phase ?? 'starting',
+    phase: recoveryFinding ? 'stalled' : workers.length > 0 ? 'waiting_on_workers' : previousState?.phase ?? 'starting',
     tickCount: (previousState?.tickCount ?? 0) + 1,
     lastPlanSummary: plan?.summary ?? previousState?.lastPlanSummary ?? null,
     pendingSpawnKeys: [...new Set([...(previousState?.pendingSpawnKeys ?? []), ...buildPendingSpawnKeys(args.runId, jobs)])],

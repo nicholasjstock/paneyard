@@ -2,43 +2,51 @@
 
 import { describe, expect, test } from 'vitest'
 
-import { runWorkerTurn } from '../worker-turn'
-import type { WorkflowManagedRole } from '../workflow-worker-runtime'
+import { runWorkerTurn, type WorkerTurnBus } from '../worker-turn'
+
+function createFakeBus(): WorkerTurnBus & {
+  requests: Array<{
+    requestId: string
+    runId: string
+    askedBy: string
+    scope: string
+    text: string
+    context?: string
+    requestedRole: string
+    status: 'open' | 'fulfilled' | 'dismissed'
+    fulfilledWorkerId?: string | null
+  }>
+} {
+  const requests: Array<{
+    requestId: string
+    runId: string
+    askedBy: string
+    scope: string
+    text: string
+    context?: string
+    requestedRole: string
+    status: 'open' | 'fulfilled' | 'dismissed'
+    fulfilledWorkerId?: string | null
+  }> = []
+  let nextId = 1
+
+  return {
+    requests,
+    appendSpawnRequest(args) {
+      const requestId = `req-${nextId}`
+      nextId += 1
+      requests.push({ ...args, requestId, status: 'open' })
+      return { requestId }
+    },
+    listSpawnRequests() {
+      return requests
+    },
+  }
+}
 
 describe('worker turn', () => {
-  test('always spawns a planner with the result and the current followingSteps as context', () => {
-    const spawnCalls: Array<{ runId: string; role: WorkflowManagedRole; nickname: string; scope: string; prompt: string }> = []
-    const workerRuntime = {
-      spawnWorker: (args: {
-        runId: string
-        role: WorkflowManagedRole
-        nickname: string
-        reason: string
-        scope: string
-        prompt: string
-      }) => {
-        spawnCalls.push(args)
-        return {
-          workerId: 'planner-worker-1',
-          runId: args.runId,
-          role: args.role,
-          nickname: args.nickname,
-          reason: args.reason,
-          scope: args.scope,
-          status: 'running' as const,
-          pid: 900001,
-          promptPath: '/tmp/planner.prompt.txt',
-          logPath: '/tmp/planner.log',
-          lastMessagePath: '/tmp/planner.last-message.txt',
-          envPath: '/tmp/planner.env.json',
-          command: 'codex',
-          args: [],
-          startedAt: new Date().toISOString(),
-          stoppedAt: null,
-          stopReason: null,
-        }
-      },
-    }
+  test('requests a follow-up planner via the bus with the result and followingSteps as context', () => {
+    const bus = createFakeBus()
 
     const result = runWorkerTurn({
       runId: 'run-6',
@@ -49,7 +57,7 @@ describe('worker turn', () => {
       task: 'Validate the phone flow',
       scenario: 'phone',
       frontendUrl: 'http://localhost:5174',
-      workerRuntime,
+      bus,
       previousState: {
         runId: 'run-6',
         phase: 'planning',
@@ -62,12 +70,13 @@ describe('worker turn', () => {
       },
     })
 
-    expect(spawnCalls).toHaveLength(1)
-    expect(spawnCalls[0]?.role).toBe('planner')
-    expect(spawnCalls[0]?.prompt).toContain('The frontend coverage-request button does not respond to clicks.')
-    expect(spawnCalls[0]?.prompt).toContain('verifier-report.md')
-    expect(result.plannerWorker).not.toBeNull()
-    expect(result.plannerWorker?.role).toBe('planner')
+    expect(bus.requests).toHaveLength(1)
+    expect(bus.requests[0]?.requestedRole).toBe('planner')
+    expect(bus.requests[0]?.askedBy).toBe('worker')
+    expect(bus.requests[0]?.scope).toBe('workflow-plan.md')
+    expect(bus.requests[0]?.context).toContain('The frontend coverage-request button does not respond to clicks.')
+    expect(bus.requests[0]?.context).toContain('verifier-report.md')
+    expect(result.plannerRequest.requestId).toBe(bus.requests[0]?.requestId)
     // worker_turn never decides anything itself — it just carries the
     // previous followingSteps forward for the spawned planner to consume.
     expect(result.nextState.followingSteps).toEqual([
@@ -75,8 +84,10 @@ describe('worker turn', () => {
     ])
   })
 
-  test('plannerWorker is null when no workerRuntime is provided', () => {
-    const result = runWorkerTurn({
+  test('does not spawn a process itself — the request is left for the supervisor to fulfill', () => {
+    const bus = createFakeBus()
+
+    runWorkerTurn({
       runId: 'run-7',
       role: 'worker',
       nickname: 'worker',
@@ -85,60 +96,16 @@ describe('worker turn', () => {
       task: 'irrelevant',
       scenario: 'phone',
       frontendUrl: 'http://localhost:5174',
+      bus,
     })
 
-    expect(result.plannerWorker).toBeNull()
+    expect(bus.requests[0]?.status).toBe('open')
   })
 
-  test('does not spawn a second planner worker when one is already active for the run', () => {
-    const spawnCalls: Array<{ role: WorkflowManagedRole }> = []
-    const workerRuntime = {
-      spawnWorker: (spawnArgs: { runId: string; role: WorkflowManagedRole; nickname: string; reason: string; scope: string; prompt: string }) => {
-        spawnCalls.push(spawnArgs)
-        return {
-          workerId: 'w-1',
-          runId: spawnArgs.runId,
-          role: spawnArgs.role,
-          nickname: spawnArgs.nickname,
-          reason: spawnArgs.reason,
-          scope: spawnArgs.scope,
-          status: 'running' as const,
-          pid: 1,
-          promptPath: '/tmp/x.prompt.txt',
-          logPath: '/tmp/x.log',
-          lastMessagePath: '/tmp/x.last-message.txt',
-          envPath: '/tmp/x.env.json',
-          command: 'codex',
-          args: [],
-          startedAt: new Date().toISOString(),
-          stoppedAt: null,
-          stopReason: null,
-        }
-      },
-      listWorkers: () => [
-        {
-          workerId: 'existing-planner',
-          runId: 'run-9',
-          role: 'planner' as const,
-          nickname: 'planner-existing',
-          reason: 'already reasoning',
-          scope: 'verifier-report.md',
-          status: 'running' as const,
-          pid: 2,
-          promptPath: '/tmp/p.prompt.txt',
-          logPath: '/tmp/p.log',
-          lastMessagePath: '/tmp/p.last-message.txt',
-          envPath: '/tmp/p.env.json',
-          command: 'codex',
-          args: [],
-          startedAt: new Date().toISOString(),
-          stoppedAt: null,
-          stopReason: null,
-        },
-      ],
-    }
+  test('reuses an existing open planner request instead of appending a duplicate', () => {
+    const bus = createFakeBus()
 
-    const result = runWorkerTurn({
+    const first = runWorkerTurn({
       runId: 'run-9',
       role: 'worker',
       nickname: 'worker',
@@ -147,62 +114,43 @@ describe('worker turn', () => {
       task: 'irrelevant',
       scenario: 'phone',
       frontendUrl: 'http://localhost:5174',
-      workerRuntime,
+      bus,
     })
 
-    expect(spawnCalls).toHaveLength(0)
-    expect(result.plannerWorker).toBeNull()
+    const second = runWorkerTurn({
+      runId: 'run-9',
+      role: 'worker',
+      nickname: 'worker-2',
+      scope: 'recorder-report.md',
+      result: 'a different result',
+      task: 'irrelevant',
+      scenario: 'phone',
+      frontendUrl: 'http://localhost:5174',
+      bus,
+    })
+
+    expect(bus.requests).toHaveLength(1)
+    expect(second.plannerRequest.requestId).toBe(first.plannerRequest.requestId)
   })
 
-  test('still spawns a planner worker when only non-planner workers are active', () => {
-    const spawnCalls: Array<{ role: WorkflowManagedRole }> = []
-    const workerRuntime = {
-      spawnWorker: (spawnArgs: { runId: string; role: WorkflowManagedRole; nickname: string; reason: string; scope: string; prompt: string }) => {
-        spawnCalls.push(spawnArgs)
-        return {
-          workerId: 'w-2',
-          runId: spawnArgs.runId,
-          role: spawnArgs.role,
-          nickname: spawnArgs.nickname,
-          reason: spawnArgs.reason,
-          scope: spawnArgs.scope,
-          status: 'running' as const,
-          pid: 3,
-          promptPath: '/tmp/y.prompt.txt',
-          logPath: '/tmp/y.log',
-          lastMessagePath: '/tmp/y.last-message.txt',
-          envPath: '/tmp/y.env.json',
-          command: 'codex',
-          args: [],
-          startedAt: new Date().toISOString(),
-          stoppedAt: null,
-          stopReason: null,
-        }
-      },
-      listWorkers: () => [
-        {
-          workerId: 'existing-worker',
-          runId: 'run-10',
-          role: 'worker' as const,
-          nickname: 'worker-existing',
-          reason: 'still recording',
-          scope: 'recorder-report.md',
-          status: 'running' as const,
-          pid: 4,
-          promptPath: '/tmp/w.prompt.txt',
-          logPath: '/tmp/w.log',
-          lastMessagePath: '/tmp/w.last-message.txt',
-          envPath: '/tmp/w.env.json',
-          command: 'codex',
-          args: [],
-          startedAt: new Date().toISOString(),
-          stoppedAt: null,
-          stopReason: null,
-        },
-      ],
-    }
+  test('reuses an already-fulfilled planner request while its planner is still active', () => {
+    const bus = createFakeBus()
 
-    const result = runWorkerTurn({
+    const first = runWorkerTurn({
+      runId: 'run-10',
+      role: 'worker',
+      nickname: 'worker',
+      scope: 'recorder-report.md',
+      result: 'irrelevant text',
+      task: 'irrelevant',
+      scenario: 'phone',
+      frontendUrl: 'http://localhost:5174',
+      bus,
+    })
+    bus.requests[0]!.status = 'fulfilled'
+    bus.requests[0]!.fulfilledWorkerId = 'planner-worker-1'
+
+    const second = runWorkerTurn({
       runId: 'run-10',
       role: 'worker',
       nickname: 'worker',
@@ -211,15 +159,68 @@ describe('worker turn', () => {
       task: 'irrelevant',
       scenario: 'phone',
       frontendUrl: 'http://localhost:5174',
-      workerRuntime,
+      bus,
+      activeWorkerIds: new Set(['planner-worker-1']),
     })
 
-    expect(spawnCalls).toHaveLength(1)
-    expect(result.plannerWorker).not.toBeNull()
+    expect(bus.requests).toHaveLength(1)
+    expect(second.plannerRequest.requestId).toBe(first.plannerRequest.requestId)
   })
 
-  test('nextState defaults phase/tickCount and followingSteps when no previousState is given', () => {
-    const result = runWorkerTurn({
+  test('requests a fresh planner once the previously fulfilled one has stopped', () => {
+    const bus = createFakeBus()
+
+    const first = runWorkerTurn({
+      runId: 'run-14',
+      role: 'worker',
+      nickname: 'worker',
+      scope: 'recorder-report.md',
+      result: 'irrelevant text',
+      task: 'irrelevant',
+      scenario: 'phone',
+      frontendUrl: 'http://localhost:5174',
+      bus,
+    })
+    bus.requests[0]!.status = 'fulfilled'
+    bus.requests[0]!.fulfilledWorkerId = 'planner-worker-1'
+
+    // That planner has since stopped — activeWorkerIds no longer contains
+    // it, so this slot is free again, unlike a one-time worker artifact
+    // that would stay "done" forever regardless.
+    const second = runWorkerTurn({
+      runId: 'run-14',
+      role: 'worker',
+      nickname: 'worker-2',
+      scope: 'verifier-report.md',
+      result: 'a later, different result',
+      task: 'irrelevant',
+      scenario: 'phone',
+      frontendUrl: 'http://localhost:5174',
+      bus,
+      activeWorkerIds: new Set(),
+    })
+
+    expect(bus.requests).toHaveLength(2)
+    expect(second.plannerRequest.requestId).not.toBe(first.plannerRequest.requestId)
+  })
+
+  test('appends a fresh request when the prior one was dismissed', () => {
+    const bus = createFakeBus()
+
+    const first = runWorkerTurn({
+      runId: 'run-11',
+      role: 'worker',
+      nickname: 'worker',
+      scope: 'recorder-report.md',
+      result: 'irrelevant text',
+      task: 'irrelevant',
+      scenario: 'phone',
+      frontendUrl: 'http://localhost:5174',
+      bus,
+    })
+    bus.requests[0]!.status = 'dismissed'
+
+    const second = runWorkerTurn({
       runId: 'run-11',
       role: 'worker',
       nickname: 'worker',
@@ -228,14 +229,16 @@ describe('worker turn', () => {
       task: 'irrelevant',
       scenario: 'phone',
       frontendUrl: 'http://localhost:5174',
+      bus,
     })
 
-    expect(result.nextState.phase).toBe('starting')
-    expect(result.nextState.tickCount).toBe(0)
-    expect(result.nextState.followingSteps).toEqual([])
+    expect(bus.requests).toHaveLength(2)
+    expect(second.plannerRequest.requestId).not.toBe(first.plannerRequest.requestId)
   })
 
-  test('nextState carries orchestrator/planner-owned fields forward untouched', () => {
+  test('nextState defaults phase/tickCount and followingSteps when no previousState is given', () => {
+    const bus = createFakeBus()
+
     const result = runWorkerTurn({
       runId: 'run-12',
       role: 'worker',
@@ -245,8 +248,29 @@ describe('worker turn', () => {
       task: 'irrelevant',
       scenario: 'phone',
       frontendUrl: 'http://localhost:5174',
+      bus,
+    })
+
+    expect(result.nextState.phase).toBe('starting')
+    expect(result.nextState.tickCount).toBe(0)
+    expect(result.nextState.followingSteps).toEqual([])
+  })
+
+  test('nextState carries orchestrator/planner-owned fields forward untouched', () => {
+    const bus = createFakeBus()
+
+    const result = runWorkerTurn({
+      runId: 'run-13',
+      role: 'worker',
+      nickname: 'worker',
+      scope: 'verifier-report.md',
+      result: 'irrelevant text',
+      task: 'irrelevant',
+      scenario: 'phone',
+      frontendUrl: 'http://localhost:5174',
+      bus,
       previousState: {
-        runId: 'run-12',
+        runId: 'run-13',
         phase: 'stalled',
         tickCount: 5,
         lastPlanSummary: 'old summary',

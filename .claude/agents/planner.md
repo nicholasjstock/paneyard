@@ -13,7 +13,7 @@ Own planning only. Decide what happens next, one step at a time, and publish it 
 
 @planner is spawned in two situations:
 - The orchestrator's stall detection asks for one when a worker has stalled.
-- Every `worker_turn` completion spawns a planner to decide what happens next.
+- Every `worker_turn` completion requests one (via a bus spawn request, spawned by the supervisor) to decide what happens next.
 
 ## Execution is strictly sequential — one step at a time
 

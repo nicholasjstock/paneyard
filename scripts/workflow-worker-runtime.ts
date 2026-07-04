@@ -75,10 +75,20 @@ type WorkerProcessHandle = {
   unref?: () => void
 }
 
+export type WorkerExitStatus = {
+  code: number | null
+  signal: NodeJS.Signals | null
+}
+
 export type WorkerProcessAdapter = {
   spawn: (command: string, args: string[], options: WorkerSpawnOptions) => WorkerProcessHandle
   isAlive: (pid: number) => boolean
   kill: (pid: number, signal?: NodeJS.Signals | number) => void
+  // Real exit code/signal for a pid that has actually exited, if the adapter
+  // is able to observe it. Optional so adapters that can't report this
+  // (test fakes, older adapters) still work — callers fall back to a
+  // best-effort guess from the worker's own log when this returns null.
+  getExitStatus?: (pid: number) => WorkerExitStatus | null
 }
 
 type CreateWorkerRuntimeArgs = {
@@ -244,9 +254,9 @@ function buildWorkerEnvSnapshot(env: NodeJS.ProcessEnv): Record<string, string |
   }
 }
 
-function readUnexpectedExitReason(fileSystem: RuntimeFileSystem, worker: WorkflowWorkerRecord): string {
+function findLastUsefulLogLine(fileSystem: RuntimeFileSystem, worker: WorkflowWorkerRecord): string | null {
   if (!fileSystem.existsSync(worker.logPath)) {
-    return 'Process exited before an explicit stop was recorded.'
+    return null
   }
 
   try {
@@ -256,20 +266,47 @@ function readUnexpectedExitReason(fileSystem: RuntimeFileSystem, worker: Workflo
       .map((line) => line.trim())
       .filter(Boolean)
 
-    const usefulLine =
+    return (
       [...lines]
         .reverse()
         .find((line) => !line.includes('worker:lifecycle') && /error|unauthorized|failed|exception/i.test(line)) ??
-      [...lines].reverse().find((line) => !line.includes('worker:lifecycle'))
-
-    if (!usefulLine) {
-      return 'Process exited before an explicit stop was recorded.'
-    }
-
-    return `Process exited unexpectedly. Last log error: ${usefulLine}`
+      [...lines].reverse().find((line) => !line.includes('worker:lifecycle')) ??
+      null
+    )
   } catch {
+    return null
+  }
+}
+
+// Fallback used only when the process adapter can't report a real exit
+// code/signal (no getExitStatus support, or the exit event hasn't been
+// observed yet) — best-effort guess from the worker's own log, same
+// heuristic used before real exit-status capture existed.
+function readUnexpectedExitReason(fileSystem: RuntimeFileSystem, worker: WorkflowWorkerRecord): string {
+  const usefulLine = findLastUsefulLogLine(fileSystem, worker)
+  if (!usefulLine) {
     return 'Process exited before an explicit stop was recorded.'
   }
+
+  return `Process exited unexpectedly. Last log error: ${usefulLine}`
+}
+
+function describeWorkerExit(
+  fileSystem: RuntimeFileSystem,
+  worker: WorkflowWorkerRecord,
+  exitStatus: WorkerExitStatus | null
+): string {
+  if (!exitStatus) {
+    return readUnexpectedExitReason(fileSystem, worker)
+  }
+
+  if (exitStatus.signal == null && exitStatus.code === 0) {
+    return 'Process exited cleanly (code 0).'
+  }
+
+  const cause = exitStatus.signal ? `killed by signal ${exitStatus.signal}` : `exited with code ${exitStatus.code}`
+  const lastLine = findLastUsefulLogLine(fileSystem, worker)
+  return lastLine ? `Process ${cause}. Last log line: ${lastLine}` : `Process ${cause}.`
 }
 
 function appendWorkerLogLine(fileSystem: RuntimeFileSystem, logPath: string, line: string): void {
@@ -327,7 +364,8 @@ export function createWorkflowWorkerRuntime(
 
       worker.status = 'stopped'
       worker.stoppedAt = new Date().toISOString()
-      worker.stopReason = worker.stopReason ?? readUnexpectedExitReason(fileSystem, worker)
+      worker.stopReason =
+        worker.stopReason ?? describeWorkerExit(fileSystem, worker, processAdapter.getExitStatus?.(worker.pid) ?? null)
       appendWorkerLogLine(
         fileSystem,
         worker.logPath,

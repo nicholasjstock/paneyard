@@ -6,6 +6,7 @@ import * as path from 'path'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import { createMcpTestHarness, type WorkflowMcpTestHarness } from './helpers/workflow-mcp-test-harness'
+import { spawnRequestedWorkers } from '../supervisor-loop'
 
 const harnesses: WorkflowMcpTestHarness[] = []
 
@@ -74,10 +75,19 @@ describe('workflow MCP planning tools', () => {
 
     expect(result.isError).toBeFalsy()
     const structuredContent = result.structuredContent as {
-      plannerWorker: { role: string } | null
+      plannerRequest: { requestId: string }
     }
-    expect(structuredContent.plannerWorker?.role).toBe('planner')
-    expect(harness.bus.listOpenSpawnRequests()).toEqual([])
+    expect(structuredContent.plannerRequest.requestId).toBeTruthy()
+
+    // worker_turn only requests the follow-up planner — it never spawns a
+    // process itself, so no worker exists yet and the request is still open,
+    // waiting for the supervisor's next tick to fulfill it.
+    const openRequests = harness.bus.listOpenSpawnRequests()
+    expect(openRequests).toHaveLength(1)
+    expect(openRequests[0]?.requestId).toBe(structuredContent.plannerRequest.requestId)
+    expect(openRequests[0]?.requestedRole).toBe('planner')
+    expect(openRequests[0]?.scope).toBe('workflow-plan.md')
+    expect(harness.runtime.listWorkers()).toEqual([])
   })
 
   test('worker_turn spawns a real planner worker with the persona and reported result in its prompt', async () => {
@@ -106,13 +116,15 @@ describe('workflow MCP planning tools', () => {
     })
 
     expect(result.isError).toBeFalsy()
-    const structuredContent = result.structuredContent as {
-      plannerWorker: { role: string; nickname: string; promptPath: string } | null
-    }
-    expect(structuredContent.plannerWorker).not.toBeNull()
-    expect(structuredContent.plannerWorker?.role).toBe('planner')
 
-    const promptContent = fs.readFileSync(structuredContent.plannerWorker!.promptPath, 'utf8')
+    // worker_turn only requests the follow-up planner; the supervisor is
+    // what actually spawns it, on its next tick.
+    const spawned = spawnRequestedWorkers({ runId: 'run-2', workerRuntime: harness.runtime, bus: harness.bus })
+    const plannerWorker = spawned.find((worker) => worker.role === 'planner')
+
+    expect(plannerWorker).toBeDefined()
+
+    const promptContent = fs.readFileSync(plannerWorker!.promptPath, 'utf8')
     expect(promptContent).toContain('Own planning only.')
     expect(promptContent).toContain('The frontend coverage-request button does not respond to clicks.')
 
@@ -157,6 +169,13 @@ describe('workflow MCP planning tools', () => {
 
     await harness.client.callTool({ name: 'worker_turn', arguments: args })
     await harness.client.callTool({ name: 'worker_turn', arguments: { ...args, nickname: 'worker-2' } })
+
+    // Reused rather than duplicated at the request level already, so even
+    // before anything is spawned there's only one planner request open.
+    const plannerRequests = harness.bus.listOpenSpawnRequests().filter((request) => request.requestedRole === 'planner')
+    expect(plannerRequests).toHaveLength(1)
+
+    spawnRequestedWorkers({ runId: 'run-single-planner', workerRuntime: harness.runtime, bus: harness.bus })
 
     const runningPlanners = harness.runtime
       .listWorkers({ runId: 'run-single-planner', activeOnly: true })

@@ -31,7 +31,11 @@ export function runPlannerTurn(args: PlannerTurnArgs): PlannerTurnResult {
   const previousState = args.previousState
   const nextState: OrchestratorDecisionState = {
     runId: args.runId,
-    phase: jobs.length > 0 ? 'planning' : previousState?.phase ?? 'starting',
+    // nextStep: null is the planner's explicit "genuinely nothing left to
+    // do" signal — mark the run completed so the orchestrator can tell a
+    // legitimate finish apart from a run that went idle without ever being
+    // told it was done (see the dead-end check in orchestrator-turn.ts).
+    phase: args.nextStep ? 'planning' : 'completed',
     tickCount: (previousState?.tickCount ?? 0) + 1,
     lastPlanSummary: args.summary,
     pendingSpawnKeys: [...new Set([...(previousState?.pendingSpawnKeys ?? []), ...buildPendingSpawnKeys(args.runId, jobs)])],

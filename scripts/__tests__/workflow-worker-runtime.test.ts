@@ -70,6 +70,7 @@ function createRuntimeHarness(options: { workerDriver?: 'codex' | 'claude' } = {
   const writes = new Map<number, string>()
   const alivePids = new Set<number>()
   const killed: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = []
+  const exitStatuses = new Map<number, { code: number | null; signal: NodeJS.Signals | null }>()
   const fileSystem = createMemoryFs()
   let nextPid = 41000
 
@@ -112,6 +113,9 @@ function createRuntimeHarness(options: { workerDriver?: 'codex' | 'claude' } = {
         killed.push({ pid, signal })
         alivePids.delete(pid)
       },
+      getExitStatus(pid) {
+        return exitStatuses.get(pid) ?? null
+      },
     },
   })
 
@@ -123,6 +127,7 @@ function createRuntimeHarness(options: { workerDriver?: 'codex' | 'claude' } = {
     writes,
     alivePids,
     killed,
+    exitStatuses,
   }
 }
 
@@ -313,5 +318,73 @@ describe('workflow worker runtime', () => {
       'Process exited unexpectedly. Last log error: ERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses'
     )
     expect(harness.fileSystem.readFileSync(worker.logPath)).toContain('stopped orchestrator')
+  })
+
+  test('listWorkers reports a clean exit when the adapter observed exit code 0, without guessing from the log', () => {
+    const harness = createRuntimeHarness()
+    const worker = harness.runtime.spawnWorker({
+      runId: 'demo-xvfb-20260701-200813',
+      role: 'worker',
+      nickname: 'demo-recorder-1',
+      reason: 'Run the recorder pass.',
+      scope: 'recorder-report.md',
+      prompt: 'Execute the recorder task.',
+    })
+
+    // The worker's own log happens to contain the word "failed" describing
+    // the task outcome — that must not be mistaken for a process crash now
+    // that a real exit code is available.
+    harness.fileSystem.writeFileSync(worker.logPath, '[DONE] Recording failed due to port contention; reported via worker_turn.\n')
+    harness.exitStatuses.set(worker.pid, { code: 0, signal: null })
+    harness.alivePids.delete(worker.pid)
+
+    const workers = harness.runtime.listWorkers()
+    const refreshed = workers[0] as WorkflowWorkerRecord
+
+    expect(refreshed.status).toBe('stopped')
+    expect(refreshed.stopReason).toBe('Process exited cleanly (code 0).')
+  })
+
+  test('listWorkers reports the real exit code for a non-zero exit, with the last log line for context', () => {
+    const harness = createRuntimeHarness()
+    const worker = harness.runtime.spawnWorker({
+      runId: 'demo-xvfb-20260701-200813',
+      role: 'worker',
+      nickname: 'demo-recorder-1',
+      reason: 'Run the recorder pass.',
+      scope: 'recorder-report.md',
+      prompt: 'Execute the recorder task.',
+    })
+
+    harness.fileSystem.writeFileSync(worker.logPath, 'fatal: unhandled exception in tool call\n')
+    harness.exitStatuses.set(worker.pid, { code: 1, signal: null })
+    harness.alivePids.delete(worker.pid)
+
+    const workers = harness.runtime.listWorkers()
+    const refreshed = workers[0] as WorkflowWorkerRecord
+
+    expect(refreshed.status).toBe('stopped')
+    expect(refreshed.stopReason).toBe('Process exited with code 1. Last log line: fatal: unhandled exception in tool call')
+  })
+
+  test('listWorkers reports a signal kill distinctly from a non-zero exit code', () => {
+    const harness = createRuntimeHarness()
+    const worker = harness.runtime.spawnWorker({
+      runId: 'demo-xvfb-20260701-200813',
+      role: 'worker',
+      nickname: 'demo-recorder-1',
+      reason: 'Run the recorder pass.',
+      scope: 'recorder-report.md',
+      prompt: 'Execute the recorder task.',
+    })
+
+    harness.exitStatuses.set(worker.pid, { code: null, signal: 'SIGKILL' })
+    harness.alivePids.delete(worker.pid)
+
+    const workers = harness.runtime.listWorkers()
+    const refreshed = workers[0] as WorkflowWorkerRecord
+
+    expect(refreshed.status).toBe('stopped')
+    expect(refreshed.stopReason).toBe('Process killed by signal SIGKILL.')
   })
 })

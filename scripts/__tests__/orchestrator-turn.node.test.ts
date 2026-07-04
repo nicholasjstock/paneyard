@@ -423,7 +423,7 @@ describe('orchestrator turn', () => {
     ).toEqual([])
   })
 
-  test('returns updated orchestrator decision state that carries forward the prior tick count and summary', () => {
+  test('detects a dead end (no workers, no open requests, not completed) and asks a planner to recover', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
     const busStoragePath = path.join(tempDir, 'workflow-bus.json')
@@ -456,14 +456,60 @@ describe('orchestrator turn', () => {
       },
     })
 
-    // No workers, no stall — a pure no-op tick. Nothing decided, so
-    // orchestrator-owned state carries forward from the previous tick.
-    expect(result.plan).toBeNull()
+    // Progress was made before (phase advanced past 'starting'), then
+    // everything went idle without ever being marked completed — that's a
+    // dead end, not a legitimate finish, so the orchestrator asks a planner
+    // to recover instead of silently doing nothing forever.
+    expect(result.plan?.nextStep?.owner).toBe('planner')
+    expect(result.jobs.map((job) => job.step.owner)).toEqual(['planner'])
     expect(result.nextState.runId).toBe('demo-20260702-130619')
     expect(result.nextState.tickCount).toBe(4)
-    expect(result.nextState.phase).toBe('waiting_on_workers')
+    expect(result.nextState.phase).toBe('stalled')
+    expect(result.nextState.lastStallFinding).toContain('no active workers and no open spawn requests')
     expect(result.nextState.followingSteps).toEqual([])
-    expect(result.nextState.lastPlanSummary).toBe('Previous planner summary.')
-    expect(result.nextState.pendingSpawnKeys).toEqual([])
+    expect(result.nextState.lastPlanSummary).toBe(result.plan?.summary)
+    expect(result.nextState.pendingSpawnKeys).toEqual([
+      JSON.stringify(['demo-20260702-130619', 'planner', 'workflow-plan.md']),
+    ])
+  })
+
+  test('does not treat a legitimately completed run as a dead end', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
+    tempDirs.push(tempDir)
+    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
+    const bus = createWorkflowBus({ storagePath: busStoragePath })
+
+    const result = runOrchestratorTurn({
+      runId: 'demo-20260702-130619',
+      task: 'Recover the stalled demo run',
+      scenario: 'both',
+      frontendUrl: 'http://localhost:5174',
+      workerRuntime: {
+        listWorkers() {
+          return []
+        },
+        spawnWorker() {
+          throw new Error('orchestrator turn should not spawn workers')
+        },
+      },
+      bus,
+      fileSystem: fs,
+      previousState: {
+        runId: 'demo-20260702-130619',
+        phase: 'completed',
+        tickCount: 5,
+        lastPlanSummary: 'The run finished successfully.',
+        pendingSpawnKeys: [],
+        followingSteps: [],
+        lastStallFinding: null,
+        lastUpdatedAt: '2026-07-02T10:00:00.000Z',
+      },
+    })
+
+    // A planner already decided nextStep: null — the run is genuinely done,
+    // not stuck, even though there are no active workers or open requests.
+    expect(result.plan).toBeNull()
+    expect(result.nextState.phase).toBe('completed')
+    expect(result.nextState.lastPlanSummary).toBe('The run finished successfully.')
   })
 })
