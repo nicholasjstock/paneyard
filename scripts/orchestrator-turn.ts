@@ -3,7 +3,6 @@ import * as fs from 'fs'
 import {
   buildPendingSpawnKeys,
   buildStalledWorkerRecoveryPlan,
-  buildWaitingPlan,
   publishPlannerJobs,
   type DemoScenario,
   type FileSystemAdapter,
@@ -26,17 +25,6 @@ export type OrchestratorWorkerRuntime = {
 }
 
 type OrchestratorBus = Parameters<typeof publishPlannerJobs>[0] & {
-  listOpenSpawnRequests: () => Array<{
-    runId: string
-    askedBy: string
-    scope: string
-    text: string
-    context: string | null
-    requestedRole: string
-    priority: 'advisory' | 'blocking'
-    status: 'open' | 'fulfilled' | 'dismissed'
-    tags: string[]
-  }>
   publishRunStatus: (args: {
     runId: string
     phase: string
@@ -72,7 +60,9 @@ export type OrchestratorTurnArgs = {
 }
 
 export type OrchestratorTurnResult = {
-  plan: PlanWorkflowIterationResult
+  // null when not stalled — a non-stalled tick is a pure no-op and builds no
+  // plan at all, rather than publishing an inert "waiting" bookkeeping step.
+  plan: PlanWorkflowIterationResult | null
   jobs: PlannerBusJob[]
   stalledWorkers: OrchestratorTurnFinding[]
   nextState: OrchestratorDecisionState
@@ -222,7 +212,6 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
     summary: `Opening orchestrator phase for ${args.scenario} scenario on ${trimTrailingSlash(args.frontendUrl)}; coordinating the next recorder and verifier handoff.`,
   })
   const workers = args.workerRuntime.listWorkers({ runId: args.runId, activeOnly: true })
-  const openSpawnRequests = args.bus.listOpenSpawnRequests().filter((request) => request.runId === args.runId)
   const stalledWorkers = detectStalledWorkers({
     workers,
     fileSystem,
@@ -230,6 +219,10 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
     staleAfterMs: args.staleAfterMs,
   })
   const stallFinding = stalledWorkers.length > 0 ? buildStallFinding(stalledWorkers) : undefined
+
+  // A non-stalled tick is a pure no-op: worker_turn/planner_turn own all real
+  // progress, so there is nothing for the orchestrator to decide or publish
+  // here. Only a detected stall gives the orchestrator a reason to act.
   const plan =
     stallFinding && stallFinding.trim().length > 0
       ? buildStalledWorkerRecoveryPlan({
@@ -237,27 +230,24 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
           scenario: args.scenario,
           frontendUrl: trimTrailingSlash(args.frontendUrl),
           stallFinding,
+          followingSteps: previousState?.followingSteps ?? [],
         })
-      : buildWaitingPlan({
-          task: args.task,
-          scenario: args.scenario,
-          frontendUrl: trimTrailingSlash(args.frontendUrl),
-          activeWorkers: workers.length,
-          openSpawnRequests: openSpawnRequests.length,
-        })
-  const jobs = publishPlannerJobs(args.bus, {
-    runId: args.runId,
-    summary: plan.summary,
-    plan,
-  })
+      : null
+  const jobs = plan
+    ? publishPlannerJobs(args.bus, {
+        runId: args.runId,
+        summary: plan.summary,
+        plan,
+      })
+    : []
   const lastStallFinding = stallFinding ?? null
   const nextState: OrchestratorDecisionState = {
     runId: args.runId,
-    phase: stallFinding ? 'stalled' : jobs.length > 0 ? 'planning' : 'waiting_on_workers',
+    phase: stallFinding ? 'stalled' : workers.length > 0 ? 'waiting_on_workers' : previousState?.phase ?? 'starting',
     tickCount: (previousState?.tickCount ?? 0) + 1,
-    lastPlanSummary: plan.summary,
+    lastPlanSummary: plan?.summary ?? previousState?.lastPlanSummary ?? null,
     pendingSpawnKeys: [...new Set([...(previousState?.pendingSpawnKeys ?? []), ...buildPendingSpawnKeys(args.runId, jobs)])],
-    recommendedNextSteps: plan.steps,
+    followingSteps: plan?.followingSteps ?? previousState?.followingSteps ?? [],
     lastStallFinding,
     lastUpdatedAt: (args.now ?? new Date()).toISOString(),
   }

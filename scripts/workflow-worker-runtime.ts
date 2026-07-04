@@ -97,6 +97,11 @@ type SpawnWorkerArgs = {
   reason: string
   scope: string
   prompt: string
+  // Lets a caller (the supervisor loop) claim this worker's id on the bus
+  // before the worker actually exists, shrinking the window in which a
+  // concurrently-running claim check can't yet see it. Falls back to
+  // generating one here for callers that don't need that guarantee.
+  workerId?: string
 }
 
 type ListWorkersArgs = {
@@ -122,7 +127,7 @@ export type WorkflowWorkerRuntime = {
   stopWorker: (args: StopWorkerArgs) => WorkflowWorkerRecord
 }
 
-function createId(): string {
+export function createId(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
     return globalThis.crypto.randomUUID()
   }
@@ -360,7 +365,7 @@ export function createWorkflowWorkerRuntime(
   return {
     spawnWorker(spawnArgs) {
       ensureDir()
-      const workerId = createId()
+      const workerId = spawnArgs.workerId ?? createId()
       const promptPath = resolvePath(workersDir, `${spawnArgs.nickname}.prompt.txt`)
       const logPath = resolvePath(workersDir, `${spawnArgs.nickname}.log`)
       const lastMessagePath = resolvePath(workersDir, `${spawnArgs.nickname}.last-message.txt`)

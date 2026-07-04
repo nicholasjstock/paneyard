@@ -30,8 +30,12 @@ describe('workflow MCP planning tools', () => {
     })
 
     expect(result.isError).toBeFalsy()
-    const structuredContent = result.structuredContent as { steps: Array<{ owner: string }> }
-    expect(structuredContent.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
+    const structuredContent = result.structuredContent as {
+      nextStep: { owner: string } | null
+      followingSteps: Array<{ owner: string }>
+    }
+    expect(structuredContent.nextStep?.owner).toBe('worker')
+    expect(structuredContent.followingSteps.map((step) => step.owner)).toEqual(['worker'])
   })
 
   test('plan_workflow_iteration rejects a non-URL frontendUrl via the Zod schema', async () => {
@@ -50,7 +54,7 @@ describe('workflow MCP planning tools', () => {
     expect(result.isError).toBe(true)
   })
 
-  test('worker_turn routes a worker-reported result to the matching fixer and publishes bus jobs', async () => {
+  test('worker_turn never publishes a plan itself — it only spawns a planner to decide', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
@@ -70,16 +74,10 @@ describe('workflow MCP planning tools', () => {
 
     expect(result.isError).toBeFalsy()
     const structuredContent = result.structuredContent as {
-      plan: { steps: Array<{ owner: string; successCheck: string }> }
-      jobs: Array<{ requestId: string; step: { owner: string } }>
+      plannerWorker: { role: string } | null
     }
-    expect(structuredContent.plan.steps.some((step) => step.successCheck.includes('front/**'))).toBe(true)
-    expect(structuredContent.jobs.map((job) => job.step.owner)).toContain('worker')
-
-    const openRequestIds = harness.bus.listOpenSpawnRequests().map((request) => request.requestId)
-    for (const job of structuredContent.jobs) {
-      expect(openRequestIds).toContain(job.requestId)
-    }
+    expect(structuredContent.plannerWorker?.role).toBe('planner')
+    expect(harness.bus.listOpenSpawnRequests()).toEqual([])
   })
 
   test('worker_turn spawns a real planner worker with the persona and reported result in its prompt', async () => {
@@ -142,37 +140,6 @@ describe('workflow MCP planning tools', () => {
     expect(result.isError).toBe(true)
   })
 
-  test('worker_turn does not re-request an artifact whose earlier identical request was already fulfilled', async () => {
-    const harness = await createMcpTestHarness()
-    harnesses.push(harness)
-
-    const args = {
-      runId: 'run-dedup',
-      role: 'worker',
-      nickname: 'worker',
-      scope: 'verifier-report.md',
-      result: 'irrelevant',
-      task: 'Validate the phone flow',
-      scenario: 'phone',
-      frontendUrl: 'http://localhost:5174',
-    }
-
-    const first = await harness.client.callTool({ name: 'worker_turn', arguments: args })
-    const firstJobs = (first.structuredContent as { jobs: Array<{ requestId: string }> }).jobs
-
-    for (const job of firstJobs) {
-      await harness.client.callTool({
-        name: 'fulfill_spawn_request',
-        arguments: { requestId: job.requestId, fulfilledBy: 'test', fulfillmentNote: 'test fulfillment' },
-      })
-    }
-
-    const second = await harness.client.callTool({ name: 'worker_turn', arguments: args })
-    const secondJobs = (second.structuredContent as { jobs: Array<{ requestId: string }> }).jobs
-
-    expect(secondJobs.map((job) => job.requestId)).toEqual(firstJobs.map((job) => job.requestId))
-  })
-
   test('worker_turn only ever has one planner worker running for a given run across repeated calls', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
@@ -197,9 +164,19 @@ describe('workflow MCP planning tools', () => {
     expect(runningPlanners).toHaveLength(1)
   })
 
-  test('worker_turn returns a nextState whose recommendedNextSteps matches the decided plan', async () => {
+  test('worker_turn carries the previous followingSteps queue forward into nextState untouched', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
+
+    await harness.client.callTool({
+      name: 'planner_turn',
+      arguments: {
+        runId: 'run-next-state',
+        summary: 'Route to a scoped fix, then re-verify.',
+        nextStep: { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Applies the fix.' },
+        followingSteps: [{ owner: 'worker', artifact: 'verifier-report.md', successCheck: 'Confirms the fix.' }],
+      },
+    })
 
     const result = await harness.client.callTool({
       name: 'worker_turn',
@@ -207,7 +184,7 @@ describe('workflow MCP planning tools', () => {
         runId: 'run-next-state',
         role: 'worker',
         nickname: 'worker',
-        scope: 'verifier-report.md',
+        scope: 'fix-summary.md',
         result: 'irrelevant',
         task: 'Validate the phone flow',
         scenario: 'phone',
@@ -217,20 +194,19 @@ describe('workflow MCP planning tools', () => {
 
     expect(result.isError).toBeFalsy()
     const structuredContent = result.structuredContent as {
-      plan: { steps: unknown[] }
-      nextState: { recommendedNextSteps: unknown[] }
+      nextState: { followingSteps: Array<{ artifact: string }> }
     }
-    expect(structuredContent.nextState.recommendedNextSteps).toEqual(structuredContent.plan.steps)
+    expect(structuredContent.nextState.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
 
     const readResult = await harness.client.callTool({
       name: 'read_orchestrator_state',
       arguments: { runId: 'run-next-state' },
     })
-    const readState = readResult.structuredContent as { recommendedNextSteps: unknown[] }
-    expect(readState.recommendedNextSteps).toEqual(structuredContent.plan.steps)
+    const readState = readResult.structuredContent as { followingSteps: Array<{ artifact: string }> }
+    expect(readState.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
   })
 
-  test('planner_turn publishes one spawn request per decided step', async () => {
+  test('planner_turn publishes a spawn request for nextStep and persists followingSteps', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
@@ -239,25 +215,25 @@ describe('workflow MCP planning tools', () => {
       arguments: {
         runId: 'run-3',
         summary: 'Frontend button unresponsive; route to a scoped fix, then re-verify.',
-        steps: [
-          { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Button responds to taps on the phone view.' },
-          { owner: 'worker', artifact: 'verifier-report.md', successCheck: 'Confirms the button now responds.' },
-        ],
+        nextStep: { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Button responds to taps on the phone view.' },
+        followingSteps: [{ owner: 'worker', artifact: 'verifier-report.md', successCheck: 'Confirms the button now responds.' }],
       },
     })
 
     expect(result.isError).toBeFalsy()
-    const structuredContent = result.structuredContent as { jobs: Array<{ requestId: string; step: { owner: string } }> }
-    expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['worker', 'worker'])
+    const structuredContent = result.structuredContent as {
+      jobs: Array<{ requestId: string; step: { owner: string } }>
+      nextState: { followingSteps: Array<{ artifact: string }> }
+    }
+    expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['worker'])
+    expect(structuredContent.nextState.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
 
     const openRequests = harness.bus.listOpenSpawnRequests()
-    expect(openRequests.map((request) => request.requestedRole)).toEqual(['worker', 'worker'])
-    for (const request of openRequests) {
-      expect(request.askedBy).toBe('planner')
-    }
+    expect(openRequests.map((request) => request.requestedRole)).toEqual(['worker'])
+    expect(openRequests[0]?.askedBy).toBe('planner')
   })
 
-  test('planner_turn rejects an unknown role in a step via the Zod schema', async () => {
+  test('planner_turn rejects an unknown role in nextStep via the Zod schema', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
@@ -266,7 +242,8 @@ describe('workflow MCP planning tools', () => {
       arguments: {
         runId: 'run-3',
         summary: 'irrelevant',
-        steps: [{ owner: 'not_a_role', artifact: 'fix-summary.md', successCheck: 'irrelevant' }],
+        nextStep: { owner: 'not_a_role', artifact: 'fix-summary.md', successCheck: 'irrelevant' },
+        followingSteps: [],
       },
     })
 
@@ -338,7 +315,7 @@ describe('workflow MCP planning tools', () => {
     expect(openRequests[0]?.scope).toBe('workflow-plan.md')
   })
 
-  test('publish_planner_jobs runs the planner and appends spawn requests in step order', async () => {
+  test('publish_planner_jobs runs the planner and appends a spawn request for nextStep', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
@@ -354,7 +331,7 @@ describe('workflow MCP planning tools', () => {
 
     expect(result.isError).toBeFalsy()
     const structuredContent = result.structuredContent as { jobs: Array<{ requestId: string; step: { owner: string } }> }
-    expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['worker', 'worker'])
+    expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['worker'])
 
     const openRequestIds = harness.bus.listOpenSpawnRequests().map((request) => request.requestId)
     for (const job of structuredContent.jobs) {

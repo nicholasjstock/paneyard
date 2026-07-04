@@ -453,5 +453,320 @@
     ],
     "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=183961982 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=183961982; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
     "lastUpdatedAt": "2026-07-04T13:06:01.985Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 29,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Waiting on 1 active workers and 1 open spawn requests.",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Records that the run already has active work in flight and needs no new handoff yet."
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=188587228 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=188587228; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:23:07.229Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 30,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=188677608 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=188677608; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=188677608 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=188677608; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=188677608 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=188677608; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:24:37.610Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 31,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=188746387 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=188746387; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=188746387 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=188746387; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=188746387 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=188746387; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:25:46.390Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 32,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=189314428 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=189314428; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=189314428 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=189314428; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=189314428 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=189314428; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:35:14.431Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 33,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=189381529 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=189381529; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=189381529 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=189381529; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=189381529 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=189381529; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:36:21.532Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 34,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190015742 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190015742; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190015742 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190015742; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190015742 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190015742; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:46:55.744Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 35,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190144655 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190144655; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190144655 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190144655; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190144655 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190144655; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:49:04.658Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 36,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190198104 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190198104; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190198104 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190198104; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190198104 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190198104; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:49:58.107Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 37,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190826184 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190826184; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190826184 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190826184; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=190826184 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=190826184; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T15:00:26.186Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 38,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=192529204 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=192529204; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=192529204 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=192529204; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=192529204 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=192529204; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T15:28:49.208Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 39,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=194784108 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=194784108; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "followingSteps": [],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=194784108 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=194784108; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T16:06:24.110Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 40,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=194844550 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=194844550; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "followingSteps": [],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=194844550 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=194844550; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T16:07:24.551Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 41,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=194997429 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=194997429; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "followingSteps": [],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=194997429 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=194997429; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T16:09:57.431Z"
+  },
+  {
+    "runId": "demo-20260702-130619",
+    "phase": "stalled",
+    "tickCount": 42,
+    "lastPlanSummary": "Repair the demo flow for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=195021107 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=195021107; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130619\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130619\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130619\",\"front_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130619\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "followingSteps": [],
+    "lastStallFinding": "Stalled worker back-fixer (worker) | runId=demo-20260702-130619 | idleForMs=195021107 | scope=fix-summary.md | reason=Frontend-only defect: request CTA resolution needs a frontend route fix. | evidence=worker=back-fixer; role=worker; idleForMs=195021107; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T16:10:21.113Z"
   }
 ]

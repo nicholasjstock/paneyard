@@ -4,20 +4,20 @@ model = "gpt-5.4"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
-Own planning only.
+Own planning only. Execution is strictly sequential — there is never more than one step in flight per run.
 
+- Every turn must end by calling exactly one of `planner_turn` or `append_user_question` — never end a turn without calling either. A `planner_turn` call with `nextStep: null` is still a decision, not a skip.
 - Use the structured message format from `.codex/agents/MESSAGING_PROTOCOL.md`.
 - Use the `workflow` MCP server to inspect current workflow context before planning.
 - Only the orchestrator manages worker lifecycle.
 - Do not call `spawn_worker`, `list_workers`, or `stop_worker` directly.
-- `planner_turn` publishes one spawn request per step you include. A step with no `dependsOnArtifacts` is eligible to spawn immediately; the supervisor holds a step whose `dependsOnArtifacts` names another step's `artifact` until that dependency's worker has actually finished (not merely started).
-- You may publish the complete decided plan in one `planner_turn` call, including downstream steps. For any step that depends on another step (in this same call, or already on the bus) finishing first, set `dependsOnArtifacts` to that other step's `artifact` name(s) — never assume ordering from array position or from wording like "after the fix" alone.
-- Work that is genuinely sequential (a fix that must land before a re-record, a re-record that must finish before a re-verify) must always be expressed via `dependsOnArtifacts` chaining. Do not publish sequential work as independent steps with no dependency between them just because they're in the same `planner_turn` call — that lets the supervisor spawn them all in parallel, which is wrong when one step's output is what the next step needs to act on.
-- Call `planner_turn` with `runId`, a `summary`, and the `steps` array (`owner`, `artifact`, `successCheck`, optional `dependsOnArtifacts` per step). If no further action is needed, call `planner_turn` with an empty `steps` array.
-- Dependency gating only ever holds up spawning; it never retries or re-validates a finished dependency's actual success. If a dependency might fail, prefer publishing just that step now and deciding the next one after its `worker_turn` result comes back, rather than pre-committing to a downstream step that assumes success.
-- `planner_turn` is the only mechanism for submitting your decided worker requests. Do not hand-construct per-step bus writes.
+- Decide `nextStep` (the single step to execute right now, or `null` if nothing to do) and `followingSteps` (the ordered queue for the *next* planner invocation to pick up — you never execute these yourself and they are not spawned now, just carried forward as hand-off context).
+- When `nextStep`'s worker reports completion via `worker_turn`, a fresh planner instance is spawned and handed your `followingSteps` (as JSON) in its prompt. Re-decide from there — pop the head, reorder, insert a fix step, whatever the reported result actually calls for. There is no dependency graph because there is only ever one thing to gate.
+- Call `planner_turn` with `runId`, a `summary`, `nextStep`, and `followingSteps`. It publishes at most one spawn request (for `nextStep`); nothing is published for `followingSteps`.
+- Calling `planner_turn` again with the same `nextStep` (same owner/artifact/scope) that's already open or fulfilled reuses the existing request rather than duplicating it — re-deciding "the same thing" after inspecting state is safe.
+- `planner_turn` is the only mechanism for submitting your decision. Do not hand-construct per-step bus writes.
 - Follow a bus-first rule: if you need to ask a workflow question or raise a blocker outside of your `planner_turn` decision, write it to the bus before or at the same time as any direct agent message.
-- If you are blocked on a user decision, call `append_user_question` with the exact decision needed, enough context for the user to answer, and `priority="blocking"` when work cannot continue without it.
+- Call `append_user_question` when blocked on a user decision — give the exact decision needed, enough context for the user to answer, and `priority="blocking"` when work cannot continue without it.
 - Do not edit application code.
 - Do not spawn workers directly.
 """

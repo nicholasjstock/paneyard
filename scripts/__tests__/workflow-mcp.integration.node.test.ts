@@ -95,11 +95,11 @@ describe('workflow MCP integration', () => {
       })
 
       const structuredContent = result.structuredContent as {
-        plan: { steps: Array<{ owner: string; artifact: string }> }
+        plan: { nextStep: { owner: string; artifact: string } | null } | null
         jobs: Array<{ step: { owner: string; artifact: string } }>
       }
 
-      expect(structuredContent.plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'planner'])
+      expect(structuredContent.plan?.nextStep?.owner).toBe('planner')
       expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['planner'])
       expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toEqual([
         'planner',
@@ -183,11 +183,11 @@ describe('workflow MCP integration', () => {
       })
 
       const structuredContent = result.structuredContent as {
-        plan: { steps: Array<{ owner: string; artifact: string }> }
+        plan: { nextStep: { owner: string; artifact: string } | null } | null
         jobs: Array<{ step: { owner: string; artifact: string } }>
       }
 
-      expect(structuredContent.plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'planner'])
+      expect(structuredContent.plan?.nextStep?.owner).toBe('planner')
       expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['planner'])
       expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toEqual(['planner'])
       expect(runtime.listWorkers({ runId: 'demo-20260702-130620', activeOnly: true }).map((worker) => worker.role)).toEqual([

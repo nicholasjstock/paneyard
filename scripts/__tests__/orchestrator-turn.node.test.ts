@@ -112,9 +112,110 @@ describe('orchestrator turn', () => {
     expect(result.nextState.phase).toBe('stalled')
     expect(result.nextState.lastStallFinding).toContain('Stalled worker worker')
     expect(result.nextState.lastStallFinding).toContain('frontend video review')
-    expect(result.plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'planner'])
+    expect(result.plan?.nextStep?.owner).toBe('planner')
     expect(result.jobs.map((job) => job.step.owner)).toEqual(['planner'])
     expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toContain('planner')
+  })
+
+  test('repeated ticks on the same stall do not pile up duplicate planner recovery requests', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
+    tempDirs.push(tempDir)
+
+    const outputDir = path.join(tempDir, 'demo-output', 'agents-sdk')
+    const workersDir = path.join(outputDir, 'workers')
+    fs.mkdirSync(workersDir, { recursive: true })
+
+    const logPath = path.join(workersDir, 'worker.log')
+    const lastMessagePath = path.join(workersDir, 'worker.last-message.txt')
+    const promptPath = path.join(workersDir, 'worker.prompt.txt')
+    const envPath = path.join(workersDir, 'worker.env.json')
+    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
+    const workerRecord = {
+      workerId: 'worker-1',
+      runId: 'demo-20260702-130619',
+      role: 'worker' as const,
+      nickname: 'worker',
+      reason: 'Frontend recording stalled on cursor overlay.',
+      scope: 'frontend video review',
+      status: 'running' as const,
+      pid: 41001,
+      promptPath,
+      logPath,
+      lastMessagePath,
+      envPath,
+      command: 'codex',
+      args: ['exec', '-'],
+      startedAt: '2026-07-02T10:00:00.000Z',
+      stoppedAt: null,
+      stopReason: null,
+    }
+
+    fs.writeFileSync(
+      path.join(outputDir, 'workers.json'),
+      JSON.stringify({ workers: [workerRecord] }, null, 2)
+    )
+    fs.writeFileSync(logPath, 'worker is still waiting on a browser frame')
+    fs.writeFileSync(lastMessagePath, 'Waiting on the browser frame to move.')
+    fs.writeFileSync(promptPath, 'Fix the stalled frontend recorder path.')
+    fs.writeFileSync(envPath, '{}')
+
+    const staleAt = new Date('2026-07-02T10:00:00.000Z')
+    fs.utimesSync(logPath, staleAt, staleAt)
+    fs.utimesSync(lastMessagePath, staleAt, staleAt)
+    fs.utimesSync(promptPath, staleAt, staleAt)
+
+    const runtime = createWorkflowWorkerRuntime({
+      rootDir: tempDir,
+      outputDir,
+      processAdapter: {
+        spawn() {
+          return {
+            pid: 42000,
+            stdin: {
+              write() {},
+              end() {},
+            },
+            unref() {},
+          }
+        },
+        isAlive(pid) {
+          return pid === 41001
+        },
+        kill() {
+          throw new Error('kill should not be called in this test')
+        },
+      },
+    })
+    const bus = createWorkflowBus({ storagePath: busStoragePath })
+
+    // Two ticks on the exact same still-stalled worker, 5s apart — idleForMs
+    // (baked into the recovery successCheck text) differs between the two,
+    // but the underlying ask ("recover this stall") has not changed.
+    runOrchestratorTurn({
+      runId: 'demo-20260702-130619',
+      task: 'Recover the stalled demo run',
+      scenario: 'both',
+      frontendUrl: 'http://localhost:5174',
+      workerRuntime: runtime,
+      bus,
+      fileSystem: fs,
+      now: new Date('2026-07-02T10:05:00.000Z'),
+    })
+    const secondTick = runOrchestratorTurn({
+      runId: 'demo-20260702-130619',
+      task: 'Recover the stalled demo run',
+      scenario: 'both',
+      frontendUrl: 'http://localhost:5174',
+      workerRuntime: runtime,
+      bus,
+      fileSystem: fs,
+      now: new Date('2026-07-02T10:05:05.000Z'),
+    })
+
+    const plannerRequests = bus.listOpenSpawnRequests().filter((request) => request.requestedRole === 'planner')
+    expect(plannerRequests).toHaveLength(1)
+    expect(secondTick.jobs.map((job) => job.step.owner)).toEqual(['planner'])
+    expect(secondTick.jobs[0]?.requestId).toBe(plannerRequests[0]?.requestId)
   })
 
   test('does not spawn planner workers during the orchestrator tick', () => {
@@ -274,7 +375,7 @@ describe('orchestrator turn', () => {
     })
 
     expect(result.jobs).toEqual([])
-    expect(result.nextState.phase).toBe('waiting_on_workers')
+    expect(result.nextState.phase).toBe('starting')
     expect(spawned).toEqual([])
     expect(bus.listRecentEvents(5).map((event) => event.type)).not.toContain('worker.spawned')
   })
@@ -349,17 +450,20 @@ describe('orchestrator turn', () => {
         tickCount: 3,
         lastPlanSummary: 'Previous planner summary.',
         pendingSpawnKeys: [],
-        recommendedNextSteps: [],
+        followingSteps: [],
         lastStallFinding: null,
         lastUpdatedAt: '2026-07-02T10:00:00.000Z',
       },
     })
 
+    // No workers, no stall — a pure no-op tick. Nothing decided, so
+    // orchestrator-owned state carries forward from the previous tick.
+    expect(result.plan).toBeNull()
     expect(result.nextState.runId).toBe('demo-20260702-130619')
     expect(result.nextState.tickCount).toBe(4)
     expect(result.nextState.phase).toBe('waiting_on_workers')
-    expect(result.nextState.recommendedNextSteps).toEqual(result.plan.steps)
-    expect(result.nextState.lastPlanSummary).toBe(result.plan.summary)
+    expect(result.nextState.followingSteps).toEqual([])
+    expect(result.nextState.lastPlanSummary).toBe('Previous planner summary.')
     expect(result.nextState.pendingSpawnKeys).toEqual([])
   })
 })

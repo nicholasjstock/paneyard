@@ -127,7 +127,6 @@ const workflowStepSchema = z.object({
   owner: z.string(),
   artifact: z.string(),
   successCheck: z.string(),
-  dependsOnArtifacts: z.array(z.string()).optional(),
 })
 
 const orchestratorDecisionStateSchema = z.object({
@@ -136,7 +135,7 @@ const orchestratorDecisionStateSchema = z.object({
   tickCount: z.number().int().min(0),
   lastPlanSummary: z.string().nullable(),
   pendingSpawnKeys: z.array(z.string()),
-  recommendedNextSteps: z.array(workflowStepSchema),
+  followingSteps: z.array(workflowStepSchema),
   lastStallFinding: z.string().nullable(),
   lastUpdatedAt: z.string().nullable(),
 })
@@ -496,7 +495,6 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         fulfillmentNote: z.string().nullable(),
         fulfilledWorkerId: z.string().nullable(),
         tags: z.array(z.string()),
-        dependsOn: z.array(z.string()),
       },
     },
     async ({ runId, frontendUrl, task }) => {
@@ -598,13 +596,8 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
       },
       outputSchema: {
         summary: z.string(),
-        steps: z.array(
-          z.object({
-            owner: z.string(),
-            artifact: z.string(),
-            successCheck: z.string(),
-          })
-        ),
+        nextStep: workflowStepSchema.nullable(),
+        followingSteps: z.array(workflowStepSchema),
       },
     },
     async ({ task, scenario, frontendUrl, verifierFinding, stallFinding }) => {
@@ -621,7 +614,10 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         verifierFinding,
         stallFinding,
       })
-      logWorkflow('tool:plan_workflow_iteration', 'completed', { steps: structuredContent.steps.length })
+      logWorkflow('tool:plan_workflow_iteration', 'completed', {
+        hasNextStep: structuredContent.nextStep !== null,
+        followingSteps: structuredContent.followingSteps.length,
+      })
 
       return {
         content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
@@ -692,24 +688,17 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         staleAfterMs: z.number().int().positive().optional(),
       },
       outputSchema: {
-        plan: z.object({
-          summary: z.string(),
-          steps: z.array(
-            z.object({
-              owner: z.string(),
-              artifact: z.string(),
-              successCheck: z.string(),
-            })
-          ),
-        }),
+        plan: z
+          .object({
+            summary: z.string(),
+            nextStep: workflowStepSchema.nullable(),
+            followingSteps: z.array(workflowStepSchema),
+          })
+          .nullable(),
         jobs: z.array(
           z.object({
             requestId: z.string(),
-            step: z.object({
-              owner: z.string(),
-              artifact: z.string(),
-              successCheck: z.string(),
-            }),
+            step: workflowStepSchema,
           })
         ),
         stalledWorkers: z.array(
@@ -757,7 +746,10 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
   server.registerTool(
     'worker_turn',
     {
-      description: 'Report one worker turn result and deterministically get the planner-decided next steps published to the bus.',
+      description:
+        'Report one worker turn result. Always spawns a planner (unless one is already active for this run) with ' +
+        'the result and the current followingSteps queue as context, so the planner can decide the next nextStep ' +
+        'and followingSteps itself via its own planner_turn call — worker_turn never publishes a plan itself.',
       inputSchema: {
         runId: z.string().min(1),
         role: workerRoleSchema,
@@ -769,16 +761,6 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         frontendUrl: z.string().url(),
       },
       outputSchema: {
-        plan: z.object({
-          summary: z.string(),
-          steps: z.array(workflowStepSchema),
-        }),
-        jobs: z.array(
-          z.object({
-            requestId: z.string(),
-            step: workflowStepSchema,
-          })
-        ),
         plannerWorker: workerRecordSchema.nullable(),
         nextState: orchestratorDecisionStateSchema,
       },
@@ -795,7 +777,6 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         task,
         scenario,
         frontendUrl,
-        bus: activeBus,
         workerRuntime: activeWorkerRuntime,
         previousState,
       })
@@ -803,7 +784,6 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
       logWorkflow('tool:worker_turn', 'completed', {
         runId,
         role,
-        jobs: structuredContent.jobs.length,
         plannerWorker: structuredContent.plannerWorker?.nickname ?? null,
       })
 
@@ -818,19 +798,24 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     'planner_turn',
     {
       description:
-        'Submit the planner\'s complete decided plan for a run and publish the resulting spawn requests to the bus. ' +
-        'planner_turn spawns a worker immediately for every included step; a step only waits if its ' +
-        'dependsOnArtifacts names another step\'s artifact, in which case the supervisor holds it until that ' +
-        'dependency is fulfilled.',
+        'Submit the planner\'s decision for a run: one nextStep to execute right now (or null if nothing to do), ' +
+        'plus the followingSteps queue for the next planner invocation to pick up once nextStep\'s worker reports ' +
+        'back. Publishes at most one spawn request (for nextStep) and persists followingSteps as orchestrator state.',
       inputSchema: {
         runId: z.string().min(1),
         summary: z.string().min(1),
-        steps: z.array(
+        nextStep: z
+          .object({
+            owner: workflowAgentSchema,
+            artifact: z.string().min(1),
+            successCheck: z.string().min(1),
+          })
+          .nullable(),
+        followingSteps: z.array(
           z.object({
             owner: workflowAgentSchema,
             artifact: z.string().min(1),
             successCheck: z.string().min(1),
-            dependsOnArtifacts: z.array(z.string()).optional(),
           })
         ),
       },
@@ -838,24 +823,25 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         jobs: z.array(
           z.object({
             requestId: z.string(),
-            step: z.object({
-              owner: z.string(),
-              artifact: z.string(),
-              successCheck: z.string(),
-              dependsOnArtifacts: z.array(z.string()).optional(),
-            }),
+            step: workflowStepSchema,
           })
         ),
+        nextState: orchestratorDecisionStateSchema,
       },
     },
-    async ({ runId, summary, steps }) => {
-      logWorkflow('tool:planner_turn', 'requested', { runId, steps: steps.length })
+    async ({ runId, summary, nextStep, followingSteps }) => {
+      logWorkflow('tool:planner_turn', 'requested', { runId, hasNextStep: nextStep !== null, followingSteps: followingSteps.length })
+      const previousState = readOrchestratorState(activeContext, runId)
       const structuredContent = runPlannerTurn({
         runId,
         summary,
-        steps,
+        nextStep,
+        followingSteps,
         bus: activeBus,
+        previousState,
       })
+      writeOrchestratorState(activeContext, structuredContent.nextState)
+      appendOrchestratorTickHistory(activeContext, structuredContent.nextState)
       logWorkflow('tool:planner_turn', 'completed', { runId, jobs: structuredContent.jobs.length })
 
       return {

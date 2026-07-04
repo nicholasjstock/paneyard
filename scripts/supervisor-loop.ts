@@ -11,7 +11,7 @@ import {
 } from './workflow-mcp'
 import { createWorkflowBus } from './workflow-bus'
 import { createNodeWorkerProcessAdapter } from './workflow-worker-runtime-node'
-import { createWorkflowWorkerRuntime, type WorkerDriver, type WorkflowWorkerRecord } from './workflow-worker-runtime'
+import { createId, createWorkflowWorkerRuntime, type WorkerDriver, type WorkflowWorkerRecord } from './workflow-worker-runtime'
 
 type SupervisorLoopOptions = {
   runId?: string
@@ -33,16 +33,15 @@ type SpawnRequest = {
   requestedRole: string
   status: 'open' | 'fulfilled' | 'dismissed'
   fulfilledWorkerId: string | null
-  dependsOn: string[]
 }
 
 type WorkerRuntimeLike = Pick<ReturnType<typeof createWorkflowWorkerRuntime>, 'listWorkers' | 'spawnWorker'>
 type WorkflowBusLike = Pick<
   ReturnType<typeof createWorkflowBus>,
   | 'listOpenSpawnRequests'
-  | 'listSpawnRequests'
   | 'publishWorkerSpawned'
   | 'fulfillSpawnRequest'
+  | 'dismissSpawnRequest'
 >
 
 const __filename = fileURLToPath(import.meta.url)
@@ -215,7 +214,6 @@ function collectSpawnRequests(args: {
   runId: string
   requests: SpawnRequest[]
   activeWorkers: WorkflowWorkerRecord[]
-  satisfiedRequestIds: Set<string>
 }): SpawnRequest[] {
   const activeKeys = new Set(args.activeWorkers.map(buildActiveWorkerKey))
   const latestByKey = new Map<string, SpawnRequest>()
@@ -230,39 +228,10 @@ function collectSpawnRequests(args: {
       continue
     }
 
-    const isBlocked = request.dependsOn.some((dependsOnId) => !args.satisfiedRequestIds.has(dependsOnId))
-    if (isBlocked) {
-      continue
-    }
-
     latestByKey.set(key, request)
   }
 
   return [...latestByKey.values()]
-}
-
-// A dependency is only "satisfied" once the worker spawned to fulfill it has
-// actually stopped running — fulfillSpawnRequest fires at spawn time, before
-// the worker has done any work, so status === 'fulfilled' alone isn't enough.
-function computeSatisfiedRequestIds(args: {
-  allRequests: SpawnRequest[]
-  allWorkers: WorkflowWorkerRecord[]
-}): Set<string> {
-  const workerStatusById = new Map(args.allWorkers.map((worker) => [worker.workerId, worker.status]))
-
-  return new Set(
-    args.allRequests
-      .filter((request) => {
-        if (request.status !== 'fulfilled') {
-          return false
-        }
-        if (!request.fulfilledWorkerId) {
-          return true
-        }
-        return workerStatusById.get(request.fulfilledWorkerId) === 'stopped'
-      })
-      .map((request) => request.requestId)
-  )
 }
 
 export function spawnRequestedWorkers(args: {
@@ -272,15 +241,36 @@ export function spawnRequestedWorkers(args: {
 }): WorkflowWorkerRecord[] {
   const activeWorkers = args.workerRuntime.listWorkers({ runId: args.runId, activeOnly: true })
   const currentWorkers = args.workerRuntime.listWorkers({ runId: args.runId })
-  const satisfiedRequestIds = computeSatisfiedRequestIds({
-    allRequests: args.bus.listSpawnRequests(),
-    allWorkers: currentWorkers,
-  })
+
+  // A currently-running worker already claims its (runId, role, scope) slot —
+  // that claim is the source of truth, not the bus's request history. Any
+  // other open request for the same slot is redundant with an in-flight
+  // claim, so dismiss it now instead of leaving it open forever (silently
+  // filtering it out tick after tick, as before, let duplicate asks — e.g.
+  // repeated stall-recovery requests — pile up on the bus unboundedly). This
+  // check is live against active workers, so the claim naturally expires
+  // once the worker actually stops, letting a genuinely new ask through on a
+  // later tick. Racing this against a very fast tick interval could let two
+  // asks slip through before either is recognized as active; that's an
+  // accepted, narrow race, not a data-loss risk.
+  const activeClaimKeys = new Set(activeWorkers.map(buildActiveWorkerKey))
+  for (const request of args.bus.listOpenSpawnRequests()) {
+    if (request.runId !== args.runId) continue
+
+    const key = buildSpawnRequestKey(request)
+    if (key && activeClaimKeys.has(key)) {
+      args.bus.dismissSpawnRequest({
+        requestId: request.requestId,
+        dismissedBy: 'supervisor_loop',
+        dismissalNote: `Superseded — an active worker already claims ${request.requestedRole}/${request.scope}.`,
+      })
+    }
+  }
+
   const spawnRequests = collectSpawnRequests({
     runId: args.runId,
     requests: args.bus.listOpenSpawnRequests(),
     activeWorkers,
-    satisfiedRequestIds,
   })
   const spawnedWorkers: WorkflowWorkerRecord[] = []
 
@@ -292,15 +282,42 @@ export function spawnRequestedWorkers(args: {
       runId: args.runId,
       request,
     })
+    const workerId = createId()
 
-    const worker = args.workerRuntime.spawnWorker({
-      runId: args.runId,
-      role,
-      nickname,
-      reason,
-      scope: request.scope,
-      prompt,
+    // Claim the (runId, role, scope) slot before actually spawning the
+    // worker — spawning does real file I/O and launches a process, which
+    // takes far longer than this one bus write. Claiming first shrinks the
+    // window in which another concurrently-running supervisor tick could
+    // still see this slot as unclaimed and spawn a duplicate for it.
+    args.bus.fulfillSpawnRequest({
+      requestId: request.requestId,
+      fulfilledBy: 'supervisor_loop',
+      fulfillmentNote: `Spawned worker ${nickname} (${role}).`,
+      fulfilledWorkerId: workerId,
     })
+
+    let worker: WorkflowWorkerRecord
+    try {
+      worker = args.workerRuntime.spawnWorker({
+        runId: args.runId,
+        role,
+        nickname,
+        reason,
+        scope: request.scope,
+        prompt,
+        workerId,
+      })
+    } catch (error) {
+      // The claim promised a worker that never came into existence — undo
+      // it so dependents don't wait forever on a workerId that will never
+      // appear, and so the slot is free for a real retry.
+      args.bus.dismissSpawnRequest({
+        requestId: request.requestId,
+        dismissedBy: 'supervisor_loop',
+        dismissalNote: `Claimed worker ${nickname} (${role}) failed to spawn: ${error instanceof Error ? error.message : String(error)}`,
+      })
+      throw error
+    }
 
     spawnedWorkers.push(worker)
     args.bus.publishWorkerSpawned({
@@ -309,12 +326,6 @@ export function spawnRequestedWorkers(args: {
       role,
       nickname,
       reason,
-    })
-    args.bus.fulfillSpawnRequest({
-      requestId: request.requestId,
-      fulfilledBy: 'supervisor_loop',
-      fulfillmentNote: `Spawned worker ${nickname} (${role}).`,
-      fulfilledWorkerId: worker.workerId,
     })
   }
 

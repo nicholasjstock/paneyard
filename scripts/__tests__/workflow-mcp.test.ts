@@ -137,10 +137,9 @@ describe('workflow-mcp planning helpers', () => {
     })
 
     expect(plan.summary).toContain('phone')
-    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
-    expect(plan.steps[0]?.artifact).toBe('workflow-plan.md')
-    expect(plan.steps[1]?.successCheck).toContain('recorder-report.md')
-    expect(plan.steps[2]?.dependsOnArtifacts).toEqual(['recorder-report.md'])
+    expect(plan.nextStep?.owner).toBe('worker')
+    expect(plan.nextStep?.successCheck).toContain('recorder-report.md')
+    expect(plan.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
   })
 
   test('planWorkflowIteration inserts the narrowest fixer when verifier findings point at frontend-only defects', () => {
@@ -151,18 +150,9 @@ describe('workflow-mcp planning helpers', () => {
       verifierFinding: 'Frontend-only defect: employee phone page fails to render the request state.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual([
-      'orchestrator',
-      'worker',
-      'worker',
-      'worker',
-      'worker',
-      'worker',
-    ])
-    expect(plan.steps[3]?.artifact).toBe('fix-summary.md')
-    expect(plan.steps[3]?.successCheck).toContain('front/**')
-    expect(plan.steps[4]?.dependsOnArtifacts).toEqual(['fix-summary.md'])
-    expect(plan.steps[5]?.dependsOnArtifacts).toEqual(['recorder-report.md'])
+    expect(plan.nextStep?.artifact).toBe('fix-summary.md')
+    expect(plan.nextStep?.successCheck).toContain('front/**')
+    expect(plan.followingSteps.map((step) => step.artifact)).toEqual(['recorder-report.md', 'verifier-report.md'])
   })
 
   test('planWorkflowIteration ignores raw stall context and keeps the baseline route', () => {
@@ -173,7 +163,8 @@ describe('workflow-mcp planning helpers', () => {
       stallFinding: 'Stalled on a frontend-only defect: employee phone page fails to render the request state.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
+    expect(plan.nextStep?.artifact).toBe('recorder-report.md')
+    expect(plan.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
   })
 
   test('planWorkflowIteration does not route infrastructure stalls directly', () => {
@@ -185,7 +176,8 @@ describe('workflow-mcp planning helpers', () => {
         'Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
+    expect(plan.nextStep?.artifact).toBe('recorder-report.md')
+    expect(plan.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
   })
 
   test('planWorkflowIteration does not route unmatched stall blockers directly', () => {
@@ -196,10 +188,11 @@ describe('workflow-mcp planning helpers', () => {
       stallFinding: 'Unhandled worker startup error: the orchestrator can no longer classify this blocker.',
     })
 
-    expect(plan.steps.map((step) => step.owner)).toEqual(['orchestrator', 'worker', 'worker'])
+    expect(plan.nextStep?.artifact).toBe('recorder-report.md')
+    expect(plan.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
   })
 
-  test('publishPlannerJobs converts planner steps into spawn requests', () => {
+  test('publishPlannerJobs converts the planner nextStep into a spawn request', () => {
     const bus = {
       requests: [] as Array<{ requestedRole: string; scope: string; text: string }>,
       appendSpawnRequest(args: {
@@ -234,15 +227,28 @@ describe('workflow-mcp planning helpers', () => {
       plan,
     })
 
-    expect(jobs.map((job) => job.step.owner)).toEqual(['worker', 'worker'])
-    expect(bus.requests.map((request) => request.requestedRole)).toEqual([
-      'worker',
-      'worker',
-    ])
-    expect(bus.requests.map((request) => request.scope)).toEqual([
-      'recorder-report.md',
-      'verifier-report.md',
-    ])
+    expect(jobs.map((job) => job.step.owner)).toEqual(['worker'])
+    expect(bus.requests.map((request) => request.requestedRole)).toEqual(['worker'])
+    expect(bus.requests.map((request) => request.scope)).toEqual(['recorder-report.md'])
+  })
+
+  test('publishPlannerJobs publishes nothing when nextStep is null', () => {
+    const bus = {
+      requests: [] as Array<{ requestedRole: string; scope: string; text: string }>,
+      appendSpawnRequest(args: { requestedRole: string; scope: string; text: string }) {
+        this.requests.push(args)
+        return { requestId: `${this.requests.length}` }
+      },
+    }
+
+    const jobs = publishPlannerJobs(bus, {
+      runId: 'demo-4b',
+      summary: 'Nothing to do.',
+      plan: { summary: 'Nothing to do.', nextStep: null, followingSteps: [] },
+    })
+
+    expect(jobs).toEqual([])
+    expect(bus.requests).toEqual([])
   })
 
   test('queueLongPhoneDemoPlannerJob creates a blocking planner seed request for the long phone demo video', () => {
@@ -255,7 +261,6 @@ describe('workflow-mcp planning helpers', () => {
       requestedRole: string
       priority?: 'advisory' | 'blocking'
       tags?: string[]
-      dependsOn?: string[]
     }> = []
 
     const request = queueLongPhoneDemoPlannerJob(
@@ -278,7 +283,6 @@ describe('workflow-mcp planning helpers', () => {
             fulfillmentNote: null,
             fulfilledWorkerId: null,
             tags: args.tags ?? [],
-            dependsOn: args.dependsOn ?? [],
           }
         },
       },
@@ -309,7 +313,6 @@ describe('workflow-mcp planning helpers', () => {
       scope: string
       text: string
       requestedRole: string
-      dependsOn: string[]
       status: 'open' | 'fulfilled' | 'dismissed'
     }> = []
     let nextId = 1
@@ -322,7 +325,6 @@ describe('workflow-mcp planning helpers', () => {
         scope: string
         text: string
         requestedRole: string
-        dependsOn?: string[]
       }) {
         const requestId = `req-${nextId}`
         nextId += 1
@@ -333,7 +335,6 @@ describe('workflow-mcp planning helpers', () => {
           scope: args.scope,
           text: args.text,
           requestedRole: args.requestedRole,
-          dependsOn: args.dependsOn ?? [],
           status: 'open',
         })
         return { requestId }
@@ -353,65 +354,6 @@ describe('workflow-mcp planning helpers', () => {
     }
   }
 
-  test('publishPlannerJobs resolves dependsOnArtifacts to requestIds within the same batch', () => {
-    const bus = createDependencyTestBus()
-
-    const jobs = publishPlannerJobs(bus, {
-      runId: 'demo-5',
-      summary: 'Repair the recording loop.',
-      plan: {
-        summary: 'Repair the recording loop.',
-        steps: [
-          { owner: 'worker', artifact: 'colima-status.md', successCheck: 'colima is running' },
-          {
-            owner: 'worker',
-            artifact: 'recorder-report.md',
-            successCheck: 'recording succeeds',
-            dependsOnArtifacts: ['colima-status.md'],
-          },
-        ],
-      },
-    })
-
-    const infraJob = jobs.find((job) => job.step.artifact === 'colima-status.md')
-    const recorderRequest = bus.requests.find((request) => request.scope === 'recorder-report.md')
-
-    expect(infraJob).toBeDefined()
-    expect(recorderRequest?.dependsOn).toEqual([infraJob?.requestId])
-  })
-
-  test('publishPlannerJobs resolves dependsOnArtifacts against a request already on the bus from an earlier call', () => {
-    const bus = createDependencyTestBus()
-    bus.appendSpawnRequest({
-      runId: 'demo-6',
-      askedBy: 'planner',
-      scope: 'colima-status.md',
-      text: 'colima is running',
-      requestedRole: 'worker',
-    })
-
-    publishPlannerJobs(bus, {
-      runId: 'demo-6',
-      summary: 'Retry the recording after the infra fix.',
-      plan: {
-        summary: 'Retry the recording after the infra fix.',
-        steps: [
-          {
-            owner: 'worker',
-            artifact: 'recorder-report.md',
-            successCheck: 'recording succeeds',
-            dependsOnArtifacts: ['colima-status.md'],
-          },
-        ],
-      },
-    })
-
-    const infraRequest = bus.requests.find((request) => request.scope === 'colima-status.md')
-    const recorderRequest = bus.requests.find((request) => request.scope === 'recorder-report.md')
-
-    expect(recorderRequest?.dependsOn).toEqual([infraRequest?.requestId])
-  })
-
   test('publishPlannerJobs does not re-request a step whose earlier identical request was already fulfilled', () => {
     const bus = createDependencyTestBus()
 
@@ -420,7 +362,7 @@ describe('workflow-mcp planning helpers', () => {
     const firstJobs = publishPlannerJobs(bus, {
       runId: 'demo-7',
       summary: 'Record the demo.',
-      plan: { summary: 'Record the demo.', steps: [step] },
+      plan: { summary: 'Record the demo.', nextStep: step, followingSteps: [] },
     })
 
     bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId })
@@ -428,7 +370,7 @@ describe('workflow-mcp planning helpers', () => {
     const secondJobs = publishPlannerJobs(bus, {
       runId: 'demo-7',
       summary: 'Record the demo.',
-      plan: { summary: 'Record the demo.', steps: [step] },
+      plan: { summary: 'Record the demo.', nextStep: step, followingSteps: [] },
     })
 
     expect(secondJobs[0]?.requestId).toBe(firstJobs[0]?.requestId)
@@ -499,7 +441,7 @@ describe('workflow-mcp planning helpers', () => {
       tickCount: 2,
       lastPlanSummary: 'Latest planner summary.',
       pendingSpawnKeys: ['["demo-2026-07-03","worker","recorder-report.md"]'],
-      recommendedNextSteps: [],
+      followingSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: '2026-07-03T12:00:00.000Z',
     }
@@ -525,7 +467,7 @@ describe('workflow-mcp planning helpers', () => {
       tickCount: 0,
       lastPlanSummary: null,
       pendingSpawnKeys: [],
-      recommendedNextSteps: [],
+      followingSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: null,
     })
@@ -545,7 +487,7 @@ describe('workflow-mcp planning helpers', () => {
       tickCount: 1,
       lastPlanSummary: 'First tick summary.',
       pendingSpawnKeys: [],
-      recommendedNextSteps: [],
+      followingSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: '2026-07-03T12:00:00.000Z',
     }
@@ -579,7 +521,7 @@ describe('workflow-mcp planning helpers', () => {
       tickCount,
       lastPlanSummary: `Tick ${tickCount} summary.`,
       pendingSpawnKeys: [],
-      recommendedNextSteps: [],
+      followingSteps: [],
       lastStallFinding: null,
       lastUpdatedAt: `2026-07-03T12:0${tickCount}:00.000Z`,
     })

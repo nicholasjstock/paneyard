@@ -64,8 +64,7 @@ describe('orchestrator integration', () => {
       now: new Date('2026-07-02T10:05:00.000Z'),
     })
 
-    expect(result.plan.summary).toContain('both')
-    expect(result.plan.steps.map((step) => step.owner)).toEqual(['orchestrator'])
+    expect(result.plan).toBeNull()
     expect(result.jobs).toEqual([])
     expect(bus.listOpenSpawnRequests()).toHaveLength(0)
     expect(runtime.listWorkers({ runId, activeOnly: true })).toEqual([])

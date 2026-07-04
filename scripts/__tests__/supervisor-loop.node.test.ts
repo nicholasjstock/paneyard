@@ -7,7 +7,7 @@ import * as path from 'path'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import { createWorkflowBus } from '../workflow-bus'
-import { createWorkflowWorkerRuntime, type WorkflowManagedRole } from '../workflow-worker-runtime'
+import { createWorkflowWorkerRuntime } from '../workflow-worker-runtime'
 import { createNodeWorkerProcessAdapter } from '../workflow-worker-runtime-node'
 import { resolveLatestPersistedRun, spawnRequestedWorkers } from '../supervisor-loop'
 
@@ -101,7 +101,7 @@ describe('supervisor loop worker spawning', () => {
         spawnWorker(args) {
           spawned.push(args)
           return {
-            workerId: `worker-${spawned.length}`,
+            workerId: args.workerId ?? `worker-${spawned.length}`,
             runId: args.runId,
             role: args.role,
             nickname: args.nickname,
@@ -129,83 +129,130 @@ describe('supervisor loop worker spawning', () => {
     expect(spawned.map((call) => call.nickname)).toEqual(['worker', 'worker-1'])
   })
 
-  test('holds a dependent request until the dependency worker actually stops, not just spawns', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supervisor-loop-deps-'))
+  test('dismisses an open request superseded by an already-active worker claiming the same role/scope, and allows a fresh ask once that claim expires', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supervisor-loop-claim-'))
     tempDirs.push(tempDir)
     const bus = createWorkflowBus({
       storagePath: path.join(tempDir, 'workflow-bus.json'),
     })
-    const runId = 'demo-deps-run'
-
-    const workers: Array<{ workerId: string; role: WorkflowManagedRole; nickname: string; status: 'running' | 'stopped' }> = []
-    let nextWorkerId = 1
+    const runId = 'demo-claim-run'
+    const spawned: Array<{ role: string; scope: string }> = []
+    const activePlannerWorker = {
+      workerId: 'planner-1',
+      runId,
+      role: 'planner' as const,
+      nickname: 'planner',
+      reason: 'Recover the stalled worker.',
+      scope: 'workflow-plan.md',
+      status: 'running' as const,
+      pid: 51000,
+      promptPath: '/tmp/planner.prompt.txt',
+      logPath: '/tmp/planner.log',
+      lastMessagePath: '/tmp/planner.last-message.txt',
+      envPath: '/tmp/planner.env.json',
+      command: 'codex',
+      args: ['exec', '-'],
+      startedAt: '2026-07-02T10:05:00.000Z',
+      stoppedAt: null,
+      stopReason: null,
+    }
+    let plannerStillActive = true
 
     const workerRuntime = {
-      listWorkers(listArgs: { activeOnly?: boolean } = {}) {
-        return workers
-          .filter((worker) => (listArgs.activeOnly ? worker.status === 'running' : true))
-          .map((worker) => ({ ...worker, runId, scope: '', reason: '', pid: 0 })) as any
+      listWorkers(listArgs?: { runId?: string; activeOnly?: boolean }) {
+        if (listArgs?.activeOnly && !plannerStillActive) {
+          return []
+        }
+        return [activePlannerWorker]
       },
-      spawnWorker(spawnArgs: { role: WorkflowManagedRole; nickname: string; scope: string }) {
-        const workerId = `worker-${nextWorkerId}`
-        nextWorkerId += 1
-        workers.push({ workerId, role: spawnArgs.role, nickname: spawnArgs.nickname, status: 'running' })
+      spawnWorker(spawnArgs: { role: string; scope: string; workerId?: string }) {
+        spawned.push({ role: spawnArgs.role, scope: spawnArgs.scope })
         return {
-          workerId,
-          runId,
-          role: spawnArgs.role,
-          nickname: spawnArgs.nickname,
-          reason: '',
-          scope: spawnArgs.scope,
-          status: 'running' as const,
-          pid: 50000 + workers.length,
-          promptPath: '',
-          logPath: '',
-          lastMessagePath: '',
-          envPath: '',
-          command: 'codex',
-          args: [],
-          startedAt: new Date().toISOString(),
-          stoppedAt: null,
-          stopReason: null,
+          ...activePlannerWorker,
+          workerId: spawnArgs.workerId ?? `planner-${spawned.length + 1}`,
+          nickname: `planner-${spawned.length + 1}`,
         }
       },
     }
 
-    const infraRequest = bus.appendSpawnRequest({
+    // A second recovery ask arrives (e.g. a re-triggered stall tick) while
+    // the first recovery planner is still actively running for the exact
+    // same (role, scope).
+    const duplicateRequest = bus.appendSpawnRequest({
       runId,
       askedBy: 'planner',
-      scope: 'colima-status.md',
-      text: 'colima is running',
-      requestedRole: 'worker',
+      scope: 'workflow-plan.md',
+      text: 'Inspect this stalled-worker context (idleForMs=999999) and recover.',
+      requestedRole: 'planner',
       priority: 'blocking',
-      tags: ['worker', 'colima-status.md', 'planner-job'],
+      tags: ['planner', 'workflow-plan.md', 'planner-job'],
     })
-    bus.appendSpawnRequest({
+
+    const firstPassSpawned = spawnRequestedWorkers({ runId, workerRuntime, bus })
+
+    expect(firstPassSpawned).toEqual([])
+    expect(spawned).toEqual([])
+    const dismissed = bus.listSpawnRequests().find((request) => request.requestId === duplicateRequest.requestId)
+    expect(dismissed?.status).toBe('dismissed')
+    expect(dismissed?.dismissalNote).toContain('planner/workflow-plan.md')
+
+    // The original planner claim finishes. A brand new ask for the same
+    // (role, scope) should now be free to spawn — the claim expired with
+    // the worker, it wasn't a permanent block.
+    plannerStillActive = false
+    const freshRequest = bus.appendSpawnRequest({
+      runId,
+      askedBy: 'planner',
+      scope: 'workflow-plan.md',
+      text: 'Inspect this stalled-worker context (idleForMs=1500000) and recover.',
+      requestedRole: 'planner',
+      priority: 'blocking',
+      tags: ['planner', 'workflow-plan.md', 'planner-job'],
+    })
+
+    const secondPassSpawned = spawnRequestedWorkers({ runId, workerRuntime, bus })
+
+    expect(secondPassSpawned).toHaveLength(1)
+    expect(spawned).toEqual([{ role: 'planner', scope: 'workflow-plan.md' }])
+    const fulfilled = bus.listSpawnRequests().find((request) => request.requestId === freshRequest.requestId)
+    expect(fulfilled?.status).toBe('fulfilled')
+  })
+
+  test('rolls back the claim when the worker actually fails to spawn, instead of leaving it fulfilled forever', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supervisor-loop-spawn-failure-'))
+    tempDirs.push(tempDir)
+    const bus = createWorkflowBus({
+      storagePath: path.join(tempDir, 'workflow-bus.json'),
+    })
+    const runId = 'demo-spawn-failure-run'
+
+    const workerRuntime = {
+      listWorkers() {
+        return []
+      },
+      spawnWorker(): never {
+        throw new Error('codex binary not found in PATH')
+      },
+    }
+
+    const request = bus.appendSpawnRequest({
       runId,
       askedBy: 'planner',
       scope: 'recorder-report.md',
-      text: 'recording succeeds after the infra fix',
+      text: 'Run the recorder.',
       requestedRole: 'worker',
       priority: 'blocking',
       tags: ['worker', 'recorder-report.md', 'planner-job'],
-      dependsOn: [infraRequest.requestId],
     })
 
-    const firstTick = spawnRequestedWorkers({ runId, workerRuntime, bus })
-    expect(firstTick.map((worker) => worker.scope)).toEqual(['colima-status.md'])
+    expect(() => spawnRequestedWorkers({ runId, workerRuntime, bus })).toThrow('codex binary not found in PATH')
 
-    // The infra worker was spawned (request marked fulfilled) but is
-    // still running: the dependent must stay blocked on this tick too.
-    const secondTick = spawnRequestedWorkers({ runId, workerRuntime, bus })
-    expect(secondTick).toEqual([])
-
-    // Now the infra worker actually finishes.
-    workers[0].status = 'stopped'
-
-    const thirdTick = spawnRequestedWorkers({ runId, workerRuntime, bus })
-    expect(thirdTick.map((worker) => worker.scope)).toEqual(['recorder-report.md'])
+    const afterFailure = bus.listSpawnRequests().find((entry) => entry.requestId === request.requestId)
+    expect(afterFailure?.status).toBe('dismissed')
+    expect(afterFailure?.dismissalNote).toContain('failed to spawn')
+    expect(afterFailure?.dismissalNote).toContain('codex binary not found in PATH')
   })
+
 })
 
 describe('supervisor loop worker spawning integration', () => {

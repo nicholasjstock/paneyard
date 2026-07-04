@@ -1,14 +1,8 @@
 import {
-  buildPendingSpawnKeys,
-  planWorkflowIteration,
-  publishPlannerJobs,
   type DemoScenario,
   type OrchestratorDecisionState,
-  type PlanWorkflowIterationArgs,
-  type PlanWorkflowIterationResult,
-  type PlannerBusJob,
+  type WorkflowStep,
 } from './workflow-mcp'
-import type { WorkflowBus } from './workflow-bus'
 import type { WorkflowManagedRole, WorkflowWorkerRecord } from './workflow-worker-runtime'
 
 export type WorkerTurnWorkerRuntime = {
@@ -32,41 +26,28 @@ export type WorkerTurnArgs = {
   task: string
   scenario: DemoScenario
   frontendUrl: string
-  bus: Parameters<typeof publishPlannerJobs>[0] & Pick<WorkflowBus, 'listRunStatuses' | 'listSpawnRequests' | 'listUserQuestions'>
-  planner?: (args: PlanWorkflowIterationArgs) => PlanWorkflowIterationResult
   workerRuntime?: WorkerTurnWorkerRuntime
   previousState?: OrchestratorDecisionState
   now?: Date
 }
 
 export type WorkerTurnResult = {
-  plan: PlanWorkflowIterationResult
-  jobs: PlannerBusJob[]
   plannerWorker: WorkflowWorkerRecord | null
   nextState: OrchestratorDecisionState
 }
 
-function buildPlannerPrompt(args: WorkerTurnArgs): string {
+function buildPlannerPrompt(args: WorkerTurnArgs, followingSteps: WorkflowStep[]): string {
   return [
     `Worker ${args.nickname} (role ${args.role}) reported this result for run ${args.runId}, scope ${args.scope}:`,
     args.result,
-    'Inspect the current workflow context and decide whether additional or refined next steps are needed. If so, publish them with planner_turn. If blocked on a user decision, call append_user_question.',
+    `Current followingSteps queue (JSON, decided by the previous planner_turn call): ${JSON.stringify(followingSteps)}`,
+    'Decide the next nextStep (usually the head of that queue, but reconsider it against the reported result) and the new followingSteps, then publish them with planner_turn. If blocked on a user decision, call append_user_question.',
   ].join('\n')
 }
 
 export function runWorkerTurn(args: WorkerTurnArgs): WorkerTurnResult {
-  const planner = args.planner ?? planWorkflowIteration
-  const plan = planner({
-    task: args.task,
-    scenario: args.scenario,
-    frontendUrl: args.frontendUrl,
-    verifierFinding: args.result,
-  })
-  const jobs = publishPlannerJobs(args.bus, {
-    runId: args.runId,
-    summary: plan.summary,
-    plan,
-  })
+  const previousState = args.previousState
+  const followingSteps = previousState?.followingSteps ?? []
 
   const activeWorkers = args.workerRuntime?.listWorkers?.({ runId: args.runId, activeOnly: true }) ?? []
   const plannerAlreadyActive = activeWorkers.some((worker) => worker.role === 'planner')
@@ -79,24 +60,25 @@ export function runWorkerTurn(args: WorkerTurnArgs): WorkerTurnResult {
           nickname: `planner-${args.nickname}-${Date.now()}`,
           reason: `Reasoning follow-up for ${args.nickname}'s reported result.`,
           scope: args.scope,
-          prompt: buildPlannerPrompt(args),
+          prompt: buildPlannerPrompt(args, followingSteps),
         })
       : null
 
-  const previousState = args.previousState
   const nextState: OrchestratorDecisionState = {
     runId: args.runId,
-    // phase / tickCount / lastStallFinding are owned by the orchestrator-turn
-    // decision loop, not by worker_turn — carry them forward untouched so a
-    // worker completion can never clobber orchestrator-observed state.
+    // phase / tickCount / lastPlanSummary / lastStallFinding / followingSteps
+    // are all owned by planner_turn (the sole publisher of decisions) and
+    // orchestrator-turn's stall detection — worker_turn only spawns the
+    // planner and reports what it saw, so it must carry all of this forward
+    // untouched rather than guessing at a new value itself.
     phase: previousState?.phase ?? 'starting',
     tickCount: previousState?.tickCount ?? 0,
     lastStallFinding: previousState?.lastStallFinding ?? null,
-    lastPlanSummary: plan.summary,
-    pendingSpawnKeys: [...new Set([...(previousState?.pendingSpawnKeys ?? []), ...buildPendingSpawnKeys(args.runId, jobs)])],
-    recommendedNextSteps: plan.steps,
+    lastPlanSummary: previousState?.lastPlanSummary ?? null,
+    pendingSpawnKeys: previousState?.pendingSpawnKeys ?? [],
+    followingSteps,
     lastUpdatedAt: (args.now ?? new Date()).toISOString(),
   }
 
-  return { plan, jobs, plannerWorker, nextState }
+  return { plannerWorker, nextState }
 }

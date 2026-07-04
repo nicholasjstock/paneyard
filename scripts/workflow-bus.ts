@@ -25,11 +25,10 @@ export type WorkflowSpawnRequest = {
   // stop, not merely for this request to be marked fulfilled (fulfillment
   // fires at spawn time, before the worker has done any work).
   fulfilledWorkerId: string | null
+  dismissedBy: string | null
+  dismissedAt: string | null
+  dismissalNote: string | null
   tags: string[]
-  // requestIds of other spawn requests (same run) that must be satisfied
-  // before this one may be spawned. See collectSpawnRequests in
-  // supervisor-loop.ts for the enforcement side.
-  dependsOn: string[]
 }
 
 export type WorkflowBusEvent = {
@@ -85,7 +84,6 @@ type AppendSpawnRequestArgs = {
   requestedRole: string
   priority?: WorkflowSpawnRequestPriority
   tags?: string[]
-  dependsOn?: string[]
 }
 
 type AppendUserQuestionArgs = {
@@ -103,6 +101,12 @@ type FulfillSpawnRequestArgs = {
   fulfilledBy: string
   fulfillmentNote: string
   fulfilledWorkerId?: string
+}
+
+type DismissSpawnRequestArgs = {
+  requestId: string
+  dismissedBy: string
+  dismissalNote: string
 }
 
 type PublishRunStatusArgs = {
@@ -165,6 +169,7 @@ export type WorkflowBus = {
   appendSpawnRequest: (args: AppendSpawnRequestArgs) => WorkflowSpawnRequest
   appendUserQuestion: (args: AppendUserQuestionArgs) => WorkflowUserQuestion
   fulfillSpawnRequest: (args: FulfillSpawnRequestArgs) => WorkflowSpawnRequest
+  dismissSpawnRequest: (args: DismissSpawnRequestArgs) => WorkflowSpawnRequest
   listRunStatuses: () => WorkflowRunStatus[]
   listOpenSpawnRequests: () => WorkflowSpawnRequest[]
   listSpawnRequests: () => WorkflowSpawnRequest[]
@@ -195,7 +200,6 @@ function cloneSpawnRequest(request: WorkflowSpawnRequest): WorkflowSpawnRequest 
   return {
     ...request,
     tags: [...request.tags],
-    dependsOn: [...request.dependsOn],
   }
 }
 
@@ -242,8 +246,10 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
         spawnRequests.set(request.requestId, {
           ...request,
           tags: [...(request.tags ?? [])],
-          dependsOn: [...(request.dependsOn ?? [])],
           fulfilledWorkerId: request.fulfilledWorkerId ?? null,
+          dismissedBy: request.dismissedBy ?? null,
+          dismissedAt: request.dismissedAt ?? null,
+          dismissalNote: request.dismissalNote ?? null,
         })
       }
 
@@ -335,8 +341,10 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
         fulfilledAt: null,
         fulfillmentNote: null,
         fulfilledWorkerId: null,
+        dismissedBy: null,
+        dismissedAt: null,
+        dismissalNote: null,
         tags: [...(args.tags ?? [])],
-        dependsOn: [...(args.dependsOn ?? [])],
       }
 
       spawnRequests.set(request.requestId, request)
@@ -348,7 +356,6 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
         priority: request.priority,
         context: request.context,
         tags: request.tags,
-        dependsOn: request.dependsOn,
       })
       persistStateToDisk()
       return cloneSpawnRequest(request)
@@ -398,6 +405,24 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
         fulfilledBy,
         fulfillmentNote,
         fulfilledWorkerId: request.fulfilledWorkerId,
+      })
+      persistStateToDisk()
+      return cloneSpawnRequest(request)
+    },
+
+    dismissSpawnRequest({ requestId, dismissedBy, dismissalNote }) {
+      loadStateFromDisk()
+      const request = spawnRequests.get(requestId)
+      if (!request) throw new Error(`Unknown spawn request: ${requestId}`)
+
+      request.status = 'dismissed'
+      request.dismissedBy = dismissedBy
+      request.dismissedAt = new Date().toISOString()
+      request.dismissalNote = dismissalNote
+      emit('spawn_request.dismissed', {
+        requestId,
+        dismissedBy,
+        dismissalNote,
       })
       persistStateToDisk()
       return cloneSpawnRequest(request)

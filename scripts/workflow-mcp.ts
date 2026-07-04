@@ -11,9 +11,6 @@ export type WorkflowStep = {
   owner: WorkflowStepOwner
   artifact: string
   successCheck: string
-  // artifact names of other steps (in this same plan, or already on the bus
-  // for this run) that must be fulfilled before this step may be spawned.
-  dependsOnArtifacts?: string[]
 }
 
 export type WorkflowContext = {
@@ -43,7 +40,11 @@ export type PlanWorkflowIterationArgs = {
 
 export type PlanWorkflowIterationResult = {
   summary: string
-  steps: WorkflowStep[]
+  // The single step to execute right now. null means nothing to do.
+  nextStep: WorkflowStep | null
+  // Queue for the *next* planner invocation to pick up once nextStep's
+  // worker reports back — never spawned directly, just carried forward.
+  followingSteps: WorkflowStep[]
 }
 
 export type PlannerBusJob = {
@@ -67,7 +68,6 @@ export type PlannerSeedRequest = {
   fulfillmentNote: string | null
   fulfilledWorkerId?: string | null
   tags: string[]
-  dependsOn?: string[]
 }
 
 export type BuildRecordDemoCommandArgs = {
@@ -103,11 +103,10 @@ export type OrchestratorDecisionState = {
   tickCount: number
   lastPlanSummary: string | null
   pendingSpawnKeys: string[]
-  // The most recently decided plan steps for this run, replaced (not
-  // accumulated) each tick. Informational only — dedup against re-publishing
-  // is handled by publishPlannerJobs directly against bus request status, not
-  // by consulting this field.
-  recommendedNextSteps: WorkflowStep[]
+  // The queue of steps still to come after the currently in-flight step.
+  // Handed back to the planner on its next invocation (after a worker_turn
+  // completion, or a stall recovery) so it can pick up where it left off.
+  followingSteps: WorkflowStep[]
   lastStallFinding: string | null
   lastUpdatedAt: string | null
 }
@@ -209,111 +208,57 @@ export function buildWorkflowContext(args: {
 
 export function planWorkflowIteration(args: PlanWorkflowIterationArgs): PlanWorkflowIterationResult {
   const findingText = [args.verifierFinding].filter(Boolean).join('\n').toLowerCase()
-  const steps: WorkflowStep[] = [
-    {
-      owner: 'orchestrator',
-      artifact: 'workflow-plan.md',
-      successCheck: `Defines the next owner, required artifact, and scenario ${args.scenario} before any specialist work begins.`,
-    },
-    {
-      owner: 'worker',
-      artifact: 'recorder-report.md',
-      successCheck: `Runs ${buildRecordDemoCommand({
-        scenario: args.scenario,
-        executionMode: 'docker',
-        frontendUrl: args.frontendUrl,
-      })} and writes recorder-report.md with artifact paths plus exit status.`,
-    },
-    {
-      owner: 'worker',
-      artifact: 'verifier-report.md',
-      successCheck: 'Confirms visible UI state transitions and cites positive evidence from generated artifacts.',
-      dependsOnArtifacts: ['recorder-report.md'],
-    },
-  ]
+  const recordStep: WorkflowStep = {
+    owner: 'worker',
+    artifact: 'recorder-report.md',
+    successCheck: `Runs ${buildRecordDemoCommand({
+      scenario: args.scenario,
+      executionMode: 'docker',
+      frontendUrl: args.frontendUrl,
+    })} and writes recorder-report.md with artifact paths plus exit status.`,
+  }
+  const verifyStep: WorkflowStep = {
+    owner: 'worker',
+    artifact: 'verifier-report.md',
+    successCheck: 'Confirms visible UI state transitions and cites positive evidence from generated artifacts.',
+  }
 
+  let fixStep: WorkflowStep | null = null
   if (findingText.includes('frontend')) {
-    steps.push({
+    fixStep = {
       owner: 'worker',
       artifact: 'fix-summary.md',
       successCheck: 'Adds or updates the preferred frontend test first, then lands the narrowest front/** fix.',
-    })
-    steps.push({
-      owner: 'worker',
-      artifact: 'recorder-report.md',
-      successCheck: 'Re-runs the recording flow after the frontend fix.',
-      dependsOnArtifacts: ['fix-summary.md'],
-    })
-    steps.push({
-      owner: 'worker',
-      artifact: 'verifier-report.md',
-      successCheck: 'Verifies the latest artifacts support success after the frontend fix.',
-      dependsOnArtifacts: ['recorder-report.md'],
-    })
+    }
   } else if (findingText.includes('backend')) {
-    steps.push({
+    fixStep = {
       owner: 'worker',
       artifact: 'fix-summary.md',
       successCheck: 'Adds or updates a failing request spec first, then lands the narrowest back/** fix.',
-    })
-    steps.push({
-      owner: 'worker',
-      artifact: 'recorder-report.md',
-      successCheck: 'Re-runs the recording flow after the backend fix.',
-      dependsOnArtifacts: ['fix-summary.md'],
-    })
-    steps.push({
-      owner: 'worker',
-      artifact: 'verifier-report.md',
-      successCheck: 'Verifies the latest artifacts support success after the backend fix.',
-      dependsOnArtifacts: ['recorder-report.md'],
-    })
+    }
   } else if (
     findingText.includes('playwright') ||
     findingText.includes('docker') ||
     findingText.includes('infrastructure') ||
     findingText.includes('toolchain')
   ) {
-    steps.push({
+    fixStep = {
       owner: 'worker',
       artifact: 'fix-summary.md',
       successCheck: 'Adds or updates the preferred infrastructure test first, then lands the narrowest repo-local toolchain or environment fix.',
-    })
-    steps.push({
-      owner: 'worker',
-      artifact: 'recorder-report.md',
-      successCheck: 'Re-runs the recording flow after the infrastructure fix.',
-      dependsOnArtifacts: ['fix-summary.md'],
-    })
-    steps.push({
-      owner: 'worker',
-      artifact: 'verifier-report.md',
-      successCheck: 'Verifies the latest artifacts support success after the infrastructure fix.',
-      dependsOnArtifacts: ['recorder-report.md'],
-    })
+    }
   } else if (findingText.trim().length > 0) {
-    steps.push({
+    fixStep = {
       owner: 'worker',
       artifact: 'fix-summary.md',
       successCheck: 'Adds or updates the narrowest repo-wide regression test first, then lands the smallest general-purpose fix.',
-    })
-    steps.push({
-      owner: 'worker',
-      artifact: 'recorder-report.md',
-      successCheck: 'Re-runs the recording flow after the general fix.',
-      dependsOnArtifacts: ['fix-summary.md'],
-    })
-    steps.push({
-      owner: 'worker',
-      artifact: 'verifier-report.md',
-      successCheck: 'Verifies the latest artifacts support success after the general fix.',
-      dependsOnArtifacts: ['recorder-report.md'],
-    })
+    }
   }
 
   return {
     summary: `${args.task} for the ${args.scenario} scenario against ${args.frontendUrl}.`,
-    steps,
+    nextStep: fixStep ?? recordStep,
+    followingSteps: fixStep ? [recordStep, verifyStep] : [verifyStep],
   }
 }
 
@@ -322,50 +267,18 @@ export function buildStalledWorkerRecoveryPlan(args: {
   scenario: DemoScenario
   frontendUrl: string
   stallFinding: string
+  followingSteps: WorkflowStep[]
 }): PlanWorkflowIterationResult {
   const summarizedFinding = args.stallFinding.replace(/\s+/g, ' ').trim()
 
   return {
     summary: `${args.task} for the ${args.scenario} scenario against ${args.frontendUrl}. Recover the stalled worker via planner. ${summarizedFinding}`,
-    steps: [
-      {
-        owner: 'orchestrator',
-        artifact: 'workflow-plan.md',
-        successCheck: 'Captures the stalled-worker context and requests a bounded planner recovery handoff.',
-      },
-      {
-        owner: 'planner',
-        artifact: 'workflow-plan.md',
-        successCheck: `Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: ${summarizedFinding}`,
-      },
-    ],
-  }
-}
-
-export function buildWaitingPlan(args: {
-  task: string
-  scenario: DemoScenario
-  frontendUrl: string
-  activeWorkers: number
-  openSpawnRequests: number
-}): PlanWorkflowIterationResult {
-  const statusSummary =
-    args.activeWorkers === 0 && args.openSpawnRequests === 0
-      ? 'No active workers or open spawn requests; remain idle until a new request arrives.'
-      : `Waiting on ${args.activeWorkers} active workers and ${args.openSpawnRequests} open spawn requests.`
-
-  return {
-    summary: `${args.task} for the ${args.scenario} scenario against ${args.frontendUrl}. ${statusSummary}`,
-    steps: [
-      {
-        owner: 'orchestrator',
-        artifact: 'workflow-plan.md',
-        successCheck:
-          args.activeWorkers === 0 && args.openSpawnRequests === 0
-            ? 'Records that the run is idle and needs no automatic restart or new handoff.'
-            : 'Records that the run already has active work in flight and needs no new handoff yet.',
-      },
-    ],
+    nextStep: {
+      owner: 'planner',
+      artifact: 'workflow-plan.md',
+      successCheck: `Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: ${summarizedFinding}`,
+    },
+    followingSteps: args.followingSteps,
   }
 }
 
@@ -380,7 +293,6 @@ export function queueLongPhoneDemoPlannerJob(
       requestedRole: string
       priority?: 'advisory' | 'blocking'
       tags?: string[]
-      dependsOn?: string[]
     }) => PlannerSeedRequest
   },
   args: {
@@ -423,7 +335,6 @@ export function publishPlannerJobs(
       requestedRole: string
       priority?: 'advisory' | 'blocking'
       tags?: string[]
-      dependsOn?: string[]
     }) => { requestId: string }
     listSpawnRequests?: () => Array<{
       requestId: string
@@ -441,67 +352,45 @@ export function publishPlannerJobs(
     plan: PlanWorkflowIterationResult
   }
 ): PlannerBusJob[] {
-  // Seed artifact -> requestId from anything already on the bus for this run
-  // (any status) so a step can depend on an artifact requested in an earlier
-  // planner_turn call, not just one in this same batch.
-  const requestIdByArtifact = new Map<string, string>()
-  for (const existing of bus.listSpawnRequests?.() ?? []) {
-    if (existing.runId === args.runId) {
-      requestIdByArtifact.set(existing.scope, existing.requestId)
-    }
+  const step = args.plan.nextStep
+  if (!step || step.owner === 'orchestrator') {
+    return []
   }
 
-  return args.plan.steps
-    .filter((step) => step.owner !== 'orchestrator')
-    .map((step) => {
-      const existingRequest = bus
-        .listSpawnRequests?.()
-        .find(
-          (request) =>
-            // 'open' or 'fulfilled' both count as "already asked, identically" —
-            // a fulfilled request means the work already happened, so it must
-            // not be re-requested just because a later worker_turn call
-            // re-derives the same plan from scratch. Only 'dismissed' requests
-            // are treated as no longer representing this decision.
-            request.status !== 'dismissed' &&
-            request.askedBy === 'planner' &&
-            request.runId === args.runId &&
-            request.requestedRole === step.owner &&
-            request.scope === step.artifact &&
-            request.text === step.successCheck
-        )
+  // 'open' or 'fulfilled' both count as "already asked for this artifact" —
+  // a fulfilled request means the work already happened, so it must not be
+  // re-requested just because this is called again for the same run. Only
+  // 'dismissed' requests are treated as no longer representing this
+  // decision. Matched on (runId, role, scope) only — not on the free-text
+  // successCheck, which can vary call to call without the underlying ask
+  // actually being different.
+  const existingRequest = bus
+    .listSpawnRequests?.()
+    .find(
+      (request) =>
+        request.status !== 'dismissed' &&
+        request.askedBy === 'planner' &&
+        request.runId === args.runId &&
+        request.requestedRole === step.owner &&
+        request.scope === step.artifact
+    )
 
-      if (existingRequest) {
-        requestIdByArtifact.set(step.artifact, existingRequest.requestId)
-        return {
-          step,
-          requestId: existingRequest.requestId,
-        }
-      }
+  if (existingRequest) {
+    return [{ step, requestId: existingRequest.requestId }]
+  }
 
-      const dependsOn = (step.dependsOnArtifacts ?? [])
-        .map((artifact) => requestIdByArtifact.get(artifact))
-        .filter((requestId): requestId is string => Boolean(requestId))
+  const request = bus.appendSpawnRequest({
+    runId: args.runId,
+    askedBy: 'planner',
+    scope: step.artifact,
+    text: step.successCheck,
+    context: args.summary,
+    requestedRole: step.owner,
+    priority: 'blocking',
+    tags: [step.owner, step.artifact, 'planner-job'],
+  })
 
-      const request = bus.appendSpawnRequest({
-        runId: args.runId,
-        askedBy: 'planner',
-        scope: step.artifact,
-        text: step.successCheck,
-        context: args.summary,
-        requestedRole: step.owner,
-        priority: 'blocking',
-        tags: [step.owner, step.artifact, 'planner-job'],
-        dependsOn,
-      })
-
-      requestIdByArtifact.set(step.artifact, request.requestId)
-
-      return {
-        step,
-        requestId: request.requestId,
-      }
-    })
+  return [{ step, requestId: request.requestId }]
 }
 
 export function buildRecordDemoCommand(args: BuildRecordDemoCommandArgs): string {
@@ -541,7 +430,7 @@ function buildDefaultOrchestratorState(runId: string): OrchestratorDecisionState
     tickCount: 0,
     lastPlanSummary: null,
     pendingSpawnKeys: [],
-    recommendedNextSteps: [],
+    followingSteps: [],
     lastStallFinding: null,
     lastUpdatedAt: null,
   }
@@ -673,8 +562,8 @@ export function readOrchestratorState(
       pendingSpawnKeys: Array.isArray(parsed.pendingSpawnKeys)
         ? parsed.pendingSpawnKeys.filter((entry): entry is string => typeof entry === 'string')
         : [],
-      recommendedNextSteps: Array.isArray(parsed.recommendedNextSteps)
-        ? parsed.recommendedNextSteps.filter(isWorkflowStep)
+      followingSteps: Array.isArray(parsed.followingSteps)
+        ? parsed.followingSteps.filter(isWorkflowStep)
         : [],
       lastStallFinding: parsed.lastStallFinding ?? null,
       lastUpdatedAt: parsed.lastUpdatedAt ?? null,

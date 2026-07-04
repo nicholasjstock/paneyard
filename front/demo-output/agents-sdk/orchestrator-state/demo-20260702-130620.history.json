@@ -453,5 +453,325 @@
     ],
     "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=183962046 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=183962046; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
     "lastUpdatedAt": "2026-07-04T13:06:02.047Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 29,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=188587291 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=188587291; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=188587291 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=188587291; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=188587291 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=188587291; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:23:07.292Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 30,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=188677674 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=188677674; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=188677674 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=188677674; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=188677674 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=188677674; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:24:37.675Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 31,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=188746433 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=188746433; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=188746433 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=188746433; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=188746433 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=188746433; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:25:46.434Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 32,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=189314468 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=189314468; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=189314468 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=189314468; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=189314468 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=189314468; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:35:14.469Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 33,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=189381585 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=189381585; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=189381585 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=189381585; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=189381585 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=189381585; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:36:21.587Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 34,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190015796 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190015796; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190015796 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190015796; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190015796 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190015796; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:46:55.797Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 35,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190144707 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190144707; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190144707 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190144707; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190144707 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190144707; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:49:04.708Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 36,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190198150 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190198150; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190198150 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190198150; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190198150 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190198150; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T14:49:58.151Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 37,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190826230 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190826230; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190826230 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190826230; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=190826230 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=190826230; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T15:00:26.233Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 38,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=192529260 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=192529260; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "recommendedNextSteps": [
+      {
+        "owner": "orchestrator",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Captures the stalled-worker context and requests a bounded planner recovery handoff."
+      },
+      {
+        "owner": "planner",
+        "artifact": "workflow-plan.md",
+        "successCheck": "Inspect this stalled-worker context, determine the next bounded recovery handoff, and publish it with planner_turn: Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=192529260 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=192529260; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z"
+      }
+    ],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=192529260 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=192529260; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T15:28:49.261Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 39,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=194784154 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=194784154; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "followingSteps": [],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=194784154 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=194784154; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T16:06:24.155Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 40,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=194844573 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=194844573; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "followingSteps": [],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=194844573 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=194844573; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T16:07:24.574Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 41,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=194997476 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=194997476; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "followingSteps": [],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=194997476 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=194997476; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T16:09:57.477Z"
+  },
+  {
+    "runId": "demo-20260702-130620",
+    "phase": "stalled",
+    "tickCount": 42,
+    "lastPlanSummary": "Repair the demo recording loop for the both scenario against http://localhost:5174. Recover the stalled worker via planner. Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=195021168 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=195021168; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "pendingSpawnKeys": [
+      "[\"demo-20260702-130620\",\"demo_recorder\",\"recorder-report.md\"]",
+      "[\"demo-20260702-130620\",\"demo_verifier\",\"verifier-report.md\"]",
+      "[\"demo-20260702-130620\",\"infra_fixer\",\"fix-summary.md\"]",
+      "[\"demo-20260702-130620\",\"planner\",\"workflow-plan.md\"]"
+    ],
+    "followingSteps": [],
+    "lastStallFinding": "Stalled worker front-fixer (worker) | runId=demo-20260702-130620 | idleForMs=195021168 | scope=fix-summary.md | reason=Docker Playwright version mismatch: the recording image ships Playwright 1.58.2 while the project depends on Playwright 1.61.1. | evidence=worker=front-fixer; role=worker; idleForMs=195021168; log mtime=2026-07-02T10:00:00.000Z; last-message mtime=2026-07-02T10:00:00.000Z; prompt mtime=2026-07-02T10:00:00.000Z",
+    "lastUpdatedAt": "2026-07-04T16:10:21.169Z"
   }
 ]

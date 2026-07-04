@@ -24,36 +24,35 @@ function makeBus() {
 }
 
 describe('planner turn', () => {
-  test('publishes one spawn request per decided step', () => {
+  test('publishes a spawn request for nextStep and carries followingSteps into state', () => {
     const bus = makeBus()
 
     const result = runPlannerTurn({
       runId: 'run-1',
       summary: 'Frontend button unresponsive; route to a scoped fix, then re-verify.',
-      steps: [
-        { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Button responds to taps on the phone view.' },
-        { owner: 'worker', artifact: 'verifier-report.md', successCheck: 'Confirms the button now responds.' },
-      ],
+      nextStep: { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Button responds to taps on the phone view.' },
+      followingSteps: [{ owner: 'worker', artifact: 'verifier-report.md', successCheck: 'Confirms the button now responds.' }],
       bus,
     })
 
-    expect(result.jobs.map((job) => job.step.owner)).toEqual(['worker', 'worker'])
+    expect(result.jobs.map((job) => job.step.owner)).toEqual(['worker'])
+    expect(result.jobs.map((job) => job.step.artifact)).toEqual(['fix-summary.md'])
+    expect(result.nextState.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
 
     const openRequests = bus.listOpenSpawnRequests()
-    expect(openRequests.map((request) => request.requestedRole)).toEqual(['worker', 'worker'])
-    for (const request of openRequests) {
-      expect(request.askedBy).toBe('planner')
-      expect(request.status).toBe('open')
-    }
+    expect(openRequests.map((request) => request.requestedRole)).toEqual(['worker'])
+    expect(openRequests[0]?.askedBy).toBe('planner')
+    expect(openRequests[0]?.status).toBe('open')
   })
 
-  test('a single-step decision publishes exactly one bus entry', () => {
+  test('a nextStep decision publishes exactly one bus entry', () => {
     const bus = makeBus()
 
     const result = runPlannerTurn({
       runId: 'run-2',
       summary: 'Infra fix needed.',
-      steps: [{ owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Docker image matches Playwright version.' }],
+      nextStep: { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Docker image matches Playwright version.' },
+      followingSteps: [],
       bus,
     })
 
@@ -61,26 +60,29 @@ describe('planner turn', () => {
     expect(bus.listOpenSpawnRequests()).toHaveLength(1)
   })
 
-  test('an empty steps array publishes nothing', () => {
+  test('a null nextStep publishes nothing', () => {
     const bus = makeBus()
 
     const result = runPlannerTurn({
       runId: 'run-3',
       summary: 'No further action needed.',
-      steps: [],
+      nextStep: null,
+      followingSteps: [],
       bus,
     })
 
     expect(result.jobs).toEqual([])
     expect(bus.listOpenSpawnRequests()).toEqual([])
+    expect(result.nextState.followingSteps).toEqual([])
   })
 
-  test('is idempotent across repeated calls for the same run and steps', () => {
+  test('is idempotent across repeated calls for the same run and nextStep', () => {
     const bus = makeBus()
     const args = {
       runId: 'run-4',
       summary: 'Frontend button unresponsive; route to a scoped fix.',
-      steps: [{ owner: 'worker' as const, artifact: 'fix-summary.md', successCheck: 'Button responds to taps.' }],
+      nextStep: { owner: 'worker' as const, artifact: 'fix-summary.md', successCheck: 'Button responds to taps.' },
+      followingSteps: [],
       bus,
     }
 
@@ -89,5 +91,33 @@ describe('planner turn', () => {
 
     expect(second.jobs.map((job) => job.requestId)).toEqual(first.jobs.map((job) => job.requestId))
     expect(bus.listOpenSpawnRequests()).toHaveLength(1)
+  })
+
+  test('carries pendingSpawnKeys and tickCount forward from previousState', () => {
+    const bus = makeBus()
+
+    const result = runPlannerTurn({
+      runId: 'run-5',
+      summary: 'Recover the stalled worker.',
+      nextStep: { owner: 'planner', artifact: 'workflow-plan.md', successCheck: 'Decide the recovery step.' },
+      followingSteps: [{ owner: 'worker', artifact: 'verifier-report.md', successCheck: 'Confirms the flow.' }],
+      bus,
+      previousState: {
+        runId: 'run-5',
+        phase: 'stalled',
+        tickCount: 3,
+        lastPlanSummary: 'old summary',
+        pendingSpawnKeys: ['existing-key'],
+        followingSteps: [],
+        lastStallFinding: 'old finding',
+        lastUpdatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    })
+
+    expect(result.nextState.tickCount).toBe(4)
+    expect(result.nextState.pendingSpawnKeys).toContain('existing-key')
+    expect(result.nextState.phase).toBe('planning')
+    expect(result.nextState.lastStallFinding).toBe('old finding')
+    expect(result.nextState.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
   })
 })
