@@ -270,6 +270,14 @@ function createPersistentWorkflowBus(options: WorkflowBusOptions = {}): Workflow
           priority: question.priority ?? 'advisory',
           status: question.status ?? 'open',
           tags: [...(question.tags ?? [])],
+          // Records persisted before answeredBy/answeredAt/answerText existed
+          // lack these keys entirely (undefined, not null) — the MCP output
+          // schema requires them present as string | null, so an unmigrated
+          // record fails validation the moment it's returned by
+          // list_user_questions/list_open_user_questions.
+          answeredBy: question.answeredBy ?? null,
+          answeredAt: question.answeredAt ?? null,
+          answerText: question.answerText ?? null,
         })
       }
 

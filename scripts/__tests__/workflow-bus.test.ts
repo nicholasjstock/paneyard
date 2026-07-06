@@ -226,4 +226,43 @@ describe('workflow bus', () => {
       })
     ).toThrow('Unknown user question: does-not-exist')
   })
+
+  test('hydrates a pre-answeredBy persisted question with null defaults instead of leaving the keys undefined', () => {
+    // Records written before answeredBy/answeredAt/answerText existed on the
+    // bus's persisted JSON lack those keys entirely. The MCP output schema
+    // for list_user_questions/list_open_user_questions requires them present
+    // as string | null, so an unmigrated record used to fail schema
+    // validation the moment it was returned by either tool.
+    const fileSystem = createMemoryFs()
+    fileSystem.writeFileSync(
+      '/virtual/workflow-bus.json',
+      JSON.stringify({
+        spawnRequests: [],
+        userQuestions: [
+          {
+            questionId: 'legacy-question',
+            runId: 'legacy-run',
+            askedBy: 'worker',
+            askedAt: '2026-07-04T09:39:40.898Z',
+            scope: 'recorder-report.md',
+            text: 'Pre-migration question with no answeredBy/answeredAt/answerText keys.',
+            context: null,
+            priority: 'blocking',
+            status: 'open',
+            tags: ['recording'],
+          },
+        ],
+        events: [],
+        runStatuses: [],
+      })
+    )
+
+    const bus = createWorkflowBus({ storagePath: '/virtual/workflow-bus.json', fileSystem })
+
+    for (const question of [bus.listUserQuestions()[0], bus.listOpenUserQuestions()[0]]) {
+      expect(question?.answeredBy).toBeNull()
+      expect(question?.answeredAt).toBeNull()
+      expect(question?.answerText).toBeNull()
+    }
+  })
 })

@@ -412,6 +412,18 @@ async function main(): Promise<number> {
       ].join(' | ') + '\n'
     )
 
+    // Once a planner has explicitly decided nextStep: null, phase is
+    // durably 'completed' (see runPlannerTurn) and every future tick would
+    // otherwise just re-run runOrchestratorTurn forever with nothing left to
+    // do — or worse, if some other in-flight tick's dead-end detection fires
+    // a redundant recovery planner before this check runs, ticking further
+    // only gives that redundant work more chances to compound. Stop here
+    // rather than looping until someone notices and sends SIGINT/SIGTERM.
+    if (persistedState.phase === 'completed') {
+      process.stdout.write(`Run ${runId} reached phase=completed; stopping supervisor loop.\n`)
+      break
+    }
+
     if (options.once || !keepRunning) {
       break
     }

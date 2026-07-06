@@ -1,3 +1,40 @@
+# Handoff — 2026-07-06 session
+
+## What this session did
+
+Ran a real, live, hands-off orchestrator test against `simple-retail-planner/main`: seeded a generic "record the phone demo, verify it, fix anything found" task and let the supervisor loop run unattended, specifically to see whether it could find and fix a real UI bug (a link that isn't styled/underlined as expected) with zero hints about where the bug is.
+
+**What worked**: the orchestrator autonomously diagnosed a real infra problem (a stale, >1-day-old Rails process squatting on port 3000), fixed it, and successfully recorded a real 183-second phone demo — all without any hints from me. A verifier worker reviewed the recording and reported PASS.
+
+**Where it fell short**: the verifier's checklist only checked "is this non-black, does it show progressive UI," never link/button styling, so it declared the demo done without ever hitting the underline issue. A follow-up run that explicitly pointed a planner at the existing recording plus this repo's own QA checklist (`.claude/agents/troubleshooting.md`'s "blue underlined link?" check) hung for 10+ minutes with zero output (see "Open, unresolved problem" below) — **the underline bug itself is still unfixed.**
+
+Two real orchestrator bugs were found and fixed along the way (both merged into this session's work, full suite 131/131 green, `tsc --noEmit` clean):
+
+1. **Supervisor loop never stopped once a run was actually done** (`scripts/supervisor-loop.ts`). The `while (keepRunning)` tick loop had no check at all for `phase === 'completed'` — so even in the fully-correct case (a planner legitimately decides `nextStep: null`), the loop would keep ticking forever. Observed live: 11 consecutive redundant recovery-planner spawns after the real task was already done, `tickCount` climbing past 388, only stopped by manually killing the process. Fixed by breaking out of the loop as soon as persisted `phase === 'completed'`.
+2. **`list_user_questions` / `list_open_user_questions` crashed with an MCP output-schema validation error** (`scripts/workflow-bus.ts`). Any `WorkflowUserQuestion` persisted before the `answeredBy`/`answeredAt`/`answerText` fields existed (i.e. anything from before commit `37cbb83`) hydrates from disk with those keys `undefined`, not `null` — but the MCP output schema requires them present as `string | null`. Fixed by defaulting the three fields to `null` on load, matching the pattern already used for spawn-request fields. Regression test added reproducing the exact legacy-record shape.
+
+## Open, unresolved problem: the hang mystery, now confirmed on the planner role too
+
+This extends the same "actual recorder hang" problem flagged as unresolved in the 2026-07-04 session below — new evidence this session broadens it beyond the worker role.
+
+**What happened**: after the first run's verifier passed without checking link styling, I seeded a second, narrower run asking a planner to re-examine the already-recorded frames against the repo's own QA checklist and fix any styling defect found. That planner (`claude --agent planner --permission-mode bypassPermissions -p -- <prompt>`) ran for **10.5+ minutes with zero output** — no `[STATUS]` line, no partial `workflow-plan.md`, not even the artifact directory created — before I killed it. `ps` showed it alive the whole time (`STAT=SNs`) but with negligible cumulative CPU (0.4–1.8% over 10+ minutes), i.e. it looks I/O/network-bound, not spinning.
+
+**How this differs from / relates to the 2026-07-04 case**:
+- The July 4 hang was on the **worker** role, doing a plain shell-command task (`bin/record_demo`) with **no image/multimodal content** in its prompt. The identically-invoked **planner** role worked fine 7 times in that same run — which is why the original theory leaned toward something worker-specific (MCP tool-set differences, or `/record-demo` skill loading).
+- This session's hang was on the **planner** role — the role that was previously reliable. That weakens the "it's a worker-specific MCP handshake issue" theory, since the same failure mode now shows up on the other role.
+- The one thing genuinely new and different about this planner's task, versus every other planner turn that succeeded quickly (1–4 min) in the same session: this was the first turn asked to **read multiple image files** (`frame_00X.png` stills from the recording) as part of a stricter visual QA pass, rather than just reasoning over text artifacts and bus state. That's a new, untested candidate theory: something about multimodal image-reading tool calls (not the role, not `/record-demo` specifically) may be the actual trigger.
+
+**Still genuinely undiagnosed** — nobody has isolated the actual root cause. Candidate theories, most-to-least likely given this session's evidence:
+1. **Multimodal/image-reading step** (new theory from this session) — the hang correlates with the one turn that required reading several PNGs, not with role or with `/record-demo`/skill loading.
+2. MCP handshake/tool-set issue (original July 4 theory) — weakened but not eliminated, since this could still be an intermittent issue that happened to hit worker once and planner once, unrelated to task content.
+3. `/record-demo` skill loading — effectively ruled out for *this* occurrence, since this planner task never invoked that skill at all.
+
+**Suggested next diagnostic step** (same style as the July 4 suggestion, updated for this session's lead): spawn a bare, trivial prompt that does nothing but ask an agent (either role) to read 2–3 existing PNG files and describe them — no recording, no CSS fix, no other work — and see if *that alone* reproduces the hang. If it does, that isolates multimodal tool calls as the trigger, independent of role. If it doesn't, the image-reading theory is wrong and whatever's left in common between the two occurrences (both were real `claude -p --agent <role>` subprocess launches under this same launcher code path) becomes the next thing to narrow down.
+
+Archived forensic state for this session's two runs (worker/planner logs, prompts, last-messages, bus state, orchestrator-state history) is at `.smoke-logs/underline-live-test-20260706/` and `.smoke-logs/underline-live-test-20260706-v2/` (gitignored, still on disk).
+
+---
+
 # Handoff — 2026-07-04 session
 
 ## Commits made this session (all pushed to local `main`, not pushed to remote)
