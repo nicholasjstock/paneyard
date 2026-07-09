@@ -13,6 +13,8 @@ class Run < ApplicationRecord
   STATUSES = %w[launching running stopping stopped completed failed].freeze
   NON_TERMINAL_STATUSES = %w[launching running stopping].freeze
 
+  belongs_to :workspace, optional: true
+
   has_many :spawn_requests, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :user_questions, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :workers, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
@@ -38,10 +40,12 @@ class Run < ApplicationRecord
   end
 
   def self.create_for_bus!(run_id)
+    default_workspace = Workspace.default
     create!(
       run_id: run_id,
       task: "(unspecified — auto-created from bus activity)",
-      target_root: Rails.application.config.x.workflow_target_root.presence || "(unspecified)",
+      workspace: default_workspace,
+      target_root: default_workspace&.root_path || "(unspecified)",
       launcher_variant: "codex",
       status: "running"
     )

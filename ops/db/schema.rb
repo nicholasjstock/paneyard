@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_09_120541) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_09_155601) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -54,8 +54,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_120541) do
     t.string "target_root", null: false
     t.text "task", null: false
     t.datetime "updated_at", null: false
+    t.integer "workspace_id"
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
+    t.index ["workspace_id"], name: "index_runs_on_workspace_id"
   end
 
   create_table "spawn_requests", force: :cascade do |t|
@@ -126,4 +128,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_120541) do
     t.index ["run_id", "status"], name: "index_workers_on_run_id_and_status"
     t.index ["worker_id"], name: "index_workers_on_worker_id", unique: true
   end
+
+  create_table "workspaces", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.string "root_path", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_workspaces_on_name", unique: true
+    t.index ["root_path"], name: "index_workspaces_on_root_path", unique: true
+  end
+
+  add_foreign_key "runs", "workspaces"
 end

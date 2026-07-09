@@ -21,7 +21,8 @@
         </div>
         <p><%= truncate(run.task, length: 140) %></p>
         <p class="muted">
-          <%= run.launcher_variant %> &middot;
+          <%= run.launcher_variant %>
+          <% if run.workspace %> &middot; <%= run.workspace.name %><% end %> &middot;
           <% if run.started_at %>started <%= time_ago_in_words(run.started_at) %> ago<% else %>not started<% end %>
           <% if run.stopped_at %> &middot; stopped <%= time_ago_in_words(run.stopped_at) %> ago<% end %>
         </p>

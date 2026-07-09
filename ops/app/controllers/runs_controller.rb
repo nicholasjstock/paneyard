@@ -7,6 +7,7 @@ class RunsController < ApplicationController
 
   def new
     @run = Run.new(launcher_variant: "claude")
+    @workspaces = Workspace.order(:name)
   end
 
   def create
@@ -14,12 +15,16 @@ class RunsController < ApplicationController
     @run.run_id = generate_run_id
     @run.status = "launching"
     @run.launched_by = current_operator
-    @run.target_root = Rails.application.config.x.workflow_target_root
+
+    workspace = Workspace.find_by(id: run_params[:workspace_id])
+    @run.workspace = workspace
+    @run.target_root = workspace&.root_path
 
     if @run.save
       LaunchRunJob.perform_later(@run.id)
       redirect_to run_path(@run), notice: "Launching #{@run.run_id}…"
     else
+      @workspaces = Workspace.order(:name)
       render :new, status: :unprocessable_entity
     end
   end
@@ -43,7 +48,7 @@ class RunsController < ApplicationController
   end
 
   def run_params
-    params.require(:run).permit(:task, :scenario, :frontend_url, :launcher_variant)
+    params.require(:run).permit(:task, :scenario, :frontend_url, :launcher_variant, :workspace_id)
   end
 
   def generate_run_id

@@ -9,13 +9,9 @@
 class LaunchRunJob < ApplicationJob
   queue_as :default
 
-  class MissingTargetRoot < StandardError; end
-
   def perform(id)
     run = Run.find(id)
-
-    target_root = Rails.application.config.x.workflow_target_root
-    raise MissingTargetRoot, "WORKFLOW_TARGET_ROOT is not configured for this ops app" if target_root.blank?
+    target_root = run.target_root
 
     run.spawn_requests.create!(
       asked_by: run.launched_by.presence || "ops_hub",
@@ -64,7 +60,6 @@ class LaunchRunJob < ApplicationJob
     Process.detach(pid)
 
     run.update!(
-      target_root: target_root,
       supervisor_pid: pid,
       status: "running",
       started_at: Time.current,

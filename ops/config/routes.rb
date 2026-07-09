@@ -18,6 +18,8 @@ Rails.application.routes.draw do
     end
   end
 
+  resources :workspaces, only: %i[index new create destroy]
+
   resources :workers, only: %i[index show] do
     member do
       post :stop
