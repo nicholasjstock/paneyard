@@ -48,7 +48,7 @@ class RunsController < ApplicationController
   end
 
   def run_params
-    params.require(:run).permit(:task, :scenario, :frontend_url, :launcher_variant, :workspace_id)
+    params.require(:run).permit(:task, :launcher_variant, :workspace_id)
   end
 
   def generate_run_id

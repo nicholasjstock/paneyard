@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_09_155601) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_09_175910) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -37,7 +37,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_155601) do
 
   create_table "runs", force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.string "frontend_url"
     t.string "launched_by"
     t.string "launcher_variant", default: "claude", null: false
     t.string "log_path"
@@ -46,7 +45,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_155601) do
     t.text "phase_summary"
     t.datetime "phase_updated_at"
     t.string "run_id", null: false
-    t.string "scenario"
     t.datetime "started_at"
     t.string "status", default: "launching", null: false
     t.datetime "stopped_at"

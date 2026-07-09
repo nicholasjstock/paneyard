@@ -9,14 +9,12 @@ module Orchestrator
     DEFAULT_STALE_AFTER_MS = 120_000
     PLANNER_FOLLOWUP_SCOPE = "workflow-plan.md"
 
-    def run_orchestrator_turn(run_id:, task:, scenario:, frontend_url:, stale_after_ms: nil, now: Time.current, previous_state: nil)
-      trimmed_frontend_url = frontend_url.to_s.sub(%r{/+\z}, "")
+    def run_orchestrator_turn(run_id:, task:, stale_after_ms: nil, now: Time.current, previous_state: nil)
       run = Run.find_or_create_for_bus!(run_id)
       run.publish_phase!(
         phase: "starting",
         owner: "orchestrator",
-        summary: "Opening orchestrator phase for #{scenario} scenario on #{trimmed_frontend_url}; " \
-          "coordinating the next recorder and verifier handoff."
+        summary: "Opening orchestrator phase for: #{task}; coordinating the next worker handoff."
       )
 
       workers = Worker.where(run_id: run_id, status: "running").to_a
@@ -53,8 +51,6 @@ module Orchestrator
         if recovery_finding.present? && !has_open_blocking_question
           Planner.build_stalled_worker_recovery_plan(
             task: task,
-            scenario: scenario,
-            frontend_url: trimmed_frontend_url,
             recovery_finding: recovery_finding,
             following_steps: previous_state&.dig(:following_steps) || []
           )
@@ -97,10 +93,9 @@ module Orchestrator
       { plan: plan, jobs: jobs, stalled_workers: stalled_workers, next_state: next_state }
     end
 
-    # task/scenario/frontend_url are part of the MCP tool's input schema
-    # for API-surface consistency with the other turn tools, but --
-    # matching scripts/worker-turn.ts exactly -- are never actually read
-    # here.
+    # task is part of the MCP tool's input schema for API-surface
+    # consistency with the other turn tools, but -- matching
+    # scripts/worker-turn.ts exactly -- is never actually read here.
     def run_worker_turn(run_id:, role:, nickname:, scope:, result:, now: Time.current, previous_state: nil)
       following_steps = previous_state&.dig(:following_steps) || []
       active_worker_ids = Worker.where(run_id: run_id, status: "running").pluck(:worker_id).to_set

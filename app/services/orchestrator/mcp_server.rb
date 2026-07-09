@@ -34,7 +34,6 @@ module Orchestrator
           ::McpTools::RunGuardedCommandTool,
           ::McpTools::SpawnWorkerTool,
           ::McpTools::StopWorkerTool,
-          ::McpTools::QueueLongPhoneDemoPlannerJobTool,
           ::McpTools::CollectWorkflowStateTool,
           ::McpTools::ReadWorkflowArtifactTool,
           ::McpTools::WriteWorkflowArtifactTool

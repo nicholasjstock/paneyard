@@ -6,18 +6,15 @@ module McpTools
       properties: {
         runId: { type: "string" },
         task: { type: "string" },
-        scenario: { type: "string", enum: %w[admin phone both] },
-        frontendUrl: { type: "string" },
         verifierFinding: { type: "string" },
         stallFinding: { type: "string" }
       },
-      required: %w[runId task scenario frontendUrl]
+      required: %w[runId task]
     )
 
-    def self.call(runId:, task:, scenario:, frontendUrl:, server_context:, verifierFinding: nil, stallFinding: nil)
+    def self.call(runId:, task:, server_context:, verifierFinding: nil, stallFinding: nil)
       plan = Orchestrator::Planner.plan_workflow_iteration(
-        task: task, scenario: scenario, frontend_url: frontendUrl,
-        verifier_finding: verifierFinding, stall_finding: stallFinding
+        task: task, verifier_finding: verifierFinding, stall_finding: stallFinding
       )
       jobs = Orchestrator::Planner.publish_planner_jobs(run_id: runId, summary: plan[:summary], plan: plan)
       ToolResponse.structured({ summary: plan[:summary], jobs: jobs })

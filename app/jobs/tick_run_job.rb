@@ -25,8 +25,6 @@ class TickRunJob < ApplicationJob
     result = Orchestrator::Turn.run_orchestrator_turn(
       run_id: run.run_id,
       task: run.task,
-      scenario: run.scenario.presence || "both",
-      frontend_url: run.frontend_url.presence || "http://localhost:5174",
       previous_state: previous_state
     )
     Orchestrator::TickState.write(result[:next_state])

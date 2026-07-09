@@ -13,14 +13,12 @@ module McpTools
         nickname: { type: "string" },
         scope: { type: "string" },
         result: { type: "string" },
-        task: { type: "string" },
-        scenario: { type: "string", enum: %w[admin phone both] },
-        frontendUrl: { type: "string" }
+        task: { type: "string" }
       },
-      required: %w[runId role nickname scope result task scenario frontendUrl]
+      required: %w[runId role nickname scope result task]
     )
 
-    def self.call(runId:, role:, nickname:, scope:, result:, task:, scenario:, frontendUrl:, server_context:)
+    def self.call(runId:, role:, nickname:, scope:, result:, task:, server_context:)
       previous_state = Orchestrator::TickState.latest(runId)
       structured = Orchestrator::Turn.run_worker_turn(
         run_id: runId, role: role, nickname: nickname, scope: scope, result: result, previous_state: previous_state

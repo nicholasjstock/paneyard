@@ -5,18 +5,15 @@ module McpTools
     input_schema(
       properties: {
         task: { type: "string" },
-        scenario: { type: "string", enum: %w[admin phone both] },
-        frontendUrl: { type: "string" },
         verifierFinding: { type: "string" },
         stallFinding: { type: "string" }
       },
-      required: %w[task scenario frontendUrl]
+      required: %w[task]
     )
 
-    def self.call(task:, scenario:, frontendUrl:, server_context:, verifierFinding: nil, stallFinding: nil)
+    def self.call(task:, server_context:, verifierFinding: nil, stallFinding: nil)
       structured = Orchestrator::Planner.plan_workflow_iteration(
-        task: task, scenario: scenario, frontend_url: frontendUrl,
-        verifier_finding: verifierFinding, stall_finding: stallFinding
+        task: task, verifier_finding: verifierFinding, stall_finding: stallFinding
       )
       ToolResponse.structured(structured)
     end

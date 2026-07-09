@@ -20,8 +20,6 @@
     <%= @run.launcher_variant %> &middot;
     <% if @run.workspace %> workspace: <%= @run.workspace.name %> &middot; <% end %>
     target: <span class="mono"><%= @run.target_root %></span>
-    <% if @run.scenario.present? %> &middot; scenario: <%= @run.scenario %><% end %>
-    <% if @run.frontend_url.present? %> &middot; <%= @run.frontend_url %><% end %>
   </p>
 </div>
 

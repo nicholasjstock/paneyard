@@ -8,28 +8,19 @@ module Orchestrator
   module GuardedCommand
     module_function
 
-    def build(operation:, root_dir:, front_dir:, scenario: nil, execution_mode: nil, frontend_url: nil, test_target: nil)
+    def build(operation:, front_dir:, test_target: nil)
       case operation
       when "frontend_typecheck"
         { command: "npx", args: [ "tsc", "--noEmit" ], cwd: front_dir }
       when "frontend_test"
         { command: "npm", args: [ "test", "--", *(test_target ? [ test_target ] : []) ], cwd: front_dir }
-      when "record_demo"
-        if scenario.blank? || execution_mode.blank? || frontend_url.blank?
-          raise ArgumentError, "record_demo requires scenario, execution_mode, and frontend_url"
-        end
-
-        { command: "bin/record_demo", args: [ scenario, "--#{execution_mode}", "--frontend-url=#{frontend_url}" ], cwd: root_dir }
       else
         raise ArgumentError, "Unknown guarded command operation: #{operation}"
       end
     end
 
-    def run(operation:, root_dir:, front_dir:, scenario: nil, execution_mode: nil, frontend_url: nil, test_target: nil)
-      spec = build(
-        operation: operation, root_dir: root_dir, front_dir: front_dir,
-        scenario: scenario, execution_mode: execution_mode, frontend_url: frontend_url, test_target: test_target
-      )
+    def run(operation:, front_dir:, test_target: nil)
+      spec = build(operation: operation, front_dir: front_dir, test_target: test_target)
       # argv-array form (no shell) -- same command-injection-safe pattern
       # already used by LaunchRunJob's Process.spawn.
       stdout, stderr, status = Open3.capture3(spec[:command], *spec[:args], chdir: spec[:cwd])

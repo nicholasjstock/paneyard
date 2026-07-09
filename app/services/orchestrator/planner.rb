@@ -1,9 +1,8 @@
 module Orchestrator
   # Ports scripts/workflow-mcp.ts's planning functions: planWorkflowIteration,
-  # buildStalledWorkerRecoveryPlan, publishPlannerJobs, buildPendingSpawnKeys,
-  # buildRecordDemoCommand. Snake_case throughout -- camelizing for the
-  # wire only happens at each MCP tool's McpTools::ToolResponse.structured
-  # call.
+  # buildStalledWorkerRecoveryPlan, publishPlannerJobs, buildPendingSpawnKeys.
+  # Snake_case throughout -- camelizing for the wire only happens at each
+  # MCP tool's McpTools::ToolResponse.structured call.
   module Planner
     module_function
 
@@ -16,20 +15,8 @@ module Orchestrator
     # accepts stallFinding without reading it in the routing logic
     # (findingText is built from verifierFinding only). Not a bug to fix
     # here; this is a faithful port.
-    def plan_workflow_iteration(task:, scenario:, frontend_url:, verifier_finding: nil, stall_finding: nil)
+    def plan_workflow_iteration(task:, verifier_finding: nil, stall_finding: nil)
       finding_text = [ verifier_finding ].compact.join("\n").downcase
-
-      record_step = {
-        owner: "worker",
-        artifact: "recorder-report.md",
-        success_check: "Runs #{build_record_demo_command(scenario: scenario, execution_mode: "docker", frontend_url: frontend_url)} " \
-          "and writes recorder-report.md with artifact paths plus exit status."
-      }
-      verify_step = {
-        owner: "worker",
-        artifact: "verifier-report.md",
-        success_check: "Confirms visible UI state transitions and cites positive evidence from generated artifacts."
-      }
 
       fix_step =
         if FRONTEND_KEYWORDS.any? { |kw| finding_text.include?(kw) }
@@ -38,14 +25,20 @@ module Orchestrator
           { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates a failing request spec first, then lands the narrowest back/** fix." }
         elsif INFRASTRUCTURE_KEYWORDS.any? { |kw| finding_text.include?(kw) }
           { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates the preferred infrastructure test first, then lands the narrowest repo-local toolchain or environment fix." }
-        elsif finding_text.strip.length > 0
+        else
           { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates the narrowest repo-wide regression test first, then lands the smallest general-purpose fix." }
         end
 
+      verify_step = {
+        owner: "worker",
+        artifact: "verifier-report.md",
+        success_check: "Confirms the change addresses the task and cites positive evidence from generated artifacts."
+      }
+
       {
-        summary: "#{task} for the #{scenario} scenario against #{frontend_url}.",
-        next_step: fix_step || record_step,
-        following_steps: fix_step ? [ record_step, verify_step ] : [ verify_step ]
+        summary: "#{task}.",
+        next_step: fix_step,
+        following_steps: [ verify_step ]
       }
     end
 
@@ -53,11 +46,11 @@ module Orchestrator
     # and for a run that's gone dead (no active workers, no open requests,
     # not marked completed) -- either way the fix is the same: ask a
     # planner to inspect what happened and decide the next bounded handoff.
-    def build_stalled_worker_recovery_plan(task:, scenario:, frontend_url:, recovery_finding:, following_steps:)
+    def build_stalled_worker_recovery_plan(task:, recovery_finding:, following_steps:)
       summarized_finding = recovery_finding.gsub(/\s+/, " ").strip
 
       {
-        summary: "#{task} for the #{scenario} scenario against #{frontend_url}. Recover the run via planner. #{summarized_finding}",
+        summary: "#{task}. Recover the run via planner. #{summarized_finding}",
         next_step: {
           owner: "planner",
           artifact: "workflow-plan.md",
@@ -73,10 +66,6 @@ module Orchestrator
 
     def build_pending_spawn_keys(run_id:, jobs:)
       jobs.map { |job| [ run_id, job[:step][:owner], job[:step][:artifact] ].to_json }
-    end
-
-    def build_record_demo_command(scenario:, execution_mode:, frontend_url:)
-      "HEADLESS=1 bin/record_demo #{scenario} --#{execution_mode} --frontend-url=#{frontend_url}"
     end
 
     # active_worker_ids -- used to tell a stale fulfilled recovery request
@@ -96,7 +85,7 @@ module Orchestrator
           elsif step[:owner] == "planner"
             request.fulfilled_worker_id.present? && active_worker_ids.include?(request.fulfilled_worker_id)
           else
-            # A concrete artifact (e.g. recorder-report.md) already got
+            # A concrete artifact (e.g. fix-summary.md) already got
             # produced -- that stays done forever, regardless of whether
             # the worker that made it is still running.
             true

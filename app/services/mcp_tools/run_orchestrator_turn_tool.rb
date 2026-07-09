@@ -7,18 +7,15 @@ module McpTools
       properties: {
         runId: { type: "string" },
         task: { type: "string" },
-        scenario: { type: "string", enum: %w[admin phone both] },
-        frontendUrl: { type: "string" },
         staleAfterMs: { type: "integer", minimum: 1 }
       },
-      required: %w[runId task scenario frontendUrl]
+      required: %w[runId task]
     )
 
-    def self.call(runId:, task:, scenario:, frontendUrl:, server_context:, staleAfterMs: nil)
+    def self.call(runId:, task:, server_context:, staleAfterMs: nil)
       previous_state = Orchestrator::TickState.latest(runId)
       structured = Orchestrator::Turn.run_orchestrator_turn(
-        run_id: runId, task: task, scenario: scenario, frontend_url: frontendUrl,
-        stale_after_ms: staleAfterMs, previous_state: previous_state
+        run_id: runId, task: task, stale_after_ms: staleAfterMs, previous_state: previous_state
       )
       Orchestrator::TickState.write(structured[:next_state])
       ToolResponse.structured(structured)

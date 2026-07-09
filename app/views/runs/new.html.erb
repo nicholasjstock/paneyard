@@ -15,17 +15,7 @@
 
   <div class="field">
     <%= form.label :task, "Task" %>
-    <%= form.text_area :task, placeholder: "Record the phone demo and fix any bugs found during verification." %>
-  </div>
-
-  <div class="field">
-    <%= form.label :scenario, "Scenario (optional)" %>
-    <%= form.select :scenario, [["", nil], %w[admin admin], %w[phone phone], %w[both both]] %>
-  </div>
-
-  <div class="field">
-    <%= form.label :frontend_url, "Frontend URL (optional)" %>
-    <%= form.text_field :frontend_url, placeholder: "http://localhost:5174" %>
+    <%= form.text_area :task, placeholder: "Fix the bug described in issue #42." %>
   </div>
 
   <div class="field">
