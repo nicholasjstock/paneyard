@@ -23,10 +23,6 @@
     <% if @run.scenario.present? %> &middot; scenario: <%= @run.scenario %><% end %>
     <% if @run.frontend_url.present? %> &middot; <%= @run.frontend_url %><% end %>
   </p>
-  <p class="muted">
-    supervisor pid: <span class="mono"><%= @run.supervisor_pid || "—" %></span>
-    <% if @run.log_path.present? %> &middot; log: <span class="mono"><%= @run.log_path %></span><% end %>
-  </p>
 </div>
 
 <%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>

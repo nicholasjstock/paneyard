@@ -23,9 +23,3 @@ Own planning only. Execution is strictly sequential — there is never more than
 - Do not spawn workers directly.
 """
 nickname_candidates = ["planner", "plan-worker", "planning-worker"]
-
-[mcp_servers.workflow]
-command = "npx"
-args = ["wf-mcp-server"]
-cwd = "/Users/stockn/Source/simple-retail-planner/main/front"
-env = { WORKFLOW_TARGET_ROOT = "/Users/stockn/Source/simple-retail-planner/main" }

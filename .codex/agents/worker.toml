@@ -42,9 +42,3 @@ You are a generic worker. Your identity for this run comes entirely from your bu
 - Report files changed, commands run, and verification result.
 """
 nickname_candidates = ["worker", "task-worker"]
-
-[mcp_servers.workflow]
-command = "npx"
-args = ["wf-mcp-server"]
-cwd = "/Users/stockn/Source/simple-retail-planner/main/front"
-env = { WORKFLOW_TARGET_ROOT = "/Users/stockn/Source/simple-retail-planner/main" }
