@@ -1,2 +1,17 @@
 #!/usr/bin/env ruby
-exec "./bin/rails", "server", *ARGV
+# Runs the Rails server and the Solid Queue jobs process together, so
+# TickRunJob's recurring schedule (config/recurring.yml) actually fires
+# in dev. Both processes are killed together on exit.
+
+pids = [
+  Process.spawn("./bin/rails", "server", *ARGV),
+  Process.spawn("./bin/jobs")
+]
+
+%w[INT TERM].each do |signal|
+  trap(signal) do
+    pids.each { |pid| Process.kill(signal, pid) rescue nil }
+  end
+end
+
+pids.each { |pid| Process.wait(pid) rescue nil }

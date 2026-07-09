@@ -54,11 +54,12 @@ Rails.application.configure do
 
   # Highlight code that enqueued background job in logs.
   config.active_job.verbose_enqueue_logs = true
-  # Production uses :solid_queue (config/environments/production.rb); dev
-  # keeps Rails's default in-process :async adapter -- Solid Queue's tables
-  # only live in the separate production queue database this app's default
-  # database.yml sets up, and standing up that split for dev isn't worth it
-  # here. LaunchRunJob/StopRunJob run the same either way.
+
+  # Solid Queue so TickRunJob's recurring schedule (config/recurring.yml)
+  # actually fires in dev, same as production. Run `bin/jobs` alongside
+  # `bin/rails server` (or just `bin/dev`, which starts both).
+  config.active_job.queue_adapter = :solid_queue
+  config.solid_queue.connects_to = { database: { writing: :queue } }
 
   # Highlight code that triggered redirect in logs.
   config.action_dispatch.verbose_redirect_logs = true
