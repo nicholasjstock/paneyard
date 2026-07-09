@@ -1,55 +1,66 @@
 module Orchestrator
-  # Shared read/write for OrchestratorTick, used by both Api::OrchestratorTicksController
-  # and the McpTools orchestrator-state tools -- one row per tick serves as
+  # Shared read/write for OrchestratorTick -- one row per tick serves as
   # both "current state" and "history entry" (see OrchestratorTick's own
-  # comment), replacing the old TS Rails-HTTP-client's separate
-  # writeOrchestratorState/appendOrchestratorTickHistory calls with a single
-  # upsert.
+  # comment). Snake_case throughout, matching the model's own attribute
+  # names directly; camelizing for the wire only happens at each MCP
+  # tool's McpTools::ToolResponse.structured call.
   module TickState
     module_function
 
     def write(state)
       state = deep_symbolize(state)
-      run = Run.find_or_create_for_bus!(state[:runId])
-      tick = OrchestratorTick.find_or_initialize_by(run_id: run.run_id, tick_count: state[:tickCount])
+      run = Run.find_or_create_for_bus!(state[:run_id])
+      tick = OrchestratorTick.find_or_initialize_by(run_id: run.run_id, tick_count: state[:tick_count])
       tick.assign_attributes(
         phase: state[:phase],
-        last_plan_summary: state[:lastPlanSummary],
-        pending_spawn_keys: state[:pendingSpawnKeys] || [],
-        following_steps: state[:followingSteps] || [],
-        last_stall_finding: state[:lastStallFinding]
+        last_plan_summary: state[:last_plan_summary],
+        pending_spawn_keys: state[:pending_spawn_keys] || [],
+        following_steps: (state[:following_steps] || []).map { |step| deep_symbolize(step) },
+        last_stall_finding: state[:last_stall_finding]
       )
       tick.save!
-      deep_symbolize(tick.as_json)
+      to_state(tick)
     end
 
     def latest(run_id)
       tick = OrchestratorTick.for_run(run_id).last
-      tick ? deep_symbolize(tick.as_json) : default_state(run_id)
+      tick ? to_state(tick) : default_state(run_id)
     end
 
     def history(run_id)
-      { runId: run_id, entries: OrchestratorTick.for_run(run_id).map { |tick| deep_symbolize(tick.as_json) } }
+      { run_id: run_id, entries: OrchestratorTick.for_run(run_id).map { |tick| to_state(tick) } }
     end
 
     def default_state(run_id)
       {
-        runId: run_id,
+        run_id: run_id,
         phase: "starting",
-        tickCount: 0,
-        lastPlanSummary: nil,
-        pendingSpawnKeys: [],
-        followingSteps: [],
-        lastStallFinding: nil,
-        lastUpdatedAt: nil
+        tick_count: 0,
+        last_plan_summary: nil,
+        pending_spawn_keys: [],
+        following_steps: [],
+        last_stall_finding: nil,
+        last_updated_at: nil
+      }
+    end
+
+    def to_state(tick)
+      {
+        run_id: tick.run_id,
+        phase: tick.phase,
+        tick_count: tick.tick_count,
+        last_plan_summary: tick.last_plan_summary,
+        pending_spawn_keys: tick.pending_spawn_keys,
+        following_steps: deep_symbolize(tick.following_steps),
+        last_stall_finding: tick.last_stall_finding,
+        last_updated_at: tick.created_at&.iso8601(3)
       }
     end
 
     # OrchestratorTick#following_steps round-trips through a JSON column as
-    # string-keyed hashes, while every state/step hash built fresh in
-    # Orchestrator::Planner/Turn uses symbol keys -- deep-symbolizing at
-    # this boundary means callers never have to care which one they're
-    # holding.
+    # string-keyed hashes -- deep-symbolizing at this boundary means
+    # callers never have to care whether a step came fresh from
+    # Orchestrator::Planner/Turn or back out of the database.
     def deep_symbolize(value)
       case value
       when Hash

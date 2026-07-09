@@ -30,12 +30,12 @@ module McpTools
     def self.call(runId:, phase:, tickCount:, pendingSpawnKeys:, followingSteps:, server_context:,
                    lastPlanSummary: nil, lastStallFinding: nil, lastUpdatedAt: nil)
       state = {
-        runId: runId, phase: phase, tickCount: tickCount, lastPlanSummary: lastPlanSummary,
-        pendingSpawnKeys: pendingSpawnKeys, followingSteps: followingSteps.map(&:deep_symbolize_keys),
-        lastStallFinding: lastStallFinding, lastUpdatedAt: lastUpdatedAt
+        run_id: runId, phase: phase, tick_count: tickCount, last_plan_summary: lastPlanSummary,
+        pending_spawn_keys: pendingSpawnKeys, following_steps: Orchestrator::WireFormat.underscore_keys(followingSteps),
+        last_stall_finding: lastStallFinding, last_updated_at: lastUpdatedAt
       }
       saved = Orchestrator::TickState.write(state)
-      ToolResponse.structured({ statePath: "orchestrator_ticks/#{runId}/#{tickCount}", state: saved })
+      ToolResponse.structured({ state_path: "orchestrator_ticks/#{runId}/#{tickCount}", state: saved })
     end
   end
 end

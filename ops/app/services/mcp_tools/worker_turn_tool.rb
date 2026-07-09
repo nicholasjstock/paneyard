@@ -25,7 +25,7 @@ module McpTools
       structured = Orchestrator::Turn.run_worker_turn(
         run_id: runId, role: role, nickname: nickname, scope: scope, result: result, previous_state: previous_state
       )
-      Orchestrator::TickState.write(structured[:nextState])
+      Orchestrator::TickState.write(structured[:next_state])
       ToolResponse.structured(structured)
     end
   end

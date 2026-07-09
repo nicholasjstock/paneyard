@@ -13,7 +13,7 @@ module Orchestrator
 
     def sanitize_run_id(run_id)
       sanitized = run_id.to_s.strip.gsub(/[^A-Za-z0-9._-]/, "_")
-      raise ArgumentError, "runId must not be empty" if sanitized.empty?
+      raise ArgumentError, "run_id must not be empty" if sanitized.empty?
 
       sanitized
     end
@@ -43,18 +43,18 @@ module Orchestrator
         path = resolve_path(root_dir, run_id, name)
 
         unless File.exist?(path)
-          next { name: name, path: path, exists: false, sizeBytes: nil, updatedAt: nil, preview: nil }
+          next { name: name, path: path, exists: false, size_bytes: nil, updated_at: nil, preview: nil }
         end
 
         stat = File.stat(path)
         preview = File.open(path, "rb") { |f| f.read(200) }
         {
-          name: name, path: path, exists: true, sizeBytes: stat.size,
-          updatedAt: stat.mtime.utc.iso8601(3), preview: preview&.scrub
+          name: name, path: path, exists: true, size_bytes: stat.size,
+          updated_at: stat.mtime.utc.iso8601(3), preview: preview&.scrub
         }
       end
 
-      { outputDir: output_dir(root_dir), artifacts: artifacts }
+      { output_dir: output_dir(root_dir), artifacts: artifacts }
     end
   end
 end

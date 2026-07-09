@@ -237,8 +237,8 @@ module Orchestrator
 
     def append_lifecycle_line(log_path, event:, worker_id:, run_id:, role:, nickname:, pid:, scope:, reason:, command:, status:, stop_reason: nil)
       details = {
-        workerId: worker_id, runId: run_id, role: role, nickname: nickname, pid: pid, scope: scope,
-        reason: reason, command: command, status: status, stopReason: stop_reason
+        worker_id: worker_id, run_id: run_id, role: role, nickname: nickname, pid: pid, scope: scope,
+        reason: reason, command: command, status: status, stop_reason: stop_reason
       }
       line = "[workflow] #{Time.now.utc.iso8601(3)} worker:lifecycle: #{event} #{nickname} #{details.to_json}\n"
       File.write(log_path, line, mode: "a")

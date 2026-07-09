@@ -16,7 +16,7 @@ module Orchestrator
         { command: "npm", args: [ "test", "--", *(test_target ? [ test_target ] : []) ], cwd: front_dir }
       when "record_demo"
         if scenario.blank? || execution_mode.blank? || frontend_url.blank?
-          raise ArgumentError, "record_demo requires scenario, executionMode, and frontendUrl"
+          raise ArgumentError, "record_demo requires scenario, execution_mode, and frontend_url"
         end
 
         { command: "bin/record_demo", args: [ scenario, "--#{execution_mode}", "--frontend-url=#{frontend_url}" ], cwd: root_dir }
@@ -33,7 +33,7 @@ module Orchestrator
       # argv-array form (no shell) -- same command-injection-safe pattern
       # already used by LaunchRunJob's Process.spawn.
       stdout, stderr, status = Open3.capture3(spec[:command], *spec[:args], chdir: spec[:cwd])
-      spec.merge(exitCode: status.exitstatus, stdout: stdout, stderr: stderr, success: status.success?)
+      spec.merge(exit_code: status.exitstatus, stdout: stdout, stderr: stderr, success: status.success?)
     end
   end
 end

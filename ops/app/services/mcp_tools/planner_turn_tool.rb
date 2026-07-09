@@ -36,12 +36,12 @@ module McpTools
 
     def self.call(runId:, summary:, nextStep:, followingSteps:, server_context:)
       previous_state = Orchestrator::TickState.latest(runId)
-      next_step = nextStep&.deep_symbolize_keys
-      following_steps = followingSteps.map(&:deep_symbolize_keys)
+      next_step = Orchestrator::WireFormat.underscore_keys(nextStep)
+      following_steps = Orchestrator::WireFormat.underscore_keys(followingSteps)
       structured = Orchestrator::Turn.run_planner_turn(
         run_id: runId, summary: summary, next_step: next_step, following_steps: following_steps, previous_state: previous_state
       )
-      Orchestrator::TickState.write(structured[:nextState])
+      Orchestrator::TickState.write(structured[:next_state])
       ToolResponse.structured(structured)
     end
   end

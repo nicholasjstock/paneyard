@@ -1,7 +1,8 @@
 module Orchestrator
   # Ports scripts/orchestrator-turn.ts, scripts/worker-turn.ts,
-  # scripts/planner-turn.ts. State/step hashes use symbol keys throughout
-  # (see Orchestrator::TickState for the DB read/write boundary).
+  # scripts/planner-turn.ts. Snake_case throughout -- camelizing for the
+  # wire only happens at each MCP tool's McpTools::ToolResponse.structured
+  # call (see Orchestrator::TickState for the DB read/write boundary).
   module Turn
     module_function
 
@@ -34,7 +35,7 @@ module Orchestrator
         previous_state.present? &&
         previous_state[:phase] != "starting" &&
         previous_state[:phase] != "completed"
-      dead_end_finding = is_dead_end ? build_dead_end_finding(run_id: run_id, following_steps: previous_state&.dig(:followingSteps) || []) : nil
+      dead_end_finding = is_dead_end ? build_dead_end_finding(run_id: run_id, following_steps: previous_state&.dig(:following_steps) || []) : nil
       recovery_finding = stall_finding || dead_end_finding
 
       # A recovery planner may have already escalated this exact
@@ -55,7 +56,7 @@ module Orchestrator
             scenario: scenario,
             frontend_url: trimmed_frontend_url,
             recovery_finding: recovery_finding,
-            following_steps: previous_state&.dig(:followingSteps) || []
+            following_steps: previous_state&.dig(:following_steps) || []
           )
         end
 
@@ -83,24 +84,25 @@ module Orchestrator
         end
 
       next_state = {
-        runId: run_id,
+        run_id: run_id,
         phase: next_phase,
-        tickCount: (previous_state&.dig(:tickCount) || 0) + 1,
-        lastPlanSummary: plan&.dig(:summary) || previous_state&.dig(:lastPlanSummary),
-        pendingSpawnKeys: ((previous_state&.dig(:pendingSpawnKeys) || []) + Planner.build_pending_spawn_keys(run_id: run_id, jobs: jobs)).uniq,
-        followingSteps: plan&.dig(:followingSteps) || previous_state&.dig(:followingSteps) || [],
-        lastStallFinding: recovery_finding,
-        lastUpdatedAt: now.utc.iso8601(3)
+        tick_count: (previous_state&.dig(:tick_count) || 0) + 1,
+        last_plan_summary: plan&.dig(:summary) || previous_state&.dig(:last_plan_summary),
+        pending_spawn_keys: ((previous_state&.dig(:pending_spawn_keys) || []) + Planner.build_pending_spawn_keys(run_id: run_id, jobs: jobs)).uniq,
+        following_steps: plan&.dig(:following_steps) || previous_state&.dig(:following_steps) || [],
+        last_stall_finding: recovery_finding,
+        last_updated_at: now.utc.iso8601(3)
       }
 
-      { plan: plan, jobs: jobs, stalledWorkers: stalled_workers, nextState: next_state }
+      { plan: plan, jobs: jobs, stalled_workers: stalled_workers, next_state: next_state }
     end
 
-    # task/scenario/frontendUrl are part of the MCP tool's input schema for
-    # API-surface consistency with the other turn tools, but -- matching
-    # scripts/worker-turn.ts exactly -- are never actually read here.
+    # task/scenario/frontend_url are part of the MCP tool's input schema
+    # for API-surface consistency with the other turn tools, but --
+    # matching scripts/worker-turn.ts exactly -- are never actually read
+    # here.
     def run_worker_turn(run_id:, role:, nickname:, scope:, result:, now: Time.current, previous_state: nil)
-      following_steps = previous_state&.dig(:followingSteps) || []
+      following_steps = previous_state&.dig(:following_steps) || []
       active_worker_ids = Worker.where(run_id: run_id, status: "running").pluck(:worker_id).to_set
 
       # A follow-up planner request is a repeatable recovery ask, not a
@@ -129,47 +131,47 @@ module Orchestrator
         tags: [ "planner", PLANNER_FOLLOWUP_SCOPE, "worker-turn-followup" ]
       )
 
-      # phase/tickCount/lastPlanSummary/lastStallFinding/followingSteps are
-      # all owned by planner_turn and orchestrator-turn's stall detection --
-      # worker_turn only requests the follow-up planner and reports what it
-      # saw, so it carries all of this forward untouched.
+      # phase/tick_count/last_plan_summary/last_stall_finding/following_steps
+      # are all owned by planner_turn and orchestrator-turn's stall
+      # detection -- worker_turn only requests the follow-up planner and
+      # reports what it saw, so it carries all of this forward untouched.
       next_state = {
-        runId: run_id,
+        run_id: run_id,
         phase: previous_state&.dig(:phase) || "starting",
-        tickCount: previous_state&.dig(:tickCount) || 0,
-        lastStallFinding: previous_state&.dig(:lastStallFinding),
-        lastPlanSummary: previous_state&.dig(:lastPlanSummary),
-        pendingSpawnKeys: previous_state&.dig(:pendingSpawnKeys) || [],
-        followingSteps: following_steps,
-        lastUpdatedAt: now.utc.iso8601(3)
+        tick_count: previous_state&.dig(:tick_count) || 0,
+        last_stall_finding: previous_state&.dig(:last_stall_finding),
+        last_plan_summary: previous_state&.dig(:last_plan_summary),
+        pending_spawn_keys: previous_state&.dig(:pending_spawn_keys) || [],
+        following_steps: following_steps,
+        last_updated_at: now.utc.iso8601(3)
       }
 
-      { plannerRequest: { requestId: planner_request.request_id }, nextState: next_state }
+      { planner_request: { request_id: planner_request.request_id }, next_state: next_state }
     end
 
     def run_planner_turn(run_id:, summary:, next_step:, following_steps:, now: Time.current, previous_state: nil)
       jobs = Planner.publish_planner_jobs(
         run_id: run_id,
         summary: summary,
-        plan: { summary: summary, nextStep: next_step, followingSteps: following_steps }
+        plan: { summary: summary, next_step: next_step, following_steps: following_steps }
       )
 
       next_state = {
-        runId: run_id,
-        # nextStep: nil is the planner's explicit "genuinely nothing left
+        run_id: run_id,
+        # next_step: nil is the planner's explicit "genuinely nothing left
         # to do" signal -- mark the run completed so the orchestrator can
         # tell a legitimate finish apart from a run that went idle without
         # ever being told it was done.
         phase: next_step ? "planning" : "completed",
-        tickCount: (previous_state&.dig(:tickCount) || 0) + 1,
-        lastPlanSummary: summary,
-        pendingSpawnKeys: ((previous_state&.dig(:pendingSpawnKeys) || []) + Planner.build_pending_spawn_keys(run_id: run_id, jobs: jobs)).uniq,
-        followingSteps: following_steps,
-        lastStallFinding: previous_state&.dig(:lastStallFinding),
-        lastUpdatedAt: now.utc.iso8601(3)
+        tick_count: (previous_state&.dig(:tick_count) || 0) + 1,
+        last_plan_summary: summary,
+        pending_spawn_keys: ((previous_state&.dig(:pending_spawn_keys) || []) + Planner.build_pending_spawn_keys(run_id: run_id, jobs: jobs)).uniq,
+        following_steps: following_steps,
+        last_stall_finding: previous_state&.dig(:last_stall_finding),
+        last_updated_at: now.utc.iso8601(3)
       }
 
-      { jobs: jobs, nextState: next_state }
+      { jobs: jobs, next_state: next_state }
     end
 
     def detect_stalled_workers(workers:, now:, stale_after_ms:)
@@ -185,9 +187,12 @@ module Orchestrator
         next if idle_for_ms < stale_after_ms
 
         {
-          worker: worker.as_json,
-          idleForMs: idle_for_ms,
-          evidence: [ "worker=#{worker.nickname}", "role=#{worker.role}", "idleForMs=#{idle_for_ms}", *latest[:evidence] ]
+          worker: {
+            worker_id: worker.worker_id, run_id: worker.run_id, role: worker.role, nickname: worker.nickname,
+            scope: worker.scope, reason: worker.reason
+          },
+          idle_for_ms: idle_for_ms,
+          evidence: [ "worker=#{worker.nickname}", "role=#{worker.role}", "idle_for_ms=#{idle_for_ms}", *latest[:evidence] ]
         }
       end
     end
@@ -220,8 +225,8 @@ module Orchestrator
         worker = stall[:worker]
         [
           "Stalled worker #{worker[:nickname]} (#{worker[:role]})",
-          "runId=#{worker[:runId]}",
-          "idleForMs=#{stall[:idleForMs]}",
+          "run_id=#{worker[:run_id]}",
+          "idle_for_ms=#{stall[:idle_for_ms]}",
           "scope=#{worker[:scope]}",
           "reason=#{worker[:reason]}",
           "evidence=#{stall[:evidence].join("; ")}"
@@ -235,7 +240,7 @@ module Orchestrator
     def build_dead_end_finding(run_id:, following_steps:)
       [
         "Run #{run_id} has no active workers and no open spawn requests, but was not marked completed.",
-        "followingSteps queue at last check: #{following_steps.to_json}",
+        "following_steps queue at last check: #{following_steps.to_json}",
         "The most recent worker likely stopped without completing its worker_turn handoff (crashed, or the call " \
           "failed) -- inspect its last known report/artifact and decide whether to retry, fix, or escalate to the user."
       ].join(" ")

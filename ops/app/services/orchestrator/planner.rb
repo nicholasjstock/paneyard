@@ -1,7 +1,9 @@
 module Orchestrator
   # Ports scripts/workflow-mcp.ts's planning functions: planWorkflowIteration,
   # buildStalledWorkerRecoveryPlan, publishPlannerJobs, buildPendingSpawnKeys,
-  # buildRecordDemoCommand. All hashes use symbol keys throughout.
+  # buildRecordDemoCommand. Snake_case throughout -- camelizing for the
+  # wire only happens at each MCP tool's McpTools::ToolResponse.structured
+  # call.
   module Planner
     module_function
 
@@ -20,30 +22,30 @@ module Orchestrator
       record_step = {
         owner: "worker",
         artifact: "recorder-report.md",
-        successCheck: "Runs #{build_record_demo_command(scenario: scenario, execution_mode: "docker", frontend_url: frontend_url)} " \
+        success_check: "Runs #{build_record_demo_command(scenario: scenario, execution_mode: "docker", frontend_url: frontend_url)} " \
           "and writes recorder-report.md with artifact paths plus exit status."
       }
       verify_step = {
         owner: "worker",
         artifact: "verifier-report.md",
-        successCheck: "Confirms visible UI state transitions and cites positive evidence from generated artifacts."
+        success_check: "Confirms visible UI state transitions and cites positive evidence from generated artifacts."
       }
 
       fix_step =
         if FRONTEND_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "worker", artifact: "fix-summary.md", successCheck: "Adds or updates the preferred frontend test first, then lands the narrowest front/** fix." }
+          { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates the preferred frontend test first, then lands the narrowest front/** fix." }
         elsif BACKEND_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "worker", artifact: "fix-summary.md", successCheck: "Adds or updates a failing request spec first, then lands the narrowest back/** fix." }
+          { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates a failing request spec first, then lands the narrowest back/** fix." }
         elsif INFRASTRUCTURE_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "worker", artifact: "fix-summary.md", successCheck: "Adds or updates the preferred infrastructure test first, then lands the narrowest repo-local toolchain or environment fix." }
+          { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates the preferred infrastructure test first, then lands the narrowest repo-local toolchain or environment fix." }
         elsif finding_text.strip.length > 0
-          { owner: "worker", artifact: "fix-summary.md", successCheck: "Adds or updates the narrowest repo-wide regression test first, then lands the smallest general-purpose fix." }
+          { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates the narrowest repo-wide regression test first, then lands the smallest general-purpose fix." }
         end
 
       {
         summary: "#{task} for the #{scenario} scenario against #{frontend_url}.",
-        nextStep: fix_step || record_step,
-        followingSteps: fix_step ? [ record_step, verify_step ] : [ verify_step ]
+        next_step: fix_step || record_step,
+        following_steps: fix_step ? [ record_step, verify_step ] : [ verify_step ]
       }
     end
 
@@ -56,12 +58,12 @@ module Orchestrator
 
       {
         summary: "#{task} for the #{scenario} scenario against #{frontend_url}. Recover the run via planner. #{summarized_finding}",
-        nextStep: {
+        next_step: {
           owner: "planner",
           artifact: "workflow-plan.md",
-          successCheck: "Inspect this recovery context, determine the next bounded handoff, and publish it with planner_turn: #{summarized_finding}"
+          success_check: "Inspect this recovery context, determine the next bounded handoff, and publish it with planner_turn: #{summarized_finding}"
         },
-        followingSteps: following_steps
+        following_steps: following_steps
       }
     end
 
@@ -77,12 +79,12 @@ module Orchestrator
       "HEADLESS=1 bin/record_demo #{scenario} --#{execution_mode} --frontend-url=#{frontend_url}"
     end
 
-    # activeWorkerIds -- used to tell a stale fulfilled recovery request
+    # active_worker_ids -- used to tell a stale fulfilled recovery request
     # apart from one that's still in flight. Safe to omit for callers that
-    # can never produce a requestedRole: 'planner' step (planner_turn's
-    # schema restricts nextStep.owner to orchestrator|worker).
+    # can never produce a requested_role: 'planner' step (planner_turn's
+    # schema restricts next_step.owner to orchestrator|worker).
     def publish_planner_jobs(run_id:, summary:, plan:, active_worker_ids: Set.new)
-      step = plan[:nextStep]
+      step = plan[:next_step]
       return [] if step.nil? || step[:owner] == "orchestrator"
 
       existing_request = SpawnRequest
@@ -102,20 +104,20 @@ module Orchestrator
         end
 
       if existing_request
-        return [ { step: step, requestId: existing_request.request_id } ]
+        return [ { step: step, request_id: existing_request.request_id } ]
       end
 
       request = SpawnRequest.create!(
         run_id: run_id,
         asked_by: "planner",
         scope: step[:artifact],
-        text: step[:successCheck],
+        text: step[:success_check],
         context: summary,
         requested_role: step[:owner],
         priority: "blocking",
         tags: [ step[:owner], step[:artifact], "planner-job" ]
       )
-      [ { step: step, requestId: request.request_id } ]
+      [ { step: step, request_id: request.request_id } ]
     end
   end
 end

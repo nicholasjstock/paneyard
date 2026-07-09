@@ -8,10 +8,16 @@ module McpTools
   module ToolResponse
     module_function
 
+    # Tools build their result in plain Ruby snake_case internally --
+    # camelizing happens once, right here, rather than tool authors having
+    # to remember to do it themselves. Idempotent against hashes that are
+    # already camelCase (e.g. a model's own #as_json), so callers never
+    # need to think about which shape they're holding.
     def structured(payload)
+      camelized = Orchestrator::WireFormat.camelize_keys(payload)
       MCP::Tool::Response.new(
-        [ { type: "text", text: JSON.generate(payload) } ],
-        structured_content: payload
+        [ { type: "text", text: JSON.generate(camelized) } ],
+        structured_content: camelized
       )
     end
   end

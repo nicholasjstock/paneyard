@@ -29,7 +29,7 @@ class TickRunJob < ApplicationJob
       frontend_url: run.frontend_url.presence || "http://localhost:5174",
       previous_state: previous_state
     )
-    Orchestrator::TickState.write(result[:nextState])
+    Orchestrator::TickState.write(result[:next_state])
     Orchestrator::SpawnRequestedWorkers.call(run: run)
 
     # No separate OS process to wait for exiting anymore -- the job knows
@@ -37,6 +37,6 @@ class TickRunJob < ApplicationJob
     # run's own status right here instead of waiting on a later
     # reconciliation pass (see the now-removed ReconcileRunsJob, whose
     # entire purpose was detecting a dead supervisor_pid process).
-    run.update!(status: "completed", stopped_at: Time.current) if result[:nextState][:phase] == "completed"
+    run.update!(status: "completed", stopped_at: Time.current) if result[:next_state][:phase] == "completed"
   end
 end

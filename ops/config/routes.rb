@@ -40,43 +40,4 @@ Rails.application.routes.draw do
   end
 
   resources :events, only: %i[index]
-
-  namespace :api do
-    resources :spawn_requests, only: %i[index create] do
-      member do
-        post :fulfill
-        post :dismiss
-      end
-    end
-
-    resources :user_questions, only: %i[index create] do
-      member do
-        post :answer
-      end
-    end
-
-    resources :workers, only: %i[index create] do
-      member do
-        post :stop
-      end
-    end
-
-    resources :orchestrator_ticks, only: %i[create] do
-      collection do
-        get :latest
-        get :history
-      end
-    end
-
-    # Not modeled as a RESTful resource(s) block: there's no per-record :id
-    # in the URL (the target Run is always identified by runId in the
-    # request body/query, matching WorkflowBus#publishRunStatus /
-    # #listRunStatuses on the TS side) and "list across all runs" +
-    # "publish one run's status" don't share a natural singular/plural
-    # resource shape.
-    get "run_statuses", to: "run_statuses#index"
-    patch "run_status", to: "run_statuses#update"
-
-    resources :events, only: %i[index]
-  end
 end

@@ -20,7 +20,7 @@ module McpTools
         run_id: runId, task: task, scenario: scenario, frontend_url: frontendUrl,
         stale_after_ms: staleAfterMs, previous_state: previous_state
       )
-      Orchestrator::TickState.write(structured[:nextState])
+      Orchestrator::TickState.write(structured[:next_state])
       ToolResponse.structured(structured)
     end
   end
