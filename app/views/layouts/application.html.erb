@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title><%= content_for(:title) || "Ops" %></title>
+    <title><%= content_for(:title) || "Workflow Orchestrator" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="application-name" content="Ops">
+    <meta name="application-name" content="Workflow Orchestrator">
     <meta name="mobile-web-app-capable" content="yes">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
@@ -25,7 +25,7 @@
 
   <body>
     <header class="topbar">
-      <a class="brand" href="<%= root_path %>">Orchestrator Ops</a>
+      <a class="brand" href="<%= root_path %>">Workflow Orchestrator</a>
       <nav>
         <%= link_to "Runs", runs_path, class: current_page?(runs_path) ? "active" : nil %>
         <%= link_to "Workers", workers_path, class: current_page?(workers_path) ? "active" : nil %>
