@@ -1,0 +1,28 @@
+<% content_for :title, "Launch task" %>
+
+<h1>Launch task</h1>
+
+<%= form_with model: @run, url: runs_path, local: true do |form| %>
+  <div class="field">
+    <%= form.label :task, "Task" %>
+    <%= form.text_area :task, placeholder: "Record the phone demo and fix any bugs found during verification." %>
+  </div>
+
+  <div class="field">
+    <%= form.label :scenario, "Scenario (optional)" %>
+    <%= form.select :scenario, [["", nil], %w[admin admin], %w[phone phone], %w[both both]] %>
+  </div>
+
+  <div class="field">
+    <%= form.label :frontend_url, "Frontend URL (optional)" %>
+    <%= form.text_field :frontend_url, placeholder: "http://localhost:5174" %>
+  </div>
+
+  <div class="field">
+    <%= form.label :launcher_variant, "Launcher" %>
+    <%= form.select :launcher_variant, Run::LAUNCHER_VARIANTS.map { |v| [v, v] } %>
+  </div>
+
+  <%= form.submit "Launch", class: "btn primary" %>
+  <%= link_to "Cancel", runs_path, class: "btn" %>
+<% end %>

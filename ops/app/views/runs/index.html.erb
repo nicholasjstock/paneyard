@@ -1,0 +1,31 @@
+<% content_for :title, "Runs" %>
+
+<%= turbo_stream_from "runs" %>
+
+<div class="toolbar">
+  <h1>Runs</h1>
+  <%= link_to "Launch task", new_run_path, class: "btn primary" %>
+</div>
+
+<%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
+
+<div id="runs">
+  <% if @runs.empty? %>
+    <p class="empty">No runs launched yet.</p>
+  <% else %>
+    <% @runs.each do |run| %>
+      <div class="card">
+        <div class="card-title">
+          <%= link_to run.run_id, run_path(run), class: "mono" %>
+          <span class="badge <%= run.status %>"><%= run.status %></span>
+        </div>
+        <p><%= truncate(run.task, length: 140) %></p>
+        <p class="muted">
+          <%= run.launcher_variant %> &middot;
+          <% if run.started_at %>started <%= time_ago_in_words(run.started_at) %> ago<% else %>not started<% end %>
+          <% if run.stopped_at %> &middot; stopped <%= time_ago_in_words(run.stopped_at) %> ago<% end %>
+        </p>
+      </div>
+    <% end %>
+  <% end %>
+</div>

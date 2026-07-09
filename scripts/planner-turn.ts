@@ -21,8 +21,8 @@ export type PlannerTurnResult = {
   nextState: OrchestratorDecisionState
 }
 
-export function runPlannerTurn(args: PlannerTurnArgs): PlannerTurnResult {
-  const jobs = publishPlannerJobs(args.bus, {
+export async function runPlannerTurn(args: PlannerTurnArgs): Promise<PlannerTurnResult> {
+  const jobs = await publishPlannerJobs(args.bus, {
     runId: args.runId,
     summary: args.summary,
     plan: { summary: args.summary, nextStep: args.nextStep, followingSteps: args.followingSteps },

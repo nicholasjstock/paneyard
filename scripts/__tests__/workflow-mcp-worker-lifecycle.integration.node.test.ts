@@ -43,8 +43,10 @@ describe('workflow MCP worker lifecycle tools', () => {
     expect(structuredContent.command).toBe('codex')
     expect(structuredContent.nickname).toBe('front-fixer')
 
-    expect(harness.runtime.listWorkers().map((worker) => worker.nickname)).toContain('front-fixer')
-    expect(harness.bus.listRecentEvents().some((event) => event.type === 'worker.spawned')).toBe(true)
+    const workersAfterSpawn = await harness.runtime.listWorkers()
+    expect(workersAfterSpawn.map((worker) => worker.nickname)).toContain('front-fixer')
+    const eventsAfterSpawn = await harness.bus.listRecentEvents()
+    expect(eventsAfterSpawn.some((event) => event.type === 'worker.spawned')).toBe(true)
   })
 
   test('spawn_worker embeds the role .toml persona into the spawned prompt', async () => {
@@ -99,7 +101,7 @@ describe('workflow MCP worker lifecycle tools', () => {
     })
 
     expect(result.isError).toBe(true)
-    expect(harness.runtime.listWorkers()).toHaveLength(0)
+    expect(await harness.runtime.listWorkers()).toHaveLength(0)
   })
 
   test('list_workers filters by runId and activeOnly through the tool', async () => {
@@ -166,8 +168,9 @@ describe('workflow MCP worker lifecycle tools', () => {
     expect(structuredContent.status).toBe('stopped')
     expect(structuredContent.stopReason).toBe('Fix landed.')
 
-    expect(harness.runtime.listWorkers({ activeOnly: true })).toHaveLength(0)
-    expect(harness.bus.listRecentEvents().some((event) => event.type === 'worker.stopped')).toBe(true)
+    expect(await harness.runtime.listWorkers({ activeOnly: true })).toHaveLength(0)
+    const eventsAfterStop = await harness.bus.listRecentEvents()
+    expect(eventsAfterStop.some((event) => event.type === 'worker.stopped')).toBe(true)
   })
 
   test('stop_worker rejects when neither workerId nor nickname is supplied', async () => {

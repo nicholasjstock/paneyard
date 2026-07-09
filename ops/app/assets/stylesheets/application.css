@@ -1,0 +1,175 @@
+/*
+ * This is a manifest file that'll be compiled into application.css.
+ *
+ * With Propshaft, assets are served efficiently without preprocessing steps. You can still include
+ * application-wide styles in this file, but keep in mind that CSS precedence will follow the standard
+ * cascading order, meaning styles declared later in the document or manifest will override earlier ones,
+ * depending on specificity.
+ *
+ * Consider organizing styles into separate files for maintainability.
+ */
+
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --border: #2a2f3a;
+  --text: #e6e8eb;
+  --muted: #9aa2af;
+  --accent: #5b8cff;
+  --danger: #ff5b6a;
+  --success: #35c98f;
+  --warn: #f5a623;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.topbar .brand {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.topbar nav a {
+  color: var(--muted);
+  text-decoration: none;
+  margin-left: 1.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.topbar nav a.active,
+.topbar nav a:hover {
+  color: var(--text);
+  border-bottom: 2px solid var(--accent);
+}
+
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+h1 { font-size: 1.4rem; margin-bottom: 1rem; }
+h2 { font-size: 1.1rem; margin: 1.5rem 0 0.75rem; }
+
+.flash {
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+.flash.notice { background: rgba(53, 201, 143, 0.15); color: var(--success); }
+.flash.alert { background: rgba(255, 91, 106, 0.15); color: var(--danger); }
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.card-title a { color: var(--text); text-decoration: none; font-weight: 600; }
+.card-title a:hover { color: var(--accent); }
+
+.muted { color: var(--muted); font-size: 0.85rem; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.badge.running, .badge.answered, .badge.completed, .badge.fulfilled { color: var(--success); border-color: var(--success); }
+.badge.blocking, .badge.failed, .badge.stalled { color: var(--danger); border-color: var(--danger); }
+.badge.launching, .badge.stopping, .badge.open, .badge.planning { color: var(--warn); border-color: var(--warn); }
+
+.btn {
+  display: inline-block;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #0b0d12; font-weight: 600; }
+.btn.primary:hover { opacity: 0.9; color: #0b0d12; }
+
+form.inline { display: inline; }
+
+.field { margin-bottom: 1rem; }
+.field label { display: block; margin-bottom: 0.3rem; font-size: 0.85rem; color: var(--muted); }
+.field input[type="text"],
+.field input[type="url"],
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.field textarea { min-height: 5rem; }
+
+pre.log {
+  background: #0a0c10;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  max-height: 480px;
+  overflow: auto;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.empty { color: var(--muted); font-style: italic; padding: 1rem 0; }
+
+.error-banner {
+  background: rgba(255, 91, 106, 0.1);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  padding: 0.75rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}

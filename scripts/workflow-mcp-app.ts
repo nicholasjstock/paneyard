@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url'
 import * as z from 'zod/v4'
 
 import {
-  appendOrchestratorTickHistory,
   buildWorkflowContext,
   buildGuardedCommand,
   collectWorkflowState,
@@ -13,10 +12,7 @@ import {
   planWorkflowIteration,
   publishPlannerJobs,
   queueLongPhoneDemoPlannerJob,
-  readOrchestratorState,
-  readOrchestratorTickHistory,
   readWorkflowArtifact,
-  writeOrchestratorState,
   writeWorkflowArtifact,
   type GuardedCommand,
   type OrchestratorDecisionState,
@@ -25,12 +21,18 @@ import {
 import { runOrchestratorTurn } from './orchestrator-turn'
 import { runWorkerTurn } from './worker-turn'
 import { runPlannerTurn } from './planner-turn'
-import { workflowBus } from './workflow-bus'
 import { formatWorkflowLogLine } from './workflow-logging'
-import { createWorkflowWorkerRuntime } from './workflow-worker-runtime'
 import { createNodeWorkerProcessAdapter } from './workflow-worker-runtime-node'
 import { createFakeWorkerProcessAdapter } from './workflow-worker-runtime-fake'
-import { collectWorkflowServerState } from './workflow-state'
+import { createRailsWorkflowBus } from './workflow-bus-rails'
+import { createWorkflowWorkerRuntimeRails } from './workflow-worker-runtime-rails'
+import {
+  appendOrchestratorTickHistory,
+  readOrchestratorState,
+  readOrchestratorTickHistory,
+  writeOrchestratorState,
+} from './orchestrator-state-rails'
+import type { RailsApiRequestOptions } from './rails-api-client'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -51,7 +53,8 @@ export const context = buildWorkflowContext({
   frontDir: FRONT_DIR,
   outputDir: OUTPUT_DIR,
 })
-export const workerRuntime = createWorkflowWorkerRuntime({
+export const workflowBus = createRailsWorkflowBus()
+export const workerRuntime = createWorkflowWorkerRuntimeRails({
   rootDir: ROOT_DIR,
   outputDir: OUTPUT_DIR,
   processAdapter:
@@ -84,9 +87,14 @@ export type WorkflowServerDeps = {
   workerRuntime?: typeof workerRuntime
   context?: WorkflowContext
   commandRunner?: GuardedCommandRunner
+  // Lets tests point the orchestrator-state calls below at a fake Rails
+  // server instead of the real one -- these aren't threaded through
+  // bus/workerRuntime DI since they're free functions, not part of either
+  // interface (see scripts/__tests__/helpers/workflow-mcp-test-harness.ts).
+  railsOptions?: RailsApiRequestOptions
 }
 
-const workerRoleSchema = z.enum(['planner', 'orchestrator', 'worker'])
+export const workerRoleSchema = z.enum(['planner', 'orchestrator', 'worker'])
 
 const workflowAgentSchema = z.enum(['orchestrator', 'worker'])
 
@@ -143,6 +151,65 @@ const orchestratorDecisionStateSchema = z.object({
   lastUpdatedAt: z.string().nullable(),
 })
 
+export const spawnWorkerInputShape = {
+  runId: z.string().min(1),
+  role: workerRoleSchema,
+  nickname: z.string().min(1),
+  reason: z.string().min(1),
+  scope: z.string().min(1),
+  prompt: z.string().min(1),
+}
+
+export const listWorkersInputShape = {
+  runId: z.string().optional(),
+  activeOnly: z.boolean().optional(),
+}
+
+export const stopWorkerInputShape = {
+  workerId: z.string().optional(),
+  nickname: z.string().optional(),
+  reason: z.string().min(1),
+}
+
+export const appendSpawnRequestInputShape = {
+  runId: z.string().min(1),
+  askedBy: z.string().min(1),
+  scope: z.string().min(1),
+  text: z.string().min(1),
+  context: z.string().optional(),
+  requestedRole: z.string().min(1),
+  priority: z.enum(['advisory', 'blocking']).optional(),
+  tags: z.array(z.string()).optional(),
+}
+
+export const appendUserQuestionInputShape = {
+  runId: z.string().min(1),
+  askedBy: z.string().min(1),
+  scope: z.string().min(1),
+  text: z.string().min(1),
+  context: z.string().optional(),
+  priority: z.enum(['advisory', 'blocking']).optional(),
+  tags: z.array(z.string()).optional(),
+}
+
+export const answerUserQuestionInputShape = {
+  questionId: z.string().min(1),
+  answeredBy: z.string().min(1),
+  answerText: z.string().min(1),
+}
+
+export const fulfillSpawnRequestInputShape = {
+  requestId: z.string().min(1),
+  fulfilledBy: z.string().min(1),
+  fulfillmentNote: z.string().min(1),
+}
+
+export const queueLongPhoneDemoPlannerJobInputShape = {
+  runId: z.string().min(1),
+  frontendUrl: z.string().url(),
+  task: z.string().optional(),
+}
+
 
 function logWorkflow(scope: string, message: string, details?: Record<string, unknown>) {
   console.error(
@@ -160,6 +227,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
   const activeWorkerRuntime = deps.workerRuntime ?? workerRuntime
   const activeContext = deps.context ?? context
   const activeCommandRunner = deps.commandRunner ?? runGuardedCommandWithSpawnSync
+  const activeRailsOptions = deps.railsOptions ?? {}
 
   const server = new McpServer({
     name: 'simple-retail-planner-workflow',
@@ -170,14 +238,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     'spawn_worker',
     {
       description: 'Spawn one MCP-managed worker process and persist observable worker state for the run.',
-      inputSchema: {
-        runId: z.string().min(1),
-        role: workerRoleSchema,
-        nickname: z.string().min(1),
-        reason: z.string().min(1),
-        scope: z.string().min(1),
-        prompt: z.string().min(1),
-      },
+      inputSchema: spawnWorkerInputShape,
       outputSchema: workerRecordSchema,
     },
     async ({ runId, role, nickname, reason, scope, prompt }) => {
@@ -185,7 +246,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
       // Persona-wrapping happens inside workerRuntime.spawnWorker itself (see
       // workflow-worker-runtime.ts) so every spawn path gets it consistently,
       // not just calls that go through this specific MCP tool.
-      const structuredContent = activeWorkerRuntime.spawnWorker({
+      const structuredContent = await activeWorkerRuntime.spawnWorker({
         runId,
         role,
         nickname,
@@ -193,7 +254,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         scope,
         prompt,
       })
-      activeBus.publishWorkerSpawned({
+      await activeBus.publishWorkerSpawned({
         runId,
         owner: 'workflow_mcp',
         role,
@@ -218,10 +279,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     'list_workers',
     {
       description: 'List MCP-managed workers and their persisted observable state.',
-      inputSchema: {
-        runId: z.string().optional(),
-        activeOnly: z.boolean().optional(),
-      },
+      inputSchema: listWorkersInputShape,
       outputSchema: {
         workers: z.array(workerRecordSchema),
       },
@@ -229,7 +287,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     async ({ runId, activeOnly }) => {
       logWorkflow('tool:list_workers', 'requested', { runId: runId ?? null, activeOnly: Boolean(activeOnly) })
       const structuredContent = {
-        workers: activeWorkerRuntime.listWorkers({
+        workers: await activeWorkerRuntime.listWorkers({
           runId,
           activeOnly,
         }),
@@ -247,11 +305,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     'stop_worker',
     {
       description: 'Stop one MCP-managed worker by workerId or nickname and persist the stop reason.',
-      inputSchema: {
-        workerId: z.string().optional(),
-        nickname: z.string().optional(),
-        reason: z.string().min(1),
-      },
+      inputSchema: stopWorkerInputShape,
       outputSchema: workerRecordSchema,
     },
     async ({ workerId, nickname, reason }) => {
@@ -264,9 +318,9 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         nickname: nickname ?? null,
       })
       const structuredContent = workerId
-        ? activeWorkerRuntime.stopWorker({ workerId, reason })
-        : activeWorkerRuntime.stopWorker({ nickname: nickname as string, reason })
-      activeBus.publishWorkerStopped({
+        ? await activeWorkerRuntime.stopWorker({ workerId, reason })
+        : await activeWorkerRuntime.stopWorker({ nickname: nickname as string, reason })
+      await activeBus.publishWorkerStopped({
         runId: structuredContent.runId,
         owner: 'workflow_mcp',
         role: structuredContent.role,
@@ -305,7 +359,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async ({ runId, phase, owner, summary }) => {
       logWorkflow('tool:publish_run_status', 'requested', { runId, phase, owner })
-      const structuredContent = activeBus.publishRunStatus({
+      const structuredContent = await activeBus.publishRunStatus({
         runId,
         phase,
         owner,
@@ -323,16 +377,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     'append_spawn_request',
     {
       description: 'Append one worker spawn request to the shared workflow bus.',
-      inputSchema: {
-        runId: z.string().min(1),
-        askedBy: z.string().min(1),
-        scope: z.string().min(1),
-        text: z.string().min(1),
-        context: z.string().optional(),
-        requestedRole: z.string().min(1),
-        priority: z.enum(['advisory', 'blocking']).optional(),
-        tags: z.array(z.string()).optional(),
-      },
+      inputSchema: appendSpawnRequestInputShape,
       outputSchema: {
         requestId: z.string(),
         runId: z.string(),
@@ -357,7 +402,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         scope,
         requestedRole,
       })
-      const structuredContent = activeBus.appendSpawnRequest({
+      const structuredContent = await activeBus.appendSpawnRequest({
         runId,
         askedBy,
         scope,
@@ -382,20 +427,12 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     'append_user_question',
     {
       description: 'Append one user-facing question to the shared workflow bus when a planner or worker is blocked on a user decision.',
-      inputSchema: {
-        runId: z.string().min(1),
-        askedBy: z.string().min(1),
-        scope: z.string().min(1),
-        text: z.string().min(1),
-        context: z.string().optional(),
-        priority: z.enum(['advisory', 'blocking']).optional(),
-        tags: z.array(z.string()).optional(),
-      },
+      inputSchema: appendUserQuestionInputShape,
       outputSchema: workflowUserQuestionSchema.shape,
     },
     async ({ runId, askedBy, scope, text, context, priority, tags }) => {
       logWorkflow('tool:append_user_question', 'requested', { runId, askedBy, scope, priority: priority ?? 'advisory' })
-      const structuredContent = activeBus.appendUserQuestion({
+      const structuredContent = await activeBus.appendUserQuestion({
         runId,
         askedBy,
         scope,
@@ -417,16 +454,12 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     {
       description:
         'Record a human answer to a previously-asked workflow question. Marks the question answered (no longer open), which lets orchestrator recovery resume for the run; the answer text is discoverable by any subsequent planner via list_user_questions.',
-      inputSchema: {
-        questionId: z.string().min(1),
-        answeredBy: z.string().min(1),
-        answerText: z.string().min(1),
-      },
+      inputSchema: answerUserQuestionInputShape,
       outputSchema: workflowUserQuestionSchema.shape,
     },
     async ({ questionId, answeredBy, answerText }) => {
       logWorkflow('tool:answer_user_question', 'requested', { questionId, answeredBy })
-      const structuredContent = activeBus.answerUserQuestion({ questionId, answeredBy, answerText })
+      const structuredContent = await activeBus.answerUserQuestion({ questionId, answeredBy, answerText })
       logWorkflow('tool:answer_user_question', 'completed', { questionId, runId: structuredContent.runId })
       return {
         content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
@@ -463,7 +496,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async () => {
       logWorkflow('tool:list_open_spawn_requests', 'requested')
-      const structuredContent = { requests: activeBus.listOpenSpawnRequests() }
+      const structuredContent = { requests: await activeBus.listOpenSpawnRequests() }
       logWorkflow('tool:list_open_spawn_requests', 'completed', {
         count: structuredContent.requests.length,
       })
@@ -486,7 +519,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     async () => {
       logWorkflow('tool:list_open_user_questions', 'requested')
       const structuredContent = {
-        questions: activeBus.listOpenUserQuestions(),
+        questions: await activeBus.listOpenUserQuestions(),
       }
       logWorkflow('tool:list_open_user_questions', 'completed', { count: structuredContent.questions.length })
       return {
@@ -509,7 +542,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     async () => {
       logWorkflow('tool:list_user_questions', 'requested')
       const structuredContent = {
-        questions: activeBus.listUserQuestions(),
+        questions: await activeBus.listUserQuestions(),
       }
       logWorkflow('tool:list_user_questions', 'completed', { count: structuredContent.questions.length })
       return {
@@ -523,11 +556,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     'queue_long_phone_demo_planner_job',
     {
       description: 'Queue an explicit planner job to create the long phone demo video without auto-restarting an idle run.',
-      inputSchema: {
-        runId: z.string().min(1),
-        frontendUrl: z.string().url(),
-        task: z.string().optional(),
-      },
+      inputSchema: queueLongPhoneDemoPlannerJobInputShape,
       outputSchema: {
         requestId: z.string(),
         runId: z.string(),
@@ -548,7 +577,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async ({ runId, frontendUrl, task }) => {
       logWorkflow('tool:queue_long_phone_demo_planner_job', 'requested', { runId, frontendUrl })
-      const structuredContent = queueLongPhoneDemoPlannerJob(activeBus, {
+      const structuredContent = await queueLongPhoneDemoPlannerJob(activeBus, {
         runId,
         frontendUrl,
         task,
@@ -568,11 +597,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     'fulfill_spawn_request',
     {
       description: 'Mark one worker spawn request fulfilled after a worker has actually been spawned.',
-      inputSchema: {
-        requestId: z.string().min(1),
-        fulfilledBy: z.string().min(1),
-        fulfillmentNote: z.string().min(1),
-      },
+      inputSchema: fulfillSpawnRequestInputShape,
       outputSchema: {
         requestId: z.string(),
         runId: z.string(),
@@ -592,7 +617,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async ({ requestId, fulfilledBy, fulfillmentNote }) => {
       logWorkflow('tool:fulfill_spawn_request', 'requested', { requestId, fulfilledBy })
-      const structuredContent = activeBus.fulfillSpawnRequest({ requestId, fulfilledBy, fulfillmentNote })
+      const structuredContent = await activeBus.fulfillSpawnRequest({ requestId, fulfilledBy, fulfillmentNote })
       logWorkflow('tool:fulfill_spawn_request', 'completed', { requestId })
       return {
         content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
@@ -621,7 +646,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async ({ limit }) => {
       logWorkflow('tool:list_recent_events', 'requested', { limit: limit ?? 20 })
-      const structuredContent = { events: activeBus.listRecentEvents(limit) }
+      const structuredContent = { events: await activeBus.listRecentEvents(limit) }
       logWorkflow('tool:list_recent_events', 'completed', {
         count: structuredContent.events.length,
       })
@@ -710,7 +735,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         verifierFinding,
         stallFinding,
       })
-      const jobs = publishPlannerJobs(activeBus, {
+      const jobs = await publishPlannerJobs(activeBus, {
         runId,
         summary: plan.summary,
         plan,
@@ -767,7 +792,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         frontendUrl,
         staleAfterMs: staleAfterMs ?? null,
       })
-      const structuredContent = runOrchestratorTurn({
+      const structuredContent = await runOrchestratorTurn({
         runId,
         task,
         scenario,
@@ -775,10 +800,10 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         workerRuntime: activeWorkerRuntime,
         bus: activeBus,
         staleAfterMs,
-        previousState: readOrchestratorState(activeContext, runId),
+        previousState: await readOrchestratorState(activeContext, runId, activeRailsOptions),
       })
-      writeOrchestratorState(activeContext, structuredContent.nextState)
-      appendOrchestratorTickHistory(activeContext, structuredContent.nextState)
+      await writeOrchestratorState(activeContext, structuredContent.nextState, activeRailsOptions)
+      await appendOrchestratorTickHistory(activeContext, structuredContent.nextState, activeRailsOptions)
       logWorkflow('tool:run_orchestrator_turn', 'completed', {
         runId,
         stalledWorkers: structuredContent.stalledWorkers.length,
@@ -817,11 +842,10 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async ({ runId, role, nickname, scope, result, task, scenario, frontendUrl }) => {
       logWorkflow('tool:worker_turn', 'requested', { runId, role, nickname, scope })
-      const previousState = readOrchestratorState(activeContext, runId)
-      const activeWorkerIds = new Set(
-        activeWorkerRuntime.listWorkers({ runId, activeOnly: true }).map((worker) => worker.workerId)
-      )
-      const structuredContent = runWorkerTurn({
+      const previousState = await readOrchestratorState(activeContext, runId, activeRailsOptions)
+      const runningWorkers = await activeWorkerRuntime.listWorkers({ runId, activeOnly: true })
+      const activeWorkerIds = new Set(runningWorkers.map((worker) => worker.workerId))
+      const structuredContent = await runWorkerTurn({
         runId,
         role,
         nickname,
@@ -834,7 +858,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         activeWorkerIds,
         previousState,
       })
-      writeOrchestratorState(activeContext, structuredContent.nextState)
+      await writeOrchestratorState(activeContext, structuredContent.nextState, activeRailsOptions)
       logWorkflow('tool:worker_turn', 'completed', {
         runId,
         role,
@@ -885,8 +909,8 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async ({ runId, summary, nextStep, followingSteps }) => {
       logWorkflow('tool:planner_turn', 'requested', { runId, hasNextStep: nextStep !== null, followingSteps: followingSteps.length })
-      const previousState = readOrchestratorState(activeContext, runId)
-      const structuredContent = runPlannerTurn({
+      const previousState = await readOrchestratorState(activeContext, runId, activeRailsOptions)
+      const structuredContent = await runPlannerTurn({
         runId,
         summary,
         nextStep,
@@ -894,8 +918,8 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         bus: activeBus,
         previousState,
       })
-      writeOrchestratorState(activeContext, structuredContent.nextState)
-      appendOrchestratorTickHistory(activeContext, structuredContent.nextState)
+      await writeOrchestratorState(activeContext, structuredContent.nextState, activeRailsOptions)
+      await appendOrchestratorTickHistory(activeContext, structuredContent.nextState, activeRailsOptions)
       logWorkflow('tool:planner_turn', 'completed', { runId, jobs: structuredContent.jobs.length })
 
       return {
@@ -916,7 +940,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async ({ runId }) => {
       logWorkflow('tool:read_orchestrator_state', 'requested', { runId })
-      const structuredContent = readOrchestratorState(activeContext, runId)
+      const structuredContent = await readOrchestratorState(activeContext, runId, activeRailsOptions)
       logWorkflow('tool:read_orchestrator_state', 'completed', {
         runId,
         tickCount: structuredContent.tickCount,
@@ -943,7 +967,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async ({ runId }) => {
       logWorkflow('tool:read_orchestrator_tick_history', 'requested', { runId })
-      const structuredContent = readOrchestratorTickHistory(activeContext, runId)
+      const structuredContent = await readOrchestratorTickHistory(activeContext, runId, activeRailsOptions)
       logWorkflow('tool:read_orchestrator_tick_history', 'completed', {
         runId,
         entries: structuredContent.entries.length,
@@ -972,7 +996,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
         runId: state.runId,
         tickCount: state.tickCount,
       })
-      const statePath = writeOrchestratorState(activeContext, state)
+      const statePath = await writeOrchestratorState(activeContext, state, activeRailsOptions)
       const structuredContent = { statePath, state }
       logWorkflow('tool:write_orchestrator_state', 'completed', {
         runId: state.runId,
@@ -1010,7 +1034,7 @@ export function createWorkflowServer(deps: WorkflowServerDeps = {}): McpServer {
     },
     async ({ runId }) => {
       logWorkflow('tool:collect_workflow_state', 'requested', { runId })
-      const artifactNames = listPlannerDeclaredArtifacts(activeBus, runId)
+      const artifactNames = await listPlannerDeclaredArtifacts(activeBus, runId)
       const structuredContent = collectWorkflowState(activeContext, runId, artifactNames)
       logWorkflow('tool:collect_workflow_state', 'completed', {
         runId,

@@ -6,8 +6,7 @@ import * as path from 'path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { createWorkflowBus } from '../workflow-bus'
-import { createWorkflowWorkerRuntime } from '../workflow-worker-runtime'
+import { createFakeWorkflowBus, createFakeWorkflowWorkerRuntime } from './helpers/fake-workflow-bus'
 import { createNodeWorkerProcessAdapter } from '../workflow-worker-runtime-node'
 import { resolveLatestPersistedRun, spawnRequestedWorkers } from '../supervisor-loop'
 
@@ -56,15 +55,13 @@ async function waitForFile(filePath: string, timeoutMs = 5000): Promise<void> {
 }
 
 describe('supervisor loop worker spawning', () => {
-  test('dedupes open planner requests by run, role, and scope before spawning', () => {
+  test('dedupes open planner requests by run, role, and scope before spawning', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supervisor-loop-'))
     tempDirs.push(tempDir)
-    const bus = createWorkflowBus({
-      storagePath: path.join(tempDir, 'workflow-bus.json'),
-    })
+    const bus = createFakeWorkflowBus()
     const spawned: Array<{ role: string; nickname: string; scope: string; reason: string; prompt: string }> = []
 
-    bus.appendSpawnRequest({
+    await bus.appendSpawnRequest({
       runId: 'demo-20260702-130619',
       askedBy: 'planner',
       scope: 'recorder-report.md',
@@ -73,7 +70,7 @@ describe('supervisor loop worker spawning', () => {
       priority: 'blocking',
       tags: ['worker', 'recorder-report.md', 'planner-job'],
     })
-    bus.appendSpawnRequest({
+    await bus.appendSpawnRequest({
       runId: 'demo-20260702-130619',
       askedBy: 'planner',
       scope: 'recorder-report.md',
@@ -82,7 +79,7 @@ describe('supervisor loop worker spawning', () => {
       priority: 'blocking',
       tags: ['worker', 'recorder-report.md', 'planner-job'],
     })
-    bus.appendSpawnRequest({
+    await bus.appendSpawnRequest({
       runId: 'demo-20260702-130619',
       askedBy: 'planner',
       scope: 'verifier-report.md',
@@ -92,13 +89,13 @@ describe('supervisor loop worker spawning', () => {
       tags: ['worker', 'verifier-report.md', 'planner-job'],
     })
 
-    const spawnedWorkers = spawnRequestedWorkers({
+    const spawnedWorkers = await spawnRequestedWorkers({
       runId: 'demo-20260702-130619',
       workerRuntime: {
-        listWorkers() {
+        async listWorkers() {
           return []
         },
-        spawnWorker(args) {
+        async spawnWorker(args) {
           spawned.push(args)
           return {
             workerId: args.workerId ?? `worker-${spawned.length}`,
@@ -129,12 +126,10 @@ describe('supervisor loop worker spawning', () => {
     expect(spawned.map((call) => call.nickname)).toEqual(['worker', 'worker-1'])
   })
 
-  test('dismisses an open request superseded by an already-active worker claiming the same role/scope, and allows a fresh ask once that claim expires', () => {
+  test('dismisses an open request superseded by an already-active worker claiming the same role/scope, and allows a fresh ask once that claim expires', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supervisor-loop-claim-'))
     tempDirs.push(tempDir)
-    const bus = createWorkflowBus({
-      storagePath: path.join(tempDir, 'workflow-bus.json'),
-    })
+    const bus = createFakeWorkflowBus()
     const runId = 'demo-claim-run'
     const spawned: Array<{ role: string; scope: string }> = []
     const activePlannerWorker = {
@@ -159,13 +154,13 @@ describe('supervisor loop worker spawning', () => {
     let plannerStillActive = true
 
     const workerRuntime = {
-      listWorkers(listArgs?: { runId?: string; activeOnly?: boolean }) {
+      async listWorkers(listArgs?: { runId?: string; activeOnly?: boolean }) {
         if (listArgs?.activeOnly && !plannerStillActive) {
           return []
         }
         return [activePlannerWorker]
       },
-      spawnWorker(spawnArgs: { role: string; scope: string; workerId?: string }) {
+      async spawnWorker(spawnArgs: { role: string; scope: string; workerId?: string }) {
         spawned.push({ role: spawnArgs.role, scope: spawnArgs.scope })
         return {
           ...activePlannerWorker,
@@ -178,7 +173,7 @@ describe('supervisor loop worker spawning', () => {
     // A second recovery ask arrives (e.g. a re-triggered stall tick) while
     // the first recovery planner is still actively running for the exact
     // same (role, scope).
-    const duplicateRequest = bus.appendSpawnRequest({
+    const duplicateRequest = await bus.appendSpawnRequest({
       runId,
       askedBy: 'planner',
       scope: 'workflow-plan.md',
@@ -188,11 +183,12 @@ describe('supervisor loop worker spawning', () => {
       tags: ['planner', 'workflow-plan.md', 'planner-job'],
     })
 
-    const firstPassSpawned = spawnRequestedWorkers({ runId, workerRuntime, bus })
+    const firstPassSpawned = await spawnRequestedWorkers({ runId, workerRuntime, bus })
 
     expect(firstPassSpawned).toEqual([])
     expect(spawned).toEqual([])
-    const dismissed = bus.listSpawnRequests().find((request) => request.requestId === duplicateRequest.requestId)
+    const allRequestsAfterFirstPass = await bus.listSpawnRequests()
+    const dismissed = allRequestsAfterFirstPass.find((request) => request.requestId === duplicateRequest.requestId)
     expect(dismissed?.status).toBe('dismissed')
     expect(dismissed?.dismissalNote).toContain('planner/workflow-plan.md')
 
@@ -200,7 +196,7 @@ describe('supervisor loop worker spawning', () => {
     // (role, scope) should now be free to spawn — the claim expired with
     // the worker, it wasn't a permanent block.
     plannerStillActive = false
-    const freshRequest = bus.appendSpawnRequest({
+    const freshRequest = await bus.appendSpawnRequest({
       runId,
       askedBy: 'planner',
       scope: 'workflow-plan.md',
@@ -210,32 +206,31 @@ describe('supervisor loop worker spawning', () => {
       tags: ['planner', 'workflow-plan.md', 'planner-job'],
     })
 
-    const secondPassSpawned = spawnRequestedWorkers({ runId, workerRuntime, bus })
+    const secondPassSpawned = await spawnRequestedWorkers({ runId, workerRuntime, bus })
 
     expect(secondPassSpawned).toHaveLength(1)
     expect(spawned).toEqual([{ role: 'planner', scope: 'workflow-plan.md' }])
-    const fulfilled = bus.listSpawnRequests().find((request) => request.requestId === freshRequest.requestId)
+    const allRequestsAfterSecondPass = await bus.listSpawnRequests()
+    const fulfilled = allRequestsAfterSecondPass.find((request) => request.requestId === freshRequest.requestId)
     expect(fulfilled?.status).toBe('fulfilled')
   })
 
-  test('rolls back the claim when the worker actually fails to spawn, instead of leaving it fulfilled forever', () => {
+  test('rolls back the claim when the worker actually fails to spawn, instead of leaving it fulfilled forever', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supervisor-loop-spawn-failure-'))
     tempDirs.push(tempDir)
-    const bus = createWorkflowBus({
-      storagePath: path.join(tempDir, 'workflow-bus.json'),
-    })
+    const bus = createFakeWorkflowBus()
     const runId = 'demo-spawn-failure-run'
 
     const workerRuntime = {
-      listWorkers() {
+      async listWorkers() {
         return []
       },
-      spawnWorker(): never {
+      async spawnWorker(): Promise<never> {
         throw new Error('codex binary not found in PATH')
       },
     }
 
-    const request = bus.appendSpawnRequest({
+    const request = await bus.appendSpawnRequest({
       runId,
       askedBy: 'planner',
       scope: 'recorder-report.md',
@@ -245,9 +240,10 @@ describe('supervisor loop worker spawning', () => {
       tags: ['worker', 'recorder-report.md', 'planner-job'],
     })
 
-    expect(() => spawnRequestedWorkers({ runId, workerRuntime, bus })).toThrow('codex binary not found in PATH')
+    await expect(spawnRequestedWorkers({ runId, workerRuntime, bus })).rejects.toThrow('codex binary not found in PATH')
 
-    const afterFailure = bus.listSpawnRequests().find((entry) => entry.requestId === request.requestId)
+    const allRequestsAfterFailure = await bus.listSpawnRequests()
+    const afterFailure = allRequestsAfterFailure.find((entry) => entry.requestId === request.requestId)
     expect(afterFailure?.status).toBe('dismissed')
     expect(afterFailure?.dismissalNote).toContain('failed to spawn')
     expect(afterFailure?.dismissalNote).toContain('codex binary not found in PATH')
@@ -273,12 +269,10 @@ setInterval(() => {}, 1000)
       { mode: 0o755 }
     )
 
-    const bus = createWorkflowBus({
-      storagePath: path.join(tempDir, 'workflow-bus.json'),
-    })
+    const bus = createFakeWorkflowBus()
     const runId = 'demo-20260703-140000'
 
-    const request = bus.appendSpawnRequest({
+    const request = await bus.appendSpawnRequest({
       runId,
       askedBy: 'orchestrator',
       scope: 'recorder-report.md',
@@ -288,7 +282,7 @@ setInterval(() => {}, 1000)
       tags: ['worker', 'recorder-report.md', 'planner-job'],
     })
 
-    const workerRuntime = createWorkflowWorkerRuntime({
+    const workerRuntime = createFakeWorkflowWorkerRuntime({
       rootDir: tempDir,
       outputDir,
       processAdapter: createNodeWorkerProcessAdapter(),
@@ -300,13 +294,13 @@ setInterval(() => {}, 1000)
         FAKE_CODEX_PROMPT_CAPTURE_PATH: promptCapturePath,
       },
       async () => {
-        const spawnedWorkers = spawnRequestedWorkers({ runId, workerRuntime, bus })
+        const spawnedWorkers = await spawnRequestedWorkers({ runId, workerRuntime, bus })
 
         expect(spawnedWorkers.map((worker) => worker.role)).toEqual(['worker'])
 
         await waitForFile(promptCapturePath)
 
-        const activeWorkers = workerRuntime.listWorkers({ runId, activeOnly: true })
+        const activeWorkers = await workerRuntime.listWorkers({ runId, activeOnly: true })
         expect(activeWorkers).toHaveLength(1)
         expect(activeWorkers[0]).toMatchObject({
           role: 'worker',
@@ -315,24 +309,23 @@ setInterval(() => {}, 1000)
         })
         expect(typeof activeWorkers[0].pid).toBe('number')
 
-        const spawnedEvents = bus
-          .listRecentEvents()
-          .filter(
-            (event) =>
-              event.type === 'worker.spawned' &&
-              (event.payload as { runId?: string }).runId === runId
-          )
+        const recentEvents = await bus.listRecentEvents()
+        const spawnedEvents = recentEvents.filter(
+          (event) =>
+            event.type === 'worker.spawned' &&
+            (event.payload as { runId?: string }).runId === runId
+        )
         expect(spawnedEvents).toHaveLength(1)
         expect(spawnedEvents[0].payload).toMatchObject({ role: 'worker', nickname: 'worker' })
 
-        const openRequests = bus.listOpenSpawnRequests()
+        const openRequests = await bus.listOpenSpawnRequests()
         expect(openRequests.map((entry) => entry.requestId)).not.toContain(request.requestId)
 
         // Once the request is fulfilled, a second tick against the same bus
         // state must not spawn a duplicate worker.
-        const secondTickSpawns = spawnRequestedWorkers({ runId, workerRuntime, bus })
+        const secondTickSpawns = await spawnRequestedWorkers({ runId, workerRuntime, bus })
         expect(secondTickSpawns).toHaveLength(0)
-        expect(workerRuntime.listWorkers({ runId, activeOnly: true })).toHaveLength(1)
+        expect(await workerRuntime.listWorkers({ runId, activeOnly: true })).toHaveLength(1)
 
         await workerRuntime.stopWorker({
           workerId: activeWorkers[0].workerId,

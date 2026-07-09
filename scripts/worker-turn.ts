@@ -14,8 +14,8 @@ export type WorkerTurnBus = {
     requestedRole: string
     priority?: 'advisory' | 'blocking'
     tags?: string[]
-  }) => { requestId: string }
-  listSpawnRequests?: () => Array<{
+  }) => Promise<{ requestId: string }>
+  listSpawnRequests?: () => Promise<Array<{
     requestId: string
     runId: string
     askedBy: string
@@ -23,7 +23,7 @@ export type WorkerTurnBus = {
     requestedRole: string
     status: 'open' | 'fulfilled' | 'dismissed'
     fulfilledWorkerId?: string | null
-  }>
+  }>>
 }
 
 export type WorkerTurnArgs = {
@@ -56,7 +56,7 @@ export type WorkerTurnResult = {
 
 const PLANNER_FOLLOWUP_SCOPE = 'workflow-plan.md'
 
-export function runWorkerTurn(args: WorkerTurnArgs): WorkerTurnResult {
+export async function runWorkerTurn(args: WorkerTurnArgs): Promise<WorkerTurnResult> {
   const previousState = args.previousState
   const followingSteps = previousState?.followingSteps ?? []
 
@@ -70,28 +70,27 @@ export function runWorkerTurn(args: WorkerTurnArgs): WorkerTurnResult {
   // must not silently reuse the old, already-resolved request — that would
   // mean only the very first follow-up planner in a run's lifetime ever
   // gets asked for.
-  const existingRequest = args.bus
-    .listSpawnRequests?.()
-    .find((request) => {
-      if (
-        request.status === 'dismissed' ||
-        request.runId !== args.runId ||
-        request.requestedRole !== 'planner' ||
-        request.scope !== PLANNER_FOLLOWUP_SCOPE
-      ) {
-        return false
-      }
+  const existingRequests = await args.bus.listSpawnRequests?.()
+  const existingRequest = existingRequests?.find((request) => {
+    if (
+      request.status === 'dismissed' ||
+      request.runId !== args.runId ||
+      request.requestedRole !== 'planner' ||
+      request.scope !== PLANNER_FOLLOWUP_SCOPE
+    ) {
+      return false
+    }
 
-      if (request.status === 'open') {
-        return true
-      }
+    if (request.status === 'open') {
+      return true
+    }
 
-      return Boolean(request.fulfilledWorkerId && activeWorkerIds.has(request.fulfilledWorkerId))
-    })
+    return Boolean(request.fulfilledWorkerId && activeWorkerIds.has(request.fulfilledWorkerId))
+  })
 
   const plannerRequest =
     existingRequest ??
-    args.bus.appendSpawnRequest({
+    (await args.bus.appendSpawnRequest({
       runId: args.runId,
       askedBy: 'worker',
       scope: PLANNER_FOLLOWUP_SCOPE,
@@ -103,7 +102,7 @@ export function runWorkerTurn(args: WorkerTurnArgs): WorkerTurnResult {
       requestedRole: 'planner',
       priority: 'blocking',
       tags: ['planner', PLANNER_FOLLOWUP_SCOPE, 'worker-turn-followup'],
-    })
+    }))
 
   const nextState: OrchestratorDecisionState = {
     runId: args.runId,

@@ -1,0 +1,76 @@
+<% content_for :title, @run.run_id %>
+
+<%= turbo_stream_from "run_#{@run.run_id}" %>
+
+<div class="toolbar">
+  <div>
+    <h1 class="mono"><%= @run.run_id %></h1>
+    <span class="badge <%= @run.status %>"><%= @run.status %></span>
+  </div>
+  <% if @run.active? %>
+    <%= button_to "Kill run", stop_run_path(@run), method: :post,
+          class: "btn danger",
+          data: { turbo_confirm: "Stop run #{@run.run_id}? This cascades to every active worker under it." } %>
+  <% end %>
+</div>
+
+<div class="card">
+  <p><%= @run.task %></p>
+  <p class="muted">
+    <%= @run.launcher_variant %> &middot; target: <span class="mono"><%= @run.target_root %></span>
+    <% if @run.scenario.present? %> &middot; scenario: <%= @run.scenario %><% end %>
+    <% if @run.frontend_url.present? %> &middot; <%= @run.frontend_url %><% end %>
+  </p>
+  <p class="muted">
+    supervisor pid: <span class="mono"><%= @run.supervisor_pid || "—" %></span>
+    <% if @run.log_path.present? %> &middot; log: <span class="mono"><%= @run.log_path %></span><% end %>
+  </p>
+</div>
+
+<%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
+
+<h2>Workers</h2>
+<% if @workers.blank? %>
+  <p class="empty">No workers recorded for this run yet.</p>
+<% else %>
+  <% @workers.each do |worker| %>
+    <div class="card">
+      <div class="card-title">
+        <%= link_to worker["nickname"], worker_path(worker["workerId"]) %>
+        <span class="badge <%= worker["status"] %>"><%= worker["status"] %></span>
+      </div>
+      <p class="muted"><%= worker["role"] %> &middot; <span class="mono"><%= worker["scope"] %></span></p>
+    </div>
+  <% end %>
+<% end %>
+
+<h2>Open spawn requests</h2>
+<% if @spawn_requests.blank? %>
+  <p class="empty">No open spawn requests for this run.</p>
+<% else %>
+  <% @spawn_requests.each do |request| %>
+    <div class="card">
+      <div class="card-title">
+        <span><%= request["requestedRole"] %></span>
+        <span class="badge <%= request["priority"] %>"><%= request["priority"] %></span>
+      </div>
+      <p><%= request["text"] %></p>
+    </div>
+  <% end %>
+<% end %>
+
+<h2>Orchestrator ticks</h2>
+<% if @tick_history.blank? || @tick_history["entries"].blank? %>
+  <p class="empty">No orchestrator ticks recorded yet.</p>
+<% else %>
+  <% @tick_history["entries"].reverse_each do |entry| %>
+    <div class="card">
+      <div class="card-title">
+        <span>Tick <%= entry["tickCount"] %></span>
+        <span class="badge <%= entry["phase"] %>"><%= entry["phase"] %></span>
+      </div>
+      <% if entry["lastPlanSummary"].present? %><p><%= entry["lastPlanSummary"] %></p><% end %>
+      <% if entry["lastStallFinding"].present? %><p class="error-banner"><%= entry["lastStallFinding"] %></p><% end %>
+    </div>
+  <% end %>
+<% end %>

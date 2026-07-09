@@ -3,15 +3,13 @@ import * as path from 'path'
 import { fileURLToPath } from 'url'
 
 import { buildRequestedWorkerPrompt, buildWorkerNickname, runOrchestratorTurn } from './orchestrator-turn'
-import {
-  appendOrchestratorTickHistory,
-  buildWorkflowContext,
-  readOrchestratorState,
-  writeOrchestratorState,
-} from './workflow-mcp'
-import { createWorkflowBus } from './workflow-bus'
+import { buildWorkflowContext } from './workflow-mcp'
 import { createNodeWorkerProcessAdapter } from './workflow-worker-runtime-node'
-import { createId, createWorkflowWorkerRuntime, type WorkerDriver, type WorkflowWorkerRecord } from './workflow-worker-runtime'
+import { createId, type WorkerDriver, type WorkflowWorkerRecord, type WorkflowWorkerRuntime } from './workflow-worker-runtime'
+import { createRailsWorkflowBus } from './workflow-bus-rails'
+import { createWorkflowWorkerRuntimeRails } from './workflow-worker-runtime-rails'
+import type { WorkflowBus } from './workflow-bus'
+import { appendOrchestratorTickHistory, readOrchestratorState, writeOrchestratorState } from './orchestrator-state-rails'
 
 type SupervisorLoopOptions = {
   runId?: string
@@ -35,9 +33,9 @@ type SpawnRequest = {
   fulfilledWorkerId: string | null
 }
 
-type WorkerRuntimeLike = Pick<ReturnType<typeof createWorkflowWorkerRuntime>, 'listWorkers' | 'spawnWorker'>
+type WorkerRuntimeLike = Pick<WorkflowWorkerRuntime, 'listWorkers' | 'spawnWorker'>
 type WorkflowBusLike = Pick<
-  ReturnType<typeof createWorkflowBus>,
+  WorkflowBus,
   | 'listOpenSpawnRequests'
   | 'publishWorkerSpawned'
   | 'fulfillSpawnRequest'
@@ -56,7 +54,10 @@ const FRONT_DIR = path.resolve(ROOT_DIR, 'front')
 const OUTPUT_DIR = process.env.WORKFLOW_STATE_DIR
   ? path.resolve(process.env.WORKFLOW_STATE_DIR)
   : path.resolve(FRONT_DIR, 'demo-output', 'agents-sdk')
-const BUS_PATH = path.join(OUTPUT_DIR, 'workflow-bus.json')
+const RAILS_URL = process.env.WORKFLOW_RAILS_URL ?? 'http://127.0.0.1:3000'
+// Historical JSON snapshots from the retired file-backed bus are left on
+// disk as read-only history (not written to anymore) -- still useful here
+// as a last-resort fallback for guessing the most recently active run.
 const ORCHESTRATOR_STATE_DIR = path.join(OUTPUT_DIR, 'orchestrator-state')
 const WORKER_DRIVER: WorkerDriver = process.env.WORKFLOW_WORKER_DRIVER === 'claude' ? 'claude' : 'codex'
 
@@ -234,13 +235,21 @@ function collectSpawnRequests(args: {
   return [...latestByKey.values()]
 }
 
-export function spawnRequestedWorkers(args: {
+// Both loops below must stay sequential (for...of with await inside) — NOT
+// parallelized via Promise.all. The claim-before-spawn pattern in the
+// second loop (fulfillSpawnRequest before workerRuntime.spawnWorker) is
+// deliberate race-avoidance: claiming first shrinks the window in which
+// another concurrently-running supervisor tick could still see a slot as
+// unclaimed and spawn a duplicate for it. Parallelizing this loop would
+// silently reintroduce the exact double-spawn race this ordering exists to
+// prevent.
+export async function spawnRequestedWorkers(args: {
   runId: string
   workerRuntime: WorkerRuntimeLike
   bus: WorkflowBusLike
-}): WorkflowWorkerRecord[] {
-  const activeWorkers = args.workerRuntime.listWorkers({ runId: args.runId, activeOnly: true })
-  const currentWorkers = args.workerRuntime.listWorkers({ runId: args.runId })
+}): Promise<WorkflowWorkerRecord[]> {
+  const activeWorkers = await args.workerRuntime.listWorkers({ runId: args.runId, activeOnly: true })
+  const currentWorkers = await args.workerRuntime.listWorkers({ runId: args.runId })
 
   // A currently-running worker already claims its (runId, role, scope) slot —
   // that claim is the source of truth, not the bus's request history. Any
@@ -254,12 +263,13 @@ export function spawnRequestedWorkers(args: {
   // asks slip through before either is recognized as active; that's an
   // accepted, narrow race, not a data-loss risk.
   const activeClaimKeys = new Set(activeWorkers.map(buildActiveWorkerKey))
-  for (const request of args.bus.listOpenSpawnRequests()) {
+  const openRequestsForClaimCheck = await args.bus.listOpenSpawnRequests()
+  for (const request of openRequestsForClaimCheck) {
     if (request.runId !== args.runId) continue
 
     const key = buildSpawnRequestKey(request)
     if (key && activeClaimKeys.has(key)) {
-      args.bus.dismissSpawnRequest({
+      await args.bus.dismissSpawnRequest({
         requestId: request.requestId,
         dismissedBy: 'supervisor_loop',
         dismissalNote: `Superseded — an active worker already claims ${request.requestedRole}/${request.scope}.`,
@@ -267,9 +277,10 @@ export function spawnRequestedWorkers(args: {
     }
   }
 
+  const openRequestsForSpawn = await args.bus.listOpenSpawnRequests()
   const spawnRequests = collectSpawnRequests({
     runId: args.runId,
-    requests: args.bus.listOpenSpawnRequests(),
+    requests: openRequestsForSpawn,
     activeWorkers,
   })
   const spawnedWorkers: WorkflowWorkerRecord[] = []
@@ -289,7 +300,7 @@ export function spawnRequestedWorkers(args: {
     // takes far longer than this one bus write. Claiming first shrinks the
     // window in which another concurrently-running supervisor tick could
     // still see this slot as unclaimed and spawn a duplicate for it.
-    args.bus.fulfillSpawnRequest({
+    await args.bus.fulfillSpawnRequest({
       requestId: request.requestId,
       fulfilledBy: 'supervisor_loop',
       fulfillmentNote: `Spawned worker ${nickname} (${role}).`,
@@ -298,7 +309,7 @@ export function spawnRequestedWorkers(args: {
 
     let worker: WorkflowWorkerRecord
     try {
-      worker = args.workerRuntime.spawnWorker({
+      worker = await args.workerRuntime.spawnWorker({
         runId: args.runId,
         role,
         nickname,
@@ -311,7 +322,7 @@ export function spawnRequestedWorkers(args: {
       // The claim promised a worker that never came into existence — undo
       // it so dependents don't wait forever on a workerId that will never
       // appear, and so the slot is free for a real retry.
-      args.bus.dismissSpawnRequest({
+      await args.bus.dismissSpawnRequest({
         requestId: request.requestId,
         dismissedBy: 'supervisor_loop',
         dismissalNote: `Claimed worker ${nickname} (${role}) failed to spawn: ${error instanceof Error ? error.message : String(error)}`,
@@ -320,7 +331,7 @@ export function spawnRequestedWorkers(args: {
     }
 
     spawnedWorkers.push(worker)
-    args.bus.publishWorkerSpawned({
+    await args.bus.publishWorkerSpawned({
       runId: args.runId,
       owner: 'supervisor_loop',
       role,
@@ -339,8 +350,8 @@ async function main(): Promise<number> {
   }
 
   const options = parseArgs(process.argv.slice(2))
-  const bus = createWorkflowBus({ storagePath: BUS_PATH })
-  const workerRuntime = createWorkflowWorkerRuntime({
+  const bus = createRailsWorkflowBus()
+  const workerRuntime = createWorkflowWorkerRuntimeRails({
     rootDir: ROOT_DIR,
     outputDir: OUTPUT_DIR,
     processAdapter: createNodeWorkerProcessAdapter(),
@@ -352,11 +363,12 @@ async function main(): Promise<number> {
     outputDir: OUTPUT_DIR,
   })
 
-  const latestRunStatus = [...bus.listRunStatuses()].sort((left, right) => left.at.localeCompare(right.at)).at(-1)
+  const runStatuses = await bus.listRunStatuses()
+  const latestRunStatus = [...runStatuses].sort((left, right) => left.at.localeCompare(right.at)).at(-1)
   const latestPersistedRun = resolveLatestPersistedRun(ORCHESTRATOR_STATE_DIR)
   const runId = options.runId ?? latestRunStatus?.runId ?? latestPersistedRun?.runId
   if (!runId) {
-    process.stderr.write(`No runId was provided and no active run status exists in ${BUS_PATH}.\n`)
+    process.stderr.write(`No runId was provided and no active run status exists at ${RAILS_URL}.\n`)
     return 1
   }
 
@@ -366,7 +378,7 @@ async function main(): Promise<number> {
 
   process.stdout.write(`Supervisor loop starting for run ${runId}.\n`)
   process.stdout.write(`Scenario: ${scenario}. Frontend URL: ${frontendUrl}.\n`)
-  process.stdout.write(`Workflow bus: ${BUS_PATH}\n`)
+  process.stdout.write(`Workflow bus: ${RAILS_URL}\n`)
 
   let keepRunning = true
   let tickNumber = 0
@@ -381,8 +393,8 @@ async function main(): Promise<number> {
 
   while (keepRunning) {
     tickNumber += 1
-    const previousState = readOrchestratorState(workflowContext, runId)
-    const orchestratorResult = runOrchestratorTurn({
+    const previousState = await readOrchestratorState(workflowContext, runId)
+    const orchestratorResult = await runOrchestratorTurn({
       runId,
       task,
       scenario,
@@ -392,13 +404,15 @@ async function main(): Promise<number> {
       staleAfterMs: options.staleAfterMs,
       previousState,
     })
-    writeOrchestratorState(workflowContext, orchestratorResult.nextState)
-    appendOrchestratorTickHistory(workflowContext, orchestratorResult.nextState)
+    await writeOrchestratorState(workflowContext, orchestratorResult.nextState)
+    await appendOrchestratorTickHistory(workflowContext, orchestratorResult.nextState)
 
-    const persistedState = readOrchestratorState(workflowContext, runId)
-    const spawnedWorkers = spawnRequestedWorkers({ runId, workerRuntime, bus })
-    const openSpawnRequests = bus.listOpenSpawnRequests().filter((request) => request.runId === runId).length
-    const activeWorkers = workerRuntime.listWorkers({ runId, activeOnly: true }).length
+    const persistedState = await readOrchestratorState(workflowContext, runId)
+    const spawnedWorkers = await spawnRequestedWorkers({ runId, workerRuntime, bus })
+    const allOpenSpawnRequests = await bus.listOpenSpawnRequests()
+    const openSpawnRequests = allOpenSpawnRequests.filter((request) => request.runId === runId).length
+    const activeWorkersList = await workerRuntime.listWorkers({ runId, activeOnly: true })
+    const activeWorkers = activeWorkersList.length
     const spawnedRoles = spawnedWorkers.map((worker) => worker.role).join(', ') || 'none'
 
     process.stdout.write(

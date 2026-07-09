@@ -6,9 +6,8 @@ import * as path from 'path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { createWorkflowBus } from '../workflow-bus'
+import { createFakeWorkflowBus, createFakeWorkflowWorkerRuntime } from './helpers/fake-workflow-bus'
 import { runOrchestratorTurn } from '../orchestrator-turn'
-import { createWorkflowWorkerRuntime } from '../workflow-worker-runtime'
 
 const tempDirs: string[] = []
 
@@ -19,7 +18,7 @@ afterEach(() => {
 })
 
 describe('orchestrator turn', () => {
-  test('detects a stalled worker and publishes a planner recovery job', () => {
+  test('detects a stalled worker and publishes a planner recovery job', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
 
@@ -32,7 +31,6 @@ describe('orchestrator turn', () => {
     const promptPath = path.join(workersDir, 'worker.prompt.txt')
     const envPath = path.join(workersDir, 'worker.env.json')
     let nextPid = 42000
-    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
     const workerRecord = {
       workerId: 'worker-1',
       runId: 'demo-20260702-130619',
@@ -54,10 +52,6 @@ describe('orchestrator turn', () => {
     }
 
     fs.writeFileSync(
-      path.join(outputDir, 'workers.json'),
-      JSON.stringify({ workers: [workerRecord] }, null, 2)
-    )
-    fs.writeFileSync(
       logPath,
       [
         '[workflow] 2026-07-02T10:00:00.000Z worker:lifecycle: spawned worker {"pid":41001}',
@@ -73,9 +67,10 @@ describe('orchestrator turn', () => {
     fs.utimesSync(lastMessagePath, staleAt, staleAt)
     fs.utimesSync(promptPath, staleAt, staleAt)
 
-    const runtime = createWorkflowWorkerRuntime({
+    const runtime = createFakeWorkflowWorkerRuntime({
       rootDir: tempDir,
       outputDir,
+      initialWorkers: [workerRecord],
       processAdapter: {
         spawn() {
           const pid = nextPid++
@@ -96,8 +91,8 @@ describe('orchestrator turn', () => {
         },
       },
     })
-    const bus = createWorkflowBus({ storagePath: busStoragePath })
-    const result = runOrchestratorTurn({
+    const bus = createFakeWorkflowBus()
+    const result = await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
@@ -114,10 +109,11 @@ describe('orchestrator turn', () => {
     expect(result.nextState.lastStallFinding).toContain('frontend video review')
     expect(result.plan?.nextStep?.owner).toBe('planner')
     expect(result.jobs.map((job) => job.step.owner)).toEqual(['planner'])
-    expect(bus.listOpenSpawnRequests().map((request) => request.requestedRole)).toContain('planner')
+    const openRequests = await bus.listOpenSpawnRequests()
+    expect(openRequests.map((request) => request.requestedRole)).toContain('planner')
   })
 
-  test('repeated ticks on the same stall do not pile up duplicate planner recovery requests', () => {
+  test('repeated ticks on the same stall do not pile up duplicate planner recovery requests', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
 
@@ -129,7 +125,6 @@ describe('orchestrator turn', () => {
     const lastMessagePath = path.join(workersDir, 'worker.last-message.txt')
     const promptPath = path.join(workersDir, 'worker.prompt.txt')
     const envPath = path.join(workersDir, 'worker.env.json')
-    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
     const workerRecord = {
       workerId: 'worker-1',
       runId: 'demo-20260702-130619',
@@ -150,10 +145,6 @@ describe('orchestrator turn', () => {
       stopReason: null,
     }
 
-    fs.writeFileSync(
-      path.join(outputDir, 'workers.json'),
-      JSON.stringify({ workers: [workerRecord] }, null, 2)
-    )
     fs.writeFileSync(logPath, 'worker is still waiting on a browser frame')
     fs.writeFileSync(lastMessagePath, 'Waiting on the browser frame to move.')
     fs.writeFileSync(promptPath, 'Fix the stalled frontend recorder path.')
@@ -164,9 +155,10 @@ describe('orchestrator turn', () => {
     fs.utimesSync(lastMessagePath, staleAt, staleAt)
     fs.utimesSync(promptPath, staleAt, staleAt)
 
-    const runtime = createWorkflowWorkerRuntime({
+    const runtime = createFakeWorkflowWorkerRuntime({
       rootDir: tempDir,
       outputDir,
+      initialWorkers: [workerRecord],
       processAdapter: {
         spawn() {
           return {
@@ -186,12 +178,12 @@ describe('orchestrator turn', () => {
         },
       },
     })
-    const bus = createWorkflowBus({ storagePath: busStoragePath })
+    const bus = createFakeWorkflowBus()
 
     // Two ticks on the exact same still-stalled worker, 5s apart — idleForMs
     // (baked into the recovery successCheck text) differs between the two,
     // but the underlying ask ("recover this stall") has not changed.
-    runOrchestratorTurn({
+    await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
@@ -201,7 +193,7 @@ describe('orchestrator turn', () => {
       fileSystem: fs,
       now: new Date('2026-07-02T10:05:00.000Z'),
     })
-    const secondTick = runOrchestratorTurn({
+    const secondTick = await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
@@ -212,13 +204,14 @@ describe('orchestrator turn', () => {
       now: new Date('2026-07-02T10:05:05.000Z'),
     })
 
-    const plannerRequests = bus.listOpenSpawnRequests().filter((request) => request.requestedRole === 'planner')
+    const allOpenRequests = await bus.listOpenSpawnRequests()
+    const plannerRequests = allOpenRequests.filter((request) => request.requestedRole === 'planner')
     expect(plannerRequests).toHaveLength(1)
     expect(secondTick.jobs.map((job) => job.step.owner)).toEqual(['planner'])
     expect(secondTick.jobs[0]?.requestId).toBe(plannerRequests[0]?.requestId)
   })
 
-  test('does not spawn planner workers during the orchestrator tick', () => {
+  test('does not spawn planner workers during the orchestrator tick', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
 
@@ -226,11 +219,10 @@ describe('orchestrator turn', () => {
     const workersDir = path.join(outputDir, 'workers')
     fs.mkdirSync(workersDir, { recursive: true })
 
-    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
-    const bus = createWorkflowBus({ storagePath: busStoragePath })
+    const bus = createFakeWorkflowBus()
     const runId = 'demo-20260702-130619'
 
-    bus.appendSpawnRequest({
+    await bus.appendSpawnRequest({
       runId,
       askedBy: 'worker',
       scope: 'recorder-report.md',
@@ -281,23 +273,18 @@ describe('orchestrator turn', () => {
       stopReason: null,
     }
 
-    fs.writeFileSync(
-      path.join(outputDir, 'workers.json'),
-      JSON.stringify({ workers: [activeRecorder, activeVerifier] }, null, 2)
-    )
-
     const spawned: Array<{ role: string; nickname: string; scope: string; reason: string; prompt: string }> = []
 
-    const result = runOrchestratorTurn({
+    const result = await runOrchestratorTurn({
       runId,
       task: 'Recover the stalled demo run',
       scenario: 'both',
       frontendUrl: 'http://localhost:5174',
       workerRuntime: {
-        listWorkers() {
+        async listWorkers() {
           return [activeRecorder, activeVerifier]
         },
-        spawnWorker(args) {
+        async spawnWorker(args) {
           spawned.push(args)
           return {
             workerId: `worker-${spawned.length}`,
@@ -328,26 +315,26 @@ describe('orchestrator turn', () => {
     expect(result.jobs).toEqual([])
     expect(result.nextState.phase).toBe('waiting_on_workers')
     expect(spawned).toEqual([])
-    expect(bus.listRecentEvents(10).map((event) => event.type)).not.toContain('worker.spawned')
+    const recentEvents = await bus.listRecentEvents(10)
+    expect(recentEvents.map((event) => event.type)).not.toContain('worker.spawned')
   })
 
-  test('does not spawn missing workers for open planner jobs in the same turn', () => {
+  test('does not spawn missing workers for open planner jobs in the same turn', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
-    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
-    const bus = createWorkflowBus({ storagePath: busStoragePath })
+    const bus = createFakeWorkflowBus()
     const spawned: Array<{ role: string; nickname: string; scope: string; reason: string; prompt: string }> = []
 
-    const result = runOrchestratorTurn({
+    const result = await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
       frontendUrl: 'http://localhost:5174',
       workerRuntime: {
-        listWorkers() {
+        async listWorkers() {
           return []
         },
-        spawnWorker(args) {
+        async spawnWorker(args) {
           spawned.push(args)
           return {
             workerId: `worker-${spawned.length}`,
@@ -377,25 +364,25 @@ describe('orchestrator turn', () => {
     expect(result.jobs).toEqual([])
     expect(result.nextState.phase).toBe('starting')
     expect(spawned).toEqual([])
-    expect(bus.listRecentEvents(5).map((event) => event.type)).not.toContain('worker.spawned')
+    const recentEvents = await bus.listRecentEvents(5)
+    expect(recentEvents.map((event) => event.type)).not.toContain('worker.spawned')
   })
 
-  test('does not append duplicate open planner jobs for the same run, role, and scope', () => {
+  test('does not append duplicate open planner jobs for the same run, role, and scope', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
-    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
-    const bus = createWorkflowBus({ storagePath: busStoragePath })
+    const bus = createFakeWorkflowBus()
 
     const workerRuntime = {
-      listWorkers() {
+      async listWorkers() {
         return []
       },
-      spawnWorker() {
+      async spawnWorker(): Promise<never> {
         throw new Error('orchestrator turn should not spawn workers')
       },
     }
 
-    runOrchestratorTurn({
+    await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
@@ -405,7 +392,7 @@ describe('orchestrator turn', () => {
       fileSystem: fs,
     })
 
-    runOrchestratorTurn({
+    await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
@@ -415,30 +402,29 @@ describe('orchestrator turn', () => {
       fileSystem: fs,
     })
 
+    const openRequests = await bus.listOpenSpawnRequests()
     expect(
-      bus
-        .listOpenSpawnRequests()
+      openRequests
         .map((request) => [request.runId, request.requestedRole, request.scope].join('|'))
         .sort()
     ).toEqual([])
   })
 
-  test('detects a dead end (no workers, no open requests, not completed) and asks a planner to recover', () => {
+  test('detects a dead end (no workers, no open requests, not completed) and asks a planner to recover', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
-    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
-    const bus = createWorkflowBus({ storagePath: busStoragePath })
+    const bus = createFakeWorkflowBus()
 
-    const result = runOrchestratorTurn({
+    const result = await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
       frontendUrl: 'http://localhost:5174',
       workerRuntime: {
-        listWorkers() {
+        async listWorkers() {
           return []
         },
-        spawnWorker() {
+        async spawnWorker(): Promise<never> {
           throw new Error('orchestrator turn should not spawn workers')
         },
       },
@@ -473,17 +459,16 @@ describe('orchestrator turn', () => {
     ])
   })
 
-  test('does not spawn another recovery planner while a blocking user question is already open for the run', () => {
+  test('does not spawn another recovery planner while a blocking user question is already open for the run', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
-    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
-    const bus = createWorkflowBus({ storagePath: busStoragePath })
+    const bus = createFakeWorkflowBus()
 
     // A prior recovery planner already escalated this exact dead end to the
     // user instead of retrying again — the orchestrator must not ignore that
     // and spawn yet another recovery planner to redundantly re-investigate
     // the same thing while it's still awaiting a human answer.
-    bus.appendUserQuestion({
+    await bus.appendUserQuestion({
       runId: 'demo-20260702-130619',
       askedBy: 'planner',
       scope: 'phone-demo-video',
@@ -491,16 +476,16 @@ describe('orchestrator turn', () => {
       priority: 'blocking',
     })
 
-    const result = runOrchestratorTurn({
+    const result = await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
       frontendUrl: 'http://localhost:5174',
       workerRuntime: {
-        listWorkers() {
+        async listWorkers() {
           return []
         },
-        spawnWorker() {
+        async spawnWorker(): Promise<never> {
           throw new Error('orchestrator turn should not spawn workers')
         },
       },
@@ -521,16 +506,15 @@ describe('orchestrator turn', () => {
     expect(result.plan).toBeNull()
     expect(result.jobs).toEqual([])
     expect(result.nextState.phase).toBe('blocked_on_user')
-    expect(bus.listOpenSpawnRequests()).toEqual([])
+    expect(await bus.listOpenSpawnRequests()).toEqual([])
   })
 
-  test('resumes recovery once the blocking question has been answered', () => {
+  test('resumes recovery once the blocking question has been answered', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
-    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
-    const bus = createWorkflowBus({ storagePath: busStoragePath })
+    const bus = createFakeWorkflowBus()
 
-    const question = bus.appendUserQuestion({
+    const question = await bus.appendUserQuestion({
       runId: 'demo-20260702-130619',
       askedBy: 'planner',
       scope: 'phone-demo-video',
@@ -539,10 +523,10 @@ describe('orchestrator turn', () => {
     })
 
     const workerRuntime = {
-      listWorkers() {
+      async listWorkers() {
         return []
       },
-      spawnWorker() {
+      async spawnWorker(): Promise<never> {
         throw new Error('orchestrator turn should not spawn workers')
       },
     }
@@ -558,7 +542,7 @@ describe('orchestrator turn', () => {
     }
 
     // Still suppressed while the question is open.
-    const suppressed = runOrchestratorTurn({
+    const suppressed = await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
@@ -571,13 +555,13 @@ describe('orchestrator turn', () => {
     expect(suppressed.plan).toBeNull()
     expect(suppressed.nextState.phase).toBe('blocked_on_user')
 
-    bus.answerUserQuestion({
+    await bus.answerUserQuestion({
       questionId: question.questionId,
       answeredBy: 'user',
       answerText: 'Kill both stalled processes and retry once more.',
     })
 
-    const resumed = runOrchestratorTurn({
+    const resumed = await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
@@ -593,22 +577,21 @@ describe('orchestrator turn', () => {
     expect(resumed.nextState.phase).toBe('stalled')
   })
 
-  test('does not treat a legitimately completed run as a dead end', () => {
+  test('does not treat a legitimately completed run as a dead end', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-turn-'))
     tempDirs.push(tempDir)
-    const busStoragePath = path.join(tempDir, 'workflow-bus.json')
-    const bus = createWorkflowBus({ storagePath: busStoragePath })
+    const bus = createFakeWorkflowBus()
 
-    const result = runOrchestratorTurn({
+    const result = await runOrchestratorTurn({
       runId: 'demo-20260702-130619',
       task: 'Recover the stalled demo run',
       scenario: 'both',
       frontendUrl: 'http://localhost:5174',
       workerRuntime: {
-        listWorkers() {
+        async listWorkers() {
           return []
         },
-        spawnWorker() {
+        async spawnWorker(): Promise<never> {
           throw new Error('orchestrator turn should not spawn workers')
         },
       },

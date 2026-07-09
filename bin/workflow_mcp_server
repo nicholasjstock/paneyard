@@ -6,10 +6,19 @@ PKG_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 DEFAULT_TARGET_ROOT="/Users/stockn/Source/simple-retail-planner/main"
 TARGET_ROOT="${WORKFLOW_TARGET_ROOT:-$DEFAULT_TARGET_ROOT}"
 TSX_BIN="${TSX_BIN:-$PKG_ROOT/node_modules/.bin/tsx}"
+# Normally inherited from the supervisor loop that forked this worker/planner
+# CLI (see bin/supervisor_launcher); defaulted here too so a standalone
+# invocation of this MCP server (e.g. manual debugging) matches.
+WORKFLOW_STATE_BACKEND="${WORKFLOW_STATE_BACKEND:-rails}"
+WORKFLOW_RAILS_URL="${WORKFLOW_RAILS_URL:-http://127.0.0.1:3000}"
 
 if [[ ! -x "$TSX_BIN" ]]; then
   echo "Missing tsx binary at $TSX_BIN" >&2
   exit 1
 fi
 
-exec env WORKFLOW_TARGET_ROOT="$TARGET_ROOT" "$TSX_BIN" "$PKG_ROOT/scripts/workflow-mcp-server.ts" "$@"
+exec env \
+  WORKFLOW_TARGET_ROOT="$TARGET_ROOT" \
+  WORKFLOW_STATE_BACKEND="$WORKFLOW_STATE_BACKEND" \
+  WORKFLOW_RAILS_URL="$WORKFLOW_RAILS_URL" \
+  "$TSX_BIN" "$PKG_ROOT/scripts/workflow-mcp-server.ts" "$@"

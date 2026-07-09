@@ -1,17 +1,12 @@
 import { describe, expect, test } from 'vitest'
 
 import {
-  appendOrchestratorTickHistory,
   buildWorkflowContext,
   buildGuardedCommand,
   buildRecordDemoCommand,
   collectWorkflowState,
   queueLongPhoneDemoPlannerJob,
-  readOrchestratorState,
-  readOrchestratorTickHistory,
   publishPlannerJobs,
-  writeOrchestratorState,
-  type OrchestratorDecisionState,
   type FileSystemAdapter,
   planWorkflowIteration,
   readWorkflowArtifact,
@@ -192,10 +187,10 @@ describe('workflow-mcp planning helpers', () => {
     expect(plan.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
   })
 
-  test('publishPlannerJobs converts the planner nextStep into a spawn request', () => {
+  test('publishPlannerJobs converts the planner nextStep into a spawn request', async () => {
     const bus = {
       requests: [] as Array<{ requestedRole: string; scope: string; text: string }>,
-      appendSpawnRequest(args: {
+      async appendSpawnRequest(args: {
         runId: string
         askedBy: string
         scope: string
@@ -221,7 +216,7 @@ describe('workflow-mcp planning helpers', () => {
       frontendUrl: 'http://localhost:5174',
     })
 
-    const jobs = publishPlannerJobs(bus, {
+    const jobs = await publishPlannerJobs(bus, {
       runId: 'demo-4',
       summary: plan.summary,
       plan,
@@ -232,16 +227,16 @@ describe('workflow-mcp planning helpers', () => {
     expect(bus.requests.map((request) => request.scope)).toEqual(['recorder-report.md'])
   })
 
-  test('publishPlannerJobs publishes nothing when nextStep is null', () => {
+  test('publishPlannerJobs publishes nothing when nextStep is null', async () => {
     const bus = {
       requests: [] as Array<{ requestedRole: string; scope: string; text: string }>,
-      appendSpawnRequest(args: { requestedRole: string; scope: string; text: string }) {
+      async appendSpawnRequest(args: { requestedRole: string; scope: string; text: string }) {
         this.requests.push(args)
         return { requestId: `${this.requests.length}` }
       },
     }
 
-    const jobs = publishPlannerJobs(bus, {
+    const jobs = await publishPlannerJobs(bus, {
       runId: 'demo-4b',
       summary: 'Nothing to do.',
       plan: { summary: 'Nothing to do.', nextStep: null, followingSteps: [] },
@@ -251,7 +246,7 @@ describe('workflow-mcp planning helpers', () => {
     expect(bus.requests).toEqual([])
   })
 
-  test('queueLongPhoneDemoPlannerJob creates a blocking planner seed request for the long phone demo video', () => {
+  test('queueLongPhoneDemoPlannerJob creates a blocking planner seed request for the long phone demo video', async () => {
     const captured: Array<{
       runId: string
       askedBy: string
@@ -263,9 +258,9 @@ describe('workflow-mcp planning helpers', () => {
       tags?: string[]
     }> = []
 
-    const request = queueLongPhoneDemoPlannerJob(
+    const request = await queueLongPhoneDemoPlannerJob(
       {
-        appendSpawnRequest(args) {
+        async appendSpawnRequest(args) {
           captured.push(args)
           return {
             requestId: 'req-1',
@@ -320,7 +315,7 @@ describe('workflow-mcp planning helpers', () => {
 
     return {
       requests,
-      appendSpawnRequest(args: {
+      async appendSpawnRequest(args: {
         runId: string
         askedBy: string
         scope: string
@@ -340,13 +335,13 @@ describe('workflow-mcp planning helpers', () => {
         })
         return { requestId }
       },
-      listOpenSpawnRequests() {
+      async listOpenSpawnRequests() {
         return requests.filter((request) => request.status === 'open')
       },
-      listSpawnRequests() {
+      async listSpawnRequests() {
         return requests
       },
-      fulfillSpawnRequest({ requestId, fulfilledWorkerId }: { requestId: string; fulfilledWorkerId?: string | null }) {
+      async fulfillSpawnRequest({ requestId, fulfilledWorkerId }: { requestId: string; fulfilledWorkerId?: string | null }) {
         const request = requests.find((entry) => entry.requestId === requestId)
         if (request) {
           request.status = 'fulfilled'
@@ -356,20 +351,20 @@ describe('workflow-mcp planning helpers', () => {
     }
   }
 
-  test('publishPlannerJobs does not re-request a step whose earlier identical request was already fulfilled', () => {
+  test('publishPlannerJobs does not re-request a step whose earlier identical request was already fulfilled', async () => {
     const bus = createDependencyTestBus()
 
     const step = { owner: 'worker' as const, artifact: 'recorder-report.md', successCheck: 'recording succeeds' }
 
-    const firstJobs = publishPlannerJobs(bus, {
+    const firstJobs = await publishPlannerJobs(bus, {
       runId: 'demo-7',
       summary: 'Record the demo.',
       plan: { summary: 'Record the demo.', nextStep: step, followingSteps: [] },
     })
 
-    bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId })
+    await bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId })
 
-    const secondJobs = publishPlannerJobs(bus, {
+    const secondJobs = await publishPlannerJobs(bus, {
       runId: 'demo-7',
       summary: 'Record the demo.',
       plan: { summary: 'Record the demo.', nextStep: step, followingSteps: [] },
@@ -379,18 +374,18 @@ describe('workflow-mcp planning helpers', () => {
     expect(bus.requests).toHaveLength(1)
   })
 
-  test('publishPlannerJobs reuses a fulfilled planner-role request while its worker is still active', () => {
+  test('publishPlannerJobs reuses a fulfilled planner-role request while its worker is still active', async () => {
     const bus = createDependencyTestBus()
     const step = { owner: 'planner' as const, artifact: 'workflow-plan.md', successCheck: 'Recover the stall.' }
 
-    const firstJobs = publishPlannerJobs(bus, {
+    const firstJobs = await publishPlannerJobs(bus, {
       runId: 'demo-8',
       summary: 'Recover the stall.',
       plan: { summary: 'Recover the stall.', nextStep: step, followingSteps: [] },
     })
-    bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId, fulfilledWorkerId: 'planner-1' })
+    await bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId, fulfilledWorkerId: 'planner-1' })
 
-    const secondJobs = publishPlannerJobs(bus, {
+    const secondJobs = await publishPlannerJobs(bus, {
       runId: 'demo-8',
       summary: 'Recover the stall.',
       plan: { summary: 'Recover the stall.', nextStep: step, followingSteps: [] },
@@ -401,21 +396,21 @@ describe('workflow-mcp planning helpers', () => {
     expect(bus.requests).toHaveLength(1)
   })
 
-  test('publishPlannerJobs asks fresh for a planner-role step once the previously fulfilled worker has stopped', () => {
+  test('publishPlannerJobs asks fresh for a planner-role step once the previously fulfilled worker has stopped', async () => {
     const bus = createDependencyTestBus()
     const step = { owner: 'planner' as const, artifact: 'workflow-plan.md', successCheck: 'Recover the stall.' }
 
-    const firstJobs = publishPlannerJobs(bus, {
+    const firstJobs = await publishPlannerJobs(bus, {
       runId: 'demo-9',
       summary: 'Recover the first stall.',
       plan: { summary: 'Recover the first stall.', nextStep: step, followingSteps: [] },
     })
-    bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId, fulfilledWorkerId: 'planner-1' })
+    await bus.fulfillSpawnRequest({ requestId: firstJobs[0]!.requestId, fulfilledWorkerId: 'planner-1' })
 
     // That recovery planner has since stopped — a second, independent
     // problem later in the same run must get its own fresh recovery ask,
     // not silently reuse the first one's already-resolved request.
-    const secondJobs = publishPlannerJobs(bus, {
+    const secondJobs = await publishPlannerJobs(bus, {
       runId: 'demo-9',
       summary: 'Recover the second stall.',
       plan: { summary: 'Recover the second stall.', nextStep: step, followingSteps: [] },
@@ -474,149 +469,6 @@ describe('workflow-mcp planning helpers', () => {
 
     expect(readWorkflowArtifact(context, 'run-1', 'fix-summary.md', fileSystem)).toBe('run 1 fix')
     expect(readWorkflowArtifact(context, 'run-2', 'fix-summary.md', fileSystem)).toBe('run 2 fix')
-  })
-
-  test('writeOrchestratorState and readOrchestratorState persist decision state per run', () => {
-    const fileSystem = createMemoryFs()
-    const tempRoot = '/virtual-repo'
-    const context = buildWorkflowContext({
-      rootDir: tempRoot,
-      frontDir: `${tempRoot}/front`,
-      outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
-    })
-    const orchestratorState: OrchestratorDecisionState = {
-      runId: 'demo-2026-07-03',
-      phase: 'planning',
-      tickCount: 2,
-      lastPlanSummary: 'Latest planner summary.',
-      pendingSpawnKeys: ['["demo-2026-07-03","worker","recorder-report.md"]'],
-      followingSteps: [],
-      lastStallFinding: null,
-      lastUpdatedAt: '2026-07-03T12:00:00.000Z',
-    }
-
-    const statePath = writeOrchestratorState(context, orchestratorState, fileSystem)
-
-    expect(statePath).toContain('/orchestrator-state/demo-2026-07-03.json')
-    expect(readOrchestratorState(context, 'demo-2026-07-03', fileSystem)).toEqual(orchestratorState)
-  })
-
-  test('readOrchestratorState returns an empty default when no state file exists', () => {
-    const fileSystem = createMemoryFs()
-    const tempRoot = '/virtual-repo'
-    const context = buildWorkflowContext({
-      rootDir: tempRoot,
-      frontDir: `${tempRoot}/front`,
-      outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
-    })
-
-    expect(readOrchestratorState(context, 'demo-2026-07-03', fileSystem)).toEqual({
-      runId: 'demo-2026-07-03',
-      phase: 'starting',
-      tickCount: 0,
-      lastPlanSummary: null,
-      pendingSpawnKeys: [],
-      followingSteps: [],
-      lastStallFinding: null,
-      lastUpdatedAt: null,
-    })
-  })
-
-  test('appendOrchestratorTickHistory appends an entry and readOrchestratorTickHistory returns it in order', () => {
-    const fileSystem = createMemoryFs()
-    const tempRoot = '/virtual-repo'
-    const context = buildWorkflowContext({
-      rootDir: tempRoot,
-      frontDir: `${tempRoot}/front`,
-      outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
-    })
-    const firstTick: OrchestratorDecisionState = {
-      runId: 'demo-2026-07-03',
-      phase: 'planning',
-      tickCount: 1,
-      lastPlanSummary: 'First tick summary.',
-      pendingSpawnKeys: [],
-      followingSteps: [],
-      lastStallFinding: null,
-      lastUpdatedAt: '2026-07-03T12:00:00.000Z',
-    }
-    const secondTick: OrchestratorDecisionState = {
-      ...firstTick,
-      tickCount: 2,
-      lastPlanSummary: 'Second tick summary.',
-      lastUpdatedAt: '2026-07-03T12:05:00.000Z',
-    }
-
-    appendOrchestratorTickHistory(context, firstTick, fileSystem)
-    appendOrchestratorTickHistory(context, secondTick, fileSystem)
-
-    expect(readOrchestratorTickHistory(context, 'demo-2026-07-03', fileSystem)).toEqual({
-      runId: 'demo-2026-07-03',
-      entries: [firstTick, secondTick],
-    })
-  })
-
-  test('appendOrchestratorTickHistory caps history at the configured limit, dropping the oldest entries', () => {
-    const fileSystem = createMemoryFs()
-    const tempRoot = '/virtual-repo'
-    const context = buildWorkflowContext({
-      rootDir: tempRoot,
-      frontDir: `${tempRoot}/front`,
-      outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
-    })
-    const buildTick = (tickCount: number): OrchestratorDecisionState => ({
-      runId: 'demo-2026-07-03',
-      phase: 'planning',
-      tickCount,
-      lastPlanSummary: `Tick ${tickCount} summary.`,
-      pendingSpawnKeys: [],
-      followingSteps: [],
-      lastStallFinding: null,
-      lastUpdatedAt: `2026-07-03T12:0${tickCount}:00.000Z`,
-    })
-
-    for (let tickCount = 1; tickCount <= 3; tickCount += 1) {
-      appendOrchestratorTickHistory(context, buildTick(tickCount), fileSystem, 2)
-    }
-
-    const history = readOrchestratorTickHistory(context, 'demo-2026-07-03', fileSystem)
-    expect(history.entries.map((entry) => entry.tickCount)).toEqual([2, 3])
-  })
-
-  test('readOrchestratorTickHistory returns an empty list when no history file exists', () => {
-    const fileSystem = createMemoryFs()
-    const tempRoot = '/virtual-repo'
-    const context = buildWorkflowContext({
-      rootDir: tempRoot,
-      frontDir: `${tempRoot}/front`,
-      outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
-    })
-
-    expect(readOrchestratorTickHistory(context, 'demo-2026-07-03', fileSystem)).toEqual({
-      runId: 'demo-2026-07-03',
-      entries: [],
-    })
-  })
-
-  test('readOrchestratorTickHistory returns an empty list when the history file is malformed JSON', () => {
-    const fileSystem = createMemoryFs()
-    const tempRoot = '/virtual-repo'
-    const context = buildWorkflowContext({
-      rootDir: tempRoot,
-      frontDir: `${tempRoot}/front`,
-      outputDir: `${tempRoot}/front/demo-output/agents-sdk`,
-    })
-
-    fileSystem.mkdirSync(`${tempRoot}/front/demo-output/agents-sdk/orchestrator-state`, { recursive: true })
-    fileSystem.writeFileSync(
-      `${tempRoot}/front/demo-output/agents-sdk/orchestrator-state/demo-2026-07-03.history.json`,
-      'not json'
-    )
-
-    expect(readOrchestratorTickHistory(context, 'demo-2026-07-03', fileSystem)).toEqual({
-      runId: 'demo-2026-07-03',
-      entries: [],
-    })
   })
 
   test('collectWorkflowState reports artifact presence and file metadata', () => {

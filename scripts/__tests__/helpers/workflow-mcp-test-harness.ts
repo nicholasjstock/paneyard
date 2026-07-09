@@ -7,12 +7,11 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 import { buildWorkflowContext, type WorkflowContext } from '../../workflow-mcp'
-import { createWorkflowBus, type WorkflowBusOptions } from '../../workflow-bus'
 import { createWorkflowServer, type GuardedCommandRunner } from '../../workflow-mcp-app'
-import { createWorkflowWorkerRuntime, type WorkerProcessAdapter } from '../../workflow-worker-runtime'
-
-type WorkflowBus = ReturnType<typeof createWorkflowBus>
-type WorkflowWorkerRuntime = ReturnType<typeof createWorkflowWorkerRuntime>
+import type { WorkflowBus } from '../../workflow-bus'
+import type { WorkerProcessAdapter, WorkflowWorkerRuntime } from '../../workflow-worker-runtime'
+import { createFakeWorkflowBus, createFakeWorkflowWorkerRuntime } from './fake-workflow-bus'
+import { startFakeOrchestratorTicksServer, type FakeOrchestratorTicksServer } from './fake-orchestrator-ticks-server'
 
 export type WorkflowMcpTestHarness = {
   tempDir: string
@@ -28,7 +27,6 @@ export type WorkflowMcpTestHarness = {
 export type CreateMcpTestHarnessOptions = {
   processAdapter?: WorkerProcessAdapter
   commandRunner?: GuardedCommandRunner
-  busOptions?: Partial<WorkflowBusOptions>
 }
 
 function buildDefaultProcessAdapter(): WorkerProcessAdapter {
@@ -59,11 +57,8 @@ export async function createMcpTestHarness(
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-mcp-tools-'))
   const outputDir = path.join(tempDir, 'demo-output', 'agents-sdk')
 
-  const bus = createWorkflowBus({
-    storagePath: path.join(tempDir, 'workflow-bus.json'),
-    ...options.busOptions,
-  })
-  const runtime = createWorkflowWorkerRuntime({
+  const bus = createFakeWorkflowBus()
+  const runtime = createFakeWorkflowWorkerRuntime({
     rootDir: tempDir,
     outputDir,
     processAdapter: options.processAdapter ?? buildDefaultProcessAdapter(),
@@ -74,11 +69,18 @@ export async function createMcpTestHarness(
     outputDir,
   })
 
+  // read_orchestrator_state/write_orchestrator_state/etc are the one part
+  // of the tool surface not covered by bus/workerRuntime DI above (they're
+  // free functions hardwired to a real HTTP call to Rails) -- point them at
+  // a throwaway in-process fake server instead via railsOptions.
+  const ticksServer: FakeOrchestratorTicksServer = await startFakeOrchestratorTicksServer()
+
   const server = createWorkflowServer({
     bus,
     workerRuntime: runtime,
     context,
     commandRunner: options.commandRunner,
+    railsOptions: { baseUrl: ticksServer.url },
   })
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
@@ -90,6 +92,7 @@ export async function createMcpTestHarness(
     await client.close().catch(() => {})
     await serverTransport.close().catch(() => {})
     await clientTransport.close().catch(() => {})
+    await ticksServer.close().catch(() => {})
     fs.rmSync(tempDir, { recursive: true, force: true })
   }
 

@@ -82,12 +82,12 @@ describe('workflow MCP planning tools', () => {
     // worker_turn only requests the follow-up planner — it never spawns a
     // process itself, so no worker exists yet and the request is still open,
     // waiting for the supervisor's next tick to fulfill it.
-    const openRequests = harness.bus.listOpenSpawnRequests()
+    const openRequests = await harness.bus.listOpenSpawnRequests()
     expect(openRequests).toHaveLength(1)
     expect(openRequests[0]?.requestId).toBe(structuredContent.plannerRequest.requestId)
     expect(openRequests[0]?.requestedRole).toBe('planner')
     expect(openRequests[0]?.scope).toBe('workflow-plan.md')
-    expect(harness.runtime.listWorkers()).toEqual([])
+    expect(await harness.runtime.listWorkers()).toEqual([])
   })
 
   test('worker_turn spawns a real planner worker with the persona and reported result in its prompt', async () => {
@@ -119,7 +119,7 @@ describe('workflow MCP planning tools', () => {
 
     // worker_turn only requests the follow-up planner; the supervisor is
     // what actually spawns it, on its next tick.
-    const spawned = spawnRequestedWorkers({ runId: 'run-2', workerRuntime: harness.runtime, bus: harness.bus })
+    const spawned = await spawnRequestedWorkers({ runId: 'run-2', workerRuntime: harness.runtime, bus: harness.bus })
     const plannerWorker = spawned.find((worker) => worker.role === 'planner')
 
     expect(plannerWorker).toBeDefined()
@@ -128,7 +128,8 @@ describe('workflow MCP planning tools', () => {
     expect(promptContent).toContain('Own planning only.')
     expect(promptContent).toContain('The frontend coverage-request button does not respond to clicks.')
 
-    expect(harness.runtime.listWorkers().some((worker) => worker.role === 'planner')).toBe(true)
+    const currentWorkers = await harness.runtime.listWorkers()
+    expect(currentWorkers.some((worker) => worker.role === 'planner')).toBe(true)
   })
 
   test('worker_turn rejects an unknown role via the Zod schema', async () => {
@@ -172,14 +173,14 @@ describe('workflow MCP planning tools', () => {
 
     // Reused rather than duplicated at the request level already, so even
     // before anything is spawned there's only one planner request open.
-    const plannerRequests = harness.bus.listOpenSpawnRequests().filter((request) => request.requestedRole === 'planner')
+    const allOpenRequests = await harness.bus.listOpenSpawnRequests()
+    const plannerRequests = allOpenRequests.filter((request) => request.requestedRole === 'planner')
     expect(plannerRequests).toHaveLength(1)
 
-    spawnRequestedWorkers({ runId: 'run-single-planner', workerRuntime: harness.runtime, bus: harness.bus })
+    await spawnRequestedWorkers({ runId: 'run-single-planner', workerRuntime: harness.runtime, bus: harness.bus })
 
-    const runningPlanners = harness.runtime
-      .listWorkers({ runId: 'run-single-planner', activeOnly: true })
-      .filter((worker) => worker.role === 'planner')
+    const activePlanners = await harness.runtime.listWorkers({ runId: 'run-single-planner', activeOnly: true })
+    const runningPlanners = activePlanners.filter((worker) => worker.role === 'planner')
     expect(runningPlanners).toHaveLength(1)
   })
 
@@ -247,7 +248,7 @@ describe('workflow MCP planning tools', () => {
     expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['worker'])
     expect(structuredContent.nextState.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
 
-    const openRequests = harness.bus.listOpenSpawnRequests()
+    const openRequests = await harness.bus.listOpenSpawnRequests()
     expect(openRequests.map((request) => request.requestedRole)).toEqual(['worker'])
     expect(openRequests[0]?.askedBy).toBe('planner')
   })
@@ -392,7 +393,7 @@ describe('workflow MCP planning tools', () => {
     expect(structuredContent.priority).toBe('blocking')
     expect(structuredContent.text).toContain('long phone demo video')
 
-    const openRequests = harness.bus.listOpenSpawnRequests()
+    const openRequests = await harness.bus.listOpenSpawnRequests()
     expect(openRequests).toHaveLength(1)
     expect(openRequests[0]?.requestedRole).toBe('planner')
     expect(openRequests[0]?.scope).toBe('workflow-plan.md')
@@ -416,7 +417,8 @@ describe('workflow MCP planning tools', () => {
     const structuredContent = result.structuredContent as { jobs: Array<{ requestId: string; step: { owner: string } }> }
     expect(structuredContent.jobs.map((job) => job.step.owner)).toEqual(['worker'])
 
-    const openRequestIds = harness.bus.listOpenSpawnRequests().map((request) => request.requestId)
+    const openRequestsForJobs = await harness.bus.listOpenSpawnRequests()
+    const openRequestIds = openRequestsForJobs.map((request) => request.requestId)
     for (const job of structuredContent.jobs) {
       expect(openRequestIds).toContain(job.requestId)
     }
@@ -440,7 +442,7 @@ describe('workflow MCP planning tools', () => {
     const secondIds = (second.structuredContent as { jobs: Array<{ requestId: string }> }).jobs.map((job) => job.requestId)
 
     expect(secondIds).toEqual(firstIds)
-    expect(harness.bus.listOpenSpawnRequests()).toHaveLength(firstIds.length)
+    expect(await harness.bus.listOpenSpawnRequests()).toHaveLength(firstIds.length)
   })
 
   test('run_orchestrator_turn persists a tick history entry alongside the state, retrievable via read_orchestrator_tick_history', async () => {

@@ -1,0 +1,32 @@
+<% content_for :title, "Workers" %>
+
+<%= turbo_stream_from "workers" %>
+
+<h1>Workers</h1>
+
+<%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
+
+<div id="workers">
+  <% if @workers.empty? %>
+    <p class="empty">No workers recorded.</p>
+  <% else %>
+    <% @workers.each do |worker| %>
+      <div class="card">
+        <div class="card-title">
+          <%= link_to worker["nickname"], worker_path(worker["workerId"]) %>
+          <span class="badge <%= worker["status"] %>"><%= worker["status"] %></span>
+        </div>
+        <p class="muted">
+          <%= worker["role"] %> &middot; run <span class="mono"><%= worker["runId"] %></span>
+          &middot; <span class="mono"><%= worker["scope"] %></span>
+        </p>
+        <p><%= worker["reason"] %></p>
+        <% if worker["status"] == "running" %>
+          <%= button_to "Stop worker", stop_worker_path(worker["workerId"]), method: :post,
+                class: "btn danger",
+                data: { turbo_confirm: "Stop worker #{worker['nickname']}?" } %>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+</div>

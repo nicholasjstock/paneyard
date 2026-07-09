@@ -32,23 +32,23 @@ function createFakeBus(): WorkerTurnBus & {
 
   return {
     requests,
-    appendSpawnRequest(args) {
+    async appendSpawnRequest(args) {
       const requestId = `req-${nextId}`
       nextId += 1
       requests.push({ ...args, requestId, status: 'open' })
       return { requestId }
     },
-    listSpawnRequests() {
+    async listSpawnRequests() {
       return requests
     },
   }
 }
 
 describe('worker turn', () => {
-  test('requests a follow-up planner via the bus with the result and followingSteps as context', () => {
+  test('requests a follow-up planner via the bus with the result and followingSteps as context', async () => {
     const bus = createFakeBus()
 
-    const result = runWorkerTurn({
+    const result = await runWorkerTurn({
       runId: 'run-6',
       role: 'worker',
       nickname: 'worker',
@@ -84,10 +84,10 @@ describe('worker turn', () => {
     ])
   })
 
-  test('does not spawn a process itself — the request is left for the supervisor to fulfill', () => {
+  test('does not spawn a process itself — the request is left for the supervisor to fulfill', async () => {
     const bus = createFakeBus()
 
-    runWorkerTurn({
+    await runWorkerTurn({
       runId: 'run-7',
       role: 'worker',
       nickname: 'worker',
@@ -102,10 +102,10 @@ describe('worker turn', () => {
     expect(bus.requests[0]?.status).toBe('open')
   })
 
-  test('reuses an existing open planner request instead of appending a duplicate', () => {
+  test('reuses an existing open planner request instead of appending a duplicate', async () => {
     const bus = createFakeBus()
 
-    const first = runWorkerTurn({
+    const first = await runWorkerTurn({
       runId: 'run-9',
       role: 'worker',
       nickname: 'worker',
@@ -117,7 +117,7 @@ describe('worker turn', () => {
       bus,
     })
 
-    const second = runWorkerTurn({
+    const second = await runWorkerTurn({
       runId: 'run-9',
       role: 'worker',
       nickname: 'worker-2',
@@ -133,10 +133,10 @@ describe('worker turn', () => {
     expect(second.plannerRequest.requestId).toBe(first.plannerRequest.requestId)
   })
 
-  test('reuses an already-fulfilled planner request while its planner is still active', () => {
+  test('reuses an already-fulfilled planner request while its planner is still active', async () => {
     const bus = createFakeBus()
 
-    const first = runWorkerTurn({
+    const first = await runWorkerTurn({
       runId: 'run-10',
       role: 'worker',
       nickname: 'worker',
@@ -150,7 +150,7 @@ describe('worker turn', () => {
     bus.requests[0]!.status = 'fulfilled'
     bus.requests[0]!.fulfilledWorkerId = 'planner-worker-1'
 
-    const second = runWorkerTurn({
+    const second = await runWorkerTurn({
       runId: 'run-10',
       role: 'worker',
       nickname: 'worker',
@@ -167,10 +167,10 @@ describe('worker turn', () => {
     expect(second.plannerRequest.requestId).toBe(first.plannerRequest.requestId)
   })
 
-  test('requests a fresh planner once the previously fulfilled one has stopped', () => {
+  test('requests a fresh planner once the previously fulfilled one has stopped', async () => {
     const bus = createFakeBus()
 
-    const first = runWorkerTurn({
+    const first = await runWorkerTurn({
       runId: 'run-14',
       role: 'worker',
       nickname: 'worker',
@@ -187,7 +187,7 @@ describe('worker turn', () => {
     // That planner has since stopped — activeWorkerIds no longer contains
     // it, so this slot is free again, unlike a one-time worker artifact
     // that would stay "done" forever regardless.
-    const second = runWorkerTurn({
+    const second = await runWorkerTurn({
       runId: 'run-14',
       role: 'worker',
       nickname: 'worker-2',
@@ -204,10 +204,10 @@ describe('worker turn', () => {
     expect(second.plannerRequest.requestId).not.toBe(first.plannerRequest.requestId)
   })
 
-  test('appends a fresh request when the prior one was dismissed', () => {
+  test('appends a fresh request when the prior one was dismissed', async () => {
     const bus = createFakeBus()
 
-    const first = runWorkerTurn({
+    const first = await runWorkerTurn({
       runId: 'run-11',
       role: 'worker',
       nickname: 'worker',
@@ -220,7 +220,7 @@ describe('worker turn', () => {
     })
     bus.requests[0]!.status = 'dismissed'
 
-    const second = runWorkerTurn({
+    const second = await runWorkerTurn({
       runId: 'run-11',
       role: 'worker',
       nickname: 'worker',
@@ -236,10 +236,10 @@ describe('worker turn', () => {
     expect(second.plannerRequest.requestId).not.toBe(first.plannerRequest.requestId)
   })
 
-  test('nextState defaults phase/tickCount and followingSteps when no previousState is given', () => {
+  test('nextState defaults phase/tickCount and followingSteps when no previousState is given', async () => {
     const bus = createFakeBus()
 
-    const result = runWorkerTurn({
+    const result = await runWorkerTurn({
       runId: 'run-12',
       role: 'worker',
       nickname: 'worker',
@@ -256,10 +256,10 @@ describe('worker turn', () => {
     expect(result.nextState.followingSteps).toEqual([])
   })
 
-  test('nextState carries orchestrator/planner-owned fields forward untouched', () => {
+  test('nextState carries orchestrator/planner-owned fields forward untouched', async () => {
     const bus = createFakeBus()
 
-    const result = runWorkerTurn({
+    const result = await runWorkerTurn({
       runId: 'run-13',
       role: 'worker',
       nickname: 'worker',

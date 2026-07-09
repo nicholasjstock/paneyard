@@ -39,28 +39,28 @@ describe('workflow MCP spawn-request tools', () => {
     expect(structuredContent.requestedRole).toBe('worker')
     expect(structuredContent.priority).toBe('blocking')
     expect(structuredContent.status).toBe('open')
-    expect(harness.bus.listOpenSpawnRequests()).toHaveLength(1)
+    expect(await harness.bus.listOpenSpawnRequests()).toHaveLength(1)
   })
 
   test('list_open_spawn_requests excludes fulfilled requests', async () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
-    const first = harness.bus.appendSpawnRequest({
+    const first = await harness.bus.appendSpawnRequest({
       runId: 'run-1',
       askedBy: 'planner',
       scope: 'a.md',
       text: 'First request.',
       requestedRole: 'worker',
     })
-    harness.bus.appendSpawnRequest({
+    await harness.bus.appendSpawnRequest({
       runId: 'run-1',
       askedBy: 'planner',
       scope: 'b.md',
       text: 'Second request.',
       requestedRole: 'worker',
     })
-    harness.bus.fulfillSpawnRequest({
+    await harness.bus.fulfillSpawnRequest({
       requestId: first.requestId,
       fulfilledBy: 'supervisor_loop',
       fulfillmentNote: 'Spawned front-fixer.',
@@ -75,7 +75,7 @@ describe('workflow MCP spawn-request tools', () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
-    const request = harness.bus.appendSpawnRequest({
+    const request = await harness.bus.appendSpawnRequest({
       runId: 'run-1',
       askedBy: 'planner',
       scope: 'a.md',
@@ -126,9 +126,9 @@ describe('workflow MCP spawn-request tools', () => {
     const harness = await createMcpTestHarness()
     harnesses.push(harness)
 
-    harness.bus.publishRunStatus({ runId: 'run-1', phase: 'starting', owner: 'orchestrator', summary: 'one' })
-    harness.bus.publishRunStatus({ runId: 'run-1', phase: 'running', owner: 'orchestrator', summary: 'two' })
-    harness.bus.publishRunStatus({ runId: 'run-1', phase: 'done', owner: 'orchestrator', summary: 'three' })
+    await harness.bus.publishRunStatus({ runId: 'run-1', phase: 'starting', owner: 'orchestrator', summary: 'one' })
+    await harness.bus.publishRunStatus({ runId: 'run-1', phase: 'running', owner: 'orchestrator', summary: 'two' })
+    await harness.bus.publishRunStatus({ runId: 'run-1', phase: 'done', owner: 'orchestrator', summary: 'three' })
 
     const limited = await harness.client.callTool({ name: 'list_recent_events', arguments: { limit: 2 } })
     const structuredContent = limited.structuredContent as { events: Array<{ payload: { summary: string } }> }

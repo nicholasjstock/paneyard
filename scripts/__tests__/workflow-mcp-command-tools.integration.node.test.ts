@@ -59,7 +59,7 @@ describe('workflow MCP command tools', () => {
 
     expect(writeResult.isError).toBeFalsy()
     expect((writeResult.structuredContent as { statePath: string }).statePath).toContain(
-      '/orchestrator-state/demo-2026-07-03.json'
+      'runId=demo-2026-07-03&tickCount=2'
     )
 
     const readResult = await harness.client.callTool({
@@ -68,7 +68,12 @@ describe('workflow MCP command tools', () => {
     })
 
     expect(readResult.isError).toBeFalsy()
-    expect(readResult.structuredContent).toEqual(orchestratorState)
+    // lastUpdatedAt is now server-stamped on write (OrchestratorTick#created_at
+    // on the real Rails side), not a passthrough of whatever the caller sent.
+    expect(readResult.structuredContent).toEqual({
+      ...orchestratorState,
+      lastUpdatedAt: expect.any(String),
+    })
   })
 
   test('build_guarded_command resolves frontend_typecheck without executing anything', async () => {

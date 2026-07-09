@@ -287,7 +287,7 @@ export function buildStalledWorkerRecoveryPlan(args: {
   }
 }
 
-export function queueLongPhoneDemoPlannerJob(
+export async function queueLongPhoneDemoPlannerJob(
   bus: {
     appendSpawnRequest: (args: {
       runId: string
@@ -298,14 +298,14 @@ export function queueLongPhoneDemoPlannerJob(
       requestedRole: string
       priority?: 'advisory' | 'blocking'
       tags?: string[]
-    }) => PlannerSeedRequest
+    }) => Promise<PlannerSeedRequest>
   },
   args: {
     runId: string
     frontendUrl: string
     task?: string
   }
-): PlannerSeedRequest {
+): Promise<PlannerSeedRequest> {
   const task =
     args.task?.trim() && args.task.trim().length > 0
       ? args.task.trim()
@@ -329,7 +329,7 @@ export function buildPendingSpawnKeys(runId: string, jobs: PlannerBusJob[]): str
   return jobs.map((job) => JSON.stringify([runId, job.step.owner, job.step.artifact]))
 }
 
-export function publishPlannerJobs(
+export async function publishPlannerJobs(
   bus: {
     appendSpawnRequest: (args: {
       runId: string
@@ -340,8 +340,8 @@ export function publishPlannerJobs(
       requestedRole: string
       priority?: 'advisory' | 'blocking'
       tags?: string[]
-    }) => { requestId: string }
-    listSpawnRequests?: () => Array<{
+    }) => Promise<{ requestId: string }>
+    listSpawnRequests?: () => Promise<Array<{
       requestId: string
       runId: string
       askedBy: string
@@ -350,7 +350,7 @@ export function publishPlannerJobs(
       requestedRole: string
       status: 'open' | 'fulfilled' | 'dismissed'
       fulfilledWorkerId?: string | null
-    }>
+    }>>
   },
   args: {
     runId: string
@@ -363,7 +363,7 @@ export function publishPlannerJobs(
     // schema restricts nextStep.owner to 'orchestrator' | 'worker').
     activeWorkerIds?: ReadonlySet<string>
   }
-): PlannerBusJob[] {
+): Promise<PlannerBusJob[]> {
   const step = args.plan.nextStep
   if (!step || step.owner === 'orchestrator') {
     return []
@@ -371,49 +371,48 @@ export function publishPlannerJobs(
 
   const activeWorkerIds = args.activeWorkerIds ?? new Set<string>()
 
-  const existingRequest = bus
-    .listSpawnRequests?.()
-    .find((request) => {
-      if (
-        request.status === 'dismissed' ||
-        request.askedBy !== 'planner' ||
-        request.runId !== args.runId ||
-        request.requestedRole !== step.owner ||
-        request.scope !== step.artifact
-      ) {
-        return false
-      }
+  const existingRequests = await bus.listSpawnRequests?.()
+  const existingRequest = existingRequests?.find((request) => {
+    if (
+      request.status === 'dismissed' ||
+      request.askedBy !== 'planner' ||
+      request.runId !== args.runId ||
+      request.requestedRole !== step.owner ||
+      request.scope !== step.artifact
+    ) {
+      return false
+    }
 
-      if (request.status === 'open') {
-        // Already asked, not yet fulfilled — reuse it rather than
-        // duplicating the same pending ask.
-        return true
-      }
-
-      // status === 'fulfilled'. For a requestedRole: 'worker' step this
-      // means a concrete artifact (e.g. recorder-report.md) already got
-      // produced — that stays done forever, regardless of whether the
-      // worker that made it is still running, so it's always reused.
-      //
-      // For a requestedRole: 'planner' step, "fulfilled" only means a
-      // planner was *spawned* to handle whatever was happening at the
-      // time — it's a repeatable recovery/follow-up ask, not a one-time
-      // artifact. Once that planner has stopped, this slot is free again;
-      // otherwise a genuinely new problem occurring later in the same run
-      // would be silently swallowed by an old, already-resolved fulfillment
-      // and never get a fresh planner of its own.
-      if (step.owner === 'planner') {
-        return Boolean(request.fulfilledWorkerId && activeWorkerIds.has(request.fulfilledWorkerId))
-      }
-
+    if (request.status === 'open') {
+      // Already asked, not yet fulfilled — reuse it rather than
+      // duplicating the same pending ask.
       return true
-    })
+    }
+
+    // status === 'fulfilled'. For a requestedRole: 'worker' step this
+    // means a concrete artifact (e.g. recorder-report.md) already got
+    // produced — that stays done forever, regardless of whether the
+    // worker that made it is still running, so it's always reused.
+    //
+    // For a requestedRole: 'planner' step, "fulfilled" only means a
+    // planner was *spawned* to handle whatever was happening at the
+    // time — it's a repeatable recovery/follow-up ask, not a one-time
+    // artifact. Once that planner has stopped, this slot is free again;
+    // otherwise a genuinely new problem occurring later in the same run
+    // would be silently swallowed by an old, already-resolved fulfillment
+    // and never get a fresh planner of its own.
+    if (step.owner === 'planner') {
+      return Boolean(request.fulfilledWorkerId && activeWorkerIds.has(request.fulfilledWorkerId))
+    }
+
+    return true
+  })
 
   if (existingRequest) {
     return [{ step, requestId: existingRequest.requestId }]
   }
 
-  const request = bus.appendSpawnRequest({
+  const request = await bus.appendSpawnRequest({
     runId: args.runId,
     askedBy: 'planner',
     scope: step.artifact,
@@ -457,79 +456,9 @@ function sanitizeRunId(runId: string): string {
   return sanitized
 }
 
-function buildDefaultOrchestratorState(runId: string): OrchestratorDecisionState {
-  return {
-    runId,
-    phase: 'starting',
-    tickCount: 0,
-    lastPlanSummary: null,
-    pendingSpawnKeys: [],
-    followingSteps: [],
-    lastStallFinding: null,
-    lastUpdatedAt: null,
-  }
-}
-
-function isWorkflowStep(value: unknown): value is WorkflowStep {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as Partial<WorkflowStep>).owner === 'string' &&
-    typeof (value as Partial<WorkflowStep>).artifact === 'string' &&
-    typeof (value as Partial<WorkflowStep>).successCheck === 'string'
-  )
-}
-
-export function resolveOrchestratorStatePath(context: WorkflowContext, runId: string): string {
-  return `${context.workspace.outputDir.replace(/\/$/, '')}/orchestrator-state/${sanitizeRunId(runId)}.json`
-}
-
 export type OrchestratorTickHistory = {
   runId: string
   entries: OrchestratorDecisionState[]
-}
-
-export const ORCHESTRATOR_TICK_HISTORY_LIMIT = 200
-
-export function resolveOrchestratorTickHistoryPath(context: WorkflowContext, runId: string): string {
-  return `${context.workspace.outputDir.replace(/\/$/, '')}/orchestrator-state/${sanitizeRunId(runId)}.history.json`
-}
-
-export function appendOrchestratorTickHistory(
-  context: WorkflowContext,
-  entry: OrchestratorDecisionState,
-  fileSystem: Pick<FileSystemAdapter, 'existsSync' | 'mkdirSync' | 'readFileSync' | 'writeFileSync'> = defaultFileSystemAdapter,
-  limit: number = ORCHESTRATOR_TICK_HISTORY_LIMIT
-): string {
-  const previousHistory = readOrchestratorTickHistory(context, entry.runId, fileSystem)
-  const entries = [...previousHistory.entries, entry].slice(-limit)
-  const historyPath = resolveOrchestratorTickHistoryPath(context, entry.runId)
-  const historyDir = historyPath.slice(0, historyPath.lastIndexOf('/'))
-  fileSystem.mkdirSync(historyDir, { recursive: true })
-  fileSystem.writeFileSync(historyPath, `${JSON.stringify(entries, null, 2)}\n`)
-  return historyPath
-}
-
-export function readOrchestratorTickHistory(
-  context: WorkflowContext,
-  runId: string,
-  fileSystem: Pick<FileSystemAdapter, 'existsSync' | 'readFileSync'> = defaultFileSystemAdapter
-): OrchestratorTickHistory {
-  const historyPath = resolveOrchestratorTickHistoryPath(context, runId)
-  if (!fileSystem.existsSync(historyPath)) {
-    return { runId, entries: [] }
-  }
-
-  try {
-    const parsed = JSON.parse(fileSystem.readFileSync(historyPath, 'utf8')) as unknown
-    if (!Array.isArray(parsed)) {
-      return { runId, entries: [] }
-    }
-
-    return { runId, entries: parsed as OrchestratorDecisionState[] }
-  } catch {
-    return { runId, entries: [] }
-  }
 }
 
 export function writeWorkflowArtifact(
@@ -563,56 +492,12 @@ export function readWorkflowArtifact(
   return fileSystem.readFileSync(artifactPath, 'utf8')
 }
 
-export function writeOrchestratorState(
-  context: WorkflowContext,
-  state: OrchestratorDecisionState,
-  fileSystem: Pick<FileSystemAdapter, 'mkdirSync' | 'writeFileSync'> = defaultFileSystemAdapter
-): string {
-  const statePath = resolveOrchestratorStatePath(context, state.runId)
-  const stateDir = statePath.slice(0, statePath.lastIndexOf('/'))
-  fileSystem.mkdirSync(stateDir, { recursive: true })
-  fileSystem.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`)
-  return statePath
-}
-
-export function readOrchestratorState(
-  context: WorkflowContext,
-  runId: string,
-  fileSystem: Pick<FileSystemAdapter, 'existsSync' | 'readFileSync'> = defaultFileSystemAdapter
-): OrchestratorDecisionState {
-  const statePath = resolveOrchestratorStatePath(context, runId)
-  if (!fileSystem.existsSync(statePath)) {
-    return buildDefaultOrchestratorState(runId)
-  }
-
-  try {
-    const parsed = JSON.parse(fileSystem.readFileSync(statePath, 'utf8')) as Partial<OrchestratorDecisionState>
-
-    return {
-      runId,
-      phase: parsed.phase ?? 'starting',
-      tickCount: typeof parsed.tickCount === 'number' ? parsed.tickCount : 0,
-      lastPlanSummary: parsed.lastPlanSummary ?? null,
-      pendingSpawnKeys: Array.isArray(parsed.pendingSpawnKeys)
-        ? parsed.pendingSpawnKeys.filter((entry): entry is string => typeof entry === 'string')
-        : [],
-      followingSteps: Array.isArray(parsed.followingSteps)
-        ? parsed.followingSteps.filter(isWorkflowStep)
-        : [],
-      lastStallFinding: parsed.lastStallFinding ?? null,
-      lastUpdatedAt: parsed.lastUpdatedAt ?? null,
-    }
-  } catch {
-    return buildDefaultOrchestratorState(runId)
-  }
-}
-
-export function listPlannerDeclaredArtifacts(
-  bus: { listSpawnRequests: () => Array<{ runId: string; askedBy: string; scope: string }> },
+export async function listPlannerDeclaredArtifacts(
+  bus: { listSpawnRequests: () => Promise<Array<{ runId: string; askedBy: string; scope: string }>> },
   runId: string
-): string[] {
+): Promise<string[]> {
   const seen = new Set<string>()
-  for (const request of bus.listSpawnRequests()) {
+  for (const request of await bus.listSpawnRequests()) {
     if (request.runId === runId && request.askedBy === 'planner') {
       seen.add(request.scope)
     }

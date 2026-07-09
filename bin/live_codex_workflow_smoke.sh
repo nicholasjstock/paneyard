@@ -168,10 +168,6 @@ if [[ "$spawn_ok" != true ]]; then
   echo "Supervisor log:" >&2
   sed -n '1,240p' "$LOG_PATH" >&2 || true
   echo "" >&2
-  if [[ -f "$WORKERS_PATH" ]]; then
-    echo "Observed workers:" >&2
-    WORKFLOW_TARGET_ROOT="$TARGET_ROOT" "$ROOT/bin/workflow_workers" --path "$WORKERS_PATH" >&2 || true
-  fi
   exit 1
 fi
 

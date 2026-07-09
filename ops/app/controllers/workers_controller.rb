@@ -1,0 +1,73 @@
+class WorkersController < ApplicationController
+  # Mirrors scripts/workflow-mcp-http.ts's now-retired /workers/:id/log
+  # endpoint's defaults.
+  DEFAULT_TAIL_LINES = 120
+  DEFAULT_FULL_LOG_MAX_CHARS = 300_000
+
+  def index
+    @workers = Worker.order(started_at: :desc).map { |worker| JSON.parse(worker.to_json) }
+  end
+
+  def show
+    @worker_id = params[:id]
+    worker = Worker.find_by(worker_id: @worker_id)
+
+    if worker
+      @log = build_log_payload(worker)
+    else
+      @log = nil
+      @orchestrator_error = "Worker not found: #{@worker_id}"
+    end
+  end
+
+  def stop
+    worker = Worker.find_by!(worker_id: params[:id])
+    if worker.status == "running"
+      begin
+        Process.kill("SIGTERM", worker.pid) if process_alive?(worker.pid)
+      rescue Errno::ESRCH
+        nil
+      end
+      worker.update!(status: "stopped", stopped_at: Time.current, stop_reason: stop_reason)
+    end
+    redirect_back fallback_location: workers_path, notice: "Worker stopped."
+  rescue ActiveRecord::RecordNotFound
+    redirect_back fallback_location: workers_path, alert: "Failed to stop worker: unknown worker #{params[:id]}"
+  end
+
+  private
+
+  def build_log_payload(worker)
+    full = Orchestrator::LogReader.read_full_content(worker.log_path, DEFAULT_FULL_LOG_MAX_CHARS)
+    last_message = File.exist?(worker.last_message_path) ? File.read(worker.last_message_path) : nil
+
+    {
+      "workerId" => worker.worker_id,
+      "runId" => worker.run_id,
+      "role" => worker.role,
+      "nickname" => worker.nickname,
+      "status" => worker.status,
+      "logPath" => worker.log_path,
+      "lastMessagePath" => worker.last_message_path,
+      "startedAt" => worker.started_at&.iso8601(3),
+      "stoppedAt" => worker.stopped_at&.iso8601(3),
+      "stopReason" => worker.stop_reason,
+      "tail" => Orchestrator::LogReader.read_tail_lines(worker.log_path, DEFAULT_TAIL_LINES),
+      "lastMessage" => last_message,
+      "logContent" => full[:content],
+      "logTruncated" => full[:truncated],
+      "logTotalBytes" => full[:total_bytes]
+    }
+  end
+
+  def process_alive?(pid)
+    Process.kill(0, pid)
+    true
+  rescue Errno::ESRCH
+    false
+  end
+
+  def stop_reason
+    params[:reason].presence || "manually stopped from ops hub"
+  end
+end

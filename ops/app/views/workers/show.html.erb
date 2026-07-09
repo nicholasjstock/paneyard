@@ -1,0 +1,31 @@
+<% content_for :title, @worker_id %>
+
+<h1 class="mono"><%= @worker_id %></h1>
+
+<%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
+
+<% if @log %>
+  <div class="card">
+    <div class="card-title">
+      <span><%= @log["nickname"] %></span>
+      <span class="badge <%= @log["status"] %>"><%= @log["status"] %></span>
+    </div>
+    <p class="muted">
+      <%= @log["role"] %> &middot; run <span class="mono"><%= @log["runId"] %></span>
+      <% if @log["stopReason"].present? %> &middot; <%= @log["stopReason"] %><% end %>
+    </p>
+    <% if @log["status"] == "running" %>
+      <%= button_to "Stop worker", stop_worker_path(@worker_id), method: :post,
+            class: "btn danger",
+            data: { turbo_confirm: "Stop worker #{@log['nickname']}?" } %>
+    <% end %>
+  </div>
+
+  <% if @log["lastMessage"].present? %>
+    <h2>Latest message</h2>
+    <pre class="log"><%= @log["lastMessage"] %></pre>
+  <% end %>
+
+  <h2>Log<%= " (truncated, #{number_to_human_size(@log['logTotalBytes'])} total)" if @log["logTruncated"] %></h2>
+  <pre class="log"><%= @log["logContent"] || (@log["tail"] || []).join("\n") %></pre>
+<% end %>

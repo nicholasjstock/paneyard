@@ -1,0 +1,39 @@
+<% content_for :title, "Questions" %>
+
+<%= turbo_stream_from "questions" %>
+
+<h1>Questions</h1>
+
+<%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
+
+<div id="questions">
+  <% if @questions.empty? %>
+    <p class="empty">No questions recorded.</p>
+  <% else %>
+    <% @questions.each do |question| %>
+      <div class="card">
+        <div class="card-title">
+          <span class="mono"><%= question["runId"] %></span>
+          <span>
+            <span class="badge <%= question["priority"] %>"><%= question["priority"] %></span>
+            <span class="badge <%= question["status"] %>"><%= question["status"] %></span>
+          </span>
+        </div>
+        <p><%= question["text"] %></p>
+        <% if question["context"].present? %><p class="muted"><%= question["context"] %></p><% end %>
+        <p class="muted">asked by <%= question["askedBy"] %> &middot; <span class="mono"><%= question["scope"] %></span></p>
+
+        <% if question["status"] == "open" %>
+          <%= form_with url: answer_question_path(question["questionId"]), method: :post, local: true do |form| %>
+            <div class="field">
+              <%= form.text_area :answer_text, placeholder: "Your answer…" %>
+            </div>
+            <%= form.submit "Answer", class: "btn primary" %>
+          <% end %>
+        <% else %>
+          <p class="muted">answered by <%= question["answeredBy"] %>: <%= question["answerText"] %></p>
+        <% end %>
+      </div>
+    <% end %>
+  <% end %>
+</div>

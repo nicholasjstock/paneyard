@@ -1,33 +1,19 @@
 // @vitest-environment node
 
-import * as fs from 'fs'
-import * as os from 'os'
-import * as path from 'path'
+import { describe, expect, test } from 'vitest'
 
-import { afterEach, describe, expect, test } from 'vitest'
-
-import { createWorkflowBus } from '../workflow-bus'
+import { createFakeWorkflowBus } from './helpers/fake-workflow-bus'
 import { runPlannerTurn } from '../planner-turn'
 
-const tempDirs: string[] = []
-
-afterEach(() => {
-  for (const tempDir of tempDirs.splice(0)) {
-    fs.rmSync(tempDir, { recursive: true, force: true })
-  }
-})
-
 function makeBus() {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'planner-turn-'))
-  tempDirs.push(tempDir)
-  return createWorkflowBus({ storagePath: path.join(tempDir, 'workflow-bus.json') })
+  return createFakeWorkflowBus()
 }
 
 describe('planner turn', () => {
-  test('publishes a spawn request for nextStep and carries followingSteps into state', () => {
+  test('publishes a spawn request for nextStep and carries followingSteps into state', async () => {
     const bus = makeBus()
 
-    const result = runPlannerTurn({
+    const result = await runPlannerTurn({
       runId: 'run-1',
       summary: 'Frontend button unresponsive; route to a scoped fix, then re-verify.',
       nextStep: { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Button responds to taps on the phone view.' },
@@ -39,16 +25,16 @@ describe('planner turn', () => {
     expect(result.jobs.map((job) => job.step.artifact)).toEqual(['fix-summary.md'])
     expect(result.nextState.followingSteps.map((step) => step.artifact)).toEqual(['verifier-report.md'])
 
-    const openRequests = bus.listOpenSpawnRequests()
+    const openRequests = await bus.listOpenSpawnRequests()
     expect(openRequests.map((request) => request.requestedRole)).toEqual(['worker'])
     expect(openRequests[0]?.askedBy).toBe('planner')
     expect(openRequests[0]?.status).toBe('open')
   })
 
-  test('a nextStep decision publishes exactly one bus entry', () => {
+  test('a nextStep decision publishes exactly one bus entry', async () => {
     const bus = makeBus()
 
-    const result = runPlannerTurn({
+    const result = await runPlannerTurn({
       runId: 'run-2',
       summary: 'Infra fix needed.',
       nextStep: { owner: 'worker', artifact: 'fix-summary.md', successCheck: 'Docker image matches Playwright version.' },
@@ -57,13 +43,13 @@ describe('planner turn', () => {
     })
 
     expect(result.jobs).toHaveLength(1)
-    expect(bus.listOpenSpawnRequests()).toHaveLength(1)
+    expect(await bus.listOpenSpawnRequests()).toHaveLength(1)
   })
 
-  test('a null nextStep publishes nothing', () => {
+  test('a null nextStep publishes nothing', async () => {
     const bus = makeBus()
 
-    const result = runPlannerTurn({
+    const result = await runPlannerTurn({
       runId: 'run-3',
       summary: 'No further action needed.',
       nextStep: null,
@@ -72,11 +58,11 @@ describe('planner turn', () => {
     })
 
     expect(result.jobs).toEqual([])
-    expect(bus.listOpenSpawnRequests()).toEqual([])
+    expect(await bus.listOpenSpawnRequests()).toEqual([])
     expect(result.nextState.followingSteps).toEqual([])
   })
 
-  test('is idempotent across repeated calls for the same run and nextStep', () => {
+  test('is idempotent across repeated calls for the same run and nextStep', async () => {
     const bus = makeBus()
     const args = {
       runId: 'run-4',
@@ -86,17 +72,17 @@ describe('planner turn', () => {
       bus,
     }
 
-    const first = runPlannerTurn(args)
-    const second = runPlannerTurn(args)
+    const first = await runPlannerTurn(args)
+    const second = await runPlannerTurn(args)
 
     expect(second.jobs.map((job) => job.requestId)).toEqual(first.jobs.map((job) => job.requestId))
-    expect(bus.listOpenSpawnRequests()).toHaveLength(1)
+    expect(await bus.listOpenSpawnRequests()).toHaveLength(1)
   })
 
-  test('carries pendingSpawnKeys and tickCount forward from previousState', () => {
+  test('carries pendingSpawnKeys and tickCount forward from previousState', async () => {
     const bus = makeBus()
 
-    const result = runPlannerTurn({
+    const result = await runPlannerTurn({
       runId: 'run-5',
       summary: 'Recover the stalled worker.',
       nextStep: { owner: 'planner', artifact: 'workflow-plan.md', successCheck: 'Decide the recovery step.' },

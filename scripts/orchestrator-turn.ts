@@ -14,7 +14,7 @@ import {
 import type { WorkflowWorkerRecord } from './workflow-worker-runtime'
 
 export type OrchestratorWorkerRuntime = {
-  listWorkers: (args?: { runId?: string; activeOnly?: boolean }) => WorkflowWorkerRecord[]
+  listWorkers: (args?: { runId?: string; activeOnly?: boolean }) => Promise<WorkflowWorkerRecord[]>
   spawnWorker: (args: {
     runId: string
     role: WorkflowWorkerRecord['role']
@@ -22,25 +22,25 @@ export type OrchestratorWorkerRuntime = {
     reason: string
     scope: string
     prompt: string
-  }) => WorkflowWorkerRecord
+  }) => Promise<WorkflowWorkerRecord>
 }
 
 type OrchestratorBus = Parameters<typeof publishPlannerJobs>[0] & {
-  listOpenSpawnRequests: () => Array<{ runId: string }>
-  listOpenUserQuestions: () => Array<{ runId: string; priority: 'advisory' | 'blocking' }>
+  listOpenSpawnRequests: () => Promise<Array<{ runId: string }>>
+  listOpenUserQuestions: () => Promise<Array<{ runId: string; priority: 'advisory' | 'blocking' }>>
   publishRunStatus: (args: {
     runId: string
     phase: string
     owner: string
     summary: string
-  }) => unknown
+  }) => Promise<unknown>
   publishWorkerSpawned: (args: {
     runId: string
     owner: string
     role: string
     nickname: string
     reason: string
-  }) => unknown
+  }) => Promise<unknown>
 }
 
 export type OrchestratorTurnFinding = {
@@ -221,16 +221,16 @@ export function buildDeadEndFinding(args: { runId: string; followingSteps: Workf
   ].join(' ')
 }
 
-export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTurnResult {
+export async function runOrchestratorTurn(args: OrchestratorTurnArgs): Promise<OrchestratorTurnResult> {
   const fileSystem = args.fileSystem ?? fs
   const previousState = args.previousState
-  args.bus.publishRunStatus({
+  await args.bus.publishRunStatus({
     runId: args.runId,
     phase: 'starting',
     owner: 'orchestrator',
     summary: `Opening orchestrator phase for ${args.scenario} scenario on ${trimTrailingSlash(args.frontendUrl)}; coordinating the next recorder and verifier handoff.`,
   })
-  const workers = args.workerRuntime.listWorkers({ runId: args.runId, activeOnly: true })
+  const workers = await args.workerRuntime.listWorkers({ runId: args.runId, activeOnly: true })
   const stalledWorkers = detectStalledWorkers({
     workers,
     fileSystem,
@@ -244,7 +244,8 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
   // 'completed', has gone dead — the same class of problem as a stalled
   // worker, just invisible to detectStalledWorkers because there's no
   // running worker left to look at.
-  const openSpawnRequests = args.bus.listOpenSpawnRequests().filter((request) => request.runId === args.runId)
+  const allOpenSpawnRequests = await args.bus.listOpenSpawnRequests()
+  const openSpawnRequests = allOpenSpawnRequests.filter((request) => request.runId === args.runId)
   const isDeadEnd =
     !stallFinding &&
     workers.length === 0 &&
@@ -263,9 +264,10 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
   // the same still-idle workers next tick and spawns *another* recovery
   // planner to redundantly re-investigate something already awaiting a
   // human answer, ignoring whatever policy that first planner decided on.
-  const hasOpenBlockingQuestion = args.bus
-    .listOpenUserQuestions()
-    .some((question) => question.runId === args.runId && question.priority === 'blocking')
+  const openUserQuestions = await args.bus.listOpenUserQuestions()
+  const hasOpenBlockingQuestion = openUserQuestions.some(
+    (question) => question.runId === args.runId && question.priority === 'blocking'
+  )
 
   // A non-stalled, non-dead-end tick is a pure no-op: worker_turn/planner_turn
   // own all real progress, so there is nothing for the orchestrator to
@@ -283,7 +285,7 @@ export function runOrchestratorTurn(args: OrchestratorTurnArgs): OrchestratorTur
         })
       : null
   const jobs = plan
-    ? publishPlannerJobs(args.bus, {
+    ? await publishPlannerJobs(args.bus, {
         runId: args.runId,
         summary: plan.summary,
         plan,

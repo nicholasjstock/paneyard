@@ -6,8 +6,7 @@ import * as path from 'path'
 
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { createWorkflowBus } from '../workflow-bus'
-import { createWorkflowWorkerRuntime } from '../workflow-worker-runtime'
+import { createFakeWorkflowBus, createFakeWorkflowWorkerRuntime } from './helpers/fake-workflow-bus'
 import { runOrchestratorTurn } from '../orchestrator-turn'
 
 const tempDirs: string[] = []
@@ -19,17 +18,15 @@ afterEach(() => {
 })
 
 describe('orchestrator integration', () => {
-  test('publishes the opening run status and stays idle for a full turn without spawning workers directly', () => {
+  test('publishes the opening run status and stays idle for a full turn without spawning workers directly', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestrator-integration-'))
     tempDirs.push(tempDir)
     const outputDir = path.join(tempDir, 'demo-output', 'agents-sdk')
-    const bus = createWorkflowBus({
-      storagePath: path.join(tempDir, 'workflow-bus.json'),
-    })
+    const bus = createFakeWorkflowBus()
     const runId = 'demo-xvfb-20260701-200813'
     let runtimeSpawnCount = 0
 
-    const runtime = createWorkflowWorkerRuntime({
+    const runtime = createFakeWorkflowWorkerRuntime({
       rootDir: tempDir,
       outputDir,
       processAdapter: {
@@ -53,7 +50,7 @@ describe('orchestrator integration', () => {
       },
     })
 
-    const result = runOrchestratorTurn({
+    const result = await runOrchestratorTurn({
       runId,
       task: 'Resume the production demo orchestration. Finish the 28 step process and produce the next bounded handoff shape for recorder and verifier workers.',
       scenario: 'both',
@@ -66,10 +63,10 @@ describe('orchestrator integration', () => {
 
     expect(result.plan).toBeNull()
     expect(result.jobs).toEqual([])
-    expect(bus.listOpenSpawnRequests()).toHaveLength(0)
-    expect(runtime.listWorkers({ runId, activeOnly: true })).toEqual([])
+    expect(await bus.listOpenSpawnRequests()).toHaveLength(0)
+    expect(await runtime.listWorkers({ runId, activeOnly: true })).toEqual([])
 
-    const recentEvents = bus.listRecentEvents(5)
+    const recentEvents = await bus.listRecentEvents(5)
     const recentEventTypes = recentEvents.map((event) => event.type)
     expect(recentEventTypes).toEqual(['run.status'])
 
