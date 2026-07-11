@@ -39,19 +39,17 @@ module Orchestrator
       FileUtils.mkdir_p(workers_dir)
 
       worker_id ||= SecureRandom.uuid
-      prompt_path = File.join(workers_dir, "#{nickname}.prompt.txt")
-      log_path = File.join(workers_dir, "#{nickname}.log")
-      last_message_path = File.join(workers_dir, "#{nickname}.last-message.txt")
-      env_path = File.join(workers_dir, "#{nickname}.env.json")
+      file_basename = worker_file_basename(run_id: run.run_id, nickname: nickname)
+      prompt_path = File.join(workers_dir, "#{file_basename}.prompt.txt")
+      log_path = File.join(workers_dir, "#{file_basename}.log")
+      last_message_path = File.join(workers_dir, "#{file_basename}.last-message.txt")
+      env_path = File.join(workers_dir, "#{file_basename}.env.json")
 
-      # claude resolves --agent <role> against .claude/agents/<role>.md
-      # itself, so the persona must not also be prepended into the prompt
-      # the way it is for codex (which has no equivalent named-agent flag).
       driver = run.launcher_variant
-      enriched_prompt = driver == "claude" ? prompt : build_prompt_with_persona(root_dir, role, prompt)
+      enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
       command, args =
         if driver == "claude"
-          [ "claude", [ "--agent", role, "--permission-mode", "bypassPermissions", "-p", "--", enriched_prompt ] ]
+          [ "claude", [ "--permission-mode", "bypassPermissions", "-p", "--", enriched_prompt ] ]
         else
           [ "codex", [ "exec", "--dangerously-bypass-approvals-and-sandbox", "-C", root_dir, "-o", last_message_path, "-" ] ]
         end
@@ -61,6 +59,7 @@ module Orchestrator
 
       File.write(prompt_path, enriched_prompt)
       File.write(log_path, "")
+      File.delete(last_message_path) if File.exist?(last_message_path)
       File.write(env_path, "#{JSON.pretty_generate(build_worker_env_snapshot(worker_env))}\n")
 
       # Brakeman flags this as command injection because command/args/paths
@@ -125,6 +124,10 @@ module Orchestrator
       end
     end
 
+    def worker_file_basename(run_id:, nickname:)
+      "#{ArtifactStore.sanitize_run_id(run_id)}-#{nickname}"
+    end
+
     def rails_mcp_url
       base = ENV.fetch("WORKFLOW_RAILS_URL", "http://127.0.0.1:#{ENV.fetch('PORT', 3000)}")
       "#{base}/mcp"
@@ -157,11 +160,16 @@ module Orchestrator
       File.write(config_path, updated)
     end
 
-    def build_prompt_with_persona(root_dir, role, prompt)
-      persona_path = File.join(root_dir, ".codex", "agents", "#{role}.toml")
+    def build_prompt_with_persona(driver:, role:, prompt:)
+      persona_path = agent_prompt_path(driver: driver, role: role)
       return prompt unless File.exist?(persona_path)
 
       "#{File.read(persona_path)}\n\nCurrent task:\n#{prompt}"
+    end
+
+    def agent_prompt_path(driver:, role:)
+      extension = driver == "claude" ? "md" : "toml"
+      File.join(Rails.root, ".#{driver}", "agents", "#{role}.#{extension}")
     end
 
     def resolve_codex_home

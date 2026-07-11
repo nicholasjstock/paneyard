@@ -1,18 +1,8 @@
-<% content_for :title, "Launch task" %>
+<% content_for :title, "Launch task in #{current_workspace.name}" %>
 
-<h1>Launch task</h1>
+<h1>Launch task in <%= current_workspace.name %></h1>
 
-<% if @workspaces.empty? %>
-  <p class="empty">
-    No workspaces registered yet. <%= link_to "Add one", new_workspace_path %> before launching a task.
-  </p>
-<% else %>
-<%= form_with model: @run, url: runs_path, local: true do |form| %>
-  <div class="field">
-    <%= form.label :workspace_id, "Workspace" %>
-    <%= form.select :workspace_id, @workspaces.map { |workspace| [workspace.name, workspace.id] }, { include_blank: "Select a workspace…" }, required: true %>
-  </div>
-
+<%= form_with model: @run, url: workspace_runs_path(current_workspace), local: true do |form| %>
   <div class="field">
     <%= form.label :task, "Task" %>
     <%= form.text_area :task, placeholder: "Fix the bug described in issue #42." %>
@@ -24,6 +14,5 @@
   </div>
 
   <%= form.submit "Launch", class: "btn primary" %>
-  <%= link_to "Cancel", runs_path, class: "btn" %>
-<% end %>
+  <%= link_to "Cancel", workspace_runs_path(current_workspace), class: "btn" %>
 <% end %>

@@ -1,8 +1,8 @@
-<% content_for :title, "Events" %>
+<% content_for :title, "#{current_workspace.name} Events" %>
 
-<%= turbo_stream_from "events" %>
+<%= turbo_stream_from "workspace_#{current_workspace.id}_events" %>
 
-<h1>Events</h1>
+<h1><%= current_workspace.name %> Events</h1>
 
 <%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
 

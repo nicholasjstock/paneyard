@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_09_175910) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_09_183000) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -52,7 +52,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_175910) do
     t.string "target_root", null: false
     t.text "task", null: false
     t.datetime "updated_at", null: false
-    t.integer "workspace_id"
+    t.integer "workspace_id", null: false
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
     t.index ["workspace_id"], name: "index_runs_on_workspace_id"

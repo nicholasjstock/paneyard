@@ -20,7 +20,10 @@ class TickRunJob < ApplicationJob
 
   def tick_run(run)
     previous_state = Orchestrator::TickState.latest(run.run_id)
-    return if previous_state[:phase] == "completed"
+    if previous_state[:phase] == "completed"
+      run.update!(status: "completed", stopped_at: run.stopped_at || Time.current) unless run.status == "completed"
+      return
+    end
 
     result = Orchestrator::Turn.run_orchestrator_turn(
       run_id: run.run_id,

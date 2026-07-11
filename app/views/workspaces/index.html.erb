@@ -12,10 +12,10 @@
     <% @workspaces.each do |workspace| %>
       <div class="card">
         <div class="card-title">
-          <span><%= workspace.name %></span>
+          <%= link_to workspace.name, workspace_runs_path(workspace) %>
           <%= button_to "Remove", workspace_path(workspace), method: :delete,
                 class: "btn danger",
-                data: { turbo_confirm: "Remove workspace #{workspace.name}? Existing runs keep their own recorded target root." } %>
+                data: { turbo_confirm: "Remove workspace #{workspace.name}? This only works when the workspace has no runs." } %>
         </div>
         <p class="muted mono"><%= workspace.root_path %></p>
       </div>

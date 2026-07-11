@@ -1,9 +1,12 @@
 class ApplicationController < ActionController::Base
   # Only allow modern browsers supporting webp images, web push, badges, import maps, CSS nesting, and CSS :has.
-  allow_browser versions: :modern
+  allow_browser versions: :modern unless Rails.env.test?
 
   # Changes to the importmap will invalidate the etag for HTML responses
   stale_when_importmap_changes
+
+  helper_method :current_workspace
+  helper_method :background_job_warning
 
   private
 
@@ -12,5 +15,17 @@ class ApplicationController < ActionController::Base
   # real auth later without touching the rest of the launch/answer flows.
   def current_operator
     "operator"
+  end
+
+  def current_workspace
+    @current_workspace
+  end
+
+  def require_workspace
+    @current_workspace = Workspace.find(params[:workspace_id])
+  end
+
+  def background_job_warning
+    @background_job_warning ||= BackgroundJobHealth.warning
   end
 end

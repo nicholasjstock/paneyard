@@ -76,6 +76,11 @@ module Orchestrator
       step = plan[:next_step]
       return [] if step.nil? || step[:owner] == "orchestrator"
 
+      run = Run.find_by!(run_id: run_id)
+      artifact_exists = ->(artifact_name) do
+        File.exist?(ArtifactStore.resolve_path(run.target_root, run_id, artifact_name))
+      end
+
       existing_request = SpawnRequest
         .where(run_id: run_id, asked_by: "planner", requested_role: step[:owner], scope: step[:artifact])
         .where.not(status: "dismissed")
@@ -85,10 +90,8 @@ module Orchestrator
           elsif step[:owner] == "planner"
             request.fulfilled_worker_id.present? && active_worker_ids.include?(request.fulfilled_worker_id)
           else
-            # A concrete artifact (e.g. fix-summary.md) already got
-            # produced -- that stays done forever, regardless of whether
-            # the worker that made it is still running.
-            true
+            artifact_exists.call(step[:artifact]) ||
+              (request.fulfilled_worker_id.present? && active_worker_ids.include?(request.fulfilled_worker_id))
           end
         end
 

@@ -3,6 +3,11 @@ class WorkspacesController < ApplicationController
     @workspaces = Workspace.order(:name)
   end
 
+  def show
+    workspace = Workspace.find(params[:id])
+    redirect_to workspace_runs_path(workspace)
+  end
+
   def new
     @workspace = Workspace.new
   end
@@ -11,7 +16,7 @@ class WorkspacesController < ApplicationController
     @workspace = Workspace.new(workspace_params)
 
     if @workspace.save
-      redirect_to workspaces_path, notice: "Added workspace #{@workspace.name}."
+      redirect_to workspace_runs_path(@workspace), notice: "Added workspace #{@workspace.name}."
     else
       render :new, status: :unprocessable_entity
     end
@@ -19,8 +24,12 @@ class WorkspacesController < ApplicationController
 
   def destroy
     workspace = Workspace.find(params[:id])
-    workspace.destroy
-    redirect_to workspaces_path, notice: "Removed workspace #{workspace.name}."
+
+    if workspace.destroy
+      redirect_to workspaces_path, notice: "Removed workspace #{workspace.name}."
+    else
+      redirect_to workspaces_path, alert: workspace.errors.full_messages.to_sentence
+    end
   end
 
   private

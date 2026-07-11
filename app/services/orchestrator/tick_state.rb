@@ -19,6 +19,7 @@ module Orchestrator
         last_stall_finding: state[:last_stall_finding]
       )
       tick.save!
+      sync_run_phase!(run: run, state: state)
       to_state(tick)
     end
 
@@ -69,6 +70,43 @@ module Orchestrator
         value.map { |v| deep_symbolize(v) }
       else
         value
+      end
+    end
+
+    def sync_run_phase!(run:, state:)
+      phase = state[:phase]
+      owner = infer_phase_owner(phase)
+      summary = summarize_state(state)
+
+      return if run.phase == phase && run.phase_owner == owner && run.phase_summary == summary
+
+      run.publish_phase!(phase: phase, owner: owner, summary: summary)
+    end
+
+    def infer_phase_owner(phase)
+      case phase
+      when "waiting_on_workers", "stalled"
+        "worker"
+      when "planning", "blocked_on_user", "completed", "starting"
+        "orchestrator"
+      else
+        "orchestrator"
+      end
+    end
+
+    def summarize_state(state)
+      return state[:last_stall_finding] if state[:last_stall_finding].present?
+      return state[:last_plan_summary] if state[:last_plan_summary].present?
+
+      case state[:phase]
+      when "waiting_on_workers"
+        "Waiting on active workers to report back."
+      when "blocked_on_user"
+        "Blocked on a user answer before the next handoff can be planned."
+      when "completed"
+        "Run completed."
+      else
+        "Coordinating the next worker handoff."
       end
     end
   end

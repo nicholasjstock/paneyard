@@ -27,11 +27,13 @@
     <header class="topbar">
       <a class="brand" href="<%= root_path %>">Workflow Orchestrator</a>
       <nav>
-        <%= link_to "Runs", runs_path, class: current_page?(runs_path) ? "active" : nil %>
-        <%= link_to "Workers", workers_path, class: current_page?(workers_path) ? "active" : nil %>
-        <%= link_to "Questions", questions_path, class: current_page?(questions_path) ? "active" : nil %>
-        <%= link_to "Events", events_path, class: current_page?(events_path) ? "active" : nil %>
         <%= link_to "Workspaces", workspaces_path, class: current_page?(workspaces_path) ? "active" : nil %>
+        <% if current_workspace %>
+          <%= link_to "Runs", workspace_runs_path(current_workspace), class: current_page?(workspace_runs_path(current_workspace)) ? "active" : nil %>
+          <%= link_to "Workers", workspace_workers_path(current_workspace), class: current_page?(workspace_workers_path(current_workspace)) ? "active" : nil %>
+          <%= link_to "Questions", workspace_questions_path(current_workspace), class: current_page?(workspace_questions_path(current_workspace)) ? "active" : nil %>
+          <%= link_to "Events", workspace_events_path(current_workspace), class: current_page?(workspace_events_path(current_workspace)) ? "active" : nil %>
+        <% end %>
       </nav>
     </header>
 
@@ -41,6 +43,9 @@
       <% end %>
       <% if alert %>
         <p class="flash alert"><%= alert %></p>
+      <% end %>
+      <% if background_job_warning.present? %>
+        <p class="flash warning"><%= background_job_warning %></p>
       <% end %>
 
       <%= yield %>

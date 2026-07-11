@@ -1,8 +1,8 @@
-<% content_for :title, "Questions" %>
+<% content_for :title, "#{current_workspace.name} Questions" %>
 
-<%= turbo_stream_from "questions" %>
+<%= turbo_stream_from "workspace_#{current_workspace.id}_questions" %>
 
-<h1>Questions</h1>
+<h1><%= current_workspace.name %> Questions</h1>
 
 <%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
 
@@ -24,7 +24,7 @@
         <p class="muted">asked by <%= question["askedBy"] %> &middot; <span class="mono"><%= question["scope"] %></span></p>
 
         <% if question["status"] == "open" %>
-          <%= form_with url: answer_question_path(question["questionId"]), method: :post, local: true do |form| %>
+          <%= form_with url: answer_workspace_question_path(current_workspace, question["questionId"]), method: :post, local: true do |form| %>
             <div class="field">
               <%= form.text_area :answer_text, placeholder: "Your answer…" %>
             </div>

@@ -1,16 +1,18 @@
 class WorkersController < ApplicationController
+  before_action :require_workspace
+
   # Mirrors scripts/workflow-mcp-http.ts's now-retired /workers/:id/log
   # endpoint's defaults.
   DEFAULT_TAIL_LINES = 120
   DEFAULT_FULL_LOG_MAX_CHARS = 300_000
 
   def index
-    @workers = Worker.order(started_at: :desc).map { |worker| JSON.parse(worker.to_json) }
+    @workers = workspace_workers.order(started_at: :desc).map { |worker| JSON.parse(worker.to_json) }
   end
 
   def show
     @worker_id = params[:id]
-    worker = Worker.find_by(worker_id: @worker_id)
+    worker = workspace_workers.find_by(worker_id: @worker_id)
 
     if worker
       @log = build_log_payload(worker)
@@ -21,7 +23,7 @@ class WorkersController < ApplicationController
   end
 
   def stop
-    worker = Worker.find_by!(worker_id: params[:id])
+    worker = workspace_workers.find_by!(worker_id: params[:id])
     if worker.status == "running"
       begin
         Process.kill("SIGTERM", worker.pid) if process_alive?(worker.pid)
@@ -30,12 +32,16 @@ class WorkersController < ApplicationController
       end
       worker.update!(status: "stopped", stopped_at: Time.current, stop_reason: stop_reason)
     end
-    redirect_back fallback_location: workers_path, notice: "Worker stopped."
+    redirect_back fallback_location: workspace_workers_path(current_workspace), notice: "Worker stopped."
   rescue ActiveRecord::RecordNotFound
-    redirect_back fallback_location: workers_path, alert: "Failed to stop worker: unknown worker #{params[:id]}"
+    redirect_back fallback_location: workspace_workers_path(current_workspace), alert: "Failed to stop worker: unknown worker #{params[:id]}"
   end
 
   private
+
+  def workspace_workers
+    Worker.joins(:run).where(runs: { workspace_id: current_workspace.id })
+  end
 
   def build_log_payload(worker)
     full = Orchestrator::LogReader.read_full_content(worker.log_path, DEFAULT_FULL_LOG_MAX_CHARS)

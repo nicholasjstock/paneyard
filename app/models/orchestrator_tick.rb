@@ -13,6 +13,8 @@ class OrchestratorTick < ApplicationRecord
 
   scope :for_run, ->(run_id) { where(run_id: run_id).order(:tick_count) }
 
+  after_commit :broadcast_run_refresh, on: :create
+
   def as_json(*)
     {
       runId: run_id,
@@ -24,5 +26,12 @@ class OrchestratorTick < ApplicationRecord
       lastStallFinding: last_stall_finding,
       lastUpdatedAt: created_at&.iso8601(3)
     }
+  end
+
+  private
+
+  def broadcast_run_refresh
+    Turbo::StreamsChannel.broadcast_refresh_to("run_#{run_id}")
+    Turbo::StreamsChannel.broadcast_refresh_to("workspace_#{run.workspace_id}_runs") if run&.workspace_id.present?
   end
 end

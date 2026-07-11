@@ -15,7 +15,7 @@
       <% if @log["stopReason"].present? %> &middot; <%= @log["stopReason"] %><% end %>
     </p>
     <% if @log["status"] == "running" %>
-      <%= button_to "Stop worker", stop_worker_path(@worker_id), method: :post,
+      <%= button_to "Stop worker", stop_workspace_worker_path(current_workspace, @worker_id), method: :post,
             class: "btn danger",
             data: { turbo_confirm: "Stop worker #{@log['nickname']}?" } %>
     <% end %>

@@ -32,16 +32,19 @@ class BusEvent < ApplicationRecord
   end
 
   def broadcast
-    Turbo::StreamsChannel.broadcast_refresh_to("events")
+    workspace_id = run&.workspace_id
+
     Turbo::StreamsChannel.broadcast_refresh_to("run_#{run_id}") if run_id.present?
 
     case event_type
     when /\Aworker\./
-      Turbo::StreamsChannel.broadcast_refresh_to("workers")
+      Turbo::StreamsChannel.broadcast_refresh_to("workspace_#{workspace_id}_workers") if workspace_id.present?
     when /\Auser_question\./
-      Turbo::StreamsChannel.broadcast_refresh_to("questions")
+      Turbo::StreamsChannel.broadcast_refresh_to("workspace_#{workspace_id}_questions") if workspace_id.present?
     when /\Aspawn_request\./, "run.status"
-      Turbo::StreamsChannel.broadcast_refresh_to("runs")
+      Turbo::StreamsChannel.broadcast_refresh_to("workspace_#{workspace_id}_runs") if workspace_id.present?
     end
+
+    Turbo::StreamsChannel.broadcast_refresh_to("workspace_#{workspace_id}_events") if workspace_id.present?
   end
 end

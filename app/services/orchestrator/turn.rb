@@ -11,11 +11,13 @@ module Orchestrator
 
     def run_orchestrator_turn(run_id:, task:, stale_after_ms: nil, now: Time.current, previous_state: nil)
       run = Run.find_or_create_for_bus!(run_id)
-      run.publish_phase!(
-        phase: "starting",
-        owner: "orchestrator",
-        summary: "Opening orchestrator phase for: #{task}; coordinating the next worker handoff."
-      )
+      if previous_state.blank? || previous_state[:tick_count].to_i.zero?
+        run.publish_phase!(
+          phase: "starting",
+          owner: "orchestrator",
+          summary: "Opening orchestrator phase for: #{task}; coordinating the next worker handoff."
+        )
+      end
 
       workers = Worker.where(run_id: run_id, status: "running").to_a
       stalled_workers = detect_stalled_workers(workers: workers, now: now, stale_after_ms: stale_after_ms || DEFAULT_STALE_AFTER_MS)
@@ -150,14 +152,24 @@ module Orchestrator
         summary: summary,
         plan: { summary: summary, next_step: next_step, following_steps: following_steps }
       )
+      active_worker_exists = Worker.where(run_id: run_id, status: "running").exists?
+      completion_phase =
+        if next_step
+          "planning"
+        elsif active_worker_exists
+          "waiting_on_workers"
+        else
+          "completed"
+        end
 
       next_state = {
         run_id: run_id,
-        # next_step: nil is the planner's explicit "genuinely nothing left
-        # to do" signal -- mark the run completed so the orchestrator can
-        # tell a legitimate finish apart from a run that went idle without
-        # ever being told it was done.
-        phase: next_step ? "planning" : "completed",
+        # next_step: nil only means "completed" when nothing is still in
+        # flight. A recovery planner can legitimately publish no new
+        # immediate handoff because an existing worker should continue
+        # uninterrupted; in that case the run must stay
+        # waiting_on_workers rather than flipping completed.
+        phase: completion_phase,
         tick_count: (previous_state&.dig(:tick_count) || 0) + 1,
         last_plan_summary: summary,
         pending_spawn_keys: ((previous_state&.dig(:pending_spawn_keys) || []) + Planner.build_pending_spawn_keys(run_id: run_id, jobs: jobs)).uniq,

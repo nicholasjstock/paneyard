@@ -9,11 +9,18 @@
 # scripts/orchestrator-turn.ts's OrchestratorDecisionPhase for the third,
 # still-distinct phase enum (that one lives on OrchestratorTick).
 class Run < ApplicationRecord
+  LAUNCH_STALE_AFTER = 30.seconds
+
+  # Removed in 20260709175910_remove_scenario_and_frontend_url_from_runs.
+  # Keep them ignored so a long-lived Rails process with stale schema
+  # metadata does not try to write them during create/update.
+  self.ignored_columns += %w[scenario frontend_url]
+
   LAUNCHER_VARIANTS = %w[claude codex].freeze
   STATUSES = %w[launching running stopping stopped completed failed].freeze
   NON_TERMINAL_STATUSES = %w[launching running stopping].freeze
 
-  belongs_to :workspace, optional: true
+  belongs_to :workspace
 
   has_many :spawn_requests, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :user_questions, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
@@ -29,6 +36,8 @@ class Run < ApplicationRecord
 
   scope :active, -> { where(status: NON_TERMINAL_STATUSES) }
 
+  after_commit :broadcast_workspace_refresh, on: %i[create update]
+
   # Every standalone/bus-only entrypoint (a bare supervisor loop tick, a
   # worker's own MCP tool calls) can reference a runId that was never
   # explicitly "launched" through the ops UI (LaunchRunJob is the only
@@ -41,11 +50,17 @@ class Run < ApplicationRecord
 
   def self.create_for_bus!(run_id)
     default_workspace = Workspace.default
+    unless default_workspace
+      run = new
+      run.errors.add(:workspace, "must exist before creating runs")
+      raise ActiveRecord::RecordInvalid.new(run)
+    end
+
     create!(
       run_id: run_id,
       task: "(unspecified — auto-created from bus activity)",
       workspace: default_workspace,
-      target_root: default_workspace&.root_path || "(unspecified)",
+      target_root: default_workspace.root_path,
       launcher_variant: "codex",
       status: "running"
     )
@@ -59,6 +74,18 @@ class Run < ApplicationRecord
 
   def terminal?
     !active?
+  end
+
+  def launch_queued?(now: Time.current)
+    status == "launching" && started_at.blank? && created_at <= now - LAUNCH_STALE_AFTER
+  end
+
+  def status_badge_label(now: Time.current)
+    launch_queued?(now: now) ? "launch queued" : status
+  end
+
+  def status_badge_class(now: Time.current)
+    launch_queued?(now: now) ? "queued" : status
   end
 
   def to_param
@@ -79,5 +106,12 @@ class Run < ApplicationRecord
     return nil if phase.blank?
 
     { runId: run_id, phase: phase, owner: phase_owner, summary: phase_summary, at: phase_updated_at&.iso8601(3) }
+  end
+
+  private
+
+  def broadcast_workspace_refresh
+    Turbo::StreamsChannel.broadcast_refresh_to("run_#{run_id}")
+    Turbo::StreamsChannel.broadcast_refresh_to("workspace_#{workspace_id}_runs") if workspace_id.present?
   end
 end

@@ -1,10 +1,10 @@
-<% content_for :title, "Runs" %>
+<% content_for :title, "#{current_workspace.name} Runs" %>
 
-<%= turbo_stream_from "runs" %>
+<%= turbo_stream_from "workspace_#{current_workspace.id}_runs" %>
 
 <div class="toolbar">
-  <h1>Runs</h1>
-  <%= link_to "Launch task", new_run_path, class: "btn primary" %>
+  <h1><%= current_workspace.name %> Runs</h1>
+  <%= link_to "Launch task", new_workspace_run_path(current_workspace), class: "btn primary" %>
 </div>
 
 <%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
@@ -14,19 +14,22 @@
     <p class="empty">No runs launched yet.</p>
   <% else %>
     <% @runs.each do |run| %>
-      <div class="card">
-        <div class="card-title">
-          <%= link_to run.run_id, run_path(run), class: "mono" %>
-          <span class="badge <%= run.status %>"><%= run.status %></span>
+        <div class="card">
+          <div class="card-title">
+            <%= link_to run.run_id, workspace_run_path(current_workspace, run), class: "mono" %>
+            <span class="badge <%= run.status_badge_class %>"><%= run.status_badge_label %></span>
+          </div>
+          <p><%= truncate(run.task, length: 140) %></p>
+          <p class="muted">
+            <%= run.launcher_variant %>
+            &middot;
+            <% if run.started_at %>started <%= time_ago_in_words(run.started_at) %> ago<% else %>not started<% end %>
+            <% if run.stopped_at %> &middot; stopped <%= time_ago_in_words(run.stopped_at) %> ago<% end %>
+          </p>
+          <% if run.launch_queued? %>
+            <p class="error-banner">Launch job has not started. This run is still queued; start `bin/jobs` or `bin/dev`.</p>
+          <% end %>
         </div>
-        <p><%= truncate(run.task, length: 140) %></p>
-        <p class="muted">
-          <%= run.launcher_variant %>
-          <% if run.workspace %> &middot; <%= run.workspace.name %><% end %> &middot;
-          <% if run.started_at %>started <%= time_ago_in_words(run.started_at) %> ago<% else %>not started<% end %>
-          <% if run.stopped_at %> &middot; stopped <%= time_ago_in_words(run.stopped_at) %> ago<% end %>
-        </p>
-      </div>
-    <% end %>
+      <% end %>
   <% end %>
 </div>

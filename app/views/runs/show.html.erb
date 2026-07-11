@@ -1,14 +1,15 @@
 <% content_for :title, @run.run_id %>
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
 
 <%= turbo_stream_from "run_#{@run.run_id}" %>
 
 <div class="toolbar">
   <div>
     <h1 class="mono"><%= @run.run_id %></h1>
-    <span class="badge <%= @run.status %>"><%= @run.status %></span>
+    <span class="badge <%= @run.status_badge_class %>"><%= @run.status_badge_label %></span>
   </div>
   <% if @run.active? %>
-    <%= button_to "Kill run", stop_run_path(@run), method: :post,
+    <%= button_to "Kill run", stop_workspace_run_path(current_workspace, @run), method: :post,
           class: "btn danger",
           data: { turbo_confirm: "Stop run #{@run.run_id}? This cascades to every active worker under it." } %>
   <% end %>
@@ -18,55 +19,235 @@
   <p><%= @run.task %></p>
   <p class="muted">
     <%= @run.launcher_variant %> &middot;
-    <% if @run.workspace %> workspace: <%= @run.workspace.name %> &middot; <% end %>
+    workspace: <%= current_workspace.name %> &middot;
     target: <span class="mono"><%= @run.target_root %></span>
   </p>
+  <% if @run.phase.present? %>
+    <p class="muted">
+      phase: <strong><%= @run.phase %></strong>
+      <% if @run.phase_owner.present? %>&middot; owner: <%= @run.phase_owner %><% end %>
+      <% if @run.phase_updated_at.present? %>&middot; updated <%= time_ago_in_words(@run.phase_updated_at) %> ago<% end %>
+    </p>
+  <% end %>
+  <% if @run.phase_summary.present? %>
+    <p><%= @run.phase_summary %></p>
+  <% end %>
+  <% if @run.launch_queued? %>
+    <p class="error-banner">Launch job has not started. This run is still queued; start `bin/jobs` or `bin/dev`.</p>
+  <% end %>
 </div>
+
+<% if @active_workers.any? %>
+  <section class="card live-worker-card">
+    <div class="panel-header">
+      <div>
+        <h2>Live Worker</h2>
+        <p class="muted">Open the worker page to inspect logs and the latest agent output.</p>
+      </div>
+      <%= link_to "Open active worker",
+            workspace_worker_path(current_workspace, @active_workers.first["workerId"]),
+            class: "btn primary" %>
+    </div>
+    <div class="live-worker-list">
+      <% @active_workers.each do |worker| %>
+        <div class="mini-card">
+          <div class="card-title">
+            <%= link_to worker["nickname"], workspace_worker_path(current_workspace, worker["workerId"]) %>
+            <span class="badge <%= worker["status"] %>"><%= worker["status"] %></span>
+          </div>
+          <p class="muted"><%= worker["role"] %> &middot; <span class="mono"><%= worker["scope"] %></span></p>
+        </div>
+      <% end %>
+    </div>
+  </section>
+<% end %>
+
+<section class="run-dashboard">
+  <div class="stat-strip">
+    <div class="stat-card">
+      <span class="stat-label">Current Phase</span>
+      <strong><%= @run.phase || "unknown" %></strong>
+      <span class="muted"><%= @run.phase_owner || "unowned" %></span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Latest Tick</span>
+      <strong><%= @latest_tick ? @latest_tick["tickCount"] : 0 %></strong>
+      <span class="muted"><%= @latest_tick ? @latest_tick["phase"] : "starting" %></span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Active Workers</span>
+      <strong><%= @active_workers.count %></strong>
+      <span class="muted"><%= @active_workers.map { |worker| worker["nickname"] }.presence&.join(", ") || "none" %></span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Open Requests</span>
+      <strong><%= @spawn_requests.count %></strong>
+      <span class="muted"><%= @spawn_requests.first&.dig("requestedRole") || "idle" %></span>
+    </div>
+  </div>
+
+  <div class="dashboard-grid">
+    <section class="panel span-2">
+      <div class="panel-header">
+        <h2>Now</h2>
+        <% if @run.phase_updated_at.present? %><span class="muted">updated <%= time_ago_in_words(@run.phase_updated_at) %> ago</span><% end %>
+      </div>
+      <% if @run.phase_summary.present? %>
+        <p class="lead"><%= @run.phase_summary %></p>
+      <% else %>
+        <p class="empty">No current phase summary yet.</p>
+      <% end %>
+      <% if @latest_tick&.dig("lastStallFinding").present? %>
+        <p class="error-banner"><%= @latest_tick["lastStallFinding"] %></p>
+      <% end %>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Next</h2>
+      </div>
+      <% if @spawn_requests.any? %>
+        <% @spawn_requests.each do |request| %>
+          <div class="mini-card">
+            <div class="card-title">
+              <span><%= request["requestedRole"] %></span>
+              <span class="badge <%= request["priority"] %>"><%= request["priority"] %></span>
+            </div>
+            <p class="mono"><%= request["scope"] %></p>
+            <p><%= request["text"] %></p>
+          </div>
+        <% end %>
+      <% elsif @following_steps.any? %>
+        <% @following_steps.each do |step| %>
+          <div class="mini-card">
+            <div class="card-title">
+              <span><%= step["owner"] || step[:owner] %></span>
+              <span class="mono"><%= step["artifact"] || step[:artifact] %></span>
+            </div>
+            <p><%= step["successCheck"] || step[:success_check] %></p>
+          </div>
+        <% end %>
+      <% else %>
+        <p class="empty">No queued handoff right now.</p>
+      <% end %>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Workers</h2>
+      </div>
+      <% if @active_workers.any? %>
+        <% @active_workers.each do |worker| %>
+          <div class="mini-card">
+            <div class="card-title">
+              <%= link_to worker["nickname"], workspace_worker_path(current_workspace, worker["workerId"]) %>
+              <span class="badge <%= worker["status"] %>"><%= worker["status"] %></span>
+            </div>
+            <p class="muted"><%= worker["role"] %> &middot; <span class="mono"><%= worker["scope"] %></span></p>
+          </div>
+        <% end %>
+      <% elsif @recent_workers.any? %>
+        <% @recent_workers.each do |worker| %>
+          <div class="mini-card">
+            <div class="card-title">
+              <%= link_to worker["nickname"], workspace_worker_path(current_workspace, worker["workerId"]) %>
+              <span class="badge <%= worker["status"] %>"><%= worker["status"] %></span>
+            </div>
+            <p class="muted"><%= worker["role"] %> &middot; <span class="mono"><%= worker["scope"] %></span></p>
+            <% if worker["stopReason"].present? %><p class="muted"><%= worker["stopReason"] %></p><% end %>
+          </div>
+        <% end %>
+      <% else %>
+        <p class="empty">No workers recorded for this run yet.</p>
+      <% end %>
+    </section>
+
+    <section class="panel span-2">
+      <div class="panel-header">
+        <h2>Recent Signals</h2>
+      </div>
+      <% if @signal_events.any? %>
+        <% @signal_events.each do |event| %>
+          <div class="timeline-row">
+            <div>
+              <span class="mono"><%= event["type"] %></span>
+              <% if event["repeatCount"].to_i > 1 %><span class="muted">&middot; repeated <%= event["repeatCount"] %>x</span><% end %>
+            </div>
+            <span class="muted"><%= event["at"] %></span>
+          </div>
+          <pre class="log compact"><%= JSON.pretty_generate(event["payload"]) %></pre>
+        <% end %>
+      <% else %>
+        <p class="empty">No non-status events yet.</p>
+      <% end %>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Artifacts</h2>
+      </div>
+      <% if @artifact_previews.any? %>
+        <% @artifact_previews.each do |artifact| %>
+          <div class="mini-card">
+            <div class="card-title">
+              <span class="mono"><%= artifact[:name] %></span>
+              <span class="muted"><%= artifact[:updated_at] %></span>
+            </div>
+            <p class="muted"><%= number_to_human_size(artifact[:size_bytes]) %></p>
+            <% if artifact[:preview].present? %>
+              <pre class="log compact"><%= artifact[:preview] %></pre>
+            <% end %>
+          </div>
+        <% end %>
+      <% else %>
+        <p class="empty">No run-scoped artifacts found yet.</p>
+      <% end %>
+    </section>
+  </div>
+</section>
 
 <%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
 
-<h2>Workers</h2>
-<% if @workers.blank? %>
-  <p class="empty">No workers recorded for this run yet.</p>
-<% else %>
-  <% @workers.each do |worker| %>
-    <div class="card">
-      <div class="card-title">
-        <%= link_to worker["nickname"], worker_path(worker["workerId"]) %>
-        <span class="badge <%= worker["status"] %>"><%= worker["status"] %></span>
+<details class="card collapsible"
+         data-controller="accordion-state"
+         data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
+         data-accordion-state-key-value="run:<%= @run.run_id %>:raw-activity-feed">
+  <summary>Raw activity feed</summary>
+  <% if @run_events.blank? %>
+    <p class="empty">No bus events recorded for this run yet.</p>
+  <% else %>
+    <% @run_events.reverse_each do |event| %>
+      <div class="mini-card">
+        <div class="card-title">
+          <span class="mono"><%= event["type"] %></span>
+          <span class="muted">
+            <%= event["at"] %>
+            <% if event["repeatCount"].to_i > 1 %>&middot; repeated <%= event["repeatCount"] %>x<% end %>
+          </span>
+        </div>
+        <pre class="log compact"><%= JSON.pretty_generate(event["payload"]) %></pre>
       </div>
-      <p class="muted"><%= worker["role"] %> &middot; <span class="mono"><%= worker["scope"] %></span></p>
-    </div>
+    <% end %>
   <% end %>
-<% end %>
+</details>
 
-<h2>Open spawn requests</h2>
-<% if @spawn_requests.blank? %>
-  <p class="empty">No open spawn requests for this run.</p>
-<% else %>
-  <% @spawn_requests.each do |request| %>
-    <div class="card">
-      <div class="card-title">
-        <span><%= request["requestedRole"] %></span>
-        <span class="badge <%= request["priority"] %>"><%= request["priority"] %></span>
+<details class="card collapsible"
+         data-controller="accordion-state"
+         data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
+         data-accordion-state-key-value="run:<%= @run.run_id %>:tick-history">
+  <summary>Tick history</summary>
+  <% if @tick_history.blank? || @tick_history["entries"].blank? %>
+    <p class="empty">No orchestrator ticks recorded yet.</p>
+  <% else %>
+    <% @tick_history["entries"].reverse_each do |entry| %>
+      <div class="mini-card">
+        <div class="card-title">
+          <span>Tick <%= entry["tickCount"] %></span>
+          <span class="badge <%= entry["phase"] %>"><%= entry["phase"] %></span>
+        </div>
+        <% if entry["lastPlanSummary"].present? %><p><%= entry["lastPlanSummary"] %></p><% end %>
+        <% if entry["lastStallFinding"].present? %><p class="error-banner"><%= entry["lastStallFinding"] %></p><% end %>
       </div>
-      <p><%= request["text"] %></p>
-    </div>
+    <% end %>
   <% end %>
-<% end %>
-
-<h2>Orchestrator ticks</h2>
-<% if @tick_history.blank? || @tick_history["entries"].blank? %>
-  <p class="empty">No orchestrator ticks recorded yet.</p>
-<% else %>
-  <% @tick_history["entries"].reverse_each do |entry| %>
-    <div class="card">
-      <div class="card-title">
-        <span>Tick <%= entry["tickCount"] %></span>
-        <span class="badge <%= entry["phase"] %>"><%= entry["phase"] %></span>
-      </div>
-      <% if entry["lastPlanSummary"].present? %><p><%= entry["lastPlanSummary"] %></p><% end %>
-      <% if entry["lastStallFinding"].present? %><p class="error-banner"><%= entry["lastStallFinding"] %></p><% end %>
-    </div>
-  <% end %>
-<% end %>
+</details>

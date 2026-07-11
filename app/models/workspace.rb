@@ -5,7 +5,7 @@
 # the actual path a launched run's supervisor process gets, just sourced
 # from here now.
 class Workspace < ApplicationRecord
-  has_many :runs, dependent: :nullify
+  has_many :runs, dependent: :restrict_with_error
 
   validates :name, presence: true, uniqueness: true
   validates :root_path, presence: true, uniqueness: true
