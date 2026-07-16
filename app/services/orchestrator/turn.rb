@@ -152,11 +152,15 @@ module Orchestrator
         summary: summary,
         plan: { summary: summary, next_step: next_step, following_steps: following_steps }
       )
-      active_worker_exists = Worker.where(run_id: run_id, status: "running").exists?
+      # The planner that is submitting this decision remains registered as
+      # running until its CLI process exits. It is not work that should keep
+      # the run alive after a nil next_step, otherwise every completed planner
+      # turn becomes waiting_on_workers and the stall recovery loop restarts.
+      active_executor_exists = Worker.where(run_id: run_id, status: "running").where.not(role: "planner").exists?
       completion_phase =
         if next_step
           "planning"
-        elsif active_worker_exists
+        elsif active_executor_exists
           "waiting_on_workers"
         else
           "completed"

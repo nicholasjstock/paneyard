@@ -26,9 +26,9 @@ class RunsController < ApplicationController
   end
 
   def show
-    @workers = Worker.where(run_id: @run.run_id).map { |worker| JSON.parse(worker.to_json) }
-    @active_workers = @workers.select { |worker| worker["status"] == "running" }
-    @recent_workers = @workers.reject { |worker| worker["status"] == "running" }.last(3).reverse
+    workers = @run.workers.order(started_at: :desc).to_a
+    @worker_activities = Orchestrator::WorkerActivity.for_workers(workers)
+    @active_workers = @worker_activities.select { |activity| activity[:worker].status == "running" }
     @spawn_requests = SpawnRequest.open_only.where(run_id: @run.run_id).map { |request| JSON.parse(request.to_json) }
     ticks = OrchestratorTick.for_run(@run.run_id)
     @latest_tick = ticks.last && JSON.parse(ticks.last.to_json)
@@ -36,7 +36,7 @@ class RunsController < ApplicationController
     @tick_history = { "runId" => @run.run_id, "entries" => ticks.map { |tick| JSON.parse(tick.to_json) } }
     raw_events = BusEvent.where(run_id: @run.run_id).order(created_at: :desc).limit(40).to_a.reverse.map { |event| JSON.parse(event.to_json) }
     @run_events = compress_events(raw_events).last(15)
-    @signal_events = @run_events.reverse.reject { |event| event["type"] == "run.status" }.first(6)
+    @timeline_events = build_timeline(raw_events).last(12).reverse
     @artifact_previews = collect_artifact_previews
   end
 
@@ -75,6 +75,29 @@ class RunsController < ApplicationController
     previous["type"] == "run.status" &&
       current["type"] == "run.status" &&
       previous["payload"] == current["payload"]
+  end
+
+  def build_timeline(events)
+    last_phase = nil
+
+    events.each_with_object([]) do |event, timeline|
+      case event["type"]
+      when "run.status"
+        phase = event.dig("payload", "phase")
+        next if phase.blank? || phase == last_phase
+
+        last_phase = phase
+        timeline << event.merge("label" => "Run entered #{phase.tr('_', ' ')}")
+      when "worker.spawned"
+        timeline << event.merge("label" => "#{event.dig('payload', 'nickname')} started")
+      when "worker.stopped"
+        timeline << event.merge("label" => "#{event.dig('payload', 'nickname')} stopped")
+      when "spawn_request.created"
+        timeline << event.merge("label" => "#{event.dig('payload', 'requestedRole')} handoff requested")
+      when "spawn_request.fulfilled"
+        timeline << event.merge("label" => "Handoff assigned")
+      end
+    end
   end
 
   def collect_artifact_previews

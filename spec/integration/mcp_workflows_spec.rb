@@ -176,6 +176,36 @@ RSpec.describe "MCP workflow integrations" do
     expect(latest_state[:phase]).to eq("waiting_on_workers")
   end
 
+  it "completes when the planner submitting a nil nextStep is the only active worker" do
+    run = create_run("mcp-planner-self")
+    run.workers.create!(
+      worker_id: SecureRandom.uuid,
+      role: "planner",
+      nickname: "planner-1",
+      reason: "Submit the final decision.",
+      scope: "workflow-plan.md",
+      status: "running",
+      pid: 123_456,
+      prompt_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "planner-1.prompt.txt"),
+      log_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "planner-1.log"),
+      last_message_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "planner-1.last-message.txt"),
+      env_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "planner-1.env.json"),
+      command: "claude",
+      args: []
+    )
+
+    response = McpTools::PlannerTurnTool.call(
+      runId: run.run_id,
+      summary: "No further work is required.",
+      nextStep: nil,
+      followingSteps: [],
+      server_context: nil
+    )
+
+    expect(response.structured_content[:nextState][:phase]).to eq("completed")
+    expect(Orchestrator::TickState.latest(run.run_id)[:phase]).to eq("completed")
+  end
+
   it "requeues a worker step when the previous fulfilled worker died before writing its artifact" do
     run = create_run("mcp-worker-requeue")
     stale_worker_id = SecureRandom.uuid

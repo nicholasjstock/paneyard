@@ -37,31 +37,6 @@
   <% end %>
 </div>
 
-<% if @active_workers.any? %>
-  <section class="card live-worker-card">
-    <div class="panel-header">
-      <div>
-        <h2>Live Worker</h2>
-        <p class="muted">Open the worker page to inspect logs and the latest agent output.</p>
-      </div>
-      <%= link_to "Open active worker",
-            workspace_worker_path(current_workspace, @active_workers.first["workerId"]),
-            class: "btn primary" %>
-    </div>
-    <div class="live-worker-list">
-      <% @active_workers.each do |worker| %>
-        <div class="mini-card">
-          <div class="card-title">
-            <%= link_to worker["nickname"], workspace_worker_path(current_workspace, worker["workerId"]) %>
-            <span class="badge <%= worker["status"] %>"><%= worker["status"] %></span>
-          </div>
-          <p class="muted"><%= worker["role"] %> &middot; <span class="mono"><%= worker["scope"] %></span></p>
-        </div>
-      <% end %>
-    </div>
-  </section>
-<% end %>
-
 <section class="run-dashboard">
   <div class="stat-strip">
     <div class="stat-card">
@@ -77,7 +52,7 @@
     <div class="stat-card">
       <span class="stat-label">Active Workers</span>
       <strong><%= @active_workers.count %></strong>
-      <span class="muted"><%= @active_workers.map { |worker| worker["nickname"] }.presence&.join(", ") || "none" %></span>
+      <span class="muted"><%= @active_workers.map { |activity| activity[:worker].nickname }.presence&.join(", ") || "none" %></span>
     </div>
     <div class="stat-card">
       <span class="stat-label">Open Requests</span>
@@ -132,53 +107,19 @@
       <% end %>
     </section>
 
-    <section class="panel">
-      <div class="panel-header">
-        <h2>Workers</h2>
-      </div>
-      <% if @active_workers.any? %>
-        <% @active_workers.each do |worker| %>
-          <div class="mini-card">
-            <div class="card-title">
-              <%= link_to worker["nickname"], workspace_worker_path(current_workspace, worker["workerId"]) %>
-              <span class="badge <%= worker["status"] %>"><%= worker["status"] %></span>
-            </div>
-            <p class="muted"><%= worker["role"] %> &middot; <span class="mono"><%= worker["scope"] %></span></p>
-          </div>
-        <% end %>
-      <% elsif @recent_workers.any? %>
-        <% @recent_workers.each do |worker| %>
-          <div class="mini-card">
-            <div class="card-title">
-              <%= link_to worker["nickname"], workspace_worker_path(current_workspace, worker["workerId"]) %>
-              <span class="badge <%= worker["status"] %>"><%= worker["status"] %></span>
-            </div>
-            <p class="muted"><%= worker["role"] %> &middot; <span class="mono"><%= worker["scope"] %></span></p>
-            <% if worker["stopReason"].present? %><p class="muted"><%= worker["stopReason"] %></p><% end %>
-          </div>
-        <% end %>
-      <% else %>
-        <p class="empty">No workers recorded for this run yet.</p>
-      <% end %>
-    </section>
-
     <section class="panel span-2">
       <div class="panel-header">
-        <h2>Recent Signals</h2>
+        <h2>Run Timeline</h2>
       </div>
-      <% if @signal_events.any? %>
-        <% @signal_events.each do |event| %>
+      <% if @timeline_events.any? %>
+        <% @timeline_events.each do |event| %>
           <div class="timeline-row">
-            <div>
-              <span class="mono"><%= event["type"] %></span>
-              <% if event["repeatCount"].to_i > 1 %><span class="muted">&middot; repeated <%= event["repeatCount"] %>x</span><% end %>
-            </div>
-            <span class="muted"><%= event["at"] %></span>
+            <span><%= event["label"] %></span>
+            <span class="muted"><%= time_ago_in_words(Time.iso8601(event["at"])) %> ago</span>
           </div>
-          <pre class="log compact"><%= JSON.pretty_generate(event["payload"]) %></pre>
         <% end %>
       <% else %>
-        <p class="empty">No non-status events yet.</p>
+        <p class="empty">No worker lifecycle activity yet.</p>
       <% end %>
     </section>
 
@@ -204,6 +145,53 @@
       <% end %>
     </section>
   </div>
+
+  <section class="panel worker-command-center">
+    <div class="panel-header">
+      <div>
+        <h2>Worker Command Center</h2>
+        <p class="muted">Current workers first. Expand a worker for its latest output and lifecycle details.</p>
+      </div>
+      <span class="muted"><%= pluralize(@worker_activities.count, "worker") %></span>
+    </div>
+
+    <% if @worker_activities.any? %>
+      <div class="worker-list">
+        <% @worker_activities.each do |activity| %>
+          <% worker = activity[:worker] %>
+          <details class="worker-row <%= activity[:display_status] %>">
+            <summary>
+              <span class="worker-name"><%= worker.nickname %></span>
+              <span class="badge <%= activity[:display_status] %>"><%= activity[:status_label] %></span>
+              <span class="worker-scope mono"><%= worker.scope %></span>
+              <span class="worker-activity muted">
+                <% if activity[:last_activity_at] %>active <%= time_ago_in_words(activity[:last_activity_at]) %> ago<% else %>no activity recorded<% end %>
+              </span>
+            </summary>
+            <div class="worker-detail">
+              <div class="worker-metadata muted">
+                <span><%= worker.role %></span>
+                <span>started <%= worker.started_at ? time_ago_in_words(worker.started_at) + " ago" : "unknown" %></span>
+                <% if worker.stopped_at %><span>stopped <%= time_ago_in_words(worker.stopped_at) %> ago</span><% end %>
+                <span class="mono">pid <%= worker.pid %></span>
+              </div>
+              <p><strong>Assigned:</strong> <%= worker.reason %></p>
+              <% if worker.stop_reason.present? %><p class="worker-stop-reason"><strong>Stop reason:</strong> <%= worker.stop_reason %></p><% end %>
+              <% if activity[:output_preview].present? %>
+                <p class="muted"><%= activity[:output_source] %></p>
+                <pre class="log compact"><%= activity[:output_preview] %></pre>
+              <% else %>
+                <p class="empty">No agent output captured yet.</p>
+              <% end %>
+              <%= link_to "Open full worker log", workspace_worker_path(current_workspace, worker.worker_id), class: "btn" %>
+            </div>
+          </details>
+        <% end %>
+      </div>
+    <% else %>
+      <p class="empty">No workers recorded for this run yet.</p>
+    <% end %>
+  </section>
 </section>
 
 <%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>

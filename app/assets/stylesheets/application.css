@@ -114,7 +114,7 @@ h2 { font-size: 1.1rem; margin: 1.5rem 0 0.75rem; }
   color: var(--muted);
 }
 .badge.running, .badge.answered, .badge.completed, .badge.fulfilled { color: var(--success); border-color: var(--success); }
-.badge.blocking, .badge.failed, .badge.stalled { color: var(--danger); border-color: var(--danger); }
+.badge.blocking, .badge.failed, .badge.stalled, .badge.attention { color: var(--danger); border-color: var(--danger); }
 .badge.launching, .badge.stopping, .badge.open, .badge.planning, .badge.queued { color: var(--warn); border-color: var(--warn); }
 
 .btn {
@@ -176,16 +176,6 @@ pre.log {
 }
 
 .run-dashboard { margin-bottom: 1.5rem; }
-
-.live-worker-card {
-  margin-bottom: 1rem;
-}
-
-.live-worker-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.75rem;
-}
 
 .stat-strip {
   display: grid;
@@ -265,6 +255,48 @@ pre.log {
   margin: 0.35rem 0;
 }
 
+.worker-command-center {
+  margin-top: 0.85rem;
+}
+
+.worker-list {
+  border-top: 1px solid var(--border);
+}
+
+.worker-row {
+  border-bottom: 1px solid var(--border);
+}
+
+.worker-row summary {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) auto minmax(10rem, 1.5fr) minmax(9rem, 1fr);
+  align-items: center;
+  gap: 0.8rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.9rem 0.25rem;
+}
+
+.worker-row summary::-webkit-details-marker { display: none; }
+.worker-row.attention { border-left: 3px solid var(--danger); padding-left: 0.55rem; }
+.worker-row.running { border-left: 3px solid var(--success); padding-left: 0.55rem; }
+.worker-name { font-weight: 600; }
+.worker-activity { text-align: right; }
+
+.worker-detail {
+  padding: 0 0.25rem 1rem 1.65rem;
+}
+
+.worker-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+}
+
+.worker-stop-reason {
+  color: var(--danger);
+}
+
 pre.log.compact {
   max-height: 220px;
   font-size: 0.75rem;
@@ -287,5 +319,16 @@ pre.log.compact {
 
   .panel.span-2 {
     grid-column: span 1;
+  }
+
+  .worker-row summary {
+    grid-template-columns: 1fr auto;
+  }
+
+  .worker-scope,
+  .worker-activity {
+    grid-column: 1 / -1;
+    padding-left: 1.35rem;
+    text-align: left;
   }
 }

@@ -18,7 +18,7 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text(run.run_id)
     expect(page).to have_text("workspace: #{workspace.name}")
     expect(page).to have_text("Current Phase")
-    expect(page).to have_text("Recent Signals")
+    expect(page).to have_text("Run Timeline")
     expect(page).to have_text("spawn_request.created")
   end
 
@@ -32,7 +32,7 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_current_path(workspace_run_path(workspace, run))
     expect(page).to have_text(run.task)
     expect(page).to have_text("Current Phase")
-    expect(page).to have_text("Recent Signals")
+    expect(page).to have_text("Run Timeline")
   end
 
   it "updates the workspace run list live when a run is created", :js do
@@ -117,9 +117,8 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text("owner: planner")
     expect(page).to have_text("Choosing the next step.")
     expect(page).to have_text("Current Phase")
-    expect(page).to have_text("Live Worker")
-    expect(page).to have_link("Open active worker", href: workspace_worker_path(workspace, run.workers.first.worker_id))
-    expect(page).to have_text("Recent Signals")
+    expect(page).to have_text("Worker Command Center")
+    expect(page).to have_text("Run Timeline")
     expect(page).to have_text("Artifacts")
     expect(page).to have_text("planning update")
     expect(page).to have_text("planner-main")
@@ -129,7 +128,7 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text("Inspect the latest worker output.")
   end
 
-  it "navigates from the run page to the active worker page" do
+  it "navigates from an expanded worker to the full worker log" do
     workspace = create_workspace
     FileUtils.mkdir_p(File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers"))
     run = create_run(workspace:, suffix: "active-worker-link", task: "Jump straight to the active worker")
@@ -150,10 +149,38 @@ RSpec.describe "workspace runs", type: :system do
     )
 
     visit workspace_run_path(workspace, run)
-    click_link "Open active worker"
+    find("summary", text: "planner-live").click
+    click_link "Open full worker log"
 
     expect(page).to have_current_path(workspace_worker_path(workspace, worker.worker_id))
     expect(page).to have_text("planner-live")
+  end
+
+  it "prioritizes active workers and surfaces unexpected exits with their latest output" do
+    workspace = create_workspace
+    workers_dir = File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers")
+    FileUtils.mkdir_p(workers_dir)
+    run = create_run(workspace:, suffix: "command-center", task: "Inspect the worker command center")
+    stopped_worker = create_run_worker(run, nickname: "worker-history", status: "stopped", stop_reason: "Manually stopped from ops hub")
+    attention_worker = create_run_worker(
+      run,
+      nickname: "worker-attention",
+      status: "stopped",
+      stop_reason: "Process no longer running after reconciliation."
+    )
+    running_worker = create_run_worker(run, nickname: "worker-active")
+    File.write(attention_worker.last_message_path, "The request failed before the handoff completed.\n")
+
+    visit workspace_run_path(workspace, run)
+
+    worker_rows = all(".worker-row")
+    expect(worker_rows.map { |row| row[:class] }).to eq([ "worker-row running", "worker-row attention", "worker-row stopped" ])
+    expect(page).to have_text(stopped_worker.nickname)
+    expect(page).to have_text(running_worker.nickname)
+
+    find("summary", text: attention_worker.nickname).click
+    expect(page).to have_text("needs attention")
+    expect(page).to have_text("The request failed before the handoff completed.")
   end
 
   it "updates the run detail page live when new status and tick data arrive", :js do
@@ -167,7 +194,7 @@ RSpec.describe "workspace runs", type: :system do
     )
 
     visit workspace_run_path(workspace, run)
-    expect(page).to have_text("No non-status events yet.")
+    expect(page).to have_text("No worker lifecycle activity yet.")
     expect(page).to have_text(/latest tick/i)
     expect(page).to have_text("0")
 
@@ -291,6 +318,27 @@ RSpec.describe "workspace runs", type: :system do
       status: status,
       launched_by: "operator",
       started_at: started_at
+    )
+  end
+
+  def create_run_worker(run, nickname:, status: "running", stop_reason: nil)
+    workers_dir = File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers")
+    run.workers.create!(
+      worker_id: SecureRandom.uuid,
+      role: "worker",
+      nickname: nickname,
+      reason: "Inspect the worker command center.",
+      scope: "fix-summary.md",
+      status: status,
+      pid: 123_456,
+      prompt_path: File.join(workers_dir, "#{nickname}.prompt.txt"),
+      log_path: File.join(workers_dir, "#{nickname}.log"),
+      last_message_path: File.join(workers_dir, "#{nickname}.last-message.txt"),
+      env_path: File.join(workers_dir, "#{nickname}.env.json"),
+      command: "claude",
+      args: [],
+      stopped_at: status == "stopped" ? Time.current : nil,
+      stop_reason: stop_reason
     )
   end
 end
