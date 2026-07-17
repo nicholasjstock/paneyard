@@ -15,6 +15,7 @@
     </div>
     <p class="muted">
       <%= @log["role"] %> &middot; run <span class="mono"><%= @log["runId"] %></span>
+      <% if @log["model"].present? %> &middot; model <%= @log["model"] %><% end %>
       <% if @log["stopReason"].present? %> &middot; <%= @log["stopReason"] %><% end %>
     </p>
     <% if @log["status"] == "running" %>
@@ -23,6 +24,29 @@
             data: { turbo_confirm: "Stop worker #{@log['nickname']}?" } %>
     <% end %>
   </div>
+
+  <% if @log["agentTurnCount"].present? %>
+    <div class="card">
+      <h2>Usage</h2>
+      <p class="muted">
+        <%= @log["model"] || "unknown model" %> &middot;
+        <%= pluralize(@log["agentTurnCount"], "turn") %> &middot;
+        <%= number_to_currency(@log["totalCostUsd"] || 0) %>
+      </p>
+      <div class="stat-strip">
+        <div class="stat-card">
+          <span class="stat-label">Input Tokens</span>
+          <strong><%= number_with_delimiter(@log["inputTokens"] || 0) %></strong>
+          <span class="muted"><%= number_with_delimiter(@log["cacheReadInputTokens"] || 0) %> cache reads</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Output Tokens</span>
+          <strong><%= number_with_delimiter(@log["outputTokens"] || 0) %></strong>
+          <span class="muted"><%= number_with_delimiter(@log["cacheCreationInputTokens"] || 0) %> cache creation</span>
+        </div>
+      </div>
+    </div>
+  <% end %>
 
   <% if @log["lastMessage"].present? %>
     <h2>Latest message</h2>

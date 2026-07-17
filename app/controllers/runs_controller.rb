@@ -40,6 +40,7 @@ class RunsController < ApplicationController
     @run_events = compress_events(raw_events).last(8)
     @timeline_events = build_timeline(raw_events).last(8).reverse
     @artifact_previews = collect_artifact_previews
+    @usage_summary = usage_summary
   end
 
   def stop
@@ -119,5 +120,19 @@ class RunsController < ApplicationController
       .first(4)
   rescue ArgumentError
     []
+  end
+
+  def usage_summary
+    workers = @run.workers
+    {
+      worker_count: workers.count,
+      reported_worker_count: workers.where.not(agent_turn_count: nil).count,
+      total_cost_usd: workers.sum(:total_cost_usd),
+      agent_turn_count: workers.sum(:agent_turn_count),
+      input_tokens: workers.sum(:input_tokens),
+      output_tokens: workers.sum(:output_tokens),
+      cache_read_input_tokens: workers.sum(:cache_read_input_tokens),
+      models: workers.where.not(model: nil).group(:model).count
+    }
   end
 end

@@ -59,6 +59,11 @@
       <strong><%= @spawn_requests.count %></strong>
       <span class="muted"><%= @spawn_requests.first&.dig("requestedRole") || "idle" %></span>
     </div>
+    <div class="stat-card">
+      <span class="stat-label">Agent Cost</span>
+      <strong><%= number_to_currency(@usage_summary[:total_cost_usd]) %></strong>
+      <span class="muted"><%= @usage_summary[:reported_worker_count] %>/<%= @usage_summary[:worker_count] %> workers reported</span>
+    </div>
   </div>
 
   <div class="dashboard-grid">
@@ -231,12 +236,20 @@
             <div class="worker-detail">
               <div class="worker-metadata muted">
                 <span><%= worker.role %></span>
+                <% if worker.model.present? %><span><%= worker.model %></span><% end %>
                 <span>started <%= worker.started_at ? time_ago_in_words(worker.started_at) + " ago" : "unknown" %></span>
                 <% if worker.stopped_at %><span>stopped <%= time_ago_in_words(worker.stopped_at) %> ago</span><% end %>
                 <span class="mono">pid <%= worker.pid %></span>
               </div>
               <p><strong>Assigned:</strong> <%= worker.reason %></p>
               <% if worker.stop_reason.present? %><p class="worker-stop-reason"><strong>Stop reason:</strong> <%= worker.stop_reason %></p><% end %>
+              <% if worker.agent_turn_count.present? %>
+                <p class="muted">
+                  <strong>Usage:</strong> <%= pluralize(worker.agent_turn_count, "turn") %> &middot;
+                  <%= number_with_delimiter(worker.input_tokens || 0) %> input / <%= number_with_delimiter(worker.output_tokens || 0) %> output tokens &middot;
+                  <%= number_to_currency(worker.total_cost_usd || 0) %>
+                </p>
+              <% end %>
               <% if activity[:output_preview].present? %>
                 <p class="muted"><%= activity[:output_source] %></p>
                 <pre class="log compact"><%= activity[:output_preview] %></pre>
@@ -251,6 +264,32 @@
     <% else %>
       <p class="empty">No workers recorded for this run yet.</p>
     <% end %>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <h2>Run Usage</h2>
+        <p class="muted">Reported only after an agent finishes; cache reads are shown separately because they can dominate context usage.</p>
+      </div>
+    </div>
+    <div class="stat-strip">
+      <div class="stat-card">
+        <span class="stat-label">Agent Turns</span>
+        <strong><%= number_with_delimiter(@usage_summary[:agent_turn_count]) %></strong>
+        <span class="muted"><%= @usage_summary[:models].map { |model, count| "#{model}: #{count}" }.join(", ").presence || "no completed telemetry" %></span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Input Tokens</span>
+        <strong><%= number_with_delimiter(@usage_summary[:input_tokens]) %></strong>
+        <span class="muted"><%= number_with_delimiter(@usage_summary[:cache_read_input_tokens]) %> cache reads</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Output Tokens</span>
+        <strong><%= number_with_delimiter(@usage_summary[:output_tokens]) %></strong>
+        <span class="muted"><%= @usage_summary[:reported_worker_count] %> workers reported usage</span>
+      </div>
+    </div>
   </section>
 </section>
 
