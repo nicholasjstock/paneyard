@@ -1,4 +1,7 @@
 <% content_for :title, @worker_id %>
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+
+<%= turbo_stream_from "worker_#{@worker_id}" %>
 
 <h1 class="mono"><%= @worker_id %></h1>
 
@@ -26,6 +29,9 @@
     <pre class="log"><%= @log["lastMessage"] %></pre>
   <% end %>
 
-  <h2>Log<%= " (truncated, #{number_to_human_size(@log['logTotalBytes'])} total)" if @log["logTruncated"] %></h2>
-  <pre class="log"><%= @log["logContent"] || (@log["tail"] || []).join("\n") %></pre>
+  <section data-controller="live-log">
+    <h2>Live Log</h2>
+    <p class="muted">Following newest output. Scroll up to pause tail-follow.</p>
+    <pre class="log live-log" data-live-log-target="output"><%= @log["logContent"] || (@log["tail"] || []).join("\n") %></pre>
+  </section>
 <% end %>

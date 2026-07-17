@@ -24,7 +24,7 @@ module Orchestrator
         elsif BACKEND_KEYWORDS.any? { |kw| finding_text.include?(kw) }
           { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates a failing request spec first, then lands the narrowest back/** fix." }
         elsif INFRASTRUCTURE_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates the preferred infrastructure test first, then lands the narrowest repo-local toolchain or environment fix." }
+          { owner: "infrastructure", artifact: "fix-summary.md", success_check: "Adds or updates the preferred infrastructure test first, then lands the narrowest repo-local toolchain or environment fix." }
         else
           { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates the narrowest repo-wide regression test first, then lands the smallest general-purpose fix." }
         end

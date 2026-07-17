@@ -6,6 +6,7 @@
 # from here now.
 class Workspace < ApplicationRecord
   has_many :runs, dependent: :restrict_with_error
+  has_many :workspace_memory_entries, dependent: :restrict_with_error
 
   validates :name, presence: true, uniqueness: true
   validates :root_path, presence: true, uniqueness: true

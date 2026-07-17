@@ -16,6 +16,9 @@ production: &recurring_jobs
   tick_runs:
     class: TickRunJob
     schedule: every 5 seconds
+  broadcast_worker_logs:
+    class: BroadcastWorkerLogsJob
+    schedule: every second
   reconcile_workers:
     class: WorkerReconcileJob
     schedule: every minute

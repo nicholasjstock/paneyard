@@ -5,7 +5,7 @@ module McpTools
     input_schema(
       properties: {
         runId: { type: "string" },
-        role: { type: "string", enum: %w[planner orchestrator worker] },
+        role: { type: "string", enum: %w[planner orchestrator worker infrastructure] },
         nickname: { type: "string" },
         reason: { type: "string" },
         scope: { type: "string" },

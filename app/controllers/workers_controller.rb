@@ -4,7 +4,6 @@ class WorkersController < ApplicationController
   # Mirrors scripts/workflow-mcp-http.ts's now-retired /workers/:id/log
   # endpoint's defaults.
   DEFAULT_TAIL_LINES = 120
-  DEFAULT_FULL_LOG_MAX_CHARS = 300_000
 
   def index
     @workers = workspace_workers.order(started_at: :desc).map { |worker| JSON.parse(worker.to_json) }
@@ -44,7 +43,7 @@ class WorkersController < ApplicationController
   end
 
   def build_log_payload(worker)
-    full = Orchestrator::LogReader.read_full_content(worker.log_path, DEFAULT_FULL_LOG_MAX_CHARS)
+    full = Orchestrator::LogReader.read_full_content(worker.log_path)
     last_message = File.exist?(worker.last_message_path) ? File.read(worker.last_message_path) : nil
 
     {
@@ -58,9 +57,9 @@ class WorkersController < ApplicationController
       "startedAt" => worker.started_at&.iso8601(3),
       "stoppedAt" => worker.stopped_at&.iso8601(3),
       "stopReason" => worker.stop_reason,
-      "tail" => Orchestrator::LogReader.read_tail_lines(worker.log_path, DEFAULT_TAIL_LINES),
+      "tail" => Orchestrator::LogReader.format_for_display(Orchestrator::LogReader.read_tail_lines(worker.log_path, DEFAULT_TAIL_LINES)),
       "lastMessage" => last_message,
-      "logContent" => full[:content],
+      "logContent" => Orchestrator::LogReader.format_for_display(full[:content]),
       "logTruncated" => full[:truncated],
       "logTotalBytes" => full[:total_bytes]
     }

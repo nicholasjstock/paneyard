@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_09_183000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_17_113000) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -35,7 +35,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_183000) do
     t.index ["run_id", "tick_count"], name: "index_orchestrator_ticks_on_run_id_and_tick_count", unique: true
   end
 
+  create_table "run_context_entries", force: :cascade do |t|
+    t.text "content", null: false
+    t.datetime "created_at", null: false
+    t.string "created_by", null: false
+    t.string "entry_key", null: false
+    t.string "evidence_ref"
+    t.string "kind", null: false
+    t.string "run_id", null: false
+    t.string "status", null: false
+    t.datetime "updated_at", null: false
+    t.index ["run_id", "entry_key"], name: "index_run_context_entries_on_run_id_and_entry_key", unique: true
+    t.index ["run_id", "kind"], name: "index_run_context_entries_on_run_id_and_kind"
+  end
+
   create_table "runs", force: :cascade do |t|
+    t.datetime "capacity_available_at"
     t.datetime "created_at", null: false
     t.string "launched_by"
     t.string "launcher_variant", default: "claude", null: false
@@ -53,6 +68,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_183000) do
     t.text "task", null: false
     t.datetime "updated_at", null: false
     t.integer "workspace_id", null: false
+    t.index ["capacity_available_at"], name: "index_runs_on_capacity_available_at"
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
     t.index ["workspace_id"], name: "index_runs_on_workspace_id"
@@ -108,8 +124,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_183000) do
     t.string "command", null: false
     t.datetime "created_at", null: false
     t.string "env_path", null: false
+    t.integer "exit_code"
+    t.string "exit_status_path"
     t.string "last_message_path", null: false
     t.string "log_path", null: false
+    t.datetime "log_updated_at"
     t.string "nickname", null: false
     t.integer "pid", null: false
     t.string "prompt_path", null: false
@@ -127,6 +146,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_183000) do
     t.index ["worker_id"], name: "index_workers_on_worker_id", unique: true
   end
 
+  create_table "workspace_memory_entries", force: :cascade do |t|
+    t.text "content", null: false
+    t.datetime "created_at", null: false
+    t.string "entry_key", null: false
+    t.string "evidence_ref", null: false
+    t.string "kind", null: false
+    t.string "recorded_by", null: false
+    t.string "status", null: false
+    t.integer "supersedes_id"
+    t.datetime "updated_at", null: false
+    t.integer "workspace_id", null: false
+    t.index ["supersedes_id"], name: "index_workspace_memory_entries_on_supersedes_id"
+    t.index ["workspace_id", "entry_key"], name: "index_workspace_memory_entries_on_workspace_id_and_entry_key"
+    t.index ["workspace_id", "status"], name: "index_workspace_memory_entries_on_workspace_id_and_status"
+    t.index ["workspace_id"], name: "index_workspace_memory_entries_on_workspace_id"
+  end
+
   create_table "workspaces", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "name", null: false
@@ -137,4 +173,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_183000) do
   end
 
   add_foreign_key "runs", "workspaces"
+  add_foreign_key "workspace_memory_entries", "workspace_memory_entries", column: "supersedes_id"
+  add_foreign_key "workspace_memory_entries", "workspaces"
 end

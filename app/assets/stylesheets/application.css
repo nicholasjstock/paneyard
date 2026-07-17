@@ -114,7 +114,7 @@ h2 { font-size: 1.1rem; margin: 1.5rem 0 0.75rem; }
   color: var(--muted);
 }
 .badge.running, .badge.answered, .badge.completed, .badge.fulfilled { color: var(--success); border-color: var(--success); }
-.badge.blocking, .badge.failed, .badge.stalled, .badge.attention { color: var(--danger); border-color: var(--danger); }
+.badge.blocking, .badge.blocked_on_user, .badge.failed, .badge.stalled, .badge.attention { color: var(--danger); border-color: var(--danger); }
 .badge.launching, .badge.stopping, .badge.open, .badge.planning, .badge.queued { color: var(--warn); border-color: var(--warn); }
 
 .btn {
@@ -247,6 +247,36 @@ pre.log {
   margin-bottom: 0.65rem;
 }
 
+.blocking-questions {
+  border-color: var(--danger);
+}
+
+.question-card {
+  border-color: rgba(255, 91, 106, 0.45);
+}
+
+.question-text {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.stream-link-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.stream-link {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.stream-link .mono {
+  color: inherit;
+  opacity: 0.78;
+}
+
 .timeline-row {
   display: flex;
   justify-content: space-between;
@@ -300,6 +330,10 @@ pre.log {
 pre.log.compact {
   max-height: 220px;
   font-size: 0.75rem;
+}
+
+pre.log.live-log {
+  max-height: min(70vh, 760px);
 }
 
 .collapsible summary {

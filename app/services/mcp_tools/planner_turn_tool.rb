@@ -12,7 +12,7 @@ module McpTools
         nextStep: {
           type: [ "object", "null" ],
           properties: {
-            owner: { type: "string", enum: %w[orchestrator worker] },
+            owner: { type: "string", enum: %w[orchestrator worker infrastructure] },
             artifact: { type: "string" },
             successCheck: { type: "string" }
           },
@@ -23,7 +23,7 @@ module McpTools
           items: {
             type: "object",
             properties: {
-              owner: { type: "string", enum: %w[orchestrator worker] },
+              owner: { type: "string", enum: %w[orchestrator worker infrastructure] },
               artifact: { type: "string" },
               successCheck: { type: "string" }
             },

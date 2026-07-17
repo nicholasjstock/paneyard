@@ -36,7 +36,11 @@ module Orchestrator
           ::McpTools::StopWorkerTool,
           ::McpTools::CollectWorkflowStateTool,
           ::McpTools::ReadWorkflowArtifactTool,
-          ::McpTools::WriteWorkflowArtifactTool
+          ::McpTools::WriteWorkflowArtifactTool,
+          ::McpTools::GetRunContextTool,
+          ::McpTools::RecordRunContextEntryTool,
+          ::McpTools::GetProjectMemoryTool,
+          ::McpTools::RecordProjectMemoryEntryTool
         ]
       )
     end

@@ -9,8 +9,9 @@
 # Accepting a client-supplied id here and treating it as authoritative is
 # required for that ordering to keep working.
 class Worker < ApplicationRecord
-  ROLES = %w[orchestrator worker planner].freeze
+  ROLES = %w[orchestrator worker planner infrastructure].freeze
   STATUSES = %w[running stopped].freeze
+  OUTPUT_TAIL_MAX_CHARS = 1_200
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, optional: true, inverse_of: :workers
 
@@ -40,6 +41,9 @@ class Worker < ApplicationRecord
       promptPath: prompt_path,
       logPath: log_path,
       lastMessagePath: last_message_path,
+      exitStatusPath: exit_status_path,
+      exitCode: exit_code,
+      outputTail: output_tail,
       envPath: env_path,
       command: command,
       args: args,
@@ -49,7 +53,32 @@ class Worker < ApplicationRecord
     }
   end
 
+  def as_diagnostic_json
+    {
+      workerId: worker_id,
+      runId: run_id,
+      role: role,
+      nickname: nickname,
+      scope: scope,
+      status: status,
+      startedAt: started_at&.iso8601(3),
+      stoppedAt: stopped_at&.iso8601(3),
+      exitCode: exit_code,
+      stopReason: stop_reason,
+      outputTail: output_tail
+    }
+  end
+
   private
+
+  def output_tail
+    tail = Orchestrator::LogReader.read_tail_lines(log_path, 12).to_s
+    return if tail.blank?
+
+    tail.length > OUTPUT_TAIL_MAX_CHARS ? "...#{tail.last(OUTPUT_TAIL_MAX_CHARS)}" : tail
+  rescue Errno::ENOENT, Errno::EACCES
+    nil
+  end
 
   def assign_started_at
     self.started_at ||= Time.current

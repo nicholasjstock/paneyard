@@ -43,13 +43,14 @@ module Orchestrator
       prompt_path = File.join(workers_dir, "#{file_basename}.prompt.txt")
       log_path = File.join(workers_dir, "#{file_basename}.log")
       last_message_path = File.join(workers_dir, "#{file_basename}.last-message.txt")
+      exit_status_path = File.join(workers_dir, "#{file_basename}.exit-status.txt")
       env_path = File.join(workers_dir, "#{file_basename}.env.json")
 
       driver = run.launcher_variant
       enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
       command, args =
         if driver == "claude"
-          [ "claude", [ "--permission-mode", "bypassPermissions", "-p", "--", enriched_prompt ] ]
+          [ "claude", claude_args(enriched_prompt) ]
         else
           [ "codex", [ "exec", "--dangerously-bypass-approvals-and-sandbox", "-C", root_dir, "-o", last_message_path, "-" ] ]
         end
@@ -60,6 +61,7 @@ module Orchestrator
       File.write(prompt_path, enriched_prompt)
       File.write(log_path, "")
       File.delete(last_message_path) if File.exist?(last_message_path)
+      File.delete(exit_status_path) if File.exist?(exit_status_path)
       File.write(env_path, "#{JSON.pretty_generate(build_worker_env_snapshot(worker_env))}\n")
 
       # Brakeman flags this as command injection because command/args/paths
@@ -71,7 +73,7 @@ module Orchestrator
       # validate_safe_path_segment! above before any path is built from it.
       stdin_read, stdin_write = IO.pipe
       pid = Process.spawn(
-        worker_env, command, *args,
+        worker_env, "/bin/sh", "-c", worker_exit_wrapper, "workflow-worker-wrapper", exit_status_path, command, *args,
         chdir: root_dir, pgroup: true, in: stdin_read, out: [ log_path, "a" ], err: [ log_path, "a" ]
       )
       stdin_read.close
@@ -82,7 +84,7 @@ module Orchestrator
       worker = run.workers.create!(
         worker_id: worker_id, role: role, nickname: nickname, reason: reason, scope: scope,
         status: "running", pid: pid, prompt_path: prompt_path, log_path: log_path,
-        last_message_path: last_message_path, env_path: env_path, command: command, args: args
+        last_message_path: last_message_path, exit_status_path: exit_status_path, env_path: env_path, command: command, args: args
       )
 
       append_lifecycle_line(
@@ -128,6 +130,26 @@ module Orchestrator
       "#{ArtifactStore.sanitize_run_id(run_id)}-#{nickname}"
     end
 
+    # Print mode normally writes only a final response. Stream JSON with
+    # partial messages gives the file-backed worker log incremental progress
+    # for the run dashboard's five-second Turbo refreshes.
+    def claude_args(prompt)
+      [
+        "--permission-mode", "bypassPermissions",
+        "--output-format", "stream-json",
+        "--include-partial-messages",
+        "--verbose",
+        "-p", "--", prompt
+      ]
+    end
+
+    # The shell remains the tracked process while the CLI runs. It records the
+    # CLI's exit code before exiting so reconciliation can distinguish a quota
+    # rejection from an unobserved process disappearance.
+    def worker_exit_wrapper
+      'exit_status_path="$1"; shift; "$@"; exit_code=$?; printf "%s\\n" "$exit_code" > "$exit_status_path"; exit "$exit_code"'
+    end
+
     def rails_mcp_url
       base = ENV.fetch("WORKFLOW_RAILS_URL", "http://127.0.0.1:#{ENV.fetch('PORT', 3000)}")
       "#{base}/mcp"
@@ -161,15 +183,30 @@ module Orchestrator
     end
 
     def build_prompt_with_persona(driver:, role:, prompt:)
-      persona_path = agent_prompt_path(driver: driver, role: role)
-      return prompt unless File.exist?(persona_path)
+      persona_paths = [ agent_prompt_path(driver: driver, role: role) ]
+      if role == "infrastructure"
+        # Infrastructure keeps the normal worker bus contract and layers on
+        # the globally reusable reliability workflow.
+        persona_paths.unshift(agent_prompt_path(driver: driver, role: "worker"))
+        persona_paths << infrastructure_skill_path(driver)
+      end
+      instructions = persona_paths.filter_map { |path| File.read(path) if File.exist?(path) }
+      return prompt if instructions.empty?
 
-      "#{File.read(persona_path)}\n\nCurrent task:\n#{prompt}"
+      "#{instructions.join("\n\n")}\n\nCurrent task:\n#{prompt}"
     end
 
     def agent_prompt_path(driver:, role:)
       extension = driver == "claude" ? "md" : "toml"
       File.join(Rails.root, ".#{driver}", "agents", "#{role}.#{extension}")
+    end
+
+    def infrastructure_skill_path(driver)
+      if driver == "claude"
+        File.join(ENV.fetch("HOME"), ".claude", "skills", "infrastructure", "SKILL.md")
+      else
+        File.join(resolve_codex_home, "skills", "infrastructure", "SKILL.md")
+      end
     end
 
     def resolve_codex_home

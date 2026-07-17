@@ -27,6 +27,7 @@ class Run < ApplicationRecord
   has_many :workers, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :orchestrator_ticks, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :bus_events, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
+  has_many :run_context_entries, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
 
   validates :run_id, presence: true, uniqueness: true
   validates :task, presence: true
@@ -74,6 +75,10 @@ class Run < ApplicationRecord
 
   def terminal?
     !active?
+  end
+
+  def capacity_blocked?(now: Time.current)
+    capacity_available_at.present? && capacity_available_at > now
   end
 
   def launch_queued?(now: Time.current)

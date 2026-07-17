@@ -3,7 +3,8 @@ module Orchestrator
   # this only adds bounded, local filesystem observations for the ops UI.
   class WorkerActivity
     PREVIEW_MAX_CHARS = 600
-    TAIL_LINES = 6
+    RAW_TAIL_LINES = 120
+    DISPLAY_TAIL_LINES = 6
 
     def self.for_workers(workers)
       workers.map { |worker| new(worker).as_json }
@@ -66,10 +67,10 @@ module Orchestrator
           @output_source = "Latest agent message"
           truncate(message)
         else
-          tail = Orchestrator::LogReader.read_tail_lines(@worker.log_path, TAIL_LINES)
+          tail = Orchestrator::LogReader.read_tail_lines(@worker.log_path, RAW_TAIL_LINES)
           if tail.present?
             @output_source = "Latest log output"
-            truncate(tail)
+            truncate(display_tail(Orchestrator::LogReader.format_for_display(tail)))
           end
         end
       end
@@ -93,6 +94,10 @@ module Orchestrator
 
     def truncate(text)
       text.length > PREVIEW_MAX_CHARS ? "#{text.first(PREVIEW_MAX_CHARS).rstrip}\n..." : text
+    end
+
+    def display_tail(text)
+      text.lines.last(DISPLAY_TAIL_LINES).join
     end
   end
 end

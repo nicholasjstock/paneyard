@@ -19,6 +19,15 @@ class TickRunJob < ApplicationJob
   private
 
   def tick_run(run)
+    if run.capacity_blocked?
+      run.publish_phase!(
+        phase: "waiting_on_capacity",
+        owner: "orchestrator",
+        summary: "Claude capacity is unavailable; retrying after #{run.capacity_available_at.in_time_zone.strftime('%H:%M %Z')}."
+      )
+      return
+    end
+
     previous_state = Orchestrator::TickState.latest(run.run_id)
     if previous_state[:phase] == "completed"
       run.update!(status: "completed", stopped_at: run.stopped_at || Time.current) unless run.status == "completed"

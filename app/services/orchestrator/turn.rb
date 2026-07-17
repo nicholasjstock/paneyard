@@ -147,6 +147,11 @@ module Orchestrator
     end
 
     def run_planner_turn(run_id:, summary:, next_step:, following_steps:, now: Time.current, previous_state: nil)
+      completion_blockers = Orchestrator::RunContext.completion_blockers(run_id: run_id)
+      if next_step.nil? && completion_blockers.any?
+        raise ArgumentError, "Cannot complete run while acceptance criteria remain pending: #{completion_blockers.join(', ')}"
+      end
+
       jobs = Planner.publish_planner_jobs(
         run_id: run_id,
         summary: summary,
@@ -157,8 +162,11 @@ module Orchestrator
       # the run alive after a nil next_step, otherwise every completed planner
       # turn becomes waiting_on_workers and the stall recovery loop restarts.
       active_executor_exists = Worker.where(run_id: run_id, status: "running").where.not(role: "planner").exists?
+      has_open_blocking_question = UserQuestion.exists?(run_id: run_id, status: "open", priority: "blocking")
       completion_phase =
-        if next_step
+        if has_open_blocking_question
+          "blocked_on_user"
+        elsif next_step
           "planning"
         elsif active_executor_exists
           "waiting_on_workers"

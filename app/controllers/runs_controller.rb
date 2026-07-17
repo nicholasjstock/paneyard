@@ -26,17 +26,19 @@ class RunsController < ApplicationController
   end
 
   def show
-    workers = @run.workers.order(started_at: :desc).to_a
+    recent_workers = @run.workers.order(started_at: :desc).limit(12).to_a
+    workers = (@run.workers.where(status: "running").to_a + recent_workers).uniq
     @worker_activities = Orchestrator::WorkerActivity.for_workers(workers)
     @active_workers = @worker_activities.select { |activity| activity[:worker].status == "running" }
     @spawn_requests = SpawnRequest.open_only.where(run_id: @run.run_id).map { |request| JSON.parse(request.to_json) }
-    ticks = OrchestratorTick.for_run(@run.run_id)
+    @blocking_questions = @run.user_questions.open_only.where(priority: "blocking").order(:asked_at).to_a
+    ticks = OrchestratorTick.for_run(@run.run_id).order(tick_count: :desc).limit(8).to_a.reverse
     @latest_tick = ticks.last && JSON.parse(ticks.last.to_json)
     @following_steps = Array(@latest_tick&.dig("followingSteps"))
     @tick_history = { "runId" => @run.run_id, "entries" => ticks.map { |tick| JSON.parse(tick.to_json) } }
-    raw_events = BusEvent.where(run_id: @run.run_id).order(created_at: :desc).limit(40).to_a.reverse.map { |event| JSON.parse(event.to_json) }
-    @run_events = compress_events(raw_events).last(15)
-    @timeline_events = build_timeline(raw_events).last(12).reverse
+    raw_events = BusEvent.where(run_id: @run.run_id).order(created_at: :desc).limit(20).to_a.reverse.map { |event| JSON.parse(event.to_json) }
+    @run_events = compress_events(raw_events).last(8)
+    @timeline_events = build_timeline(raw_events).last(8).reverse
     @artifact_previews = collect_artifact_previews
   end
 
