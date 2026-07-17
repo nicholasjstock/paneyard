@@ -43,6 +43,13 @@ class Worker < ApplicationRecord
       lastMessagePath: last_message_path,
       exitStatusPath: exit_status_path,
       exitCode: exit_code,
+      model: model,
+      agentTurnCount: agent_turn_count,
+      inputTokens: input_tokens,
+      outputTokens: output_tokens,
+      cacheReadInputTokens: cache_read_input_tokens,
+      cacheCreationInputTokens: cache_creation_input_tokens,
+      totalCostUsd: total_cost_usd,
       outputTail: output_tail,
       envPath: env_path,
       command: command,
@@ -65,6 +72,13 @@ class Worker < ApplicationRecord
       stoppedAt: stopped_at&.iso8601(3),
       exitCode: exit_code,
       stopReason: stop_reason,
+      model: model,
+      agentTurnCount: agent_turn_count,
+      inputTokens: input_tokens,
+      outputTokens: output_tokens,
+      cacheReadInputTokens: cache_read_input_tokens,
+      cacheCreationInputTokens: cache_creation_input_tokens,
+      totalCostUsd: total_cost_usd,
       outputTail: output_tail
     }
   end

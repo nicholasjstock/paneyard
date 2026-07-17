@@ -37,4 +37,21 @@ class Orchestrator::LogReaderTest < ActiveSupport::TestCase
 
     assert_equal "Still working", Orchestrator::LogReader.format_for_display(log)
   end
+
+  test "extracts aggregate Claude usage from the final result event" do
+    file = Tempfile.new("worker-log")
+    file.write({
+      type: "result", model: "claude-haiku-4-5", num_turns: 7, total_cost_usd: 0.0123,
+      usage: { input_tokens: 12, output_tokens: 34, cache_read_input_tokens: 56, cache_creation_input_tokens: 78 }
+    }.to_json)
+    file.close
+
+    usage = Orchestrator::LogReader.claude_usage(file.path)
+
+    assert_equal "claude-haiku-4-5", usage[:model]
+    assert_equal 7, usage[:agent_turn_count]
+    assert_equal 56, usage[:cache_read_input_tokens]
+  ensure
+    file&.unlink
+  end
 end

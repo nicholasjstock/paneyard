@@ -33,6 +33,31 @@ module Orchestrator
       tail.empty? ? nil : "#{tail.join("\n")}\n"
     end
 
+    # Claude's final stream-json `result` event carries aggregate usage for
+    # the whole agent session. Read only the tail because that event is
+    # emitted at the end, after all incremental messages.
+    def claude_usage(path)
+      read_tail_lines(path, 100).to_s.each_line.to_a.reverse_each do |line|
+        event = JSON.parse(line)
+        next unless event["type"] == "result"
+
+        usage = event["usage"] || {}
+        return {
+          model: event["model"],
+          agent_turn_count: event["num_turns"],
+          input_tokens: usage["input_tokens"],
+          output_tokens: usage["output_tokens"],
+          cache_read_input_tokens: usage["cache_read_input_tokens"],
+          cache_creation_input_tokens: usage["cache_creation_input_tokens"],
+          total_cost_usd: event["total_cost_usd"]
+        }.compact
+      rescue JSON::ParserError
+        next
+      end
+
+      {}
+    end
+
     # Claude's stream-json protocol is useful for transport but unreadable in
     # an operations UI. Collapse it into the assistant text and completed
     # tool calls while leaving non-protocol lines, such as lifecycle events,

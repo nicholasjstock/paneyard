@@ -47,6 +47,7 @@ module Orchestrator
       env_path = File.join(workers_dir, "#{file_basename}.env.json")
 
       driver = run.launcher_variant
+      selected_model = driver == "claude" ? claude_model_for(role) : nil
       enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
       command, args =
         if driver == "claude"
@@ -84,7 +85,8 @@ module Orchestrator
       worker = run.workers.create!(
         worker_id: worker_id, role: role, nickname: nickname, reason: reason, scope: scope,
         status: "running", pid: pid, prompt_path: prompt_path, log_path: log_path,
-        last_message_path: last_message_path, exit_status_path: exit_status_path, env_path: env_path, command: command, args: args
+        last_message_path: last_message_path, exit_status_path: exit_status_path, env_path: env_path,
+        command: command, args: args, model: selected_model
       )
 
       append_lifecycle_line(

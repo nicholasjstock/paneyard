@@ -12,7 +12,10 @@ class WorkerReconcileJobTest < ActiveSupport::TestCase
       status: "running"
     )
     log_path = File.join(workspace.root_path, "worker.log")
-    File.write(log_path, "You've hit your session limit · resets 5pm (Europe/Paris)\\n")
+    File.write(log_path, <<~LOG)
+      You've hit your session limit · resets 5pm (Europe/Paris)
+      {"type":"result","model":"claude-haiku-4-5","num_turns":3,"total_cost_usd":0.1,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}
+    LOG
     worker = Worker.create!(
       worker_id: SecureRandom.uuid,
       run_id: run.run_id,
@@ -33,6 +36,9 @@ class WorkerReconcileJobTest < ActiveSupport::TestCase
 
     assert_equal "stopped", worker.reload.status
     assert_equal "Claude session limit reached; worker exited before completing its handoff.", worker.stop_reason
+    assert_equal "claude-haiku-4-5", worker.model
+    assert_equal 3, worker.agent_turn_count
+    assert_equal 30, worker.cache_read_input_tokens
     assert_includes worker.as_json[:outputTail], "session limit"
     assert_operator run.reload.capacity_available_at, :>, Time.current
     assert_equal "waiting_on_capacity", run.phase

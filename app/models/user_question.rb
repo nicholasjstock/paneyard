@@ -3,6 +3,7 @@
 class UserQuestion < ApplicationRecord
   PRIORITIES = %w[advisory blocking].freeze
   STATUSES = %w[open answered dismissed].freeze
+  DIAGNOSTIC_TEXT_LIMIT = 600
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, optional: true, inverse_of: :user_questions
 
@@ -37,6 +38,24 @@ class UserQuestion < ApplicationRecord
     }
   end
 
+  def as_diagnostic_json
+    {
+      questionId: question_id,
+      runId: run_id,
+      askedBy: asked_by,
+      askedAt: asked_at.iso8601(3),
+      scope: scope,
+      text: truncate(text),
+      priority: priority,
+      status: status,
+      tags: tags,
+      answeredBy: answered_by,
+      answeredAt: answered_at&.iso8601(3),
+      answerText: truncate(answer_text),
+      detailAvailable: context.present? || text.to_s.length > DIAGNOSTIC_TEXT_LIMIT || answer_text.to_s.length > DIAGNOSTIC_TEXT_LIMIT
+    }
+  end
+
   private
 
   def assign_question_id
@@ -45,6 +64,11 @@ class UserQuestion < ApplicationRecord
 
   def assign_asked_at
     self.asked_at ||= Time.current
+  end
+
+  def truncate(value)
+    text = value.to_s
+    text.length > DIAGNOSTIC_TEXT_LIMIT ? "#{text.first(DIAGNOSTIC_TEXT_LIMIT).rstrip}…" : text
   end
 
   def publish_created_event

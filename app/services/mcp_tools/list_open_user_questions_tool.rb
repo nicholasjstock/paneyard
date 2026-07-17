@@ -1,19 +1,21 @@
 module McpTools
   class ListOpenUserQuestionsTool < MCP::Tool
     tool_name "list_open_user_questions"
-    description "List recent open user questions, optionally scoped to one run."
+    description "List compact open user questions for one run."
     input_schema(
       properties: {
         runId: { type: "string" },
-        limit: { type: "integer", minimum: 1, maximum: 50 }
+        limit: { type: "integer", minimum: 1, maximum: 20 },
+        includeDetails: { type: "boolean" }
       },
-      required: []
+      required: %w[runId]
     )
 
-    def self.call(server_context:, runId: nil, limit: nil)
-      scope = UserQuestion.open_only.order(asked_at: :desc)
-      scope = scope.where(run_id: runId) if runId.present?
-      ToolResponse.structured({ questions: scope.limit((limit || 20).to_i.clamp(1, 50)).map(&:as_json) })
+    def self.call(server_context:, runId:, limit: nil, includeDetails: false)
+      scope = UserQuestion.open_only.where(run_id: runId).order(asked_at: :desc)
+      questions = scope.limit((limit || 5).to_i.clamp(1, 20))
+      payload = includeDetails ? questions.map(&:as_json) : questions.map(&:as_diagnostic_json)
+      ToolResponse.structured({ questions: payload })
     end
   end
 end

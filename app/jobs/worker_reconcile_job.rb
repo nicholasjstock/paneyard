@@ -18,11 +18,13 @@ class WorkerReconcileJob < ApplicationJob
 
       exit_code = read_exit_code(worker.exit_status_path)
       output = Orchestrator::LogReader.read_tail_lines(worker.log_path, 12).to_s
+      usage = Orchestrator::LogReader.claude_usage(worker.log_path)
       worker.update!(
         status: "stopped",
         stopped_at: Time.current,
         exit_code: exit_code,
-        stop_reason: worker.stop_reason.presence || stop_reason_for(worker, exit_code, output)
+        stop_reason: worker.stop_reason.presence || stop_reason_for(worker, exit_code, output),
+        **usage
       )
       block_run_for_capacity!(worker, output) if claude_capacity_failure?(output)
     end

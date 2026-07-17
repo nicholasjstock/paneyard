@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_17_113000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_17_173000) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -120,16 +120,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_113000) do
   end
 
   create_table "workers", force: :cascade do |t|
+    t.integer "agent_turn_count"
     t.json "args", default: [], null: false
+    t.bigint "cache_creation_input_tokens"
+    t.bigint "cache_read_input_tokens"
     t.string "command", null: false
     t.datetime "created_at", null: false
     t.string "env_path", null: false
     t.integer "exit_code"
     t.string "exit_status_path"
+    t.bigint "input_tokens"
     t.string "last_message_path", null: false
     t.string "log_path", null: false
     t.datetime "log_updated_at"
+    t.string "model"
     t.string "nickname", null: false
+    t.bigint "output_tokens"
     t.integer "pid", null: false
     t.string "prompt_path", null: false
     t.text "reason", null: false
@@ -140,6 +146,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_113000) do
     t.string "status", default: "running", null: false
     t.text "stop_reason"
     t.datetime "stopped_at"
+    t.decimal "total_cost_usd", precision: 12, scale: 6
     t.datetime "updated_at", null: false
     t.string "worker_id", null: false
     t.index ["run_id", "status"], name: "index_workers_on_run_id_and_status"

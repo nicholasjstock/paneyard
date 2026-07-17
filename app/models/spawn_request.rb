@@ -5,6 +5,7 @@
 class SpawnRequest < ApplicationRecord
   PRIORITIES = %w[advisory blocking].freeze
   STATUSES = %w[open fulfilled dismissed].freeze
+  DIAGNOSTIC_TEXT_LIMIT = 600
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, optional: true, inverse_of: :spawn_requests
 
@@ -44,6 +45,23 @@ class SpawnRequest < ApplicationRecord
     }
   end
 
+  def as_diagnostic_json
+    {
+      requestId: request_id,
+      runId: run_id,
+      askedBy: asked_by,
+      askedAt: asked_at.iso8601(3),
+      scope: scope,
+      text: truncate(text),
+      requestedRole: requested_role,
+      priority: priority,
+      status: status,
+      fulfilledWorkerId: fulfilled_worker_id,
+      tags: tags,
+      detailAvailable: context.present? || text.to_s.length > DIAGNOSTIC_TEXT_LIMIT
+    }
+  end
+
   private
 
   def assign_request_id
@@ -52,6 +70,11 @@ class SpawnRequest < ApplicationRecord
 
   def assign_asked_at
     self.asked_at ||= Time.current
+  end
+
+  def truncate(value)
+    text = value.to_s
+    text.length > DIAGNOSTIC_TEXT_LIMIT ? "#{text.first(DIAGNOSTIC_TEXT_LIMIT).rstrip}…" : text
   end
 
   def publish_created_event
