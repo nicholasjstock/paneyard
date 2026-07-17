@@ -1,10 +1,8 @@
-# Replaces scripts/supervisor-loop.ts's tick loop -- instead of a
-# dedicated, PID-tracked OS process per run, a recurring job (see
-# config/recurring.yml) ticks every active run each time it fires: one
-# orchestrator turn, then spawns whatever workers that turn's (or an
-# earlier planner_turn's) spawn requests call for. Mirrors
-# ReconcileRunsJob/WorkerReconcileJob's existing recurring-job pattern in
-# this app.
+# The scheduler is an executor and liveness observer, not a second planner.
+# PlannerTurnTool is the sole writer of a run's decision state. This job
+# fulfills requests that decision has already published and, after a real
+# lifecycle failure, requests a recovery planner without overwriting the
+# planner's state.
 class TickRunJob < ApplicationJob
   queue_as :default
 
@@ -34,19 +32,24 @@ class TickRunJob < ApplicationJob
       return
     end
 
-    result = Orchestrator::Turn.run_orchestrator_turn(
-      run_id: run.run_id,
-      task: run.task,
-      previous_state: previous_state
-    )
-    Orchestrator::TickState.write(result[:next_state])
     Orchestrator::SpawnRequestedWorkers.call(run: run)
+    request_recovery_planner_if_dead_end(run, previous_state)
+  end
 
-    # No separate OS process to wait for exiting anymore -- the job knows
-    # synchronously the moment a tick reaches 'completed', so it flips the
-    # run's own status right here instead of waiting on a later
-    # reconciliation pass (see the now-removed ReconcileRunsJob, whose
-    # entire purpose was detecting a dead supervisor_pid process).
-    run.update!(status: "completed", stopped_at: Time.current) if result[:next_state][:phase] == "completed"
+  def request_recovery_planner_if_dead_end(run, previous_state)
+    return if Worker.where(run_id: run.run_id, status: "running").exists?
+    return if SpawnRequest.where(run_id: run.run_id, status: "open").exists?
+    return if previous_state[:phase].in?(%w[starting completed blocked_on_user])
+
+    finding = Orchestrator::Turn.build_dead_end_finding(
+      run_id: run.run_id,
+      following_steps: previous_state[:following_steps] || []
+    )
+    plan = Orchestrator::Planner.build_stalled_worker_recovery_plan(
+      task: run.task,
+      recovery_finding: finding,
+      following_steps: previous_state[:following_steps] || []
+    )
+    Orchestrator::Planner.publish_planner_jobs(run_id: run.run_id, summary: plan[:summary], plan: plan)
   end
 end

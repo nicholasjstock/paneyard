@@ -26,6 +26,7 @@ class WorkerReconcileJob < ApplicationJob
         stop_reason: worker.stop_reason.presence || stop_reason_for(worker, exit_code, output),
         **usage
       )
+      TickRunJob.perform_later unless claude_capacity_failure?(output)
       block_run_for_capacity!(worker, output) if claude_capacity_failure?(output)
     end
   end

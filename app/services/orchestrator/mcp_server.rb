@@ -24,7 +24,6 @@ module Orchestrator
           ::McpTools::ListWorkersTool,
           ::McpTools::PlanWorkflowIterationTool,
           ::McpTools::PublishPlannerJobsTool,
-          ::McpTools::RunOrchestratorTurnTool,
           ::McpTools::WorkerTurnTool,
           ::McpTools::PlannerTurnTool,
           ::McpTools::ReadOrchestratorStateTool,
