@@ -4,15 +4,25 @@ module Orchestrator
   module ProjectMemory
     module_function
 
-    def snapshot(run_id:)
+    DEFAULT_BRIEF_ENTRY_LIMIT = 8
+    BRIEF_CONTENT_LIMIT = 600
+    DETAIL_ENTRY_LIMIT = 20
+    AVAILABLE_KEY_LIMIT = 50
+
+    def snapshot(run_id:, entry_keys: nil)
       run = Run.find_or_create_for_bus!(run_id)
       workspace = run.workspace
+      entries = workspace.workspace_memory_entries.current.order(:kind, :entry_key, :created_at).to_a
 
       {
         workspace_id: workspace.id,
         workspace_name: workspace.name,
         target_root: workspace.root_path,
-        entries: workspace.workspace_memory_entries.current.order(:kind, :entry_key, :created_at).map(&:as_json)
+        context_mode: entry_keys.present? ? "selected" : "brief",
+        entries: select_entries(entries, entry_keys),
+        available_entry_keys: entries.first(AVAILABLE_KEY_LIMIT).map(&:entry_key),
+        available_entry_count: entries.size,
+        retrieval_hint: "Request entryKeys for full details only when a specific durable rule or its evidence is needed."
       }
     end
 
@@ -35,5 +45,22 @@ module Orchestrator
         )
       end
     end
+
+    def select_entries(entries, entry_keys)
+      if entry_keys.present?
+        entries.select { |entry| entry_keys.include?(entry.entry_key) }.first(DETAIL_ENTRY_LIMIT).map(&:as_json)
+      else
+        entries.first(DEFAULT_BRIEF_ENTRY_LIMIT).map do |entry|
+          entry.as_json.merge(content: truncate(entry.content, BRIEF_CONTENT_LIMIT))
+        end
+      end
+    end
+    private_class_method :select_entries
+
+    def truncate(value, limit)
+      text = value.to_s
+      text.length > limit ? "#{text.first(limit).rstrip}…" : text
+    end
+    private_class_method :truncate
   end
 end

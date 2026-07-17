@@ -7,6 +7,9 @@ module Orchestrator
   module ArtifactStore
     module_function
 
+    DEFAULT_READ_LIMIT = 2_000
+    MAX_READ_LIMIT = 8_000
+
     def output_dir(root_dir)
       File.join(root_dir, "front", "demo-output", "agents-sdk")
     end
@@ -36,6 +39,26 @@ module Orchestrator
 
     def read(root_dir, run_id, artifact_name)
       File.read(resolve_path(root_dir, run_id, artifact_name))
+    end
+
+    # MCP consumers should start with a small evidence window and request a
+    # later offset only when that window leaves a specific question open.
+    # Offsets are bytes so they can be used directly with File#seek.
+    def read_window(root_dir, run_id, artifact_name, offset: 0, limit: DEFAULT_READ_LIMIT)
+      path = resolve_path(root_dir, run_id, artifact_name)
+      total_bytes = File.size(path)
+      start_offset = offset.to_i.clamp(0, total_bytes)
+      byte_limit = limit.to_i.clamp(1, MAX_READ_LIMIT)
+      content = File.binread(path, byte_limit, start_offset).force_encoding("UTF-8").scrub
+      next_offset = start_offset + content.bytesize
+
+      {
+        content: content,
+        total_bytes: total_bytes,
+        offset: start_offset,
+        next_offset: next_offset < total_bytes ? next_offset : nil,
+        truncated: next_offset < total_bytes
+      }
     end
 
     def collect(root_dir, run_id, artifact_names)

@@ -50,7 +50,7 @@ module Orchestrator
       enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
       command, args =
         if driver == "claude"
-          [ "claude", claude_args(enriched_prompt) ]
+          [ "claude", claude_args(enriched_prompt, role: role) ]
         else
           [ "codex", [ "exec", "--dangerously-bypass-approvals-and-sandbox", "-C", root_dir, "-o", last_message_path, "-" ] ]
         end
@@ -133,14 +133,22 @@ module Orchestrator
     # Print mode normally writes only a final response. Stream JSON with
     # partial messages gives the file-backed worker log incremental progress
     # for the run dashboard's five-second Turbo refreshes.
-    def claude_args(prompt)
+    # Agent instructions are plain prompt text, so Claude does not read the
+    # YAML front matter in .claude/agents/*.md as model configuration. Keep
+    # cost routing here at the actual CLI boundary instead.
+    def claude_args(prompt, role: "worker")
       [
+        "--model", claude_model_for(role),
         "--permission-mode", "bypassPermissions",
         "--output-format", "stream-json",
         "--include-partial-messages",
         "--verbose",
         "-p", "--", prompt
       ]
+    end
+
+    def claude_model_for(role)
+      role == "planner" ? "sonnet" : "haiku"
     end
 
     # The shell remains the tracked process while the CLI runs. It records the

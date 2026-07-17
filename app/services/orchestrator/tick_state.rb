@@ -7,6 +7,10 @@ module Orchestrator
   module TickState
     module_function
 
+    DEFAULT_HISTORY_LIMIT = 5
+    MAX_HISTORY_LIMIT = 50
+    HISTORY_SUMMARY_LIMIT = 600
+
     def write(state)
       state = deep_symbolize(state)
       run = Run.find_or_create_for_bus!(state[:run_id])
@@ -28,8 +32,17 @@ module Orchestrator
       tick ? to_state(tick) : default_state(run_id)
     end
 
-    def history(run_id)
-      { run_id: run_id, entries: OrchestratorTick.for_run(run_id).map { |tick| to_state(tick) } }
+    def history(run_id, limit: DEFAULT_HISTORY_LIMIT, include_details: false)
+      scope = OrchestratorTick.for_run(run_id)
+      total_ticks = scope.count
+      ticks = scope.reorder(tick_count: :desc).limit(limit.to_i.clamp(1, MAX_HISTORY_LIMIT)).to_a.reverse
+
+      {
+        run_id: run_id,
+        history_mode: include_details ? "detailed" : "compact",
+        total_ticks: total_ticks,
+        entries: ticks.map { |tick| include_details ? to_state(tick) : to_history_entry(tick) }
+      }
     end
 
     def default_state(run_id)
@@ -56,6 +69,24 @@ module Orchestrator
         last_stall_finding: tick.last_stall_finding,
         last_updated_at: tick.created_at&.iso8601(3)
       }
+    end
+
+    def to_history_entry(tick)
+      {
+        run_id: tick.run_id,
+        phase: tick.phase,
+        tick_count: tick.tick_count,
+        last_plan_summary: truncate(tick.last_plan_summary),
+        pending_spawn_count: tick.pending_spawn_keys.size,
+        following_step_count: tick.following_steps.size,
+        last_stall_finding: truncate(tick.last_stall_finding),
+        last_updated_at: tick.created_at&.iso8601(3)
+      }
+    end
+
+    def truncate(value)
+      text = value.to_s
+      text.length > HISTORY_SUMMARY_LIMIT ? "#{text.first(HISTORY_SUMMARY_LIMIT).rstrip}…" : text
     end
 
     # OrchestratorTick#following_steps round-trips through a JSON column as

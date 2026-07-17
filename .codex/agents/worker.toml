@@ -19,7 +19,7 @@ You are a generic worker. Your identity for this run comes entirely from your bu
 
 ## If your task is verifying or analyzing artifacts (logs, screenshots, test output, or other generated evidence)
 
-- Prefer `collect_workflow_state` to inventory available evidence and `read_workflow_artifact` (with the current `runId`) to read prior reports.
+- Prefer `collect_workflow_state` to inventory available evidence. `read_workflow_artifact` returns a small initial window; request a later `offset` only when that evidence leaves a specific question unanswered.
 - Prefer the fastest evidence source that can answer the question — logs or screenshots before a full pass over generated artifacts — and fall back to a deeper pass only when cheaper evidence is insufficient.
 - Within your own turn, go progressively deeper, not in parallel: a `fast` pass answers the cheapest useful question and surfaces critical failures as early as possible; if warranted, follow with `medium` (state transitions and timing gaps), then `slow` (the most complete timeline and edge-case findings).
 - Validate the artifact before analysis. A blank, corrupted, or unreadable artifact is a failure, not a success — never claim success without positive evidence.

@@ -5,24 +5,35 @@ module Orchestrator
   module RunContext
     module_function
 
-    def snapshot(run_id:)
+    DEFAULT_BRIEF_ENTRY_LIMIT = 8
+    BRIEF_CONTENT_LIMIT = 600
+    DETAIL_ENTRY_LIMIT = 20
+    AVAILABLE_KEY_LIMIT = 50
+
+    # The default snapshot is deliberately a small briefing, not a replay of
+    # the whole run. Agents can request exact entry keys when a fact needs
+    # its full evidence or wording. Keeping the default bounded prevents a
+    # new agent from spending its context window on history it may not need.
+    def snapshot(run_id:, entry_keys: nil)
       entries = RunContextEntry.where(run_id: run_id).order(:kind, :entry_key)
       grouped = entries.group_by(&:kind)
       criteria = grouped.fetch("acceptance_criterion", []).map(&:as_json)
+      selected_entries = select_entries(entries.to_a, entry_keys)
 
       {
         run_id: run_id,
-        acceptance_criteria: criteria,
-        constraints: grouped.fetch("constraint", []).map(&:as_json),
-        facts: grouped.fetch("fact", []).map(&:as_json),
-        rejected_approaches: grouped.fetch("rejected_approach", []).map(&:as_json),
-        operator_decisions: grouped.fetch("operator_decision", []).map(&:as_json),
+        context_mode: entry_keys.present? ? "selected" : "brief",
+        entries: selected_entries,
+        available_entry_keys: entries.limit(AVAILABLE_KEY_LIMIT).pluck(:entry_key),
+        available_entry_count: entries.count,
+        retrieval_hint: "Request entryKeys for full details only when a specific fact, decision, or evidence reference is needed.",
         completion_blockers: criteria_completion_blockers(criteria)
       }
     end
 
     def completion_blockers(run_id:)
-      criteria_completion_blockers(snapshot(run_id: run_id)[:acceptance_criteria])
+      criteria = RunContextEntry.where(run_id: run_id, kind: "acceptance_criterion").map(&:as_json)
+      criteria_completion_blockers(criteria)
     end
 
     def upsert!(run_id:, entry_key:, kind:, status:, content:, evidence_ref:, created_by:)
@@ -43,5 +54,35 @@ module Orchestrator
         .map { |criterion| criterion[:key] || criterion["key"] }
     end
     private_class_method :criteria_completion_blockers
+
+    def select_entries(entries, entry_keys)
+      if entry_keys.present?
+        entries.select { |entry| entry_keys.include?(entry.entry_key) }
+          .first(DETAIL_ENTRY_LIMIT)
+          .map(&:as_json)
+      else
+        entries
+          .sort_by { |entry| [ brief_kind_rank(entry.kind), -entry.updated_at.to_i ] }
+          .first(DEFAULT_BRIEF_ENTRY_LIMIT)
+          .map { |entry| brief_entry(entry) }
+      end
+    end
+    private_class_method :select_entries
+
+    def brief_kind_rank(kind)
+      %w[operator_decision acceptance_criterion constraint fact rejected_approach].index(kind) || 99
+    end
+    private_class_method :brief_kind_rank
+
+    def brief_entry(entry)
+      entry.as_json.merge(content: truncate(entry.content, BRIEF_CONTENT_LIMIT))
+    end
+    private_class_method :brief_entry
+
+    def truncate(value, limit)
+      text = value.to_s
+      text.length > limit ? "#{text.first(limit).rstrip}…" : text
+    end
+    private_class_method :truncate
   end
 end
