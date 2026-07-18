@@ -12,22 +12,32 @@ module McpTools
         nextStep: {
           type: [ "object", "null" ],
           properties: {
-            owner: { type: "string", enum: %w[orchestrator worker infrastructure] },
+            owner: { type: "string", enum: Orchestrator::StepPolicy::PLANNER_STEP_OWNERS },
             artifact: { type: "string" },
-            successCheck: { type: "string" }
+            successCheck: { type: "string" },
+            mode: { type: "string", enum: Orchestrator::StepPolicy::MODES },
+            writeScope: { type: "string", enum: Orchestrator::StepPolicy::WRITE_SCOPES },
+            allowedPaths: { type: "array", items: { type: "string" } },
+            evidenceRefs: { type: "array", items: { type: "string" } },
+            operatorApprovalQuestionId: { type: [ "string", "null" ] }
           },
-          required: %w[owner artifact successCheck]
+          required: %w[owner artifact successCheck mode writeScope allowedPaths evidenceRefs]
         },
         followingSteps: {
           type: "array",
           items: {
             type: "object",
             properties: {
-              owner: { type: "string", enum: %w[orchestrator worker infrastructure] },
+              owner: { type: "string", enum: Orchestrator::StepPolicy::PLANNER_STEP_OWNERS },
               artifact: { type: "string" },
-              successCheck: { type: "string" }
+              successCheck: { type: "string" },
+              mode: { type: "string", enum: Orchestrator::StepPolicy::MODES },
+              writeScope: { type: "string", enum: Orchestrator::StepPolicy::WRITE_SCOPES },
+              allowedPaths: { type: "array", items: { type: "string" } },
+              evidenceRefs: { type: "array", items: { type: "string" } },
+              operatorApprovalQuestionId: { type: [ "string", "null" ] }
             },
-            required: %w[owner artifact successCheck]
+            required: %w[owner artifact successCheck mode writeScope allowedPaths evidenceRefs]
           }
         }
       },
@@ -42,6 +52,7 @@ module McpTools
         run_id: runId, summary: summary, next_step: next_step, following_steps: following_steps, previous_state: previous_state
       )
       Orchestrator::TickState.write(structured[:next_state])
+      Worker.mark_handoff_completed!(run_id: runId, role: "planner")
       ToolResponse.structured(structured)
     end
   end

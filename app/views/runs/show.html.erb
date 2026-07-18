@@ -6,88 +6,138 @@
 <div class="toolbar">
   <div>
     <h1 class="mono"><%= @run.run_id %></h1>
-    <span class="badge <%= @run.status_badge_class %>"><%= @run.status_badge_label %></span>
+    <span class="muted"><%= @run.launcher_variant %> &middot; workspace: <%= current_workspace.name %></span>
   </div>
-  <% if @run.active? %>
-    <%= button_to "Kill run", stop_workspace_run_path(current_workspace, @run), method: :post,
-          class: "btn danger",
-          data: { turbo_confirm: "Stop run #{@run.run_id}? This cascades to every active worker under it." } %>
-  <% end %>
-</div>
-
-<div class="card">
-  <p><%= @run.task %></p>
-  <p class="muted">
-    <%= @run.launcher_variant %> &middot;
-    workspace: <%= current_workspace.name %> &middot;
-    target: <span class="mono"><%= @run.target_root %></span>
-  </p>
-  <% if @run.phase.present? %>
-    <p class="muted">
-      phase: <strong><%= @run.phase %></strong>
-      <% if @run.phase_owner.present? %>&middot; owner: <%= @run.phase_owner %><% end %>
-      <% if @run.phase_updated_at.present? %>&middot; updated <%= time_ago_in_words(@run.phase_updated_at) %> ago<% end %>
-    </p>
-  <% end %>
-  <% if @run.phase_summary.present? %>
-    <p><%= @run.phase_summary %></p>
-  <% end %>
-  <% if @run.launch_queued? %>
-    <p class="error-banner">Launch job has not started. This run is still queued; start `bin/jobs` or `bin/dev`.</p>
-  <% end %>
+  <div class="toolbar-actions" data-controller="chat-drawer"
+       data-action="keydown.esc@window->chat-drawer#close turbo:before-morph-element@document->chat-drawer#beforeMorph input->chat-drawer#saveDraft turbo:submit-start->chat-drawer#clearDraft">
+    <button type="button" class="chat-launcher" aria-label="Open project chat" title="Open project chat" data-action="chat-drawer#open">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M20 11.5a7.5 7.5 0 0 1-8 7.48 8.7 8.7 0 0 1-3.34-.9L4 20l1.4-4.18A7.5 7.5 0 1 1 20 11.5Z" />
+        <path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" />
+      </svg>
+    </button>
+    <% if @run.active? %>
+      <%= button_to "Kill run", stop_workspace_run_path(current_workspace, @run), method: :post,
+            class: "btn danger",
+            data: { turbo_confirm: "Stop run #{@run.run_id}? This cascades to every active worker under it." } %>
+    <% end %>
+    <%= render "workspace_chats/drawer", chat: @workspace_chat, messages: @workspace_chat_messages, run: @run %>
+  </div>
 </div>
 
 <section class="run-dashboard">
-  <div class="stat-strip">
-    <div class="stat-card">
-      <span class="stat-label">Current Phase</span>
-      <strong><%= @run.phase || "unknown" %></strong>
-      <span class="muted"><%= @run.phase_owner || "unowned" %></span>
+  <section class="panel run-now-panel">
+    <div class="panel-header">
+      <div>
+        <h2>What’s happening</h2>
+        <p class="muted"><%= @run.task %></p>
+      </div>
+      <span class="badge <%= @run_now[:status_class] %>"><%= @run_now[:state] %></span>
     </div>
-    <div class="stat-card">
-      <span class="stat-label">Latest Tick</span>
-      <strong><%= @latest_tick ? @latest_tick["tickCount"] : 0 %></strong>
-      <span class="muted"><%= @latest_tick ? @latest_tick["phase"] : "starting" %></span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-label">Active Workers</span>
-      <strong><%= @active_workers.count %></strong>
-      <span class="muted"><%= @active_workers.map { |activity| activity[:worker].nickname }.presence&.join(", ") || "none" %></span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-label">Open Requests</span>
-      <strong><%= @spawn_requests.count %></strong>
-      <span class="muted"><%= @spawn_requests.first&.dig("requestedRole") || "idle" %></span>
-    </div>
-    <div class="stat-card">
-      <span class="stat-label">Agent Cost</span>
-      <strong><%= number_to_currency(@usage_summary[:total_cost_usd]) %></strong>
-      <span class="muted"><%= @usage_summary[:reported_worker_count] %>/<%= @usage_summary[:worker_count] %> workers reported</span>
-    </div>
-  </div>
 
-  <div class="dashboard-grid">
-    <% if @active_workers.any? %>
-      <section class="panel span-2 live-worker-links">
-        <div class="panel-header">
-          <div>
-            <h2>Live Worker Streams</h2>
-            <p class="muted">Open a running worker to follow its output as it arrives.</p>
-          </div>
+    <p class="run-headline"><%= @run_now[:detail] %></p>
+    <p class="muted">Updated <%= time_ago_in_words(@run_now[:latest_activity_at]) %> ago &middot; refreshes automatically</p>
+    <% if @latest_tick&.dig("lastStallFinding").present? %><p class="error-banner"><%= @latest_tick["lastStallFinding"] %></p><% end %>
+    <% if @run.launch_queued? %><p class="error-banner">Launch job has not started. Start <span class="mono">bin/dev</span> to begin monitoring.</p><% end %>
+
+    <% if @run_now[:current_activity]&.dig(:output_preview).present? %>
+      <div class="live-activity">
+        <div class="live-activity-header">
+          <span class="stat-label">Latest worker activity</span>
+          <%= link_to "Open live worker", workspace_worker_path(current_workspace, @run_now[:current_activity][:worker].worker_id), class: "btn" %>
         </div>
-        <div class="stream-link-list">
-          <% @active_workers.each do |activity| %>
-            <% worker = activity[:worker] %>
-            <%= link_to workspace_worker_path(current_workspace, worker.worker_id), class: "btn primary stream-link" do %>
-              <span><%= worker.nickname %></span>
-              <span class="mono"><%= worker.scope %></span>
-              <span>Open live stream</span>
-            <% end %>
-          <% end %>
-        </div>
-      </section>
+        <pre class="log compact"><%= @run_now[:current_activity][:output_preview] %></pre>
+      </div>
     <% end %>
 
+    <div class="run-now-grid">
+      <div>
+        <span class="stat-label">Current objective</span>
+        <% if @run_now[:why].present? %>
+          <p><%= @run_now[:why] %></p>
+        <% else %>
+          <p class="muted">No objective has been published yet.</p>
+        <% end %>
+      </div>
+      <div>
+        <span class="stat-label">What happens next</span>
+        <% if @run_now[:next_step].present? %>
+          <% step = @run_now[:next_step] %>
+          <p><strong><%= step["requestedRole"] || step[:owner] || step["owner"] %></strong> &middot; <span class="mono"><%= step["scope"] || step[:artifact] || step["artifact"] %></span></p>
+          <p class="muted"><%= step["text"] || step[:success_check] || step["successCheck"] %></p>
+        <% else %>
+          <p class="muted">No automatic follow-up is queued.</p>
+        <% end %>
+      </div>
+      <div>
+        <span class="stat-label">Do you need to act?</span>
+        <% if @blocking_questions.any? %>
+          <p class="operator-action"><strong>Yes.</strong> <%= pluralize(@blocking_questions.count, "decision") %> needs an answer below.</p>
+        <% else %>
+          <p class="no-action"><strong>No.</strong> The run will continue automatically.</p>
+        <% end %>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel run-usage-panel">
+    <div class="panel-header">
+      <div>
+        <h2>Run usage</h2>
+        <p class="muted">Combined worker sessions and Rails-owned planner decisions.</p>
+      </div>
+      <span class="muted"><%= @usage_summary[:reported_worker_count] %> workers reported &middot; <%= pluralize(@usage_summary[:planner_decision_count], "planner decision") %></span>
+    </div>
+    <div class="stat-strip">
+      <div class="stat-card">
+        <span class="stat-label">Agent Turns</span>
+        <strong><%= number_with_delimiter(@usage_summary[:agent_turn_count]) %></strong>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Input Tokens</span>
+        <strong><%= number_with_delimiter(@usage_summary[:input_tokens]) %></strong>
+        <span class="muted"><%= number_with_delimiter(@usage_summary[:cache_read_input_tokens]) %> cache reads</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Output Tokens</span>
+        <strong><%= number_with_delimiter(@usage_summary[:output_tokens]) %></strong>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Cost</span>
+        <strong><%= number_to_currency(@usage_summary[:total_cost_usd]) %></strong>
+        <span class="muted"><%= @usage_summary[:models].map { |model, count| "#{model}: #{count}" }.join(", ").presence || "no completed telemetry" %></span>
+      </div>
+    </div>
+    <% if @latest_planner_decision %>
+      <details class="mini-card" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:planner-context">
+        <summary>
+          Latest planner: <strong><%= pluralize(@latest_planner_decision.model_calls, "model call") %></strong>
+          &middot; <strong><%= number_to_human_size(@latest_planner_decision.context_bytes) %></strong> requested context
+          &middot; <span class="badge <%= @latest_planner_decision.status %>"><%= @latest_planner_decision.status %></span>
+        </summary>
+        <% if @latest_planner_decision.model_attempts.any? %>
+          <p class="muted">
+            Models: <%= @latest_planner_decision.model_attempts.map { |attempt| "#{attempt['tier']}: #{attempt['model']}" }.join(" → ") %>
+          </p>
+        <% end %>
+        <% if @latest_planner_decision.context_requests.any? %>
+          <% @latest_planner_decision.context_requests.each do |request| %>
+            <p class="muted">
+              <span class="mono"><%= request["source"] %>:<%= request["reference"] %></span>
+              &middot; offset <%= number_with_delimiter(request["offset"] || 0) %>
+              &middot; requested <%= number_with_delimiter(request["max_chars"]) %> chars
+              &middot; returned <%= number_to_human_size(request["returned_bytes"] || 0) %>
+              &middot; <%= request["question"] %>
+            </p>
+          <% end %>
+        <% else %>
+          <p class="muted">The planner decided from the initial Rails context without requesting additions.</p>
+        <% end %>
+      </details>
+    <% end %>
+  </section>
+
+  <div class="dashboard-grid">
     <% if @blocking_questions.any? %>
       <section class="panel span-2 blocking-questions">
         <div class="panel-header">
@@ -125,51 +175,6 @@
 
     <section class="panel span-2">
       <div class="panel-header">
-        <h2>Now</h2>
-        <% if @run.phase_updated_at.present? %><span class="muted">updated <%= time_ago_in_words(@run.phase_updated_at) %> ago</span><% end %>
-      </div>
-      <% if @run.phase_summary.present? %>
-        <p class="lead"><%= @run.phase_summary %></p>
-      <% else %>
-        <p class="empty">No current phase summary yet.</p>
-      <% end %>
-      <% if @latest_tick&.dig("lastStallFinding").present? %>
-        <p class="error-banner"><%= @latest_tick["lastStallFinding"] %></p>
-      <% end %>
-    </section>
-
-    <section class="panel">
-      <div class="panel-header">
-        <h2>Next</h2>
-      </div>
-      <% if @spawn_requests.any? %>
-        <% @spawn_requests.each do |request| %>
-          <div class="mini-card">
-            <div class="card-title">
-              <span><%= request["requestedRole"] %></span>
-              <span class="badge <%= request["priority"] %>"><%= request["priority"] %></span>
-            </div>
-            <p class="mono"><%= request["scope"] %></p>
-            <p><%= request["text"] %></p>
-          </div>
-        <% end %>
-      <% elsif @following_steps.any? %>
-        <% @following_steps.each do |step| %>
-          <div class="mini-card">
-            <div class="card-title">
-              <span><%= step["owner"] || step[:owner] %></span>
-              <span class="mono"><%= step["artifact"] || step[:artifact] %></span>
-            </div>
-            <p><%= step["successCheck"] || step[:success_check] %></p>
-          </div>
-        <% end %>
-      <% else %>
-        <p class="empty">No queued handoff right now.</p>
-      <% end %>
-    </section>
-
-    <section class="panel span-2">
-      <div class="panel-header">
         <h2>Run Timeline</h2>
       </div>
       <% if @timeline_events.any? %>
@@ -188,16 +193,16 @@
       <div class="panel-header">
         <h2>Artifacts</h2>
       </div>
-      <% if @artifact_previews.any? %>
-        <% @artifact_previews.each do |artifact| %>
-          <div class="mini-card">
+      <% if @artifacts.any? %>
+        <% @artifacts.each do |artifact| %>
+          <div class="mini-card artifact-card">
             <div class="card-title">
               <span class="mono"><%= artifact[:name] %></span>
               <span class="muted"><%= artifact[:updated_at] %></span>
             </div>
             <p class="muted"><%= number_to_human_size(artifact[:size_bytes]) %></p>
-            <% if artifact[:preview].present? %>
-              <pre class="log compact"><%= artifact[:preview] %></pre>
+            <% if artifact[:content].present? %>
+              <pre class="log artifact-content"><%= artifact[:content] %></pre>
             <% end %>
           </div>
         <% end %>
@@ -210,8 +215,8 @@
   <section class="panel worker-command-center">
     <div class="panel-header">
       <div>
-        <h2>Worker Command Center</h2>
-        <p class="muted">Current workers first. Expand a worker for its latest output and lifecycle details.</p>
+        <h2>Workers</h2>
+        <p class="muted">Current workers first. Expand one for its latest output and lifecycle details.</p>
       </div>
       <span class="muted"><%= pluralize(@worker_activities.count, "worker") %></span>
     </div>
@@ -266,75 +271,6 @@
     <% end %>
   </section>
 
-  <section class="panel">
-    <div class="panel-header">
-      <div>
-        <h2>Run Usage</h2>
-        <p class="muted">Reported only after an agent finishes; cache reads are shown separately because they can dominate context usage.</p>
-      </div>
-    </div>
-    <div class="stat-strip">
-      <div class="stat-card">
-        <span class="stat-label">Agent Turns</span>
-        <strong><%= number_with_delimiter(@usage_summary[:agent_turn_count]) %></strong>
-        <span class="muted"><%= @usage_summary[:models].map { |model, count| "#{model}: #{count}" }.join(", ").presence || "no completed telemetry" %></span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Input Tokens</span>
-        <strong><%= number_with_delimiter(@usage_summary[:input_tokens]) %></strong>
-        <span class="muted"><%= number_with_delimiter(@usage_summary[:cache_read_input_tokens]) %> cache reads</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Output Tokens</span>
-        <strong><%= number_with_delimiter(@usage_summary[:output_tokens]) %></strong>
-        <span class="muted"><%= @usage_summary[:reported_worker_count] %> workers reported usage</span>
-      </div>
-    </div>
-  </section>
 </section>
 
 <%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
-
-<details class="card collapsible"
-         data-controller="accordion-state"
-         data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
-         data-accordion-state-key-value="run:<%= @run.run_id %>:raw-activity-feed">
-  <summary>Raw activity feed</summary>
-  <% if @run_events.blank? %>
-    <p class="empty">No bus events recorded for this run yet.</p>
-  <% else %>
-    <% @run_events.reverse_each do |event| %>
-      <div class="mini-card">
-        <div class="card-title">
-          <span class="mono"><%= event["type"] %></span>
-          <span class="muted">
-            <%= event["at"] %>
-            <% if event["repeatCount"].to_i > 1 %>&middot; repeated <%= event["repeatCount"] %>x<% end %>
-          </span>
-        </div>
-        <pre class="log compact"><%= JSON.pretty_generate(event["payload"]) %></pre>
-      </div>
-    <% end %>
-  <% end %>
-</details>
-
-<details class="card collapsible"
-         data-controller="accordion-state"
-         data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
-         data-accordion-state-key-value="run:<%= @run.run_id %>:tick-history">
-  <summary>Recent tick history (last 8)</summary>
-  <% if @tick_history.blank? || @tick_history["entries"].blank? %>
-    <p class="empty">No orchestrator ticks recorded yet.</p>
-  <% else %>
-    <% @tick_history["entries"].reverse_each do |entry| %>
-      <div class="mini-card">
-        <div class="card-title">
-          <span>Tick <%= entry["tickCount"] %></span>
-          <span class="badge <%= entry["phase"] %>"><%= entry["phase"] %></span>
-        </div>
-        <% if entry["lastPlanSummary"].present? %><p><%= entry["lastPlanSummary"] %></p><% end %>
-        <% if entry["lastStallFinding"].present? %><p class="error-banner"><%= entry["lastStallFinding"] %></p><% end %>
-      </div>
-    <% end %>
-  <% end %>
-</details>

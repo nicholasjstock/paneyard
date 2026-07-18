@@ -28,6 +28,14 @@ class Worker < ApplicationRecord
 
   scope :active, -> { where(status: "running") }
 
+  def self.mark_handoff_completed!(run_id:, nickname: nil, role: nil)
+    workers = where(run_id: run_id)
+    workers = workers.where(nickname: nickname) if nickname.present?
+    workers = workers.where(role: role) if role.present?
+
+    workers.order(created_at: :desc).first&.update_column(:handoff_completed_at, Time.current)
+  end
+
   def as_json(*)
     {
       workerId: worker_id,
@@ -56,6 +64,7 @@ class Worker < ApplicationRecord
       args: args,
       startedAt: started_at.iso8601(3),
       stoppedAt: stopped_at&.iso8601(3),
+      handoffCompletedAt: handoff_completed_at&.iso8601(3),
       stopReason: stop_reason
     }
   end

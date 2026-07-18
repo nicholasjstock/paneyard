@@ -8,10 +8,22 @@ pids = [
   Process.spawn("./bin/jobs")
 ]
 
-%w[INT TERM].each do |signal|
-  trap(signal) do
-    pids.each { |pid| Process.kill(signal, pid) rescue nil }
-  end
+stopping = false
+stop_children = proc do
+  next if stopping
+
+  stopping = true
+  pids.each { |pid| Process.kill("TERM", pid) rescue nil }
 end
 
-pids.each { |pid| Process.wait(pid) rescue nil }
+%w[INT TERM].each do |signal|
+  trap(signal) { stop_children.call }
+end
+
+begin
+  exited_pid = Process.wait
+  warn "bin/dev: child #{exited_pid} exited; stopping the remaining development services" unless stopping
+ensure
+  stop_children.call
+  pids.each { |pid| Process.wait(pid) rescue nil }
+end

@@ -1,3 +1,5 @@
+require "pathname"
+
 module Orchestrator
   # Ports scripts/workflow-mcp.ts's writeWorkflowArtifact/readWorkflowArtifact/
   # collectWorkflowState/resolveWorkflowArtifactPath/sanitizeRunId. Artifact
@@ -28,6 +30,15 @@ module Orchestrator
       end
 
       File.join(output_dir(root_dir), sanitize_run_id(run_id), artifact_name)
+    end
+
+    def canonical_name(root_dir, run_id, reference)
+      value = reference.to_s
+      run_dir = File.join(output_dir(root_dir), sanitize_run_id(run_id))
+      absolute = Pathname.new(value).absolute? ? File.expand_path(value) : File.expand_path(value, root_dir)
+      return value unless File.dirname(absolute) == File.expand_path(run_dir)
+
+      File.basename(absolute)
     end
 
     def write(root_dir, run_id, artifact_name, content)

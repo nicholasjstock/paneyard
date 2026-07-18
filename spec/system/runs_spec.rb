@@ -17,9 +17,8 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_current_path(workspace_run_path(workspace, run))
     expect(page).to have_text(run.run_id)
     expect(page).to have_text("workspace: #{workspace.name}")
-    expect(page).to have_text("Current Phase")
+    expect(page).to have_text("What’s happening")
     expect(page).to have_text("Run Timeline")
-    expect(page).to have_text("spawn_request.created")
   end
 
   it "opens the detail page from the workspace run list" do
@@ -31,7 +30,7 @@ RSpec.describe "workspace runs", type: :system do
 
     expect(page).to have_current_path(workspace_run_path(workspace, run))
     expect(page).to have_text(run.task)
-    expect(page).to have_text("Current Phase")
+    expect(page).to have_text("What’s happening")
     expect(page).to have_text("Run Timeline")
   end
 
@@ -110,22 +109,23 @@ RSpec.describe "workspace runs", type: :system do
       following_steps: []
     )
     BusEvent.publish("run.status", run_id: run.run_id, payload: { runId: run.run_id, summary: "planning update" })
+    artifact_path = File.join(workspace.root_path, "front", "demo-output", "agents-sdk", run.run_id, "fix-summary.md")
+    FileUtils.mkdir_p(File.dirname(artifact_path))
+    File.write(artifact_path, "First artifact line\nFinal artifact line that must remain visible\n")
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_text("phase: planning")
-    expect(page).to have_text("owner: planner")
-    expect(page).to have_text("Choosing the next step.")
-    expect(page).to have_text("Current Phase")
-    expect(page).to have_text("Worker Command Center")
+    expect(page).to have_text("Test the details page.")
+    expect(page).to have_text("What’s happening")
+    expect(page).to have_text("Workers")
     expect(page).to have_text("Run Timeline")
     expect(page).to have_text("Artifacts")
-    expect(page).to have_text("planning update")
+    expect(page).to have_text("Run usage")
+    expect(page).to have_text("Cost")
     expect(page).to have_text("planner-main")
     expect(page).to have_text("workflow-plan.md")
     expect(page).to have_text("fix-summary.md")
-    expect(page).to have_text("Tick 2")
-    expect(page).to have_text("Inspect the latest worker output.")
+    expect(page).to have_text("Final artifact line that must remain visible")
   end
 
   it "navigates from an expanded worker to the full worker log" do
@@ -183,6 +183,62 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text("The request failed before the handoff completed.")
   end
 
+  it "uses live worker evidence instead of a stale persisted phase" do
+    workspace = create_workspace
+    workers_dir = File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers")
+    FileUtils.mkdir_p(workers_dir)
+    run = create_run(workspace:, suffix: "live-over-phase", task: "Explain the live run clearly")
+    run.update!(
+      phase: "waiting_on_capacity",
+      phase_summary: "Claude capacity is unavailable.",
+      phase_updated_at: 5.minutes.ago,
+      capacity_available_at: 20.minutes.from_now
+    )
+    worker = create_run_worker(run, nickname: "worker-live")
+    worker.update!(scope: "diagnosis.md", reason: "Capture the request, refetch, and rendered state.")
+    File.write(worker.last_message_path, "Recording the failing flow against backend port 4100.\n")
+    OrchestratorTick.create!(
+      run_id: run.run_id,
+      phase: "planning",
+      tick_count: 1,
+      pending_spawn_keys: [],
+      following_steps: [
+        {
+          owner: "worker",
+          artifact: "verification.md",
+          successCheck: "Verify the diagnosis evidence."
+        }
+      ]
+    )
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_text("Work in progress")
+    expect(page).to have_text("worker-live is working on diagnosis.md")
+    expect(page).to have_text("Recording the failing flow against backend port 4100.")
+    expect(page).to have_text("Capture the request, refetch, and rendered state.")
+    expect(page).to have_text("verification.md")
+    expect(page).to have_text("No. The run will continue automatically.")
+    expect(page).to have_no_text("Work will resume automatically")
+  end
+
+  it "shows a blocking question when no worker is active" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "blocking-question", task: "Await an operator decision")
+    run.user_questions.create!(
+      asked_by: "worker",
+      scope: "decision.md",
+      text: "Which reproduction path should we take?",
+      priority: "blocking",
+      status: "open"
+    )
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_text("Needs your decision")
+    expect(page).to have_text("1 blocking question awaiting an answer.")
+  end
+
   it "updates the run detail page live when new status and tick data arrive", :js do
     workspace = create_workspace
     run = create_run(
@@ -195,7 +251,7 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
     expect(page).to have_text("No worker lifecycle activity yet.")
-    expect(page).to have_text(/latest tick/i)
+    expect(page).to have_text("What’s happening")
     expect(page).to have_text("0")
 
     publisher = Thread.new do
@@ -224,49 +280,10 @@ RSpec.describe "workspace runs", type: :system do
       end
     end
 
-    expect(page).to have_text(/latest tick/i)
+    expect(page).to have_text("What’s happening")
     expect(page).to have_text("planning")
     expect(page).to have_text("The planner is deciding what to do next.")
-    expect(page).to have_text("running")
-
-    publisher.join
-  end
-
-  it "keeps expanded accordions open across live tick refreshes", :js do
-    workspace = create_workspace
-    run = create_run(
-      workspace: workspace,
-      suffix: "accordion-refresh",
-      task: "Keep the activity feed open during live updates"
-    )
-    BusEvent.publish("run.status", run_id: run.run_id, payload: { runId: run.run_id, summary: "initial status" })
-
-    visit workspace_run_path(workspace, run)
-
-    find("summary", text: "Raw activity feed").click
-    expect(page).to have_css("details[open] summary", text: "Raw activity feed", visible: :all)
-
-    publisher = Thread.new do
-      ActiveRecord::Base.connection_pool.with_connection do
-        sleep 0.5
-        OrchestratorTick.create!(
-          run_id: run.run_id,
-          phase: "planning",
-          tick_count: 1,
-          last_plan_summary: "Refresh while the accordion is open.",
-          pending_spawn_keys: [],
-          following_steps: []
-        )
-        BusEvent.publish(
-          "run.status",
-          run_id: run.run_id,
-          payload: { runId: run.run_id, phase: "planning", summary: "live update landed" }
-        )
-      end
-    end
-
-    expect(page).to have_text("live update landed")
-    expect(page).to have_css("details[open] summary", text: "Raw activity feed", visible: :all)
+    expect(page).to have_text("Planning next step")
 
     publisher.join
   end

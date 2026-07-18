@@ -3,13 +3,13 @@
 This project uses Codex `multi_agent` workers with a deterministic supervisor/orchestrator loop and a bus-led fan-out model:
 
 - `orchestrator` is deterministic loop logic in `scripts/orchestrator-turn.ts`; it coordinates record -> verify -> fix -> re-record loops and uses the shared bus as the state ledger.
-- `planner` decides handoff payloads and uses `gpt-5.4` for more capable planning.
+- Rails owns handoff state; when a new decision is required it requests one bounded structured model response from a compact evidence projection.
 - `worker` is the single generic task executor: it records demos, runs evidence-based verification passes, or applies a scoped fix, whichever the planner's step/prompt describes, after planner gives the work order.
 - Execution is strictly sequential: at most one `worker` instance runs per run at a time, per the planner's `nextStep`/`followingSteps` decision. There is no dependency graph because there is only ever one thing in flight.
 - Keep `multi_agent` enabled so Codex can still fan out its own built-in `explorer`/`worker` subagents for read-only research or bounded edits within a single agent's own turn — this is separate from the workflow's sequential step execution.
 
 The supervisor calls the orchestrator logic directly in-process. Do not route orchestration through repo CLI wrappers or a standalone LLM orchestrator prompt.
-Normal worker completions are handled deterministically: each worker calls the `worker_turn` MCP tool itself when it finishes, which requests a follow-up planner via a bus spawn request (reused if one is open, or fulfilled by a still-active planner — a stopped fulfillment is stale and gets a fresh request instead) — the supervisor spawns that planner on its next tick, and it decides and publishes the actual next step. The orchestrator only needs to invoke `planner` directly for cases `worker_turn` doesn't cover, such as stalled/unresponsive workers.
+Normal worker completions are Rails-owned: `worker_turn` promotes the next validated `followingSteps` item after `[DONE]`. Blocked, failed, exhausted, or unplanned outcomes queue one bounded, tools-disabled structured planner decision; no planner OS process is spawned.
 
 ## Running Nicknames
 

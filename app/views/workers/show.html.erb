@@ -8,6 +8,10 @@
 <%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
 
 <% if @log %>
+  <p>
+    <%= link_to "Back to run", workspace_run_path(current_workspace, @log["runId"]), class: "btn" %>
+  </p>
+
   <div class="card">
     <div class="card-title">
       <span><%= @log["nickname"] %></span>

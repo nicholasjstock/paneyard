@@ -10,8 +10,9 @@ class Orchestrator::WorkerSpawnerTest < ActiveSupport::TestCase
     assert_equal "Do the work.", args.last
   end
 
-  test "Claude planners use Sonnet while all execution roles use Haiku" do
-    assert_equal "sonnet", Orchestrator::WorkerSpawner.send(:claude_model_for, "planner")
+  test "Claude diagnosis starts small and only promoted work uses Sonnet" do
+    assert_equal "haiku", Orchestrator::WorkerSpawner.send(:claude_model_for, "worker", mode: "diagnosis")
+    assert_equal "sonnet", Orchestrator::WorkerSpawner.send(:claude_model_for, "worker", mode: "diagnosis", model_tier: "strong")
     assert_equal "haiku", Orchestrator::WorkerSpawner.send(:claude_model_for, "worker")
     assert_equal "haiku", Orchestrator::WorkerSpawner.send(:claude_model_for, "infrastructure")
   end

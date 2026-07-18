@@ -10,9 +10,28 @@ module Orchestrator
     # task is part of the MCP tool's input schema for API-surface
     # consistency with the other turn tools, but -- matching
     # scripts/worker-turn.ts exactly -- is never actually read here.
-    def run_worker_turn(run_id:, role:, nickname:, scope:, result:, now: Time.current, previous_state: nil)
+    def run_worker_turn(run_id:, role:, nickname:, scope:, result:, evidence_outcome: nil, evidence_citations: [], diagnosis_findings: nil, now: Time.current, previous_state: nil)
+      DiagnosisEvidenceGate.validate!(run_id:, nickname:, scope:, evidence_outcome:, evidence_citations:)
+      StructuredDiagnosisFindings.persist!(run_id:, nickname:, scope:, findings: diagnosis_findings) if diagnosis_findings.present?
       following_steps = previous_state&.dig(:following_steps) || []
       active_worker_ids = Worker.where(run_id: run_id, status: "running").pluck(:worker_id).to_set
+
+      if (review = record_diagnosis_attempt(run_id:, nickname:, result:, evidence_outcome:, evidence_citations:))
+        next_state = (previous_state || TickState.default_state(run_id)).merge(
+          phase: "planning", last_plan_summary: "Strong chaperone is reviewing repeated diagnosis failures.",
+          last_updated_at: now.utc.iso8601(3)
+        )
+        return { planner_request: nil, chaperone_review: { review_id: review.review_id }, next_state: next_state }
+      end
+
+      if completed_result?(result) && following_steps.any?
+        next_step, *remaining_steps = following_steps
+        summary = "#{nickname} completed #{scope}. Rails promoted the next previously planned step without another planner call."
+        promoted = run_planner_turn(
+          run_id:, summary:, next_step:, following_steps: remaining_steps, now:, previous_state:
+        )
+        return promoted.merge(planner_request: nil, promoted_preplanned_step: true)
+      end
 
       # A follow-up planner request is a repeatable recovery ask, not a
       # one-time artifact -- an 'open' request is safe to reuse
@@ -22,7 +41,11 @@ module Orchestrator
       existing_request = SpawnRequest
         .where(run_id: run_id, requested_role: "planner", scope: PLANNER_FOLLOWUP_SCOPE)
         .where.not(status: "dismissed")
-        .detect { |request| request.status == "open" || (request.fulfilled_worker_id.present? && active_worker_ids.include?(request.fulfilled_worker_id)) }
+        .detect do |request|
+          request.status == "open" ||
+            (request.fulfilled_worker_id.present? && active_worker_ids.include?(request.fulfilled_worker_id)) ||
+            PlannerDecision.active.exists?(spawn_request_id: request.request_id)
+        end
 
       planner_request = existing_request || SpawnRequest.create!(
         run_id: run_id,
@@ -33,11 +56,12 @@ module Orchestrator
           "call append_user_question.",
         context: [
           "Worker #{nickname} (role #{role}) reported this result for run #{run_id}, scope #{scope}: #{result}",
+          (evidence_outcome.present? ? "Evidence outcome: #{evidence_outcome}; citations: #{Array(evidence_citations).join(', ')}." : nil),
           "Current followingSteps queue (JSON, decided by the previous planner_turn call): #{following_steps.to_json}"
-        ].join(" "),
+        ].compact.join(" "),
         requested_role: "planner",
         priority: "blocking",
-        tags: [ "planner", PLANNER_FOLLOWUP_SCOPE, "worker-turn-followup" ]
+        tags: [ "planner", PLANNER_FOLLOWUP_SCOPE, "worker-turn-followup", ("evidence-#{evidence_outcome}" if evidence_outcome.present?) ].compact
       )
 
       # phase/tick_count/last_plan_summary/last_stall_finding/following_steps
@@ -58,7 +82,36 @@ module Orchestrator
       { planner_request: { request_id: planner_request.request_id }, next_state: next_state }
     end
 
+    def completed_result?(result)
+      result.to_s.match?(/\A\s*\[DONE\]/i)
+    end
+    private_class_method :completed_result?
+
+    def record_diagnosis_attempt(run_id:, nickname:, result:, evidence_outcome:, evidence_citations:)
+      worker = Worker.where(run_id:, nickname:).order(created_at: :desc).first
+      request = worker && SpawnRequest.find_by(fulfilled_worker_id: worker.worker_id)
+      return unless request && SpawnRequestedWorkers.execution_mode(request) == "diagnosis"
+
+      outcome = if result.to_s.match?(/\A\s*\[DONE\]/i) && evidence_outcome == "confirmed"
+        "done"
+      elsif result.to_s.match?(/\A\s*\[FAILED\]/i)
+        "failed"
+      else
+        "blocked"
+      end
+      lineage_key = request.lineage_key.presence || request.scope
+      attempt = StepAttempt.create!(
+        run_id:, spawn_request: request, worker_id: worker.worker_id, lineage_key:, mode: "diagnosis",
+        outcome:, result:, evidence_outcome:, evidence_citations:
+      )
+      return unless outcome.in?(%w[blocked failed])
+
+      ChaperoneTrigger.call(attempt)
+    end
+    private_class_method :record_diagnosis_attempt
+
     def run_planner_turn(run_id:, summary:, next_step:, following_steps:, now: Time.current, previous_state: nil)
+      StepPolicy.validate_plan!(run_id:, next_step:, following_steps:)
       completion_blockers = Orchestrator::RunContext.completion_blockers(run_id: run_id)
       if next_step.nil? && completion_blockers.any?
         raise ArgumentError, "Cannot complete run while acceptance criteria remain pending: #{completion_blockers.join(', ')}"

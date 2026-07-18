@@ -1,9 +1,7 @@
-# Starts a brand-new orchestrator run: seeds the initial planner request
-# on the bus and marks the run running. TickRunJob (a recurring job, see
-# config/recurring.yml) picks it up from there -- no separate OS process
-# to spawn/track anymore (contrast with the old bin/supervisor_launcher*
-# tick loop this replaced, whose PID used to be recorded on
-# Run#supervisor_pid).
+# Starts a brand-new orchestrator run: seeds the initial planning request
+# on the bus and marks the run running. TickRunJob claims that request and
+# queues one bounded PlannerDecisionJob; planning is Rails-owned and does
+# not spawn a stateful planner process.
 #
 # Runs via ActiveJob (not inline in the controller) so the web request
 # stays fast and a failure is visible/retryable like any other job.

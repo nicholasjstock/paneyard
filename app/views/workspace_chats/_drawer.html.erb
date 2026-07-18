@@ -1,0 +1,56 @@
+<%= turbo_stream_from "workspace_chat_#{chat.id}" %>
+
+<div class="chat-backdrop" data-action="click->chat-drawer#close"></div>
+<aside class="chat-drawer" role="dialog" aria-modal="true" aria-label="Project chat" data-chat-drawer-target="panel">
+  <div class="chat-drawer-shell">
+    <header class="chat-drawer-header">
+      <div>
+        <span class="eyebrow">Project operator</span>
+        <strong><%= chat.workspace.name %></strong>
+      </div>
+      <button type="button" class="chat-close" aria-label="Close chat" data-action="chat-drawer#close">×</button>
+    </header>
+
+    <section class="chat-drawer-thread" data-chat-drawer-target="thread" aria-live="polite">
+      <% if messages.empty? %>
+        <div class="chat-empty">
+          <h2>Ask about this run</h2>
+          <p>I can explain its current state, inspect or edit this project, and operate its jobs.</p>
+        </div>
+      <% else %>
+        <% messages.each do |message| %>
+          <article class="chat-message <%= message.role %> <%= message.status %>">
+            <div class="chat-message-meta">
+              <strong><%= message.role == "user" ? "You" : "Operator" %></strong>
+              <span><%= message.created_at.to_fs(:short) %></span>
+              <% unless message.status == "completed" %><span>· <%= message.status %></span><% end %>
+            </div>
+            <div class="chat-message-content"><%= simple_format(message.content) %></div>
+          </article>
+        <% end %>
+      <% end %>
+
+      <% if chat.status == "processing" %>
+        <div class="chat-thinking"><span></span><span></span><span></span> Working in <%= chat.workspace.name %>…</div>
+      <% end %>
+    </section>
+
+    <% if chat.last_error.present? %>
+      <div class="chat-drawer-error"><strong>Turn failed:</strong> <%= chat.last_error %></div>
+    <% end %>
+
+    <%= form_with model: WorkspaceChatMessage.new,
+          url: workspace_chat_messages_path(chat.workspace, chat, run_id: run.run_id),
+          class: "chat-composer" do |form| %>
+      <%= form.text_area :content,
+            placeholder: "What’s going on in this run?",
+            rows: 3, required: true, disabled: chat.status == "processing",
+            data: { chat_drawer_target: "input", action: "keydown->chat-drawer#submitOnEnter" } %>
+      <div class="chat-composer-footer">
+        <span class="muted">History belongs to <%= chat.workspace.name %>.</span>
+        <%= form.submit chat.status == "processing" ? "Working…" : "Send",
+              class: "btn primary", disabled: chat.status == "processing" %>
+      </div>
+    <% end %>
+  </div>
+</aside>

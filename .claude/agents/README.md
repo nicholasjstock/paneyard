@@ -26,10 +26,10 @@ Agents work together hierarchically:
 - **Supervisor** (@supervisor) owns the main workflow loop, calls orchestrator for planning, spawns workers, and iterates until completion.
 - **Orchestrator** (internal, called by @supervisor) never decides real work itself — a normal tick is a pure no-op. Its only job is detecting trouble: a stalled worker (still running, idle too long), or a dead-ended run (no active workers, no open requests, never marked `completed` — a worker that stopped without completing its handoff, invisible to stall detection since there's no running worker left to check). Either way it publishes a spawn request for a recovery @planner — unless a `blocking` user question is already open for the run, in which case it stays a no-op until that's answered, rather than spawning another @planner to redundantly re-investigate something already awaiting a human.
 - **Worker** (@worker) executes whatever the current bus request/prompt describes — recording, verification, or a scoped fix. Execution is strictly sequential: at most one worker instance runs per run at a time, per the planner's `nextStep`/`followingSteps` decision.
-- **Planner** (@planner) is spawned for stalled-worker recovery, and after every `worker_turn` completion, to decide the single next step (`nextStep`) plus the queue for later (`followingSteps`). Every planner turn ends by publishing a decision (`planner_turn`, with `nextStep` possibly `null`) or a user question (`append_user_question`) — never silently.
+- **Planning** is Rails-owned. A `[DONE]` worker result promotes the next validated `followingSteps` item deterministically. When a new decision is needed, Rails runs one bounded, tools-disabled structured model call and transactionally persists its `nextStep` and `followingSteps`; no planner OS process is spawned.
 
 All agents should route unmet worker needs back through the shared bus so the supervisor can spawn the missing role instead of fragmenting state across direct side channels.
-Workers report completion via the `worker_turn` MCP tool, which requests a follow-up @planner via a bus spawn request (reused if one is open, or fulfilled by a still-active planner — a stopped fulfillment is stale and gets a fresh request, so a later problem always gets its own planner) with the result and the current `followingSteps` queue as context — the supervisor spawns that planner on its next tick, and this is the primary reporting mechanism. Workers should call @planner directly only when they're stuck mid-task and need help (a separate path from the automatic post-completion request).
+Workers report completion through `worker_turn`. Rails advances a preplanned queue after `[DONE]`; blocked, failed, exhausted, or unplanned outcomes queue a bounded planner decision from a compact run-state projection.
 
 ## Quick Start
 
@@ -87,7 +87,6 @@ Each iteration of the supervisor's main loop:
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — System design and agent roles
 - [MESSAGING_PROTOCOL.md](./MESSAGING_PROTOCOL.md) — Structured logging format (all agents)
 - [worker.md](./worker.md) — Generic task worker
-- [planner.md](./planner.md) — Planning helper
 
 ## MCP Tools & Skills
 

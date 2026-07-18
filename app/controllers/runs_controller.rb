@@ -35,12 +35,15 @@ class RunsController < ApplicationController
     ticks = OrchestratorTick.for_run(@run.run_id).order(tick_count: :desc).limit(8).to_a.reverse
     @latest_tick = ticks.last && JSON.parse(ticks.last.to_json)
     @following_steps = Array(@latest_tick&.dig("followingSteps"))
-    @tick_history = { "runId" => @run.run_id, "entries" => ticks.map { |tick| JSON.parse(tick.to_json) } }
     raw_events = BusEvent.where(run_id: @run.run_id).order(created_at: :desc).limit(20).to_a.reverse.map { |event| JSON.parse(event.to_json) }
-    @run_events = compress_events(raw_events).last(8)
     @timeline_events = build_timeline(raw_events).last(8).reverse
-    @artifact_previews = collect_artifact_previews
+    @artifacts = collect_artifacts
+    @planner_decisions = @run.planner_decisions.order(created_at: :desc).limit(5).to_a
+    @latest_planner_decision = @planner_decisions.first
     @usage_summary = usage_summary
+    @run_now = build_run_now
+    @workspace_chat = current_workspace.workspace_chats.first_or_create!
+    @workspace_chat_messages = @workspace_chat.messages.order(:created_at)
   end
 
   def stop
@@ -60,24 +63,6 @@ class RunsController < ApplicationController
 
   def generate_run_id
     "demo-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}"
-  end
-
-  def compress_events(events)
-    events.each_with_object([]) do |event, compressed|
-      previous = compressed.last
-      if previous && duplicate_status_event?(previous, event)
-        previous["repeatCount"] = previous.fetch("repeatCount", 1) + 1
-        previous["at"] = event["at"]
-      else
-        compressed << event
-      end
-    end
-  end
-
-  def duplicate_status_event?(previous, current)
-    previous["type"] == "run.status" &&
-      current["type"] == "run.status" &&
-      previous["payload"] == current["payload"]
   end
 
   def build_timeline(events)
@@ -103,7 +88,46 @@ class RunsController < ApplicationController
     end
   end
 
-  def collect_artifact_previews
+  def build_run_now
+    current_activity = @active_workers.max_by { |activity| activity[:last_activity_at] || activity[:started_at] || Time.at(0) }
+    current_worker = current_activity&.dig(:worker)
+    next_step = current_worker ? @following_steps.first : (@spawn_requests.first || @following_steps.first)
+    attention_worker = @worker_activities.find { |activity| activity[:attention_needed] }
+    state, detail, status_class =
+      if current_worker
+        [ "Work in progress", "#{current_worker.nickname} is working on #{current_worker.scope}.", "running" ]
+      elsif @blocking_questions.any?
+        [ "Needs your decision", "#{helpers.pluralize(@blocking_questions.count, "blocking question")} awaiting an answer.", "blocking" ]
+      elsif @run.capacity_blocked?
+        available_at = @run.capacity_available_at.in_time_zone
+        [ "Waiting for capacity", "Work will resume automatically at #{helpers.l(available_at, format: "%H:%M %Z")}.", "planning" ]
+      elsif @spawn_requests.any?
+        [ "Ready to dispatch", "A #{@spawn_requests.first["requestedRole"]} handoff is waiting for the supervisor.", "planning" ]
+      elsif @following_steps.any?
+        [ "Awaiting the next plan", "The next planner turn will choose from the queued follow-up work.", "planning" ]
+      elsif @run.phase == "planning"
+        [ "Planning next step", @run.phase_summary.presence || "The orchestrator is deciding the next bounded handoff.", "planning" ]
+      elsif attention_worker
+        [ "Needs attention", "#{attention_worker[:worker].nickname} stopped unexpectedly.", "blocking" ]
+      elsif @run.status == "completed"
+        [ "Completed", "No further work is queued.", "completed" ]
+      else
+        [ "Monitoring", "No active worker or queued handoff is recorded yet.", "queued" ]
+      end
+
+    {
+      state: state,
+      detail: detail,
+      status_class: status_class,
+      why: current_worker&.reason.presence || @latest_tick&.dig("lastPlanSummary") || @run.phase_summary.presence,
+      current_activity: current_activity,
+      latest_activity_at: current_activity&.dig(:last_activity_at) || @run.phase_updated_at || @run.updated_at,
+      next_step: next_step,
+      latest_worker: @run.workers.where(status: "stopped").order(stopped_at: :desc).first
+    }
+  end
+
+  def collect_artifacts
     artifact_names = (
       SpawnRequest.where(run_id: @run.run_id).pluck(:scope) +
       Array(@latest_tick&.dig("followingSteps")).map { |step| step["artifact"] || step[:artifact] } +
@@ -113,7 +137,7 @@ class RunsController < ApplicationController
     Orchestrator::ArtifactStore.collect(@run.target_root, @run.run_id, artifact_names)[:artifacts]
       .select { |artifact| artifact[:exists] }
       .map do |artifact|
-        artifact.merge(preview: artifact[:preview].to_s.dup.force_encoding("UTF-8").scrub)
+        artifact.merge(content: Orchestrator::ArtifactStore.read(@run.target_root, @run.run_id, artifact[:name]).force_encoding("UTF-8").scrub)
       end
       .sort_by { |artifact| artifact[:updated_at] || "" }
       .reverse
@@ -123,16 +147,6 @@ class RunsController < ApplicationController
   end
 
   def usage_summary
-    workers = @run.workers
-    {
-      worker_count: workers.count,
-      reported_worker_count: workers.where.not(agent_turn_count: nil).count,
-      total_cost_usd: workers.sum(:total_cost_usd),
-      agent_turn_count: workers.sum(:agent_turn_count),
-      input_tokens: workers.sum(:input_tokens),
-      output_tokens: workers.sum(:output_tokens),
-      cache_read_input_tokens: workers.sum(:cache_read_input_tokens),
-      models: workers.where.not(model: nil).group(:model).count
-    }
+    Orchestrator::RunUsage.build(@run)
   end
 end

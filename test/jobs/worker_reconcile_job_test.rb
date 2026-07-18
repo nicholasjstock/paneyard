@@ -58,6 +58,44 @@ class WorkerReconcileJobTest < ActiveSupport::TestCase
     FileUtils.remove_entry(directory) if directory && File.exist?(directory)
   end
 
+  test "does not report a failed handoff after a worker has completed one" do
+    workspace = Workspace.create!(name: "reconcile-handoff-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace: workspace,
+      run_id: "reconcile-handoff-#{SecureRandom.hex(4)}",
+      task: "Test completed handoff reconciliation",
+      target_root: workspace.root_path,
+      launcher_variant: "claude",
+      status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "completed\n")
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid,
+      run_id: run.run_id,
+      role: "planner",
+      nickname: "planner-test",
+      reason: "Test planner",
+      scope: "workflow-plan.md",
+      status: "running",
+      pid: 999_999_999,
+      prompt_path: log_path,
+      log_path: log_path,
+      last_message_path: log_path,
+      exit_status_path: log_path,
+      env_path: log_path,
+      command: "claude",
+      handoff_completed_at: Time.current
+    )
+
+    WorkerReconcileJob.perform_now
+
+    assert_equal "stopped", worker.reload.status
+    assert_equal "Worker stopped after completing its handoff.", worker.stop_reason
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   test "diagnostic worker payload excludes the launch prompt" do
     directory = Dir.mktmpdir
     log_path = File.join(directory, "worker.log")

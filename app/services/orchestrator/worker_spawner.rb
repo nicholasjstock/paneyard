@@ -25,7 +25,9 @@ module Orchestrator
     MASKED_API_KEY_VALUES = [ "", "[set]", "[secure]", "[redacted]" ].freeze
     CODEX_WORKER_MODEL = "gpt-5.6-luna"
 
-    def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil)
+    def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil, model_tier: "small")
+      raise ArgumentError, "Planner processes were removed; queue a PlannerDecisionJob instead" if role == "planner"
+
       # nickname flows straight into file paths under workers_dir below --
       # unlike runId (see Orchestrator::ArtifactStore.sanitize_run_id) the
       # original TS spawnWorkerInputShape never constrained nickname's
@@ -49,20 +51,20 @@ module Orchestrator
 
       driver = run.launcher_variant
       selected_model = if driver == "claude"
-        claude_model_for(role)
-      elsif role != "planner"
+        claude_model_for(role, mode:, model_tier:)
+      else
         CODEX_WORKER_MODEL
       end
       enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
       command, args =
         if driver == "claude"
-          [ "claude", claude_args(enriched_prompt, role: role) ]
+          [ "claude", claude_args(enriched_prompt, role: role, mode:, model_tier:) ]
         else
           [ "codex", codex_args(root_dir: root_dir, last_message_path: last_message_path, role: role) ]
         end
 
       driver == "claude" ? write_claude_mcp_config(root_dir) : write_codex_mcp_config(root_dir)
-      worker_env = build_worker_env
+      worker_env = build_worker_env.merge("WORKER_LOG_PATH" => log_path)
 
       File.write(prompt_path, enriched_prompt)
       File.write(log_path, "")
@@ -143,9 +145,9 @@ module Orchestrator
     # Agent instructions are plain prompt text, so Claude does not read the
     # YAML front matter in .claude/agents/*.md as model configuration. Keep
     # cost routing here at the actual CLI boundary instead.
-    def claude_args(prompt, role: "worker")
+    def claude_args(prompt, role: "worker", mode: nil, model_tier: "small")
       [
-        "--model", claude_model_for(role),
+        "--model", claude_model_for(role, mode:, model_tier:),
         "--permission-mode", "bypassPermissions",
         "--output-format", "stream-json",
         "--include-partial-messages",
@@ -154,13 +156,12 @@ module Orchestrator
       ]
     end
 
-    def claude_model_for(role)
-      role == "planner" ? "sonnet" : "haiku"
+    def claude_model_for(role, mode: nil, model_tier: "small")
+      model_tier.to_s == "strong" ? "sonnet" : "haiku"
     end
 
     def codex_args(root_dir:, last_message_path:, role:)
-      model_args = role == "planner" ? [] : [ "--model", CODEX_WORKER_MODEL ]
-      [ "exec", *model_args, "--dangerously-bypass-approvals-and-sandbox", "-C", root_dir, "-o", last_message_path, "-" ]
+      [ "exec", "--model", CODEX_WORKER_MODEL, "--dangerously-bypass-approvals-and-sandbox", "-C", root_dir, "-o", last_message_path, "-" ]
     end
 
     # The shell remains the tracked process while the CLI runs. It records the
@@ -291,6 +292,7 @@ module Orchestrator
         USER: resolved.call("USER"),
         LOGNAME: resolved.call("LOGNAME"),
         TMPDIR: resolved.call("TMPDIR"),
+        WORKER_LOG_PATH: resolved.call("WORKER_LOG_PATH"),
         OPENAI_API_KEY: resolved.call("OPENAI_API_KEY").present? ? "[set]" : nil,
         OPENAI_BASE_URL: resolved.call("OPENAI_BASE_URL")
       }

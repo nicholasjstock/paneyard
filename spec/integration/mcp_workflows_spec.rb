@@ -17,6 +17,58 @@ RSpec.describe "MCP workflow integrations" do
     expect(run.bus_events.order(:created_at).pluck(:event_type)).to include("spawn_request.created")
   end
 
+  it "carries a diagnosis-only policy into the spawned worker request" do
+    run = create_run("mcp-diagnosis-policy")
+
+    response = McpTools::PlannerTurnTool.call(
+      runId: run.run_id,
+      summary: "The failing boundary is not confirmed yet.",
+      nextStep: {
+        owner: "worker",
+        artifact: "api-diagnosis.md",
+        successCheck: "Capture the POST response, subsequent GET response, and rendered state.",
+        mode: "diagnosis",
+        writeScope: "artifact_only",
+        allowedPaths: [],
+        evidenceRefs: []
+      },
+      followingSteps: [],
+      server_context: nil
+    )
+
+    request = run.spawn_requests.order(:created_at).last
+    expect(response.structured_content[:nextState][:phase]).to eq("planning")
+    expect(request.text).to include(
+      "Execution mode: diagnosis",
+      "Allowed repository paths: none",
+      "Do not implement an application fix"
+    )
+  end
+
+  it "rejects a planner step that combines diagnosis and implementation" do
+    run = create_run("mcp-combined-diagnosis-fix")
+
+    expect do
+      McpTools::PlannerTurnTool.call(
+        runId: run.run_id,
+        summary: "Evidence is still missing.",
+        nextStep: {
+          owner: "worker",
+          artifact: "api-diagnosis.md",
+          successCheck: "Capture the response and then implement the smallest fix.",
+          mode: "diagnosis",
+          writeScope: "artifact_only",
+          allowedPaths: [],
+          evidenceRefs: []
+        },
+        followingSteps: [],
+        server_context: nil
+      )
+    end.to raise_error(ArgumentError, "diagnosis step cannot also request implementation")
+
+    expect(run.spawn_requests).to be_empty
+  end
+
   it "writes and reads orchestrator state and history through the tool layer" do
     run = create_run("mcp-state")
 
@@ -104,6 +156,7 @@ RSpec.describe "MCP workflow integrations" do
 
   it "turns a worker result into follow-up planner work" do
     run = create_run("mcp-worker-turn")
+    worker = create_worker(run, role: "worker", nickname: "worker-1", scope: "fix-summary.md")
     McpTools::WriteOrchestratorStateTool.call(
       runId: run.run_id,
       phase: "planning",
@@ -127,6 +180,40 @@ RSpec.describe "MCP workflow integrations" do
 
     expect(response.structured_content[:plannerRequest][:requestId]).to eq(planner_request.request_id)
     expect(planner_request).to have_attributes(requested_role: "planner", scope: "workflow-plan.md")
+    expect(worker.reload.handoff_completed_at).to be_present
+  end
+
+  it "rejects a diagnosis handoff without artifact-backed evidence citations" do
+    run = create_run("mcp-diagnosis-evidence")
+    worker = create_worker(run, role: "worker", nickname: "worker-diagnosis", scope: "diagnosis.md")
+    run.spawn_requests.create!(
+      asked_by: "planner", scope: "diagnosis.md",
+      text: "Execution mode: diagnosis. Capture the POST and GET boundary.",
+      requested_role: "worker", priority: "blocking", status: "fulfilled",
+      fulfilled_by: "tick_run_job", fulfilled_at: Time.current, fulfilled_worker_id: worker.worker_id
+    )
+    Orchestrator::ArtifactStore.write(
+      run.target_root, run.run_id, "diagnosis.md",
+      "Evidence: POST completed at 12:00:01Z; reproduction stopped before the GET request."
+    )
+
+    expect do
+      McpTools::WorkerTurnTool.call(
+        runId: run.run_id, role: "worker", nickname: worker.nickname, scope: worker.scope,
+        result: "Diagnosis complete.", task: run.task, server_context: nil
+      )
+    end.to raise_error(ArgumentError, "diagnosis worker_turn requires evidenceOutcome=confirmed or blocked")
+
+    response = McpTools::WorkerTurnTool.call(
+      runId: run.run_id, role: "worker", nickname: worker.nickname, scope: worker.scope,
+      result: "The target boundary was not reached.", task: run.task,
+      evidenceOutcome: "blocked",
+      evidenceCitations: [ "reproduction stopped before the GET request" ],
+      server_context: nil
+    )
+
+    expect(response.structured_content[:plannerRequest][:requestId]).to be_present
+    expect(worker.reload.handoff_completed_at).to be_present
   end
 
   it "turns a planner decision into completion state when nextStep is nil" do
@@ -178,21 +265,7 @@ RSpec.describe "MCP workflow integrations" do
 
   it "completes when the planner submitting a nil nextStep is the only active worker" do
     run = create_run("mcp-planner-self")
-    run.workers.create!(
-      worker_id: SecureRandom.uuid,
-      role: "planner",
-      nickname: "planner-1",
-      reason: "Submit the final decision.",
-      scope: "workflow-plan.md",
-      status: "running",
-      pid: 123_456,
-      prompt_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "planner-1.prompt.txt"),
-      log_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "planner-1.log"),
-      last_message_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "planner-1.last-message.txt"),
-      env_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "planner-1.env.json"),
-      command: "claude",
-      args: []
-    )
+    planner = create_worker(run, role: "planner", nickname: "planner-1", scope: "workflow-plan.md")
 
     response = McpTools::PlannerTurnTool.call(
       runId: run.run_id,
@@ -204,9 +277,10 @@ RSpec.describe "MCP workflow integrations" do
 
     expect(response.structured_content[:nextState][:phase]).to eq("completed")
     expect(Orchestrator::TickState.latest(run.run_id)[:phase]).to eq("completed")
+    expect(planner.reload.handoff_completed_at).to be_present
   end
 
-  it "requeues a worker step when the previous fulfilled worker died before writing its artifact" do
+  it "requeues a worker step when the previous fulfilled worker stopped, even if it wrote the artifact" do
     run = create_run("mcp-worker-requeue")
     stale_worker_id = SecureRandom.uuid
     run.spawn_requests.create!(
@@ -239,6 +313,7 @@ RSpec.describe "MCP workflow integrations" do
       command: "claude",
       args: []
     )
+    Orchestrator::ArtifactStore.write(run.target_root, run.run_id, "phone-recording-report.md", "Incomplete first attempt.")
 
     response = McpTools::PlannerTurnTool.call(
       runId: run.run_id,
@@ -246,7 +321,11 @@ RSpec.describe "MCP workflow integrations" do
       nextStep: {
         owner: "worker",
         artifact: "phone-recording-report.md",
-        successCheck: "Write the recording report."
+        successCheck: "Write the recording report.",
+        mode: "recording",
+        writeScope: "artifact_only",
+        allowedPaths: [],
+        evidenceRefs: [ "prior recording attempt" ]
       },
       followingSteps: [],
       server_context: nil
@@ -271,6 +350,24 @@ RSpec.describe "MCP workflow integrations" do
       status: "running",
       launched_by: "operator",
       started_at: Time.current
+    )
+  end
+
+  def create_worker(run, role:, nickname:, scope:)
+    run.workers.create!(
+      worker_id: SecureRandom.uuid,
+      role: role,
+      nickname: nickname,
+      reason: "Test #{role} handoff.",
+      scope: scope,
+      status: "running",
+      pid: 123_456,
+      prompt_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "#{nickname}.prompt.txt"),
+      log_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "#{nickname}.log"),
+      last_message_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "#{nickname}.last-message.txt"),
+      env_path: File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers", "#{nickname}.env.json"),
+      command: "claude",
+      args: []
     )
   end
 end

@@ -9,6 +9,8 @@ Rails.application.routes.draw do
   # app/services/orchestrator/mcp_server.rb, app/mcp_tools/) -- Streamable
   # HTTP, hosted inside this already-running process rather than spawned
   # fresh per worker like the old scripts/workflow-mcp-server.ts did.
+  mount Orchestrator::ChaperoneMcpEndpoint.new => "/mcp/chaperone"
+  mount Orchestrator::WorkspaceChatMcpEndpoint.new => "/mcp/workspace-chat"
   mcp_transport = MCP::Server::Transports::StreamableHTTPTransport.new(Orchestrator::McpServer.build)
   mount mcp_transport => "/mcp"
 
@@ -20,6 +22,9 @@ Rails.application.routes.draw do
   root "workspaces#index"
 
   resources :workspaces, only: %i[index show new create destroy] do
+    resources :chats, controller: "workspace_chats", only: %i[index create show] do
+      resources :messages, controller: "workspace_chat_messages", only: %i[create]
+    end
     resources :runs, only: %i[index new create show] do
       member do
         post :stop

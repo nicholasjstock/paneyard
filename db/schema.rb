@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_17_173000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -20,6 +20,33 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_173000) do
     t.datetime "updated_at", null: false
     t.index ["event_id"], name: "index_bus_events_on_event_id", unique: true
     t.index ["run_id"], name: "index_bus_events_on_run_id"
+  end
+
+  create_table "chaperone_reviews", force: :cascade do |t|
+    t.string "action"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "lineage_key", null: false
+    t.string "model"
+    t.string "review_id", null: false
+    t.string "run_id", null: false
+    t.datetime "started_at"
+    t.string "status", default: "queued", null: false
+    t.text "stderr"
+    t.text "stdout"
+    t.json "step_attempt_ids", default: [], null: false
+    t.string "subject_id"
+    t.string "subject_type", default: "diagnosis", null: false
+    t.text "summary"
+    t.string "token_digest", null: false
+    t.json "tool_calls", default: [], null: false
+    t.text "trigger_reason"
+    t.datetime "updated_at", null: false
+    t.index ["review_id"], name: "index_chaperone_reviews_on_review_id", unique: true
+    t.index ["run_id", "status"], name: "index_chaperone_reviews_on_run_id_and_status"
+    t.index ["subject_type", "subject_id", "status"], name: "index_chaperone_reviews_on_subject_and_status"
+    t.index ["token_digest"], name: "index_chaperone_reviews_on_token_digest", unique: true
   end
 
   create_table "orchestrator_ticks", force: :cascade do |t|
@@ -33,6 +60,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_173000) do
     t.integer "tick_count", null: false
     t.datetime "updated_at", null: false
     t.index ["run_id", "tick_count"], name: "index_orchestrator_ticks_on_run_id_and_tick_count", unique: true
+  end
+
+  create_table "planner_decisions", force: :cascade do |t|
+    t.integer "cache_read_input_tokens"
+    t.datetime "completed_at"
+    t.integer "context_bytes", default: 0, null: false
+    t.json "context_requests", default: [], null: false
+    t.datetime "created_at", null: false
+    t.json "decision"
+    t.string "decision_id", null: false
+    t.text "error"
+    t.integer "input_tokens"
+    t.string "model"
+    t.json "model_attempts", default: [], null: false
+    t.integer "model_calls", default: 0, null: false
+    t.integer "output_tokens"
+    t.string "run_id", null: false
+    t.string "spawn_request_id", null: false
+    t.datetime "started_at"
+    t.string "status", default: "queued", null: false
+    t.decimal "total_cost_usd", precision: 12, scale: 6
+    t.datetime "updated_at", null: false
+    t.index ["decision_id"], name: "index_planner_decisions_on_decision_id", unique: true
+    t.index ["run_id", "status"], name: "index_planner_decisions_on_run_id_and_status"
+    t.index ["spawn_request_id"], name: "index_planner_decisions_on_spawn_request_id", unique: true
   end
 
   create_table "run_context_entries", force: :cascade do |t|
@@ -86,6 +138,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_173000) do
     t.string "fulfilled_by"
     t.string "fulfilled_worker_id"
     t.text "fulfillment_note"
+    t.string "lineage_key"
+    t.string "model_tier", default: "small", null: false
     t.string "priority", default: "advisory", null: false
     t.string "request_id", null: false
     t.string "requested_role", null: false
@@ -97,6 +151,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_173000) do
     t.datetime "updated_at", null: false
     t.index ["request_id"], name: "index_spawn_requests_on_request_id", unique: true
     t.index ["run_id", "status"], name: "index_spawn_requests_on_run_id_and_status"
+  end
+
+  create_table "step_attempts", force: :cascade do |t|
+    t.string "attempt_id", null: false
+    t.string "chaperone_action"
+    t.string "chaperone_status"
+    t.text "chaperone_summary"
+    t.datetime "created_at", null: false
+    t.json "evidence_citations", default: [], null: false
+    t.string "evidence_outcome"
+    t.string "lineage_key", null: false
+    t.string "mode", null: false
+    t.string "outcome", null: false
+    t.text "result", null: false
+    t.string "run_id", null: false
+    t.string "spawn_request_id", null: false
+    t.datetime "updated_at", null: false
+    t.string "worker_id"
+    t.index ["attempt_id"], name: "index_step_attempts_on_attempt_id", unique: true
+    t.index ["run_id", "lineage_key"], name: "index_step_attempts_on_run_id_and_lineage_key"
   end
 
   create_table "user_questions", force: :cascade do |t|
@@ -129,6 +203,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_173000) do
     t.string "env_path", null: false
     t.integer "exit_code"
     t.string "exit_status_path"
+    t.datetime "handoff_completed_at"
     t.bigint "input_tokens"
     t.string "last_message_path", null: false
     t.string "log_path", null: false
@@ -151,6 +226,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_173000) do
     t.string "worker_id", null: false
     t.index ["run_id", "status"], name: "index_workers_on_run_id_and_status"
     t.index ["worker_id"], name: "index_workers_on_worker_id", unique: true
+  end
+
+  create_table "workspace_chat_messages", force: :cascade do |t|
+    t.text "content", null: false
+    t.datetime "created_at", null: false
+    t.string "role", null: false
+    t.string "status", default: "completed", null: false
+    t.datetime "updated_at", null: false
+    t.json "usage", default: {}, null: false
+    t.integer "workspace_chat_id", null: false
+    t.index ["workspace_chat_id"], name: "index_workspace_chat_messages_on_workspace_chat_id"
+  end
+
+  create_table "workspace_chats", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "last_error"
+    t.string "session_id"
+    t.string "status", default: "idle", null: false
+    t.string "title", default: "New conversation", null: false
+    t.datetime "updated_at", null: false
+    t.integer "workspace_id", null: false
+    t.index ["workspace_id"], name: "index_workspace_chats_on_workspace_id", unique: true
   end
 
   create_table "workspace_memory_entries", force: :cascade do |t|
@@ -180,6 +277,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_173000) do
   end
 
   add_foreign_key "runs", "workspaces"
+  add_foreign_key "workspace_chat_messages", "workspace_chats"
+  add_foreign_key "workspace_chats", "workspaces"
   add_foreign_key "workspace_memory_entries", "workspace_memory_entries", column: "supersedes_id"
   add_foreign_key "workspace_memory_entries", "workspaces"
 end

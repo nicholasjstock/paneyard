@@ -1,8 +1,8 @@
 # The scheduler is an executor and liveness observer, not a second planner.
-# PlannerTurnTool is the sole writer of a run's decision state. This job
-# fulfills requests that decision has already published and, after a real
-# lifecycle failure, requests a recovery planner without overwriting the
-# planner's state.
+# Rails owns orchestration state and process dispatch. This job fulfills
+# worker requests directly, queues bounded PlannerDecisionJob calls for
+# planning requests, and requests recovery planning after a real lifecycle
+# failure without asking a model to coordinate process state.
 class TickRunJob < ApplicationJob
   queue_as :default
 
@@ -33,13 +33,41 @@ class TickRunJob < ApplicationJob
     end
 
     Orchestrator::SpawnRequestedWorkers.call(run: run)
+    clear_expired_capacity_phase(run)
     request_recovery_planner_if_dead_end(run, previous_state)
+  end
+
+  def clear_expired_capacity_phase(run)
+    return unless run.phase == "waiting_on_capacity"
+
+    active_worker = Worker.where(run_id: run.run_id, status: "running").order(started_at: :desc).first
+    if active_worker
+      run.publish_phase!(
+        phase: "waiting_on_workers",
+        owner: active_worker.role,
+        summary: "#{active_worker.nickname} is active on #{active_worker.scope}."
+      )
+    elsif SpawnRequest.where(run_id: run.run_id, status: "open").exists?
+      run.publish_phase!(
+        phase: "planning",
+        owner: "orchestrator",
+        summary: "Capacity is available; the next handoff is queued."
+      )
+    else
+      run.publish_phase!(
+        phase: "planning",
+        owner: "orchestrator",
+        summary: "Capacity is available; evaluating the next handoff."
+      )
+    end
   end
 
   def request_recovery_planner_if_dead_end(run, previous_state)
     return if Worker.where(run_id: run.run_id, status: "running").exists?
+    return if PlannerDecision.active.where(run_id: run.run_id).exists?
     return if SpawnRequest.where(run_id: run.run_id, status: "open").exists?
-    return if previous_state[:phase].in?(%w[starting completed blocked_on_user])
+    return if previous_state[:phase].in?(%w[starting completed])
+    return if previous_state[:phase] == "blocked_on_user" && UserQuestion.exists?(run_id: run.run_id, status: "open", priority: "blocking")
 
     finding = Orchestrator::Turn.build_dead_end_finding(
       run_id: run.run_id,

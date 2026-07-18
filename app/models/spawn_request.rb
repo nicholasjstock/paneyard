@@ -13,6 +13,7 @@ class SpawnRequest < ApplicationRecord
   validates :run_id, :asked_by, :scope, :text, :requested_role, presence: true
   validates :priority, inclusion: { in: PRIORITIES }
   validates :status, inclusion: { in: STATUSES }
+  validates :model_tier, inclusion: { in: %w[small strong] }
 
   before_validation :assign_request_id, on: :create
   before_validation :assign_asked_at, on: :create
@@ -32,6 +33,8 @@ class SpawnRequest < ApplicationRecord
       text: text,
       context: context,
       requestedRole: requested_role,
+      lineageKey: lineage_key,
+      modelTier: model_tier,
       priority: priority,
       status: status,
       fulfilledBy: fulfilled_by,

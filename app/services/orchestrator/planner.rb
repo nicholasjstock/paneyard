@@ -20,20 +20,26 @@ module Orchestrator
 
       fix_step =
         if FRONTEND_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates the preferred frontend test first, then lands the narrowest front/** fix." }
+          { owner: "worker", artifact: "fix-summary.md", success_check: "Reproduce the frontend failure and identify the confirmed boundary with consumer evidence; keep repository application files read-only." }
         elsif BACKEND_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates a failing request spec first, then lands the narrowest back/** fix." }
+          { owner: "worker", artifact: "fix-summary.md", success_check: "Reproduce the backend failure and identify the confirmed boundary with request evidence; keep repository application files read-only." }
         elsif INFRASTRUCTURE_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "infrastructure", artifact: "fix-summary.md", success_check: "Adds or updates the preferred infrastructure test first, then lands the narrowest repo-local toolchain or environment fix." }
+          { owner: "infrastructure", artifact: "fix-summary.md", success_check: "Reproduce the infrastructure failure and identify the confirmed runtime boundary; keep repository files read-only." }
         else
-          { owner: "worker", artifact: "fix-summary.md", success_check: "Adds or updates the narrowest repo-wide regression test first, then lands the smallest general-purpose fix." }
+          { owner: "worker", artifact: "fix-summary.md", success_check: "Reproduce the reported failure and identify the confirmed boundary with direct evidence; keep repository files read-only." }
         end
 
       verify_step = {
         owner: "worker",
         artifact: "verifier-report.md",
-        success_check: "Confirms the change addresses the task and cites positive evidence from generated artifacts."
+        success_check: "Confirms the change addresses the task and cites positive evidence from generated artifacts.",
+        mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
       }
+
+      fix_step.merge!(
+        mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [],
+        evidence_refs: [ verifier_finding ].compact
+      )
 
       {
         summary: "#{task}.",
@@ -54,7 +60,8 @@ module Orchestrator
         next_step: {
           owner: "planner",
           artifact: "workflow-plan.md",
-          success_check: "Inspect this recovery context, determine the next bounded handoff, and publish it with planner_turn: #{summarized_finding}"
+          success_check: "Inspect the recovery evidence, identify why the handoff did not complete, and publish the next bounded step with planner_turn.",
+          mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [ summarized_finding ]
         },
         following_steps: following_steps
       }
@@ -69,17 +76,12 @@ module Orchestrator
     end
 
     # active_worker_ids -- used to tell a stale fulfilled recovery request
-    # apart from one that's still in flight. Safe to omit for callers that
-    # can never produce a requested_role: 'planner' step (planner_turn's
-    # schema restricts next_step.owner to orchestrator|worker).
+    # apart from one that's still in flight.
     def publish_planner_jobs(run_id:, summary:, plan:, active_worker_ids: Set.new)
       step = plan[:next_step]
-      return [] if step.nil? || step[:owner] == "orchestrator"
+      return [] if step.nil?
 
-      run = Run.find_by!(run_id: run_id)
-      artifact_exists = ->(artifact_name) do
-        File.exist?(ArtifactStore.resolve_path(run.target_root, run_id, artifact_name))
-      end
+      StepPolicy.validate!(run_id:, step:)
 
       existing_request = SpawnRequest
         .where(run_id: run_id, asked_by: "planner", requested_role: step[:owner], scope: step[:artifact])
@@ -87,11 +89,8 @@ module Orchestrator
         .detect do |request|
           if request.status == "open"
             true
-          elsif step[:owner] == "planner"
-            request.fulfilled_worker_id.present? && active_worker_ids.include?(request.fulfilled_worker_id)
           else
-            artifact_exists.call(step[:artifact]) ||
-              (request.fulfilled_worker_id.present? && active_worker_ids.include?(request.fulfilled_worker_id))
+            request.fulfilled_worker_id.present? && active_worker_ids.include?(request.fulfilled_worker_id)
           end
         end
 
@@ -103,9 +102,10 @@ module Orchestrator
         run_id: run_id,
         asked_by: "planner",
         scope: step[:artifact],
-        text: step[:success_check],
+        text: StepPolicy.worker_instructions(step),
         context: summary,
         requested_role: step[:owner],
+        lineage_key: step[:lineage_key].presence || step[:artifact],
         priority: "blocking",
         tags: [ step[:owner], step[:artifact], "planner-job" ]
       )

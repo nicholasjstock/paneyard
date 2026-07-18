@@ -25,6 +25,7 @@ RSpec.describe "workspace workers", type: :system do
     expect(page).to have_text(worker.worker_id)
     expect(page).to have_text("latest update")
     expect(page).to have_text("second line")
+    expect(page).to have_link("Back to run", href: workspace_run_path(workspace, run))
   end
 
   it "stops a running worker from the workers index" do

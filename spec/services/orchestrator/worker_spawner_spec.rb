@@ -1,8 +1,14 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::WorkerSpawner do
+  it "extracts diagnosis mode from the planner request used by the spawn path" do
+    request = instance_double(SpawnRequest, text: "Execution mode: diagnosis. Write scope: artifact_only.")
+
+    expect(Orchestrator::SpawnRequestedWorkers.execution_mode(request)).to eq("diagnosis")
+  end
+
   describe ".spawn_worker" do
-    it "inlines the Claude persona from this repository instead of using a target-workspace agent name" do
+    it "rejects legacy planner process spawns" do
       workspace_root = Dir.mktmpdir("workflow-worker-spawner-claude")
       workspace = Workspace.create!(name: "planner-#{SecureRandom.hex(4)}", root_path: workspace_root)
       run = workspace.runs.create!(
@@ -15,28 +21,13 @@ RSpec.describe Orchestrator::WorkerSpawner do
         started_at: Time.current
       )
 
-      spawn_call = nil
-      allow(Process).to receive(:spawn) do |*args|
-        spawn_call = args
-        12_345
-      end
-      allow(Process).to receive(:detach)
-
-      worker = described_class.spawn_worker(
-        run: run,
-        role: "planner",
-        nickname: "planner-test",
-        reason: "Recover the run.",
-        scope: "workflow-plan.md",
-        prompt: "Inspect the recovery context and publish the next step."
-      )
-
-      expect(worker.command).to eq("claude")
-      expect(spawn_call).to include("claude")
-      expect(spawn_call[2..]).to include("--permission-mode", "bypassPermissions", "-p", "--")
-      expect(spawn_call[2..]).not_to include("--agent", "planner")
-      expect(File.read(worker.prompt_path)).to include("# Planner (@planner)")
-      expect(File.read(worker.prompt_path)).to include("Current task:\nInspect the recovery context")
+      expect(Process).not_to receive(:spawn)
+      expect do
+        described_class.spawn_worker(
+          run: run, role: "planner", nickname: "planner-test", reason: "Recover the run.",
+          scope: "workflow-plan.md", prompt: "Inspect the recovery context."
+        )
+      end.to raise_error(ArgumentError, /Planner processes were removed/)
     end
 
     it "inlines the Codex persona from this repository instead of depending on target-workspace agent files" do
@@ -70,8 +61,30 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(worker.command).to eq("codex")
       expect(worker.model).to eq("gpt-5.6-luna")
       expect(worker.args).to include("--model", "gpt-5.6-luna")
+      expect(JSON.parse(File.read(worker.env_path)).fetch("WORKER_LOG_PATH")).to eq(worker.log_path)
       expect(File.read(worker.prompt_path)).to include('name = "worker"')
       expect(File.read(worker.prompt_path)).to include("Current task:\nVerify the issue and report back.")
+    end
+
+    it "starts Claude diagnosis workers on Haiku" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-diagnosis")
+      workspace = Workspace.create!(name: "planner-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Diagnose an uncertain boundary",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(34_567)
+      allow(Process).to receive(:detach)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", mode: "diagnosis", nickname: "diagnosis-worker",
+        reason: "Confirm the runtime boundary.", scope: "diagnosis.md", prompt: "Capture direct evidence."
+      )
+
+      expect(worker.model).to eq("haiku")
+      expect(worker.args).to include("--model", "haiku")
     end
   end
 end

@@ -16,9 +16,14 @@ module McpTools
             properties: {
               owner: { type: "string" },
               artifact: { type: "string" },
-              successCheck: { type: "string" }
+              successCheck: { type: "string" },
+              mode: { type: "string", enum: Orchestrator::StepPolicy::MODES },
+              writeScope: { type: "string", enum: Orchestrator::StepPolicy::WRITE_SCOPES },
+              allowedPaths: { type: "array", items: { type: "string" } },
+              evidenceRefs: { type: "array", items: { type: "string" } },
+              operatorApprovalQuestionId: { type: [ "string", "null" ] }
             },
-            required: %w[owner artifact successCheck]
+            required: %w[owner artifact successCheck mode writeScope allowedPaths evidenceRefs]
           }
         },
         lastStallFinding: { type: [ "string", "null" ] },

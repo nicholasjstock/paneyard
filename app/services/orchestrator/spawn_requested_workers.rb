@@ -37,6 +37,22 @@ module Orchestrator
 
       spawn_requests.each do |request|
         role = request.requested_role
+        if role == "planner"
+          decision = PlannerDecision.find_or_initialize_by(spawn_request_id: request.request_id)
+          decision.assign_attributes(run: run, spawn_request: request, status: "queued", error: nil, completed_at: nil)
+          decision.save!
+          request.update!(
+            status: "fulfilled", fulfilled_by: "planner_decision_job", fulfilled_at: Time.current,
+            fulfillment_note: "Queued bounded Rails-owned planner decision #{decision.decision_id}."
+          )
+          run.publish_phase!(
+            phase: "planning", owner: "orchestrator",
+            summary: "Preparing one bounded planner decision from current run evidence."
+          )
+          PlannerDecisionJob.perform_later(decision.id)
+          next
+        end
+
         nickname = build_unique_nickname(build_worker_nickname(role), current_workers + spawned_workers)
         reason = "Bus request from #{request.asked_by} for #{request.scope}."
         prompt = build_requested_worker_prompt(run_id: run_id, request: request)
@@ -52,7 +68,8 @@ module Orchestrator
 
         begin
           worker = WorkerSpawner.spawn_worker(
-            run: run, role: role, nickname: nickname, reason: reason, scope: request.scope, prompt: prompt, worker_id: worker_id
+            run: run, role: role, nickname: nickname, reason: reason, scope: request.scope, prompt: prompt,
+            worker_id: worker_id, mode: execution_mode(request), model_tier: request.model_tier
           )
         rescue => e
           # The claim promised a worker that never came into existence --
@@ -115,6 +132,10 @@ module Orchestrator
         (request.context.present? ? "Context: #{request.context}." : nil),
         "Write your report via write_workflow_artifact using artifactName=\"#{request.scope}\". Use the shared workflow bus for blockers."
       ].compact.join(" ")
+    end
+
+    def execution_mode(request)
+      request.text.to_s[/\bExecution mode: ([a-z_]+)\./i, 1]&.downcase
     end
   end
 end

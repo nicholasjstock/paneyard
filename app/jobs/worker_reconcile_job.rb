@@ -26,8 +26,9 @@ class WorkerReconcileJob < ApplicationJob
         stop_reason: worker.stop_reason.presence || stop_reason_for(worker, exit_code, output),
         **usage
       )
-      TickRunJob.perform_later unless claude_capacity_failure?(output)
-      block_run_for_capacity!(worker, output) if claude_capacity_failure?(output)
+      capacity_failure = claude_capacity_failure?(output) && worker.handoff_completed_at.blank?
+      TickRunJob.perform_later unless capacity_failure
+      block_run_for_capacity!(worker, output) if capacity_failure
     end
   end
 
@@ -49,8 +50,11 @@ class WorkerReconcileJob < ApplicationJob
     nil
   end
 
-  def stop_reason_for(worker, exit_code, output)
-    return "Claude session limit reached; worker exited before completing its handoff." if output.match?(/hit your session limit/i)
+    def stop_reason_for(worker, exit_code, output)
+      return "Worker exited successfully after completing its handoff." if worker.handoff_completed_at.present? && exit_code == 0
+      return "Worker exited with status #{exit_code} after completing its handoff." if worker.handoff_completed_at.present? && exit_code.present?
+      return "Worker stopped after completing its handoff." if worker.handoff_completed_at.present?
+      return "Claude session limit reached; worker exited before completing its handoff." if output.match?(/hit your session limit/i)
     return "Claude rate limit reached; worker exited before completing its handoff." if output.match?(/rate limit|too many requests/i)
     return "Worker exited with status #{exit_code} before completing its handoff." if exit_code.present?
 
