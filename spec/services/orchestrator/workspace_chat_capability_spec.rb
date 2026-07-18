@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class WorkspaceChatCapabilityTest < ActiveSupport::TestCase
-  test "authenticates only the chat named by the signed capability" do
+RSpec.describe Orchestrator::WorkspaceChatCapability do
+  it "authenticates only the chat named by the signed capability" do
     workspace = Workspace.create!(name: "capability-#{SecureRandom.hex(4)}", root_path: "/tmp/#{SecureRandom.hex(8)}")
     chat = workspace.workspace_chats.create!
 

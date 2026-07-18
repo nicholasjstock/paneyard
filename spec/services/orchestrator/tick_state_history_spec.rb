@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::TickStateTest < ActiveSupport::TestCase
-  test "returns a compact recent history by default and details on request" do
+RSpec.describe Orchestrator::TickState do
+  it "returns a compact recent history by default and details on request" do
     run_id = "tick-history-#{SecureRandom.hex(4)}"
     workspace = Workspace.create!(name: "tick-history-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
     Run.create!(

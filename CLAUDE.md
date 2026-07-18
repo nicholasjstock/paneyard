@@ -10,7 +10,7 @@ Planning starts on the smaller model. If the context is sufficient but the decis
 
 Workers remain autonomous executors. A result beginning with `[DONE]` promotes an existing validated `followingSteps` item directly in Rails. `[BLOCKED]`, `[FAILED]`, or an exhausted queue triggers a bounded planner decision.
 
-When changing orchestration, add service/job regression coverage, run `bin/rails test`, the relevant RSpec files, `bin/rubocop`, and `git diff --check`. Never use a live model call merely to test parsing or routing; inject or stub the planner runner.
+When changing orchestration, add RSpec service/job regression coverage, run `bundle exec rspec`, `bin/rubocop`, and `git diff --check`. Never use a live model call merely to test parsing or routing; inject or stub the planner runner.
 ## Chaperone
 
 Diagnosis starts on the small worker model. Rails records outcomes under the planner-provided stable `lineageKey`. Repeated unsuccessful attempts in one lineage trigger a strong-model chaperone, which may continue small, promote the next attempt, or stop for user input.

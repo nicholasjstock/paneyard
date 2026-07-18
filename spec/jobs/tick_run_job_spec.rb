@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class TickRunJobTest < ActiveSupport::TestCase
-  test "does not overwrite a planner decision while fulfilling its worker request" do
+RSpec.describe TickRunJob do
+  it "does not overwrite a planner decision while fulfilling its worker request" do
     workspace = Workspace.create!(name: "tick-job-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
     run = Run.create!(
       workspace: workspace, run_id: "tick-job-#{SecureRandom.hex(4)}", task: "Test scheduler boundary",
@@ -23,7 +23,7 @@ class TickRunJobTest < ActiveSupport::TestCase
     assert_equal planned_state, Orchestrator::TickState.latest(run.run_id)
   end
 
-  test "requests one recovery planner after a real dead end without writing tick state" do
+  it "requests one recovery planner after a real dead end without writing tick state" do
     workspace = Workspace.create!(name: "tick-recovery-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
     run = Run.create!(
       workspace: workspace, run_id: "tick-recovery-#{SecureRandom.hex(4)}", task: "Recover work that may need a fix",
@@ -45,7 +45,7 @@ class TickRunJobTest < ActiveSupport::TestCase
     assert_equal state, Orchestrator::TickState.latest(run.run_id)
   end
 
-  test "clears an expired capacity phase when work is active" do
+  it "clears an expired capacity phase when work is active" do
     workspace = Workspace.create!(name: "tick-capacity-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
     run = Run.create!(
       workspace: workspace, run_id: "tick-capacity-#{SecureRandom.hex(4)}", task: "Resume after capacity",

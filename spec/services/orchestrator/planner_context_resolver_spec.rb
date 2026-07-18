@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::PlannerContextResolverTest < ActiveSupport::TestCase
-  test "returns only a bounded window from a requested artifact" do
+RSpec.describe Orchestrator::PlannerContextResolver do
+  it "returns only a bounded window from a requested artifact" do
     run = build_run
     Orchestrator::ArtifactStore.write(run.target_root, run.run_id, "report.md", "a" * 10_000)
 
@@ -29,7 +29,7 @@ class Orchestrator::PlannerContextResolverTest < ActiveSupport::TestCase
   end
 
 
-  test "marks missing and empty context as unavailable" do
+  it "marks missing and empty context as unavailable" do
     run = build_run
 
     missing = Orchestrator::PlannerContextResolver.resolve(
@@ -43,7 +43,7 @@ class Orchestrator::PlannerContextResolverTest < ActiveSupport::TestCase
     refute empty_memory[:available]
   end
 
-  test "rejects workspace file traversal" do
+  it "rejects workspace file traversal" do
     run = build_run
 
     assert_raises(ArgumentError) do
@@ -55,7 +55,7 @@ class Orchestrator::PlannerContextResolverTest < ActiveSupport::TestCase
     end
   end
 
-  test "canonicalizes the exact current run artifact path to its safe filename" do
+  it "canonicalizes the exact current run artifact path to its safe filename" do
     run = build_run
     path = Orchestrator::ArtifactStore.write(run.target_root, run.run_id, "workflow-plan.md", "measured baseline: 94 seconds")
 
@@ -74,7 +74,7 @@ class Orchestrator::PlannerContextResolverTest < ActiveSupport::TestCase
     assert_equal "measured baseline: 94 seconds", absolute[:content]
   end
 
-  test "does not canonicalize an artifact path belonging to another run" do
+  it "does not canonicalize an artifact path belonging to another run" do
     run = build_run
 
     assert_raises(ArgumentError) do

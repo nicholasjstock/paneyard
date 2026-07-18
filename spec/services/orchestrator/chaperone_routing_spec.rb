@@ -1,9 +1,9 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::ChaperoneRoutingTest < ActiveSupport::TestCase
+RSpec.describe "chaperone routing" do
   include ActiveJob::TestHelper
 
-  test "queues a strong chaperone after the second failed diagnosis in one lineage" do
+  it "queues a strong chaperone after the second failed diagnosis in one lineage" do
     run = build_run
     first = report_failure(run, 1)
     assert first[:planner_request]
@@ -21,7 +21,7 @@ class Orchestrator::ChaperoneRoutingTest < ActiveSupport::TestCase
     assert_equal 2, review.step_attempt_ids.length
   end
 
-  test "promotion preserves the diagnosis lineage and requests the strong worker tier" do
+  it "promotion preserves the diagnosis lineage and requests the strong worker tier" do
     run = build_run
     report_failure(run, 1)
     report_failure(run, 2)
@@ -38,7 +38,7 @@ class Orchestrator::ChaperoneRoutingTest < ActiveSupport::TestCase
     assert_equal "completed", review.reload.status
   end
 
-  test "only a chaperone decision can promote a planner request" do
+  it "only a chaperone decision can promote a planner request" do
     run = build_run
     request = run.spawn_requests.create!(
       asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",
@@ -58,7 +58,7 @@ class Orchestrator::ChaperoneRoutingTest < ActiveSupport::TestCase
     assert_equal "completed", review.reload.status
   end
 
-  test "stopping a planner asks an actionable question and keeps the conclusion as context" do
+  it "stopping a planner asks an actionable question and keeps the conclusion as context" do
     run = build_run
     request = run.spawn_requests.create!(
       asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",
@@ -85,7 +85,7 @@ class Orchestrator::ChaperoneRoutingTest < ActiveSupport::TestCase
     assert_equal "blocking", question.priority
   end
 
-  test "stopping repeated diagnosis separates the decision from its explanation" do
+  it "stopping repeated diagnosis separates the decision from its explanation" do
     run = build_run
     report_failure(run, 1)
     report_failure(run, 2)

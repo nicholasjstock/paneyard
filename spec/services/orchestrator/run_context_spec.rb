@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::RunContextTest < ActiveSupport::TestCase
-  test "reports only pending acceptance criteria as completion blockers" do
+RSpec.describe Orchestrator::RunContext do
+  it "reports only pending acceptance criteria as completion blockers" do
     run_id = "context-test-#{SecureRandom.hex(4)}"
     RunContextEntry.create!(
       run_id: run_id, entry_key: "speed", kind: "acceptance_criterion", status: "verified",
@@ -18,7 +18,7 @@ class Orchestrator::RunContextTest < ActiveSupport::TestCase
     assert_equal [ "recording" ], Orchestrator::RunContext.completion_blockers(run_id: run_id)
   end
 
-  test "returns a bounded brief by default and full content for requested keys" do
+  it "returns a bounded brief by default and full content for requested keys" do
     run_id = "context-brief-#{SecureRandom.hex(4)}"
     long_content = "x" * 900
     RunContextEntry.create!(

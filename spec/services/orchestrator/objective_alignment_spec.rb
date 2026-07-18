@@ -1,9 +1,9 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::ObjectiveAlignmentTest < ActiveSupport::TestCase
+RSpec.describe Orchestrator::ObjectiveAlignment do
   include ActiveJob::TestHelper
 
-  test "rejects a performance diagnosis without a cited numeric baseline and preserves it as unrelated evidence" do
+  it "rejects a performance diagnosis without a cited numeric baseline and preserves it as unrelated evidence" do
     run, request, worker = build_diagnosis("Make the phone demo faster")
     artifact = "The phone demo has a nested coverage-item routing defect in front/scripts/record-demo.ts."
     Orchestrator::ArtifactStore.write(run.target_root, run.run_id, request.scope, artifact)
@@ -21,7 +21,7 @@ class Orchestrator::ObjectiveAlignmentTest < ActiveSupport::TestCase
     assert_includes rejected.content, "separate candidate"
   end
 
-  test "queues a chaperone after a second objective-misaligned diagnosis in one lineage" do
+  it "queues a chaperone after a second objective-misaligned diagnosis in one lineage" do
     run, first_request, first_worker = build_diagnosis("Make the phone demo faster")
     reject_diagnosis(run, first_request, first_worker)
     second_worker = run.workers.create!(
@@ -45,7 +45,7 @@ class Orchestrator::ObjectiveAlignmentTest < ActiveSupport::TestCase
     assert_equal 2, run.chaperone_reviews.last.step_attempt_ids.length
   end
 
-  test "accepts a performance diagnosis with an artifact-backed measurement" do
+  it "accepts a performance diagnosis with an artifact-backed measurement" do
     run, request, worker = build_diagnosis("Make the phone demo faster")
     citation = "Measured phone demo duration: 94.2 seconds from launch to completion."
     Orchestrator::ArtifactStore.write(run.target_root, run.run_id, request.scope, citation)
@@ -58,7 +58,7 @@ class Orchestrator::ObjectiveAlignmentTest < ActiveSupport::TestCase
     end
   end
 
-  test "rejects downstream work that drops the performance objective" do
+  it "rejects downstream work that drops the performance objective" do
     run, = build_diagnosis("Make the phone demo faster")
 
     error = assert_raises(ArgumentError) do

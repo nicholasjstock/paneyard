@@ -103,7 +103,7 @@ RSpec.describe "MCP workflow integrations" do
       summary: "Waiting for the planner result.",
       server_context: nil
     )
-    events_response = McpTools::ListRecentEventsTool.call(server_context: nil, limit: 5)
+    events_response = McpTools::ListRecentEventsTool.call(runId: run.run_id, server_context: nil, limit: 5)
 
     expect(status_response.structured_content[:phase]).to eq("waiting_on_workers")
     expect(events_response.structured_content[:events].map { |event| event[:type] }).to include("run.status")

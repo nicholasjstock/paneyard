@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::StructuredDiagnosisFindingsTest < ActiveSupport::TestCase
-  test "persists exact targets and measurements as one curated run-context fact" do
+RSpec.describe Orchestrator::StructuredDiagnosisFindings do
+  it "persists exact targets and measurements as one curated run-context fact" do
     root = Dir.mktmpdir("structured-findings")
     FileUtils.mkdir_p(File.join(root, "front", "scripts"))
     File.write(File.join(root, "front", "scripts", "record-demo.ts"), "// target")
@@ -38,7 +38,7 @@ class Orchestrator::StructuredDiagnosisFindingsTest < ActiveSupport::TestCase
     assert_includes Orchestrator::PlannerBrief.build(run:, request: run.spawn_requests.first), "front/scripts/record-demo.ts"
   end
 
-  test "rejects a target path that is not cited in the diagnosis artifact" do
+  it "rejects a target path that is not cited in the diagnosis artifact" do
     root = Dir.mktmpdir("structured-findings-reject")
     workspace = Workspace.create!(name: "findings-reject-#{SecureRandom.hex(4)}", root_path: root)
     run = workspace.runs.create!(run_id: SecureRandom.uuid, task: "Diagnose", target_root: root, launcher_variant: "claude", status: "running")

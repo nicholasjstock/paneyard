@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::PlannerTest < ActiveSupport::TestCase
-  test "routes infrastructure findings to the infrastructure role" do
+RSpec.describe Orchestrator::Planner do
+  it "routes infrastructure findings to the infrastructure role" do
     plan = Orchestrator::Planner.plan_workflow_iteration(
       task: "Fix the stalled worker", verifier_finding: "Docker worker logs stop streaming."
     )

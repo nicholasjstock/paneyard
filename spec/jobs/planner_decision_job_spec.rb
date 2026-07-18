@@ -1,8 +1,8 @@
-require "test_helper"
+require "rails_helper"
 
-class PlannerDecisionJobTest < ActiveSupport::TestCase
+RSpec.describe PlannerDecisionJob do
   include ActiveJob::TestHelper
-  test "persists and dispatches one bounded model decision" do
+  it "persists and dispatches one bounded model decision" do
     run, request, record = build_decision
     result = {
       summary: "Run the verification.",
@@ -24,7 +24,7 @@ class PlannerDecisionJobTest < ActiveSupport::TestCase
     assert_equal "planning", Orchestrator::TickState.latest(run.run_id)[:phase]
   end
 
-  test "fails the run instead of retrying an invalid planner call forever" do
+  it "fails the run instead of retrying an invalid planner call forever" do
     run, request, record = build_decision
     error = Orchestrator::PlannerDecisionRunner::Error.new("invalid structured response")
 
@@ -38,7 +38,7 @@ class PlannerDecisionJobTest < ActiveSupport::TestCase
     assert_equal "failed", run.phase
   end
 
-  test "routes a policy-invalid small plan to the chaperone without self-promoting" do
+  it "routes a policy-invalid small plan to the chaperone without self-promoting" do
     run, _request, record = build_decision
     tiers = []
     runner = lambda do |model_tier:, **|
@@ -64,7 +64,7 @@ class PlannerDecisionJobTest < ActiveSupport::TestCase
     assert_equal "planner", run.chaperone_reviews.last.subject_type
   end
 
-  test "does not complete a run after a blocked worker handoff" do
+  it "does not complete a run after a blocked worker handoff" do
     run, request, record = build_decision
     request.update!(tags: %w[planner worker-turn-followup evidence-blocked])
     result = {
@@ -81,7 +81,7 @@ class PlannerDecisionJobTest < ActiveSupport::TestCase
     assert_equal "planner", run.chaperone_reviews.last.subject_type
   end
 
-  test "reruns with narrowly requested context before committing a decision" do
+  it "reruns with narrowly requested context before committing a decision" do
     run, _request, record = build_decision
     Orchestrator::ArtifactStore.write(run.target_root, run.run_id, "diagnosis.md", "Confirmed boundary: admin session was missing.")
     calls = []
@@ -122,7 +122,7 @@ class PlannerDecisionJobTest < ActiveSupport::TestCase
     assert_equal "fix.md", run.spawn_requests.open_only.find_by!(requested_role: "worker").scope
   end
 
-  test "turns repeated unavailable context into a bounded diagnosis" do
+  it "turns repeated unavailable context into a bounded diagnosis" do
     run, _request, record = build_decision
     calls = 0
     tiers = []
@@ -151,7 +151,7 @@ class PlannerDecisionJobTest < ActiveSupport::TestCase
     assert_equal "planner", diagnosis.asked_by
   end
 
-  test "small planner requests chaperone review instead of promoting itself" do
+  it "small planner requests chaperone review instead of promoting itself" do
     run, _request, record = build_decision
     tiers = []
     runner = lambda do |model_tier:, **|
@@ -182,7 +182,7 @@ class PlannerDecisionJobTest < ActiveSupport::TestCase
     assert_equal "planner", run.chaperone_reviews.last.subject_type
   end
 
-  test "returns to the small model after a promoted planner receives fresh context" do
+  it "returns to the small model after a promoted planner receives fresh context" do
     run, request, record = build_decision
     request.update!(model_tier: "strong")
     Orchestrator::ArtifactStore.write(run.target_root, run.run_id, "diagnosis.md", "Exact target: front/scripts/record-demo.ts")
@@ -212,7 +212,7 @@ class PlannerDecisionJobTest < ActiveSupport::TestCase
     assert_includes final_context, "front/scripts/record-demo.ts"
   end
 
-  test "strips excess path authority from a strong verification plan instead of restarting diagnosis" do
+  it "strips excess path authority from a strong verification plan instead of restarting diagnosis" do
     run, request, record = build_decision
     request.update!(model_tier: "strong")
     runner = lambda do |**|

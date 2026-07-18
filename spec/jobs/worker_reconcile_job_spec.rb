@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class WorkerReconcileJobTest < ActiveSupport::TestCase
-  test "classifies a Claude session-limit exit from the worker log" do
+RSpec.describe WorkerReconcileJob do
+  it "classifies a Claude session-limit exit from the worker log" do
     workspace = Workspace.create!(name: "reconcile-test-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(
       workspace: workspace,
@@ -46,7 +46,7 @@ class WorkerReconcileJobTest < ActiveSupport::TestCase
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
-  test "bounds stream-log diagnostics returned to planners" do
+  it "bounds stream-log diagnostics returned to planners" do
     directory = Dir.mktmpdir
     log_path = File.join(directory, "worker.log")
     File.write(log_path, "x" * 2_000)
@@ -58,7 +58,7 @@ class WorkerReconcileJobTest < ActiveSupport::TestCase
     FileUtils.remove_entry(directory) if directory && File.exist?(directory)
   end
 
-  test "does not report a failed handoff after a worker has completed one" do
+  it "does not report a failed handoff after a worker has completed one" do
     workspace = Workspace.create!(name: "reconcile-handoff-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(
       workspace: workspace,
@@ -96,7 +96,7 @@ class WorkerReconcileJobTest < ActiveSupport::TestCase
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
-  test "diagnostic worker payload excludes the launch prompt" do
+  it "diagnostic worker payload excludes the launch prompt" do
     directory = Dir.mktmpdir
     log_path = File.join(directory, "worker.log")
     File.write(log_path, "worker output\n")

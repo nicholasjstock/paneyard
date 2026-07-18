@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class BroadcastWorkerLogsJobTest < ActiveSupport::TestCase
-  test "records a changed active worker log" do
+RSpec.describe BroadcastWorkerLogsJob do
+  it "records a changed active worker log" do
     workspace = Workspace.create!(name: "log-watch-test-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(
       workspace: workspace,

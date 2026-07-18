@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::TurnTest < ActiveSupport::TestCase
-  test "planner completion stays blocked when an operator answer is open" do
+RSpec.describe Orchestrator::Turn do
+  it "planner completion stays blocked when an operator answer is open" do
     workspace = Workspace.create!(name: "turn-test-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
     run = Run.create!(
       workspace: workspace,
@@ -31,7 +31,7 @@ class Orchestrator::TurnTest < ActiveSupport::TestCase
     assert_equal "blocked_on_user", result.dig(:next_state, :phase)
   end
 
-  test "planner cannot complete with pending acceptance criteria" do
+  it "planner cannot complete with pending acceptance criteria" do
     workspace = Workspace.create!(name: "turn-context-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
     run = Run.create!(
       workspace: workspace, run_id: "turn-context-#{SecureRandom.hex(4)}", task: "Verify completion",

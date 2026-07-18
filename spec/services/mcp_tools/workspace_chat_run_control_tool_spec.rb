@@ -1,11 +1,11 @@
-require "test_helper"
+require "rails_helper"
 
-class WorkspaceChatRunControlToolTest < ActiveSupport::TestCase
+RSpec.describe McpTools::WorkspaceChatRunControlTool do
   include ActiveJob::TestHelper
 
-  teardown { WorkspaceChatContext.reset }
+  after { WorkspaceChatContext.reset }
 
-  test "resumes a run and queues orchestration only inside the chat workspace" do
+  it "resumes a run and queues orchestration only inside the chat workspace" do
     own_workspace, chat = create_workspace_with_chat("own")
     other_workspace, = create_workspace_with_chat("other")
     run = create_run(own_workspace, "own-run")

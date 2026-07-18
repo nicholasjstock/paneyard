@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::TurnRoutingTest < ActiveSupport::TestCase
-  test "promotes a queued step after DONE without requesting another planner" do
+RSpec.describe "turn routing" do
+  it "promotes a queued step after DONE without requesting another planner" do
     run = build_run
     previous_state = Orchestrator::TickState.write(
       run_id: run.run_id, phase: "waiting_on_workers", tick_count: 1,

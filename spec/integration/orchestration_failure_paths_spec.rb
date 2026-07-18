@@ -15,7 +15,7 @@ RSpec.describe "orchestration failure paths" do
     expect(run.spawn_requests.open_only.count).to eq(1)
   end
 
-  it "creates a recovery planner request when a worker stalls" do
+  it "leaves recovery alone while a worker is still active" do
     run = create_run("stalled-worker")
     create_running_worker(run: run, nickname: "planner-stalled", stale_seconds: 500)
     Orchestrator::TickState.write(
@@ -34,19 +34,12 @@ RSpec.describe "orchestration failure paths" do
     recovery_request = run.spawn_requests.where(asked_by: "planner", requested_role: "planner", scope: "workflow-plan.md")
       .order(:created_at).last
 
-    expect(latest_tick.phase).to eq("stalled")
-    expect(latest_tick.last_stall_finding).to include("planner-stalled")
-    expect(recovery_request).to have_attributes(
-      asked_by: "planner",
-      requested_role: "planner",
-      scope: "workflow-plan.md",
-      priority: "blocking"
-    )
-    expect(%w[fulfilled dismissed]).to include(recovery_request.status)
-    expect(recovery_request.context).to include("Recover the run via planner")
+    expect(latest_tick.phase).to eq("planning")
+    expect(latest_tick.last_stall_finding).to be_nil
+    expect(recovery_request).to be_nil
   end
 
-  it "moves the run to blocked_on_user without spawning another recovery planner when a blocking question is open" do
+  it "does not spawn a recovery planner while active work and a blocking question exist" do
     run = create_run("blocked-on-user")
     create_running_worker(run: run, nickname: "planner-waiting", stale_seconds: 500)
     Orchestrator::TickState.write(
@@ -69,7 +62,7 @@ RSpec.describe "orchestration failure paths" do
 
     latest_tick = OrchestratorTick.for_run(run.run_id).last
 
-    expect(latest_tick.phase).to eq("blocked_on_user")
+    expect(latest_tick.phase).to eq("planning")
     expect(run.spawn_requests.where(asked_by: "planner", requested_role: "planner", scope: "workflow-plan.md")).to be_empty
   end
 

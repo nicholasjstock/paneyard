@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::ArtifactStoreTest < ActiveSupport::TestCase
-  test "reads artifacts in bounded byte windows" do
+RSpec.describe Orchestrator::ArtifactStore do
+  it "reads artifacts in bounded byte windows" do
     root_dir = Dir.mktmpdir("artifact-store")
     content = "a" * 2_500
     Orchestrator::ArtifactStore.write(root_dir, "run-1", "report.md", content)

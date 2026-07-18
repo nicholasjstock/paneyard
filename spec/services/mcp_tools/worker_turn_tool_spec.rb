@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class McpTools::WorkerTurnToolTest < ActiveSupport::TestCase
-  test "binds a handoff to the sole active worker when the model invents a nickname" do
+RSpec.describe McpTools::WorkerTurnTool do
+  it "binds a handoff to the sole active worker when the model invents a nickname" do
     root = Dir.mktmpdir("worker-turn-identity")
     workspace = Workspace.create!(name: "worker-turn-#{SecureRandom.hex(4)}", root_path: root)
     run = workspace.runs.create!(

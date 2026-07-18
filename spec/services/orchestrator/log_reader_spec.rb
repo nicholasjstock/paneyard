@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::LogReaderTest < ActiveSupport::TestCase
-  test "reads a complete log when no display limit is requested" do
+RSpec.describe Orchestrator::LogReader do
+  it "reads a complete log when no display limit is requested" do
     file = Tempfile.new("worker-log")
     file.write("a" * 20)
     file.close
@@ -14,7 +14,7 @@ class Orchestrator::LogReaderTest < ActiveSupport::TestCase
     file&.unlink
   end
 
-  test "formats Claude stream JSON into readable text and commands" do
+  it "formats Claude stream JSON into readable text and commands" do
     log = <<~LOG
       [workflow] spawned worker
       {"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
@@ -29,7 +29,7 @@ class Orchestrator::LogReaderTest < ActiveSupport::TestCase
     assert_equal "[workflow] spawned worker\nChecking the log.\n$ bin/rails test", Orchestrator::LogReader.format_for_display(log)
   end
 
-  test "retains incomplete streamed text at the end of a log window" do
+  it "retains incomplete streamed text at the end of a log window" do
     log = <<~LOG
       {"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
       {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Still working"}}}
@@ -38,7 +38,7 @@ class Orchestrator::LogReaderTest < ActiveSupport::TestCase
     assert_equal "Still working", Orchestrator::LogReader.format_for_display(log)
   end
 
-  test "extracts aggregate Claude usage from the final result event" do
+  it "extracts aggregate Claude usage from the final result event" do
     file = Tempfile.new("worker-log")
     file.write({
       type: "result", model: "claude-haiku-4-5", num_turns: 7, total_cost_usd: 0.0123,

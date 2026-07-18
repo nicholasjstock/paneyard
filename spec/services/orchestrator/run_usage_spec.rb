@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class RunUsageTest < ActiveSupport::TestCase
-  test "combines worker and planner telemetry for chat and run views" do
+RSpec.describe Orchestrator::RunUsage do
+  it "combines worker and planner telemetry for chat and run views" do
     workspace = Workspace.create!(name: "usage-#{SecureRandom.hex(4)}", root_path: "/tmp/#{SecureRandom.hex(8)}")
     started_at = 2.hours.ago
     run = workspace.runs.create!(

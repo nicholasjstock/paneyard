@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::StepPolicyTest < ActiveSupport::TestCase
-  test "rejects an executable step assigned to the orchestrator" do
+RSpec.describe Orchestrator::StepPolicy do
+  it "rejects an executable step assigned to the orchestrator" do
     error = assert_raises ArgumentError do
       Orchestrator::StepPolicy.validate!(
         run_id: "unused",
@@ -15,7 +15,7 @@ class Orchestrator::StepPolicyTest < ActiveSupport::TestCase
     assert_equal "Planner step must name an executable owner", error.message
   end
 
-  test "normalizes excess path authority away from non-writing steps" do
+  it "normalizes excess path authority away from non-writing steps" do
     plan = Orchestrator::StepPolicy.normalize_plan(
       next_step: {
         mode: "verification", write_scope: "artifact_only",
@@ -30,7 +30,7 @@ class Orchestrator::StepPolicyTest < ActiveSupport::TestCase
     assert_empty plan[:following_steps].first[:allowed_paths]
   end
 
-  test "does not infer or alter implementation paths" do
+  it "does not infer or alter implementation paths" do
     plan = Orchestrator::StepPolicy.normalize_plan(
       next_step: {
         mode: "implementation", write_scope: "scoped_changes",
@@ -41,7 +41,7 @@ class Orchestrator::StepPolicyTest < ActiveSupport::TestCase
     assert_equal [ "front/**/*.ts" ], plan[:next_step][:allowed_paths]
   end
 
-  setup do
+  before do
     workspace = Workspace.create!(name: "step-policy-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     @run = Run.create!(
       workspace:,
@@ -53,7 +53,7 @@ class Orchestrator::StepPolicyTest < ActiveSupport::TestCase
     )
   end
 
-  test "rejects a diagnosis step that also requests implementation" do
+  it "rejects a diagnosis step that also requests implementation" do
     error = assert_raises(ArgumentError) do
       Orchestrator::StepPolicy.validate!(
         run_id: @run.run_id,
@@ -64,13 +64,13 @@ class Orchestrator::StepPolicyTest < ActiveSupport::TestCase
     assert_equal "diagnosis step cannot also request implementation", error.message
   end
 
-  test "allows a diagnosis step to explicitly prohibit changes" do
+  it "allows a diagnosis step to explicitly prohibit changes" do
     step = diagnosis_step(success_check: "Reproduce the boundary. Do not change application code or public contracts.")
 
     assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
   end
 
-  test "rejects implementation without evidence and exact files" do
+  it "rejects implementation without evidence and exact files" do
     error = assert_raises(ArgumentError) do
       Orchestrator::StepPolicy.validate!(
         run_id: @run.run_id,
@@ -84,7 +84,7 @@ class Orchestrator::StepPolicyTest < ActiveSupport::TestCase
     assert_match(/allowedPaths must name exact files/, error.message)
   end
 
-  test "rejects protected API files without answered operator approval" do
+  it "rejects protected API files without answered operator approval" do
     error = assert_raises(ArgumentError) do
       Orchestrator::StepPolicy.validate!(
         run_id: @run.run_id,
@@ -95,7 +95,7 @@ class Orchestrator::StepPolicyTest < ActiveSupport::TestCase
     assert_match(/Protected paths require an answered operator question/, error.message)
   end
 
-  test "accepts a protected API file after explicit operator approval" do
+  it "accepts a protected API file after explicit operator approval" do
     question = @run.user_questions.create!(
       asked_by: "planner", scope: "api-contract.md", text: "Approve the documented OpenAPI contract update?",
       priority: "blocking", status: "answered", answered_by: "operator", answered_at: Time.current,

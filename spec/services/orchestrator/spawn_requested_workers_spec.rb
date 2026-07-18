@@ -1,9 +1,9 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::SpawnRequestedWorkersTest < ActiveSupport::TestCase
+RSpec.describe Orchestrator::SpawnRequestedWorkers do
   include ActiveJob::TestHelper
 
-  test "queues a Rails planner decision instead of spawning a planner process" do
+  it "queues a Rails planner decision instead of spawning a planner process" do
     workspace = Workspace.create!(name: "spawn-planner-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
     run = workspace.runs.create!(
       run_id: "spawn-planner-#{SecureRandom.hex(4)}", task: "Plan the run",

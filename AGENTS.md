@@ -35,7 +35,7 @@ Planning defaults to the smaller model tier. When information is sufficient but 
 Key implementation files are `app/jobs/planner_decision_job.rb`, `app/models/planner_decision.rb`, and `app/services/orchestrator/{planner_brief,planner_context_resolver,planner_decision_runner,spawn_requested_workers,turn}.rb`.
 
 ## Testing Guidelines
-The repository uses both Minitest under `test/` and RSpec under `spec/`. Add service and job regression coverage for orchestration state changes, and system coverage for UI behavior. Run `bin/rails test`, the relevant `bundle exec rspec ...` files, `bin/rubocop`, and `git diff --check`. Stub `Orchestrator::PlannerDecisionRunner` in tests; do not consume live model capacity to verify routing or structured-output parsing.
+The repository uses RSpec under `spec/`. Add service and job regression coverage for orchestration state changes, and system coverage for UI behavior. Run `bundle exec rspec`, `bin/rubocop`, and `git diff --check`. Stub `Orchestrator::PlannerDecisionRunner` in specs; do not consume live model capacity to verify routing or structured-output parsing.
 
 ## Commit & Pull Request Guidelines
 Recent commit history favors short, imperative summaries such as `Flatten ops/ into the repo root` and `Port the TS orchestrator engine to Ruby`. Keep commits focused and descriptive. PRs should include a concise problem statement, the implementation approach, any schema or job-queue impact, and manual verification steps. Link related issues when available and include screenshots only for UI changes.

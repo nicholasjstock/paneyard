@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class Orchestrator::PlannerDecisionRunnerTest < ActiveSupport::TestCase
-  test "runs Claude once with tools disabled and returns a structured decision" do
+RSpec.describe Orchestrator::PlannerDecisionRunner do
+  it "runs Claude once with tools disabled and returns a structured decision" do
     run, request = build_run_and_request
     response = {
       "structured_output" => {
@@ -35,7 +35,7 @@ class Orchestrator::PlannerDecisionRunnerTest < ActiveSupport::TestCase
     assert_equal run.target_root, captured[:chdir]
   end
 
-  test "brief contains bounded current state instead of event or worker log history" do
+  it "brief contains bounded current state instead of event or worker log history" do
     run, request = build_run_and_request
     request.update!(context: "x" * 8_000)
 
@@ -47,7 +47,7 @@ class Orchestrator::PlannerDecisionRunnerTest < ActiveSupport::TestCase
     refute_includes brief, "worker_logs"
   end
 
-  test "brief carries the latest chaperone conclusion and compact transitions" do
+  it "brief carries the latest chaperone conclusion and compact transitions" do
     run, request = build_run_and_request
     review, = ChaperoneReview.issue!(
       run:, lineage_key: "planner:test", step_attempt_ids: [], subject_type: "planner",

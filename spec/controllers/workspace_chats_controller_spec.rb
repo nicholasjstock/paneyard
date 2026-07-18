@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class WorkspaceChatsControllerTest < ActionDispatch::IntegrationTest
-  test "each workspace opens and retains its own single chat history" do
+RSpec.describe WorkspaceChatsController, type: :request do
+  it "each workspace opens and retains its own single chat history" do
     first = create_workspace("first")
     second = create_workspace("second")
     first_chat = first.workspace_chats.create!
@@ -10,19 +10,19 @@ class WorkspaceChatsControllerTest < ActionDispatch::IntegrationTest
     second_chat.messages.create!(role: "user", content: "Remember the second project", status: "completed")
 
     get workspace_chats_path(first)
-    assert_redirected_to workspace_chat_path(first, first_chat)
+    expect(response).to redirect_to(workspace_chat_path(first, first_chat))
     follow_redirect!
-    assert_response :success
-    assert_includes response.body, "Remember the first project"
-    refute_includes response.body, "Remember the second project"
+    expect(response).to have_http_status(:success)
+    expect(response.body).to include("Remember the first project")
+    expect(response.body).not_to include("Remember the second project")
 
     get workspace_chats_path(second)
-    assert_redirected_to workspace_chat_path(second, second_chat)
-    assert_equal 1, first.workspace_chats.count
-    assert_equal 1, second.workspace_chats.count
+    expect(response).to redirect_to(workspace_chat_path(second, second_chat))
+    expect(first.workspace_chats.count).to eq(1)
+    expect(second.workspace_chats.count).to eq(1)
   end
 
-  test "run view embeds the workspace history in an operator drawer" do
+  it "run view embeds the workspace history in an operator drawer" do
     workspace = create_workspace("drawer")
     chat = workspace.workspace_chats.create!
     chat.messages.create!(role: "assistant", content: "This project's retained answer", status: "completed")
@@ -33,10 +33,10 @@ class WorkspaceChatsControllerTest < ActionDispatch::IntegrationTest
 
     get workspace_run_path(workspace, run)
 
-    assert_response :success
-    assert_includes response.body, "Open project chat"
-    assert_includes response.body, "This project's retained answer"
-    assert_includes response.body, "chat-drawer"
+    expect(response).to have_http_status(:success)
+    expect(response.body).to include("Open project chat")
+    expect(response.body).to include("This project's retained answer")
+    expect(response.body).to include("chat-drawer")
   end
 
   private

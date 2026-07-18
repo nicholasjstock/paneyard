@@ -1,8 +1,8 @@
-require "test_helper"
+require "rails_helper"
 require "tmpdir"
 
-class WorkspaceChatRunnerTest < ActiveSupport::TestCase
-  test "starts a sandboxed workspace session and captures its id" do
+RSpec.describe Orchestrator::WorkspaceChatRunner do
+  it "starts a sandboxed workspace session and captures its id" do
     Dir.mktmpdir do |root|
       chat = create_chat(root:)
       captured = nil
@@ -29,7 +29,7 @@ class WorkspaceChatRunnerTest < ActiveSupport::TestCase
     end
   end
 
-  test "resumes the workspace's existing session" do
+  it "resumes the workspace's existing session" do
     Dir.mktmpdir do |root|
       chat = create_chat(root:)
       chat.update!(session_id: "thread-existing")
