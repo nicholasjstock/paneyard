@@ -17,12 +17,22 @@ class Orchestrator::WorkerSpawnerTest < ActiveSupport::TestCase
   end
 
   test "infrastructure workers receive the generic worker contract and skill" do
+    assert_equal Rails.root.join(".claude", "skills", "infrastructure", "SKILL.md"),
+      Orchestrator::WorkerSpawner.send(:infrastructure_skill_path, "claude")
+    assert_equal Rails.root.join(".codex", "skills", "infrastructure", "SKILL.md"),
+      Orchestrator::WorkerSpawner.send(:infrastructure_skill_path, "codex")
+
     prompt = Orchestrator::WorkerSpawner.send(
       :build_prompt_with_persona, driver: "claude", role: "infrastructure", prompt: "Diagnose the outage."
+    )
+    codex_prompt = Orchestrator::WorkerSpawner.send(
+      :build_prompt_with_persona, driver: "codex", role: "infrastructure", prompt: "Diagnose the outage."
     )
 
     assert_includes prompt, "call `worker_turn`"
     assert_includes prompt, "evidence-driven reliability investigation"
     assert_includes prompt, "Current task:\nDiagnose the outage."
+    assert_includes codex_prompt, "call `worker_turn`"
+    assert_includes codex_prompt, "evidence-driven reliability investigation"
   end
 end

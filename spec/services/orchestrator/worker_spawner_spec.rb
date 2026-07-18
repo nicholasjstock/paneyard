@@ -32,7 +32,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       )
 
       expect(worker.command).to eq("claude")
-      expect(spawn_call[1]).to eq("claude")
+      expect(spawn_call).to include("claude")
       expect(spawn_call[2..]).to include("--permission-mode", "bypassPermissions", "-p", "--")
       expect(spawn_call[2..]).not_to include("--agent", "planner")
       expect(File.read(worker.prompt_path)).to include("# Planner (@planner)")
@@ -68,6 +68,8 @@ RSpec.describe Orchestrator::WorkerSpawner do
       )
 
       expect(worker.command).to eq("codex")
+      expect(worker.model).to eq("gpt-5.6-luna")
+      expect(worker.args).to include("--model", "gpt-5.6-luna")
       expect(File.read(worker.prompt_path)).to include('name = "worker"')
       expect(File.read(worker.prompt_path)).to include("Current task:\nVerify the issue and report back.")
     end

@@ -23,6 +23,7 @@ module Orchestrator
     module_function
 
     MASKED_API_KEY_VALUES = [ "", "[set]", "[secure]", "[redacted]" ].freeze
+    CODEX_WORKER_MODEL = "gpt-5.6-luna"
 
     def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil)
       # nickname flows straight into file paths under workers_dir below --
@@ -47,13 +48,17 @@ module Orchestrator
       env_path = File.join(workers_dir, "#{file_basename}.env.json")
 
       driver = run.launcher_variant
-      selected_model = driver == "claude" ? claude_model_for(role) : nil
+      selected_model = if driver == "claude"
+        claude_model_for(role)
+      elsif role != "planner"
+        CODEX_WORKER_MODEL
+      end
       enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
       command, args =
         if driver == "claude"
           [ "claude", claude_args(enriched_prompt, role: role) ]
         else
-          [ "codex", [ "exec", "--dangerously-bypass-approvals-and-sandbox", "-C", root_dir, "-o", last_message_path, "-" ] ]
+          [ "codex", codex_args(root_dir: root_dir, last_message_path: last_message_path, role: role) ]
         end
 
       driver == "claude" ? write_claude_mcp_config(root_dir) : write_codex_mcp_config(root_dir)
@@ -153,6 +158,11 @@ module Orchestrator
       role == "planner" ? "sonnet" : "haiku"
     end
 
+    def codex_args(root_dir:, last_message_path:, role:)
+      model_args = role == "planner" ? [] : [ "--model", CODEX_WORKER_MODEL ]
+      [ "exec", *model_args, "--dangerously-bypass-approvals-and-sandbox", "-C", root_dir, "-o", last_message_path, "-" ]
+    end
+
     # The shell remains the tracked process while the CLI runs. It records the
     # CLI's exit code before exiting so reconciliation can distinguish a quota
     # rejection from an unobserved process disappearance.
@@ -196,7 +206,7 @@ module Orchestrator
       persona_paths = [ agent_prompt_path(driver: driver, role: role) ]
       if role == "infrastructure"
         # Infrastructure keeps the normal worker bus contract and layers on
-        # the globally reusable reliability workflow.
+        # the launcher-specific, repository-owned reliability workflow.
         persona_paths.unshift(agent_prompt_path(driver: driver, role: "worker"))
         persona_paths << infrastructure_skill_path(driver)
       end
@@ -212,11 +222,7 @@ module Orchestrator
     end
 
     def infrastructure_skill_path(driver)
-      if driver == "claude"
-        File.join(ENV.fetch("HOME"), ".claude", "skills", "infrastructure", "SKILL.md")
-      else
-        File.join(resolve_codex_home, "skills", "infrastructure", "SKILL.md")
-      end
+      Rails.root.join(".#{driver}", "skills", "infrastructure", "SKILL.md")
     end
 
     def resolve_codex_home
