@@ -49,10 +49,12 @@ module Orchestrator
         You are a workflow planner. Make exactly one bounded orchestration decision from the Rails-prepared evidence below.
         Do not inspect files, call tools, update memory, or execute work. Return only the JSON object required by the schema.
         Choose at most one nextStep. Keep followingSteps ordered and limited to concrete work already justified by the evidence.
-        Rails-owned acceptance criteria are mandatory. Never return nextStep=null while completion_blockers is non-empty.
-        Plan recording or verification work that produces positive evidence for each unresolved criterion; source edits alone
-        never satisfy an outcome criterion. A demo-artifact criterion requires a real playable video, not a report claiming
-        that recording was blocked or that implementation is complete.
+        On the initial decision, define a concise acceptanceCriteria contract derived directly from the user's requested
+        outcomes. Criteria describe observable outcomes, not implementation steps. On later decisions return acceptanceCriteria=[];
+        the established contract is immutable. Use acceptanceUpdates only when supplied worker evidence positively satisfies
+        an existing criterion. A verified update requires a workspace-relative evidenceRef; blocked work, source edits alone,
+        estimates, and absence of errors are not positive verification. Waive only when the user explicitly authorized it.
+        Never return nextStep=null while completion_blockers remain after applying justified acceptanceUpdates.
         A diagnosis step must be artifact_only. An implementation step must name exact allowedPaths.
         If the task is ambiguous and no known source contains the missing detail, choose a bounded diagnosis step that locates
         the target and measures a baseline. Do not use needs_context to search the repository or repeatedly ask for absent facts.

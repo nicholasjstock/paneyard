@@ -35,6 +35,24 @@ module Orchestrator
       required: %w[owner artifact successCheck mode writeScope allowedPaths evidenceRefs]
     }.freeze
 
+    ACCEPTANCE_CRITERION_SCHEMA = {
+      type: "object", additionalProperties: false,
+      properties: {
+        key: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
+        content: { type: "string" }
+      },
+      required: %w[key content]
+    }.freeze
+
+    ACCEPTANCE_UPDATE_SCHEMA = {
+      type: "object", additionalProperties: false,
+      properties: {
+        key: { type: "string" }, status: { type: "string", enum: %w[verified waived] },
+        evidenceRef: { type: [ "string", "null" ] }
+      },
+      required: %w[key status evidenceRef]
+    }.freeze
+
     SCHEMA = {
       type: "object",
       additionalProperties: false,
@@ -54,9 +72,11 @@ module Orchestrator
             maxChars: { type: "integer", minimum: 1 }
           },
           required: %w[source reference question offset maxChars]
-        }
+        },
+        acceptanceCriteria: { type: "array", maxItems: 8, items: ACCEPTANCE_CRITERION_SCHEMA },
+        acceptanceUpdates: { type: "array", maxItems: 8, items: ACCEPTANCE_UPDATE_SCHEMA }
       },
-      required: %w[outcome summary nextStep followingSteps contextRequest]
+      required: %w[outcome summary nextStep followingSteps contextRequest acceptanceCriteria acceptanceUpdates]
     }.freeze
 
     def call(run:, request:, additional_context: [], model_tier: :small, command_runner: Open3.method(:capture3))
@@ -121,6 +141,8 @@ module Orchestrator
         next_step: WireFormat.underscore_keys(decision["nextStep"]),
         following_steps: WireFormat.underscore_keys(decision.fetch("followingSteps")),
         context_request: WireFormat.underscore_keys(decision["contextRequest"]),
+        acceptance_criteria: WireFormat.underscore_keys(decision.fetch("acceptanceCriteria", [])),
+        acceptance_updates: WireFormat.underscore_keys(decision.fetch("acceptanceUpdates", [])),
         usage: result[:usage],
         model: result[:model],
         model_tier: model_tier.to_s

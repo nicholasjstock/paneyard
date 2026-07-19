@@ -29,14 +29,11 @@ RSpec.describe "run orchestration end to end" do
       expect(run.spawn_requests.open_only.count).to eq(1)
 
       File.write(File.join(@workspace_root, "verified-outcome.md"), "The launched run is responsive.")
-      Orchestrator::RunContext.upsert!(
-        run_id: run.run_id, entry_key: "requested-outcome", kind: "acceptance_criterion", status: "verified",
-        content: "The launched run was investigated and verified responsive.",
-        evidence_ref: "verified-outcome.md", created_by: "test-verifier"
-      )
 
       allow(Orchestrator::PlannerDecisionRunner).to receive(:call).and_return(
         summary: "Bounded planner completed the run.", next_step: nil, following_steps: [],
+        acceptance_criteria: [ { key: "requested-outcome", content: "The launched run is investigated and verified responsive." } ],
+        acceptance_updates: [ { key: "requested-outcome", status: "verified", evidence_ref: "verified-outcome.md" } ],
         usage: { input_tokens: 40, output_tokens: 10 }, model: "test-planner"
       )
 

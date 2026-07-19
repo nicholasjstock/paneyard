@@ -35,4 +35,48 @@ RSpec.describe Orchestrator::RunContext do
     assert_equal "selected", detailed[:context_mode]
     assert_equal long_content, detailed[:entries].first[:content]
   end
+
+  it "persists an initial planner contract and keeps it immutable" do
+    root = Dir.mktmpdir("planner-acceptance")
+    workspace = Workspace.create!(name: "acceptance-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "acceptance-#{SecureRandom.hex(4)}", task: "Create the requested outcome",
+      target_root: root, launcher_variant: "claude", status: "running"
+    )
+
+    described_class.apply_planner_acceptance!(
+      run:, criteria: [ { key: "observable-outcome", content: "The requested outcome is positively verified." } ], updates: []
+    )
+
+    expect(described_class.completion_blockers(run_id: run.run_id)).to eq([ "observable-outcome" ])
+    expect do
+      described_class.apply_planner_acceptance!(
+        run:, criteria: [ { key: "replacement", content: "Replace the contract." } ], updates: []
+      )
+    end.to raise_error(ArgumentError, /immutable/)
+  end
+
+  it "accepts planner verification only when its evidence exists inside the workspace" do
+    root = Dir.mktmpdir("planner-evidence")
+    workspace = Workspace.create!(name: "evidence-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "evidence-#{SecureRandom.hex(4)}", task: "Verify it",
+      target_root: root, launcher_variant: "claude", status: "running"
+    )
+    described_class.apply_planner_acceptance!(
+      run:, criteria: [ { key: "verified-result", content: "Positive evidence exists." } ], updates: []
+    )
+
+    expect do
+      described_class.apply_planner_acceptance!(
+        run:, criteria: [], updates: [ { key: "verified-result", status: "verified", evidence_ref: "missing.md" } ]
+      )
+    end.to raise_error(ArgumentError, /does not exist/)
+
+    File.write(File.join(root, "result.md"), "positive verification")
+    described_class.apply_planner_acceptance!(
+      run:, criteria: [], updates: [ { key: "verified-result", status: "verified", evidence_ref: "result.md" } ]
+    )
+    expect(described_class.completion_blockers(run_id: run.run_id)).to be_empty
+  end
 end

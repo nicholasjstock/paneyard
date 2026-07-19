@@ -10,8 +10,6 @@ class LaunchRunJob < ApplicationJob
 
   def perform(id)
     run = Run.find(id)
-    Orchestrator::AcceptanceCriteria.seed!(run)
-
     run.spawn_requests.create!(
       asked_by: run.launched_by.presence || "ops_hub",
       scope: "workflow-plan.md",

@@ -1,3 +1,5 @@
+require "pathname"
+
 module Orchestrator
   # Compiles curated, current operational knowledge for one run. It is kept
   # separate from the unbounded event log so planners receive decisions and
@@ -37,9 +39,7 @@ module Orchestrator
     end
 
     def upsert!(run_id:, entry_key:, kind:, status:, content:, evidence_ref:, created_by:)
-      if kind == "acceptance_criterion" && status == "verified"
-        AcceptanceCriteria.validate_verification!(run_id:, entry_key:, evidence_ref:)
-      end
+      validate_evidence!(run_id:, evidence_ref:) if kind == "acceptance_criterion" && status == "verified"
       entry = RunContextEntry.find_or_initialize_by(run_id: run_id, entry_key: entry_key)
       entry.assign_attributes(
         kind: kind,
@@ -51,6 +51,46 @@ module Orchestrator
       entry.save!
       entry
     end
+
+    def apply_planner_acceptance!(run:, criteria:, updates:)
+      existing = run.run_context_entries.where(kind: "acceptance_criterion")
+      if existing.empty?
+        raise ArgumentError, "Initial planner decision requires an acceptance contract" if criteria.empty?
+
+        criteria.each do |criterion|
+          key = criterion.fetch(:key).to_s
+          raise ArgumentError, "Invalid acceptance criterion key: #{key}" unless key.match?(/\A[a-z0-9][a-z0-9-]{0,63}\z/)
+
+          upsert!(
+            run_id: run.run_id, entry_key: key, kind: "acceptance_criterion", status: "pending",
+            content: criterion.fetch(:content), evidence_ref: nil, created_by: "planner"
+          )
+        end
+      elsif criteria.any?
+        raise ArgumentError, "Acceptance contract is immutable after the initial planner decision"
+      end
+
+      updates.each do |update|
+        entry = existing.find_by(entry_key: update.fetch(:key)) ||
+          run.run_context_entries.find_by!(kind: "acceptance_criterion", entry_key: update.fetch(:key))
+        status = update.fetch(:status).to_s
+        raise ArgumentError, "Planner may only verify or waive acceptance criteria" unless status.in?(%w[verified waived])
+
+        upsert!(
+          run_id: run.run_id, entry_key: entry.entry_key, kind: entry.kind, status:,
+          content: entry.content, evidence_ref: update[:evidence_ref], created_by: "planner"
+        )
+      end
+    end
+
+    def validate_evidence!(run_id:, evidence_ref:)
+      run = Run.find_by!(run_id:)
+      root = Pathname.new(run.target_root).expand_path
+      candidate = root.join(evidence_ref.to_s).cleanpath
+      inside_workspace = candidate.to_s == root.to_s || candidate.to_s.start_with?("#{root}#{File::SEPARATOR}")
+      raise ArgumentError, "Verified acceptance evidence does not exist: #{evidence_ref}" unless inside_workspace && candidate.file?
+    end
+    private_class_method :validate_evidence!
 
     def criteria_completion_blockers(criteria)
       criteria.select { |criterion| !%w[verified waived].include?(criterion[:status] || criterion["status"]) }

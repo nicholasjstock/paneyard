@@ -16,6 +16,9 @@ class PlannerDecisionJob < ApplicationJob
     return if result[:chaperone_pending]
 
     PlannerDecision.transaction do
+      Orchestrator::RunContext.apply_planner_acceptance!(
+        run: record.run, criteria: Array(result[:acceptance_criteria]), updates: Array(result[:acceptance_updates])
+      )
       previous_state = Orchestrator::TickState.latest(record.run_id)
       turn = Orchestrator::Turn.run_planner_turn(
         run_id: record.run_id, summary: result[:summary], next_step: result[:next_step],
@@ -49,6 +52,11 @@ class PlannerDecisionJob < ApplicationJob
       )
       record_model_call!(record, result)
       if result[:outcome] == "decision"
+        if record.run.run_context_entries.where(kind: "acceptance_criterion").empty? && Array(result[:acceptance_criteria]).empty?
+          return queue_planner_chaperone!(record, "Small planner omitted the initial acceptance contract.") if model_tier == :small
+
+          raise Orchestrator::PlannerDecisionRunner::Error, "Strong planner omitted the initial acceptance contract"
+        end
         if result[:next_step].nil? && blocked_worker_handoff?(record)
           reason = "Small planner tried to complete the run after a worker reported blocked evidence."
           return queue_planner_chaperone!(record, reason) if model_tier == :small

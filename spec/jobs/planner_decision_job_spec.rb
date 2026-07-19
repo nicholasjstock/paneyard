@@ -81,6 +81,26 @@ RSpec.describe PlannerDecisionJob do
     assert_equal "planner", run.chaperone_reviews.last.subject_type
   end
 
+  it "routes an omitted initial acceptance contract to the chaperone" do
+    run, _request, record = build_decision(with_acceptance: false)
+    result = {
+      outcome: "decision", summary: "Start diagnosis.",
+      next_step: {
+        owner: "worker", artifact: "diagnosis.md", success_check: "Locate the failure.",
+        mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+      },
+      following_steps: [], acceptance_criteria: [], acceptance_updates: [],
+      context_request: nil, usage: {}, model: "haiku", model_tier: "small"
+    }
+
+    assert_enqueued_with(job: ChaperoneReviewJob) do
+      with_stubbed_runner(->(**) { result }) { PlannerDecisionJob.perform_now(record.id) }
+    end
+
+    expect(record.reload.status).to eq("awaiting_chaperone")
+    expect(run.run_context_entries.where(kind: "acceptance_criterion")).to be_empty
+  end
+
   it "reruns with narrowly requested context before committing a decision" do
     run, _request, record = build_decision
     Orchestrator::ArtifactStore.write(run.target_root, run.run_id, "diagnosis.md", "Confirmed boundary: admin session was missing.")
@@ -246,7 +266,7 @@ RSpec.describe PlannerDecisionJob do
     singleton&.define_method(:call, original) if original
   end
 
-  def build_decision
+  def build_decision(with_acceptance: true)
     workspace = Workspace.create!(name: "planner-job-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
     run = workspace.runs.create!(
       run_id: "planner-job-#{SecureRandom.hex(4)}", task: "Complete the workflow",
@@ -257,6 +277,12 @@ RSpec.describe PlannerDecisionJob do
       requested_role: "planner", priority: "blocking", status: "fulfilled", fulfilled_by: "planner_decision_job"
     )
     record = PlannerDecision.create!(run:, spawn_request: request, status: "queued")
+    if with_acceptance
+      RunContextEntry.create!(
+        run_id: run.run_id, entry_key: "existing-outcome", kind: "acceptance_criterion", status: "verified",
+        content: "Existing test outcome", evidence_ref: "Gemfile", created_by: "test"
+      )
+    end
     [ run, request, record ]
   end
 end
