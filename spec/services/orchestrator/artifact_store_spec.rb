@@ -20,4 +20,22 @@ RSpec.describe Orchestrator::ArtifactStore do
   ensure
     FileUtils.remove_entry(root_dir) if root_dir && Dir.exist?(root_dir)
   end
+
+  it "reports nested workspace scopes as not existing instead of raising" do
+    root_dir = Dir.mktmpdir("artifact-store")
+    Orchestrator::ArtifactStore.write(root_dir, "run-1", "report.md", "hello")
+
+    artifacts = Orchestrator::ArtifactStore.collect(
+      root_dir, "run-1", [ "report.md", "front/scripts/record-demo.ts" ]
+    )[:artifacts]
+
+    found = artifacts.find { |artifact| artifact[:name] == "report.md" }
+    missing = artifacts.find { |artifact| artifact[:name] == "front/scripts/record-demo.ts" }
+
+    assert found[:exists]
+    assert_not missing[:exists]
+    assert_nil missing[:path]
+  ensure
+    FileUtils.remove_entry(root_dir) if root_dir && Dir.exist?(root_dir)
+  end
 end

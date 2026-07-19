@@ -117,17 +117,26 @@ module Orchestrator
         raise ArgumentError, "Cannot complete run while acceptance criteria remain pending: #{completion_blockers.join(', ')}"
       end
 
-      jobs = Planner.publish_planner_jobs(
-        run_id: run_id,
-        summary: summary,
-        plan: { summary: summary, next_step: next_step, following_steps: following_steps }
-      )
+      # An open blocking question means the run is waiting on the user, not
+      # the planner -- publishing new jobs here would dispatch workers behind
+      # a UI that still reads "blocked_on_user", so no new work may be queued
+      # until the question is answered.
+      has_open_blocking_question = UserQuestion.exists?(run_id: run_id, status: "open", priority: "blocking")
+      jobs =
+        if has_open_blocking_question
+          []
+        else
+          Planner.publish_planner_jobs(
+            run_id: run_id,
+            summary: summary,
+            plan: { summary: summary, next_step: next_step, following_steps: following_steps }
+          )
+        end
       # The planner that is submitting this decision remains registered as
       # running until its CLI process exits. It is not work that should keep
       # the run alive after a nil next_step, otherwise every completed planner
       # turn becomes waiting_on_workers and the stall recovery loop restarts.
       active_executor_exists = Worker.where(run_id: run_id, status: "running").where.not(role: "planner").exists?
-      has_open_blocking_question = UserQuestion.exists?(run_id: run_id, status: "open", priority: "blocking")
       completion_phase =
         if has_open_blocking_question
           "blocked_on_user"

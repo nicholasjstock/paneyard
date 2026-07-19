@@ -85,11 +85,20 @@ module Orchestrator
       }
     end
 
+    # Candidate names come from SpawnRequest#scope, which is often a real
+    # nested workspace path (e.g. "front/scripts/record-demo.ts") rather
+    # than a flat artifact filename -- treat those as simply not existing
+    # as artifacts instead of raising, since resolve_path's traversal guard
+    # rejects any name containing "/".
     def collect(root_dir, run_id, artifact_names)
       artifacts = artifact_names.map do |name|
-        path = resolve_path(root_dir, run_id, name)
+        path = begin
+          resolve_path(root_dir, run_id, name)
+        rescue ArgumentError
+          nil
+        end
 
-        unless File.exist?(path)
+        if path.nil? || !File.exist?(path)
           next { name: name, path: path, exists: false, size_bytes: nil, updated_at: nil, preview: nil }
         end
 
