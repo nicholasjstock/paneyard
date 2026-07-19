@@ -1,7 +1,6 @@
 require "rails_helper"
 
 RSpec.describe PlannerDecisionJob do
-  include ActiveJob::TestHelper
   it "persists and dispatches one bounded model decision" do
     run, request, record = build_decision
     result = {
@@ -54,7 +53,7 @@ RSpec.describe PlannerDecisionJob do
       }
     end
 
-    assert_enqueued_with(job: ChaperoneReviewJob) do
+    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
       with_stubbed_runner(runner) { PlannerDecisionJob.perform_now(record.id) }
     end
 
@@ -129,7 +128,7 @@ RSpec.describe PlannerDecisionJob do
       following_steps: [], context_request: nil, usage: {}, model: "haiku", model_tier: "small"
     }
 
-    assert_enqueued_with(job: ChaperoneReviewJob) do
+    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
       with_stubbed_runner(->(**) { result }) { PlannerDecisionJob.perform_now(record.id) }
     end
 
@@ -150,7 +149,7 @@ RSpec.describe PlannerDecisionJob do
       context_request: nil, usage: {}, model: "haiku", model_tier: "small"
     }
 
-    assert_enqueued_with(job: ChaperoneReviewJob) do
+    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
       with_stubbed_runner(->(**) { result }) { PlannerDecisionJob.perform_now(record.id) }
     end
 
@@ -248,7 +247,7 @@ RSpec.describe PlannerDecisionJob do
       end
     end
 
-    assert_enqueued_with(job: ChaperoneReviewJob) do
+    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
       with_stubbed_runner(runner) { PlannerDecisionJob.perform_now(record.id) }
     end
 

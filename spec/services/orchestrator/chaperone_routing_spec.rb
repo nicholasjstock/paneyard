@@ -1,15 +1,13 @@
 require "rails_helper"
 
 RSpec.describe "chaperone routing" do
-  include ActiveJob::TestHelper
-
   it "queues a strong chaperone after the second failed diagnosis in one lineage" do
     run = build_run
     first = report_failure(run, 1)
     assert first[:planner_request]
     assert_nil first[:chaperone_review]
 
-    assert_enqueued_with(job: ChaperoneReviewJob) do
+    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
       second = report_failure(run, 2)
       assert_nil second[:planner_request]
       assert second[:chaperone_review]

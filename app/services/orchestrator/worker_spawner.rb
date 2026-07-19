@@ -28,7 +28,7 @@ module Orchestrator
     CODEX_WORKER_MODEL = "gpt-5.6-luna"
 
     def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil,
-      write_scope: nil, allowed_paths: [], model_tier: "small")
+      write_scope: nil, allowed_paths: [], model_tier: "small", mcp_override: nil)
       raise ArgumentError, "Planner processes were removed; queue a PlannerDecisionJob instead" if role == "planner"
 
       # nickname flows straight into file paths under workers_dir below --
@@ -60,32 +60,42 @@ module Orchestrator
       policy = WorkerExecutionPolicy.new(
         root_dir:, mode:, write_scope: write_scope.presence || "artifact_only", allowed_paths:,
         profile_name: "worker-#{worker_id.delete('-')}"
-      )
+      ) unless mcp_override
 
       driver = run.launcher_variant
       selected_model = if driver == "claude"
         claude_model_for(role, mode:, model_tier:)
+      elsif mcp_override
+        model_tier.to_s == "small" ? CODEX_WORKER_MODEL : "default"
       else
         CODEX_WORKER_MODEL
       end
       enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
-      enriched_prompt = worker_identity_prompt(
-        run_id: run.run_id, worker_id:, nickname:, role:, scope:, mode:, write_scope:, allowed_paths:,
-        target_root: root_dir
-      ) + enriched_prompt
-      capability_token, capability_token_digest = Worker.issue_capability
-      write_worker_mcp_config(mcp_config_path, capability_token)
-      write_claude_settings(claude_settings_path, policy) if driver == "claude"
+      unless mcp_override
+        enriched_prompt = worker_identity_prompt(
+          run_id: run.run_id, worker_id:, nickname:, role:, scope:, mode:, write_scope:, allowed_paths:,
+          target_root: root_dir
+        ) + enriched_prompt
+      end
+      if mcp_override
+        write_worker_mcp_config(
+          mcp_config_path, mcp_override[:token], server_name: "chaperone", url: mcp_override[:url]
+        )
+      else
+        capability_token, capability_token_digest = Worker.issue_capability
+        write_worker_mcp_config(mcp_config_path, capability_token)
+        write_claude_settings(claude_settings_path, policy) if driver == "claude"
+      end
       command, args =
         if driver == "claude"
           [ "claude", claude_args(
             enriched_prompt, role:, mode:, mcp_config_path:, settings_path: claude_settings_path,
-            target_root: root_dir, policy:, model_tier:
+            target_root: root_dir, policy:, model_tier:, mcp_override:
           ) ]
         else
           validate_codex_permission_profile_compatibility!(root_dir)
           [ "codex", codex_args(
-            root_dir:, last_message_path:, policy:
+            root_dir:, last_message_path:, policy:, mcp_override:
           ) ]
         end
 
@@ -95,7 +105,8 @@ module Orchestrator
         "WORKFLOW_WORKER_ID" => worker_id,
         "WORKFLOW_WORKER_NICKNAME" => nickname,
         "WORKFLOW_WORKER_SCOPE" => scope,
-        "WORKFLOW_WORKER_TOKEN" => capability_token
+        "WORKFLOW_WORKER_TOKEN" => capability_token,
+        "WORKFLOW_CHAPERONE_TOKEN" => mcp_override&.dig(:token)
       )
 
       File.write(prompt_path, enriched_prompt)
@@ -184,7 +195,19 @@ module Orchestrator
     # YAML front matter in .claude/agents/*.md as model configuration. Keep
     # cost routing here at the actual CLI boundary instead.
     def claude_args(prompt, role: "worker", mode: nil, mcp_config_path:, settings_path:, target_root:, policy:,
-      model_tier: "small")
+      model_tier: "small", mcp_override: nil)
+      if mcp_override
+        return [
+          "--model", claude_model_for(role, mode:, model_tier:),
+          "--print",
+          "--mcp-config", mcp_config_path,
+          "--strict-mcp-config",
+          "--allowedTools", mcp_override[:allowed_tools].map { |name| "mcp__chaperone__#{name}" }.join(","),
+          "--no-session-persistence",
+          "--", prompt
+        ]
+      end
+
       [
         "--model", claude_model_for(role, mode:, model_tier:),
         "--permission-mode", "dontAsk",
@@ -207,7 +230,17 @@ module Orchestrator
       model_tier.to_s == "strong" ? "sonnet" : "haiku"
     end
 
-    def codex_args(root_dir:, last_message_path:, policy:)
+    def codex_args(root_dir:, last_message_path:, policy:, mcp_override: nil)
+      if mcp_override
+        return [
+          "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
+          "-c", %(mcp_servers.chaperone.url=#{mcp_override[:url].to_json}),
+          "-c", %(mcp_servers.chaperone.bearer_token_env_var="WORKFLOW_CHAPERONE_TOKEN"),
+          "-c", %(mcp_servers.chaperone.default_tools_approval_mode="approve"),
+          "-C", root_dir, "-o", last_message_path, "-"
+        ]
+      end
+
       mcp_overrides = [
         %(mcp_servers.workflow.url=#{"#{rails_mcp_url}/worker".to_json}),
         %(mcp_servers.workflow.bearer_token_env_var="WORKFLOW_WORKER_TOKEN"),
@@ -250,11 +283,11 @@ module Orchestrator
       "#{base}/mcp"
     end
 
-    def write_worker_mcp_config(path, token)
+    def write_worker_mcp_config(path, token, server_name: "workflow", url: nil)
       config = {
         "mcpServers" => {
-          "workflow" => {
-            "type" => "http", "url" => "#{rails_mcp_url}/worker",
+          server_name => {
+            "type" => "http", "url" => url || "#{rails_mcp_url}/worker",
             "headers" => { "Authorization" => "Bearer #{token}" }
           }
         }
@@ -392,6 +425,7 @@ module Orchestrator
         WORKFLOW_WORKER_NICKNAME: resolved.call("WORKFLOW_WORKER_NICKNAME"),
         WORKFLOW_WORKER_SCOPE: resolved.call("WORKFLOW_WORKER_SCOPE"),
         WORKFLOW_WORKER_TOKEN: resolved.call("WORKFLOW_WORKER_TOKEN").present? ? "[set]" : nil,
+        WORKFLOW_CHAPERONE_TOKEN: resolved.call("WORKFLOW_CHAPERONE_TOKEN").present? ? "[set]" : nil,
         OPENAI_API_KEY: resolved.call("OPENAI_API_KEY").present? ? "[set]" : nil,
         OPENAI_BASE_URL: resolved.call("OPENAI_BASE_URL")
       }

@@ -10,11 +10,16 @@ module Orchestrator
       return if failures.count < 2
       return if ChaperoneReview.where(run_id: attempt.run_id, lineage_key: attempt.lineage_key, status: %w[queued running]).exists?
 
-      review, token = ChaperoneReview.issue!(
+      review, = ChaperoneReview.issue!(
         run: attempt.run, lineage_key: attempt.lineage_key, step_attempt_ids: failures.pluck(:attempt_id)
       )
       attempt.update!(chaperone_status: "queued")
-      ChaperoneReviewJob.perform_later(review.id, token)
+      SpawnRequest.create!(
+        requested_role: "chaperone", run_id: attempt.run_id, scope: review.lineage_key,
+        lineage_key: review.lineage_key, model_tier: "strong", priority: "blocking",
+        asked_by: "chaperone",
+        text: review.trigger_reason.presence || review.summary.presence || "Chaperone review for lineage #{review.lineage_key}."
+      )
       review
     end
   end

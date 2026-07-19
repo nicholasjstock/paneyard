@@ -118,6 +118,81 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "records a normal stop for a chaperone worker that died after submitting its decision" do
+    workspace = Workspace.create!(name: "reconcile-chaperone-done-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-chaperone-done-#{SecureRandom.hex(4)}", task: "Reconcile a finished chaperone",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "decision submitted\n")
+    review = ChaperoneReview.create!(
+      run:, lineage_key: "diagnosis-lineage", step_attempt_ids: [], status: "completed",
+      action: "continue_small", summary: "Bounded retry is sufficient.", token_digest: SecureRandom.hex(32),
+      expires_at: 1.hour.from_now, completed_at: Time.current
+    )
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "chaperone", nickname: "chaperone-test",
+      reason: "Chaperone review.", scope: review.lineage_key, status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+    run.spawn_requests.create!(
+      asked_by: "chaperone", scope: review.lineage_key, lineage_key: review.lineage_key,
+      text: "Repeated blocked diagnosis.", requested_role: "chaperone", priority: "blocking",
+      status: "fulfilled", fulfilled_worker_id: worker.worker_id
+    )
+
+    WorkerReconcileJob.perform_now
+
+    assert_equal "stopped", worker.reload.status
+    assert_equal "completed", review.reload.status
+    expect(StepAttempt.where(worker_id: worker.worker_id)).to be_empty
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
+  it "fails the review and asks the operator when a chaperone worker dies before deciding" do
+    workspace = Workspace.create!(name: "reconcile-chaperone-dead-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-chaperone-dead-#{SecureRandom.hex(4)}", task: "Reconcile a killed chaperone",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "\n")
+    diagnosis_request = run.spawn_requests.create!(
+      asked_by: "planner", scope: "diagnosis.md", text: "Diagnose it.", requested_role: "worker",
+      priority: "blocking", lineage_key: "diagnosis-lineage"
+    )
+    attempt = StepAttempt.create!(
+      run:, spawn_request: diagnosis_request, worker_id: SecureRandom.uuid, lineage_key: "diagnosis-lineage",
+      mode: "diagnosis", outcome: "blocked", result: "Could not reproduce.", chaperone_status: "queued"
+    )
+    review = ChaperoneReview.create!(
+      run:, lineage_key: "diagnosis-lineage", step_attempt_ids: [ attempt.attempt_id ], status: "running",
+      token_digest: SecureRandom.hex(32), expires_at: 1.hour.from_now, started_at: Time.current
+    )
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "chaperone", nickname: "chaperone-test",
+      reason: "Chaperone review.", scope: review.lineage_key, status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+    run.spawn_requests.create!(
+      asked_by: "chaperone", scope: review.lineage_key, lineage_key: review.lineage_key,
+      text: "Repeated blocked diagnosis.", requested_role: "chaperone", priority: "blocking",
+      status: "fulfilled", fulfilled_worker_id: worker.worker_id
+    )
+
+    WorkerReconcileJob.perform_now
+
+    assert_equal "stopped", worker.reload.status
+    assert_equal "failed", review.reload.status
+    question = UserQuestion.find_by(run_id: run.run_id, priority: "blocking", status: "open")
+    expect(question).to be_present
+    assert_equal "blocked_on_user", run.reload.phase
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "diagnostic worker payload excludes the launch prompt" do
     directory = Dir.mktmpdir
     log_path = File.join(directory, "worker.log")

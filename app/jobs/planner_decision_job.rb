@@ -149,11 +149,15 @@ class PlannerDecisionJob < ApplicationJob
       subject_type: "planner", subject_id: record.decision_id, status: %w[queued running]
     ).first
     unless existing
-      review, token = ChaperoneReview.issue!(
+      review, = ChaperoneReview.issue!(
         run: record.run, lineage_key: "planner:#{record.decision_id}", step_attempt_ids: [],
         subject_type: "planner", subject_id: record.decision_id, summary: reason
       )
-      ChaperoneReviewJob.perform_later(review.id, token)
+      SpawnRequest.create!(
+        requested_role: "chaperone", run_id: record.run_id, scope: review.lineage_key,
+        lineage_key: review.lineage_key, model_tier: "strong", priority: "blocking",
+        asked_by: "chaperone", text: review.trigger_reason.presence || review.summary.presence || reason
+      )
     end
     record.update!(status: "awaiting_chaperone", error: reason)
     record.run.publish_phase!(phase: "planning", owner: "chaperone", summary: "Chaperone is reviewing whether planner promotion is justified.")

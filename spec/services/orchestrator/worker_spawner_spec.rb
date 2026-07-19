@@ -102,6 +102,77 @@ RSpec.describe Orchestrator::WorkerSpawner do
         "WORKFLOW_WORKER_SCOPE" => "diagnosis.md"
       )
     end
+
+    it "spawns a chaperone worker on a Claude run against the curated MCP override instead of the normal worker MCP config" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-chaperone")
+      workspace = Workspace.create!(name: "chaperone-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Review a repeated failure",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(45_678)
+      allow(Process).to receive(:detach)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "chaperone", nickname: "chaperone-test", reason: "Chaperone review: repeated failure.",
+        scope: "diagnose-it", prompt: "You must begin by calling get_chaperone_state.", model_tier: "strong",
+        mcp_override: {
+          url: "http://127.0.0.1:3000/mcp/chaperone", token: "chaperone-token",
+          allowed_tools: %w[get_chaperone_state read_chaperone_artifact submit_chaperone_decision]
+        }
+      )
+
+      expect(worker.command).to eq("claude")
+      expect(worker.model).to eq("sonnet")
+      expect(worker.args).to include("--print", "--strict-mcp-config")
+      expect(worker.args).not_to include("--tools", "--settings", "--output-format")
+      allowed_tools_index = worker.args.index("--allowedTools")
+      expect(worker.args[allowed_tools_index + 1]).to eq(
+        "mcp__chaperone__get_chaperone_state,mcp__chaperone__read_chaperone_artifact,mcp__chaperone__submit_chaperone_decision"
+      )
+
+      mcp_config = JSON.parse(File.read(worker.mcp_config_path))
+      expect(mcp_config.dig("mcpServers", "chaperone", "url")).to eq("http://127.0.0.1:3000/mcp/chaperone")
+      expect(mcp_config.dig("mcpServers", "chaperone", "headers", "Authorization")).to eq("Bearer chaperone-token")
+      claude_settings_path = worker.mcp_config_path.sub(/\.mcp\.json\z/, ".claude-settings.json")
+      expect(File.exist?(claude_settings_path)).to be false
+    end
+
+    it "spawns a chaperone worker on a Codex run through the codex CLI instead of forcing Claude" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-chaperone-codex")
+      workspace = Workspace.create!(name: "chaperone-codex-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Review a repeated failure",
+        target_root: workspace.root_path, launcher_variant: "codex", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(56_789)
+      allow(Process).to receive(:detach)
+      stdin_read = instance_double(IO, close: true)
+      stdin_write = StringIO.new
+      allow(IO).to receive(:pipe).and_return([ stdin_read, stdin_write ])
+
+      worker = described_class.spawn_worker(
+        run: run, role: "chaperone", nickname: "chaperone-codex-test", reason: "Chaperone review: repeated failure.",
+        scope: "diagnose-it", prompt: "You must begin by calling get_chaperone_state.", model_tier: "strong",
+        mcp_override: {
+          url: "http://127.0.0.1:3000/mcp/chaperone", token: "chaperone-token",
+          allowed_tools: %w[get_chaperone_state read_chaperone_artifact submit_chaperone_decision]
+        }
+      )
+
+      expect(worker.command).to eq("codex")
+      expect(worker.model).to eq("default")
+      expect(worker.args).to include("--sandbox", "read-only")
+      expect(worker.args).not_to include("--model")
+      expect(worker.args).to include(%(mcp_servers.chaperone.url=#{"http://127.0.0.1:3000/mcp/chaperone".to_json}))
+      expect(worker.args).to include(%(mcp_servers.chaperone.bearer_token_env_var="WORKFLOW_CHAPERONE_TOKEN"))
+      expect(JSON.parse(File.read(worker.env_path)).fetch("WORKFLOW_CHAPERONE_TOKEN")).to eq("[set]")
+      expect(stdin_write.string).to include("get_chaperone_state")
+    end
   end
 
   describe ".stop_worker" do

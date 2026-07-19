@@ -37,6 +37,12 @@ class ChaperoneReview < ApplicationRecord
     Digest::SHA256.hexdigest(token)
   end
 
+  def reissue_token!
+    token = SecureRandom.hex(32)
+    update!(token_digest: self.class.digest(token), expires_at: 1.hour.from_now)
+    token
+  end
+
   def record_tool_call!(tool_name)
     with_lock do
       self.tool_calls = tool_calls + [ { "tool" => tool_name, "at" => Time.current.iso8601(3) } ]

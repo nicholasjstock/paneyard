@@ -28,6 +28,11 @@ class WorkerReconcileJob < ApplicationJob
         stop_reason:,
         **usage
       )
+      if worker.role == "chaperone"
+        handle_chaperone_worker_stop(worker)
+        next
+      end
+
       capacity_failure = claude_capacity_failure?(output) && worker.handoff_completed_at.blank?
       review = record_failed_attempt(worker, stop_reason:, output:) unless capacity_failure || worker.handoff_completed_at.present?
       TickRunJob.perform_later unless capacity_failure || review
@@ -99,6 +104,22 @@ class WorkerReconcileJob < ApplicationJob
       )
     end
     review
+  end
+
+  # A chaperone review is never itself the subject of another chaperone
+  # review (record_failed_attempt/ChaperoneTrigger is intentionally skipped
+  # by the caller's `next`) -- chaperone failure escalates immediately via
+  # handle_review_failure, same as today; running the normal retry/chaperone
+  # path here would recursively spawn chaperone-reviewing-chaperone.
+  def handle_chaperone_worker_stop(worker)
+    request = SpawnRequest.find_by(fulfilled_worker_id: worker.worker_id)
+    return unless request
+
+    review = ChaperoneReview.find_by(run_id: worker.run_id, lineage_key: request.lineage_key, status: %w[queued running])
+    return unless review
+
+    review.update!(status: "failed", summary: worker.stop_reason, completed_at: Time.current)
+    Orchestrator::ApplyChaperoneDecision.handle_review_failure(review: review)
   end
 
   def block_run_for_capacity!(worker, output)

@@ -1,8 +1,6 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::ObjectiveAlignment do
-  include ActiveJob::TestHelper
-
   it "rejects a performance diagnosis without a cited numeric baseline and preserves it as unrelated evidence" do
     run, request, worker = build_diagnosis("Make the phone demo faster")
     artifact = "The phone demo has a nested coverage-item routing defect in front/scripts/record-demo.ts."
@@ -37,7 +35,7 @@ RSpec.describe Orchestrator::ObjectiveAlignment do
       lineage_key: first_request.lineage_key
     )
 
-    assert_enqueued_with(job: ChaperoneReviewJob) do
+    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
       reject_diagnosis(run, second_request, second_worker)
     end
 

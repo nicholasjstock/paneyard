@@ -53,6 +53,11 @@ module Orchestrator
           next
         end
 
+        if role == "chaperone"
+          dispatch_chaperone_request(run: run, request: request)
+          next
+        end
+
         nickname = build_unique_nickname(build_worker_nickname(role), current_workers + spawned_workers)
         reason = "Bus request from #{request.asked_by} for #{request.scope}."
         prompt = build_requested_worker_prompt(run_id: run_id, request: request)
@@ -111,6 +116,54 @@ module Orchestrator
       end
 
       latest_by_key.values
+    end
+
+    def dispatch_chaperone_request(run:, request:)
+      review = ChaperoneReview.find_by(run_id: run.run_id, lineage_key: request.lineage_key, status: %w[queued running])
+      unless review
+        request.update!(
+          status: "dismissed", dismissed_by: "tick_run_job",
+          dismissal_note: "No pending chaperone review found for lineage #{request.lineage_key}."
+        )
+        return
+      end
+
+      token = review.reissue_token!
+      worker_id = SecureRandom.uuid
+
+      request.update!(
+        status: "fulfilled", fulfilled_by: "tick_run_job", fulfilled_at: Time.current,
+        fulfillment_note: "Spawned chaperone review #{review.review_id}.", fulfilled_worker_id: worker_id
+      )
+
+      begin
+        WorkerSpawner.spawn_worker(
+          run: run, role: "chaperone", nickname: "chaperone-#{SecureRandom.hex(3)}",
+          reason: "Chaperone review: #{review.trigger_reason || review.summary}",
+          scope: request.scope, prompt: chaperone_prompt(review), worker_id: worker_id, model_tier: "strong",
+          mcp_override: {
+            url: "#{WorkerSpawner.rails_mcp_url}/chaperone", token: token,
+            allowed_tools: Orchestrator::ChaperoneMcpServer::TOOL_NAMES
+          }
+        )
+      rescue => e
+        request.update!(
+          status: "dismissed", dismissed_by: "tick_run_job",
+          dismissal_note: "Claimed chaperone review #{review.review_id} failed to spawn: #{e.message}"
+        )
+        raise
+      end
+    end
+
+    def chaperone_prompt(review)
+      if review.subject_type == "planner"
+        "You must begin by calling get_chaperone_state. Review the bounded small-model planner attempt and its failure using only the chaperone MCP tools. " \
+          "Choose continue_small when the failure can be corrected by a bounded retry with clearer context, including invalid verification evidence, an unverified service or endpoint, or an unnecessary protected-path proposal. " \
+          "Choose promote only for a genuine reasoning-capability gap. Choose stop only when no safe in-scope retry exists and a real external decision is unavoidable; never stop merely because the planner proposed unauthorized work when an in-scope alternative remains. " \
+          "Your summary must state the concrete next action. You must finish by calling submit_chaperone_decision exactly once; a text-only answer is a failure."
+      else
+        "You must begin by calling get_chaperone_state. Review repeated diagnosis attempts using only the chaperone MCP tools. Determine semantic similarity and progress. You must finish by calling submit_chaperone_decision exactly once with continue_small, promote, or stop; a text-only answer is a failure."
+      end
     end
 
     def build_worker_nickname(role)
