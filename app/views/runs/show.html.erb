@@ -4,9 +4,10 @@
 <%= turbo_stream_from "run_#{@run.run_id}" %>
 
 <div class="toolbar">
-  <div>
-    <h1 class="mono"><%= @run.run_id %></h1>
-    <span class="muted"><%= @run.launcher_variant %> &middot; workspace: <%= current_workspace.name %></span>
+  <div class="run-title">
+    <span class="eyebrow">Run <span class="mono"><%= @run.run_id %></span></span>
+    <h1><%= @run.task %></h1>
+    <span class="muted"><%= current_workspace.name %> &middot; <%= @run.launcher_variant %></span>
   </div>
   <div class="toolbar-actions" data-controller="chat-drawer"
        data-action="keydown.esc@window->chat-drawer#close turbo:before-morph-element@document->chat-drawer#beforeMorph input->chat-drawer#saveDraft turbo:submit-start->chat-drawer#clearDraft">
@@ -26,68 +27,75 @@
 </div>
 
 <section class="run-dashboard">
-  <section class="panel run-now-panel">
-    <div class="panel-header">
-      <div>
-        <h2>What’s happening</h2>
-        <p class="muted"><%= @run.task %></p>
+  <div class="run-overview-grid">
+    <section class="panel run-now-panel <%= @run_now[:status_class] %>">
+      <div class="run-now-heading">
+        <span class="eyebrow">Now</span>
+        <span class="badge <%= @run_now[:status_class] %>"><%= @run_now[:badge_label] %></span>
       </div>
-      <span class="badge <%= @run_now[:status_class] %>"><%= @run_now[:state] %></span>
-    </div>
+      <h2><%= @run_now[:state] %></h2>
+      <p class="run-headline"><%= @run_now[:detail] %></p>
+      <p class="activity-age">Updated <%= time_ago_in_words(@run_now[:latest_activity_at]) %> ago &middot; live</p>
 
-    <p class="run-headline"><%= @run_now[:detail] %></p>
-    <p class="muted">Updated <%= time_ago_in_words(@run_now[:latest_activity_at]) %> ago &middot; refreshes automatically</p>
-    <% if @latest_tick&.dig("lastStallFinding").present? %><p class="error-banner"><%= @latest_tick["lastStallFinding"] %></p><% end %>
-    <% if @run.launch_queued? %><p class="error-banner">Launch job has not started. Start <span class="mono">bin/dev</span> to begin monitoring.</p><% end %>
-
-    <% if @run_now[:current_activity]&.dig(:output_preview).present? %>
-      <div class="live-activity">
-        <div class="live-activity-header">
-          <span class="stat-label">Latest worker activity</span>
-          <%= link_to "Open live worker", workspace_worker_path(current_workspace, @run_now[:current_activity][:worker].worker_id), class: "btn" %>
-        </div>
-        <pre class="log compact"><%= @run_now[:current_activity][:output_preview] %></pre>
-      </div>
-    <% end %>
-
-    <div class="run-now-grid">
-      <div>
-        <span class="stat-label">Current objective</span>
-        <% if @run_now[:why].present? %>
+      <div class="run-narrative">
+        <div class="narrative-row">
+          <span class="narrative-label">Why</span>
           <p><%= @run_now[:why] %></p>
-        <% else %>
-          <p class="muted">No objective has been published yet.</p>
-        <% end %>
+        </div>
+        <div class="narrative-row">
+          <span class="narrative-label">Next</span>
+          <p><%= @run_now[:next] %></p>
+        </div>
+        <div class="narrative-row <%= "requires-action" if @run_now[:operator_action_required] %>">
+          <span class="narrative-label">You</span>
+          <p><%= @run_now[:operator_action] %></p>
+        </div>
       </div>
-      <div>
-        <span class="stat-label">What happens next</span>
-        <% if @run_now[:next_step].present? %>
-          <% step = @run_now[:next_step] %>
-          <p><strong><%= step["requestedRole"] || step[:owner] || step["owner"] %></strong> &middot; <span class="mono"><%= step["scope"] || step[:artifact] || step["artifact"] %></span></p>
-          <p class="muted"><%= step["text"] || step[:success_check] || step["successCheck"] %></p>
-        <% else %>
-          <p class="muted">No automatic follow-up is queued.</p>
-        <% end %>
-      </div>
-      <div>
-        <span class="stat-label">Do you need to act?</span>
-        <% if @blocking_questions.any? %>
-          <p class="operator-action"><strong>Yes.</strong> <%= pluralize(@blocking_questions.count, "decision") %> needs an answer below.</p>
-        <% else %>
-          <p class="no-action"><strong>No.</strong> The run will continue automatically.</p>
-        <% end %>
-      </div>
-    </div>
-  </section>
 
-  <section class="panel run-usage-panel">
-    <div class="panel-header">
-      <div>
-        <h2>Run usage</h2>
-        <p class="muted">Combined worker sessions and Rails-owned planner decisions.</p>
+      <% if @latest_tick&.dig("lastStallFinding").present? %><p class="error-banner"><%= @latest_tick["lastStallFinding"] %></p><% end %>
+    </section>
+
+    <section class="panel activity-panel">
+      <div class="panel-header">
+        <div>
+          <span class="eyebrow">Recent activity</span>
+          <h2>How it got here</h2>
+        </div>
       </div>
-      <span class="muted"><%= @usage_summary[:reported_worker_count] %> workers reported &middot; <%= pluralize(@usage_summary[:planner_decision_count], "planner decision") %></span>
-    </div>
+      <% if @activity_feed.any? %>
+        <ol class="activity-feed">
+          <% @activity_feed.each_with_index do |item, index| %>
+            <li class="<%= item[:kind] %> <%= "current" if index.zero? %>">
+              <div class="activity-copy">
+                <span class="activity-actor"><%= item[:actor] %></span>
+                <span><%= item[:label] %></span>
+              </div>
+              <time class="muted"><%= time_ago_in_words(item[:at]) %> ago</time>
+            </li>
+          <% end %>
+        </ol>
+      <% else %>
+        <p class="empty">No activity has been recorded yet.</p>
+      <% end %>
+      <% if @run_now[:narrative_activity] %>
+        <%= link_to "Inspect current worker", workspace_worker_path(current_workspace, @run_now[:narrative_activity][:worker].worker_id), class: "activity-link" %>
+      <% end %>
+    </section>
+  </div>
+
+  <details class="panel secondary-panel run-usage-panel" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:usage">
+    <summary>
+      <span>
+        <strong>Usage & planner</strong>
+        <span class="muted">
+          <%= pluralize(@planner_decisions.count, "planner decision") %> &middot;
+          <%= number_with_delimiter(@usage_summary[:input_tokens] + @usage_summary[:output_tokens]) %> tokens &middot;
+          <%= number_to_currency(@usage_summary[:total_cost_usd]) %>
+        </span>
+      </span>
+      <span class="detail-affordance">View details</span>
+    </summary>
+    <div class="secondary-panel-body">
     <div class="stat-strip">
       <div class="stat-card">
         <span class="stat-label">Agent Turns</span>
@@ -108,34 +116,25 @@
         <span class="muted"><%= @usage_summary[:models].map { |model, count| "#{model}: #{count}" }.join(", ").presence || "no completed telemetry" %></span>
       </div>
     </div>
-    <% if @latest_planner_decision %>
-      <details class="mini-card" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:planner-context">
-        <summary>
-          Latest planner: <strong><%= pluralize(@latest_planner_decision.model_calls, "model call") %></strong>
-          &middot; <strong><%= number_to_human_size(@latest_planner_decision.context_bytes) %></strong> requested context
-          &middot; <span class="badge <%= @latest_planner_decision.status %>"><%= @latest_planner_decision.status %></span>
-        </summary>
-        <% if @latest_planner_decision.model_attempts.any? %>
-          <p class="muted">
-            Models: <%= @latest_planner_decision.model_attempts.map { |attempt| "#{attempt['tier']}: #{attempt['model']}" }.join(" → ") %>
-          </p>
+    <section class="planner-history">
+      <div class="planner-history-heading">
+        <div>
+          <span class="stat-label">Planner decision history</span>
+          <p class="muted">One expandable item for every persisted planner decision, newest first.</p>
+        </div>
+        <span class="muted"><%= pluralize(@planner_decisions.count, "database row") %></span>
+      </div>
+      <% if @planner_decisions.any? %>
+        <% total = @planner_decisions.count %>
+        <% @planner_decisions.each_with_index do |decision, index| %>
+          <%= render "planner_decision", decision: decision, number: total - index %>
         <% end %>
-        <% if @latest_planner_decision.context_requests.any? %>
-          <% @latest_planner_decision.context_requests.each do |request| %>
-            <p class="muted">
-              <span class="mono"><%= request["source"] %>:<%= request["reference"] %></span>
-              &middot; offset <%= number_with_delimiter(request["offset"] || 0) %>
-              &middot; requested <%= number_with_delimiter(request["max_chars"]) %> chars
-              &middot; returned <%= number_to_human_size(request["returned_bytes"] || 0) %>
-              &middot; <%= request["question"] %>
-            </p>
-          <% end %>
-        <% else %>
-          <p class="muted">The planner decided from the initial Rails context without requesting additions.</p>
-        <% end %>
-      </details>
-    <% end %>
-  </section>
+      <% else %>
+        <p class="empty">No planner decision has been persisted yet.</p>
+      <% end %>
+    </section>
+    </div>
+  </details>
 
   <div class="dashboard-grid">
     <% if @blocking_questions.any? %>
@@ -173,26 +172,12 @@
       </section>
     <% end %>
 
-    <section class="panel span-2">
-      <div class="panel-header">
-        <h2>Run Timeline</h2>
-      </div>
-      <% if @timeline_events.any? %>
-        <% @timeline_events.each do |event| %>
-          <div class="timeline-row">
-            <span><%= event["label"] %></span>
-            <span class="muted"><%= time_ago_in_words(Time.iso8601(event["at"])) %> ago</span>
-          </div>
-        <% end %>
-      <% else %>
-        <p class="empty">No worker lifecycle activity yet.</p>
-      <% end %>
-    </section>
-
-    <section class="panel">
-      <div class="panel-header">
-        <h2>Artifacts</h2>
-      </div>
+    <details class="panel secondary-panel span-2" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:artifacts">
+      <summary>
+        <span><strong>Artifacts</strong> <span class="muted"><%= pluralize(@artifacts.count, "available artifact") %></span></span>
+        <span class="detail-affordance">View details</span>
+      </summary>
+      <div class="secondary-panel-body">
       <% if @artifacts.any? %>
         <% @artifacts.each do |artifact| %>
           <div class="mini-card artifact-card">
@@ -209,17 +194,16 @@
       <% else %>
         <p class="empty">No run-scoped artifacts found yet.</p>
       <% end %>
-    </section>
+      </div>
+    </details>
   </div>
 
-  <section class="panel worker-command-center">
-    <div class="panel-header">
-      <div>
-        <h2>Workers</h2>
-        <p class="muted">Current workers first. Expand one for its latest output and lifecycle details.</p>
-      </div>
-      <span class="muted"><%= pluralize(@worker_activities.count, "worker") %></span>
-    </div>
+  <details class="panel secondary-panel worker-command-center" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:workers">
+    <summary>
+      <span><strong>Worker history</strong> <span class="muted"><%= pluralize(@worker_activities.count, "worker") %></span></span>
+      <span class="detail-affordance">View details</span>
+    </summary>
+    <div class="secondary-panel-body">
 
     <% if @worker_activities.any? %>
       <div class="worker-list">
@@ -269,7 +253,8 @@
     <% else %>
       <p class="empty">No workers recorded for this run yet.</p>
     <% end %>
-  </section>
+    </div>
+  </details>
 
 </section>
 

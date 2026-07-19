@@ -58,6 +58,45 @@ module Orchestrator
       {}
     end
 
+    # Claude print-mode does not support Codex's --output-last-message flag.
+    # Its terminal stream-json result event carries the equivalent final text,
+    # so reconciliation persists that value into Worker#last_message_path.
+    def claude_final_response(path)
+      read_tail_lines(path, 200).to_s.each_line.to_a.reverse_each do |line|
+        event = JSON.parse(line)
+        next unless event["type"] == "result"
+
+        return event["result"].to_s if event["result"].present?
+      rescue JSON::ParserError
+        next
+      end
+
+      nil
+    end
+
+    # Extract the worker's intentionally published progress messages from the
+    # stream protocol. These are the useful operational narrative; thinking,
+    # token events, and duplicate streaming/final message copies stay hidden.
+    def progress_updates(path, limit: 4, tail_lines: 2_000)
+      updates = []
+      read_tail_lines(path, tail_lines).to_s.each_line do |line|
+        event = JSON.parse(line)
+        next unless event["type"] == "assistant"
+
+        Array(event.dig("message", "content")).each do |block|
+          next unless block["type"] == "text"
+
+          block["text"].to_s.each_line do |text|
+            message = text.strip.delete_prefix("[STATUS]").strip if text.strip.start_with?("[STATUS]")
+            updates << message if message.present? && updates.last != message
+          end
+        end
+      rescue JSON::ParserError
+        next
+      end
+      updates.last(limit)
+    end
+
     # Claude's stream-json protocol is useful for transport but unreadable in
     # an operations UI. Collapse it into the assistant text and completed
     # tool calls while leaving non-protocol lines, such as lifecycle events,

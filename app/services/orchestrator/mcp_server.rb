@@ -29,8 +29,6 @@ module Orchestrator
           ::McpTools::ReadOrchestratorStateTool,
           ::McpTools::ReadOrchestratorTickHistoryTool,
           ::McpTools::WriteOrchestratorStateTool,
-          ::McpTools::BuildGuardedCommandTool,
-          ::McpTools::RunGuardedCommandTool,
           ::McpTools::SpawnWorkerTool,
           ::McpTools::StopWorkerTool,
           ::McpTools::CollectWorkflowStateTool,

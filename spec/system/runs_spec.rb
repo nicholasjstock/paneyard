@@ -16,9 +16,9 @@ RSpec.describe "workspace runs", type: :system do
 
     expect(page).to have_current_path(workspace_run_path(workspace, run))
     expect(page).to have_text(run.run_id)
-    expect(page).to have_text("workspace: #{workspace.name}")
-    expect(page).to have_text("What’s happening")
-    expect(page).to have_text("Run Timeline")
+    expect(page).to have_text(workspace.name)
+    expect(page).to have_text("Ready to dispatch")
+    expect(page).to have_text("How it got here")
   end
 
   it "opens the detail page from the workspace run list" do
@@ -30,8 +30,8 @@ RSpec.describe "workspace runs", type: :system do
 
     expect(page).to have_current_path(workspace_run_path(workspace, run))
     expect(page).to have_text(run.task)
-    expect(page).to have_text("What’s happening")
-    expect(page).to have_text("Run Timeline")
+    expect(page).to have_text("Monitoring")
+    expect(page).to have_text("How it got here")
   end
 
   it "updates the workspace run list live when a run is created", :js do
@@ -109,23 +109,82 @@ RSpec.describe "workspace runs", type: :system do
       following_steps: []
     )
     BusEvent.publish("run.status", run_id: run.run_id, payload: { runId: run.run_id, summary: "planning update" })
-    artifact_path = File.join(workspace.root_path, "front", "demo-output", "agents-sdk", run.run_id, "fix-summary.md")
+    artifact_path = Orchestrator::ArtifactStore.resolve_path(workspace.root_path, run.run_id, "fix-summary.md")
     FileUtils.mkdir_p(File.dirname(artifact_path))
     File.write(artifact_path, "First artifact line\nFinal artifact line that must remain visible\n")
 
     visit workspace_run_path(workspace, run)
 
     expect(page).to have_text("Test the details page.")
-    expect(page).to have_text("What’s happening")
-    expect(page).to have_text("Workers")
-    expect(page).to have_text("Run Timeline")
+    expect(page).to have_text("Work in progress")
+    expect(page).to have_text("Worker history")
+    expect(page).to have_text("How it got here")
     expect(page).to have_text("Artifacts")
-    expect(page).to have_text("Run usage")
+    expect(page).to have_text("Usage & planner")
     expect(page).to have_text("Cost")
     expect(page).to have_text("planner-main")
     expect(page).to have_text("workflow-plan.md")
     expect(page).to have_text("fix-summary.md")
     expect(page).to have_text("Final artifact line that must remain visible")
+  end
+
+  it "renders every persisted planner decision with its attempts and context" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "planner-history", task: "Explain every planning decision")
+    launch_request = run.spawn_requests.create!(
+      asked_by: "operator", requested_role: "planner", scope: "workflow-plan.md",
+      text: "Choose the initial step.", status: "fulfilled", priority: "blocking", tags: %w[launch]
+    )
+    first = run.planner_decisions.create!(
+      spawn_request: launch_request, status: "completed", model: "claude-haiku", model_calls: 1,
+      input_tokens: 800, output_tokens: 120, total_cost_usd: 0.01, context_bytes: 600,
+      context_requests: [
+        { source: "artifact", reference: "diagnosis.md", question: "What failed?", max_chars: 600, returned_bytes: 600 }
+      ],
+      decision: {
+        summary: "Gather direct runtime evidence.",
+        next_step: {
+          owner: "worker", artifact: "diagnosis.md", mode: "diagnosis", write_scope: "artifact_only",
+          success_check: "Reproduce the failure.", allowed_paths: [], evidence_refs: []
+        },
+        following_steps: []
+      },
+      started_at: 4.minutes.ago, completed_at: 3.minutes.ago
+    )
+    first.attempts.create!(
+      sequence: 1, model_tier: "small", model: "claude-haiku", outcome: "decision", disposition: "accepted",
+      proposal: { summary: "Gather direct runtime evidence.", next_step: first.decision["next_step"] },
+      usage: { input_tokens: 800, output_tokens: 120, total_cost_usd: 0.01 }
+    )
+
+    retry_request = run.spawn_requests.create!(
+      asked_by: "worker-2", requested_role: "planner", scope: "workflow-plan.md",
+      text: "Recover from a rejected handoff.", status: "fulfilled", priority: "blocking"
+    )
+    second = run.planner_decisions.create!(
+      spawn_request: retry_request, status: "failed", model: "claude-haiku", model_calls: 1,
+      input_tokens: 300, output_tokens: 40, total_cost_usd: 0.004,
+      error: "Policy rejected exact path", started_at: 2.minutes.ago, completed_at: 1.minute.ago
+    )
+    second.attempts.create!(
+      sequence: 1, model_tier: "small", model: "claude-haiku", outcome: "decision", disposition: "rejected",
+      rejection_reason: "Policy rejected exact path", proposal: { summary: "Broaden the write scope." },
+      usage: { input_tokens: 300, output_tokens: 40, total_cost_usd: 0.004 }
+    )
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_text("2 planner decisions")
+    rows = all(".planner-decision-row", visible: :all)
+    expect(rows.count).to eq(2)
+    expect(rows.first.text(:all)).to include("Decision 2", "Failed before a decision")
+    expect(page).to have_css(".planner-decision-row", text: "Policy rejected exact path", visible: :all)
+    expect(page).to have_css(".planner-decision-row", text: "artifact:diagnosis.md", visible: :all)
+    expect(page).to have_css(".planner-decision-row", text: "worker → diagnosis.md", visible: :all)
+    activity_items = all(".activity-feed li")
+    expect(activity_items.count { |item| item.has_text?("Planner") }).to eq(2)
+    expect(activity_items.first).to have_text("Planner Attempt failed: Policy rejected exact path")
+    expect(activity_items.last).to have_text("Planner Chose worker → diagnosis.md")
   end
 
   it "navigates from an expanded worker to the full worker log" do
@@ -149,8 +208,7 @@ RSpec.describe "workspace runs", type: :system do
     )
 
     visit workspace_run_path(workspace, run)
-    find("summary", text: "planner-live").click
-    click_link "Open full worker log"
+    click_link "Inspect current worker"
 
     expect(page).to have_current_path(workspace_worker_path(workspace, worker.worker_id))
     expect(page).to have_text("planner-live")
@@ -173,14 +231,16 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
 
-    worker_rows = all(".worker-row")
+    worker_rows = all(".worker-row", visible: :all)
     expect(worker_rows.map { |row| row[:class] }).to eq([ "worker-row running", "worker-row attention", "worker-row stopped" ])
     expect(page).to have_text(stopped_worker.nickname)
     expect(page).to have_text(running_worker.nickname)
 
-    find("summary", text: attention_worker.nickname).click
     expect(page).to have_text("needs attention")
-    expect(page).to have_text("The request failed before the handoff completed.")
+    expect(page).to have_text("Work in progress")
+    expect(page).to have_css(
+      ".worker-row.attention", text: "The request failed before the handoff completed.", visible: :all
+    )
   end
 
   it "uses live worker evidence instead of a stale persisted phase" do
@@ -197,6 +257,10 @@ RSpec.describe "workspace runs", type: :system do
     worker = create_run_worker(run, nickname: "worker-live")
     worker.update!(scope: "diagnosis.md", reason: "Capture the request, refetch, and rendered state.")
     File.write(worker.last_message_path, "Recording the failing flow against backend port 4100.\n")
+    File.write(worker.log_path, [
+      { type: "assistant", message: { content: [ { type: "text", text: "[STATUS] Located the recorded phone scenario." } ] } }.to_json,
+      { type: "assistant", message: { content: [ { type: "text", text: "[STATUS] Measuring the 29-step recording now." } ] } }.to_json
+    ].join("\n"))
     OrchestratorTick.create!(
       run_id: run.run_id,
       phase: "planning",
@@ -214,17 +278,20 @@ RSpec.describe "workspace runs", type: :system do
     visit workspace_run_path(workspace, run)
 
     expect(page).to have_text("Work in progress")
-    expect(page).to have_text("worker-live is working on diagnosis.md")
+    expect(page).to have_text("Measuring the 29-step recording now.")
     expect(page).to have_text("Recording the failing flow against backend port 4100.")
+    expect(page).to have_text("Measuring the 29-step recording now.")
+    expect(page).to have_text("How it got here")
     expect(page).to have_text("Capture the request, refetch, and rendered state.")
     expect(page).to have_text("verification.md")
-    expect(page).to have_text("No. The run will continue automatically.")
-    expect(page).to have_no_text("Work will resume automatically")
+    expect(page).to have_text("No action required while the worker is making progress.")
+    expect(page).to have_no_text("The next model call is paused")
   end
 
-  it "shows a blocking question when no worker is active" do
+  it "prioritizes a blocking question even while a worker is active" do
     workspace = create_workspace
     run = create_run(workspace:, suffix: "blocking-question", task: "Await an operator decision")
+    create_run_worker(run, nickname: "worker-still-active")
     run.user_questions.create!(
       asked_by: "worker",
       scope: "decision.md",
@@ -235,8 +302,44 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_text("Needs your decision")
-    expect(page).to have_text("1 blocking question awaiting an answer.")
+    expect(page).to have_text("Your decision is needed")
+    expect(page).to have_text("The run is paused on 1 blocking question.")
+    expect(page).to have_text("Answer required before work can continue.")
+    expect(page).to have_no_text("No action required while the worker is making progress.")
+  end
+
+  it "shows an explicit failure while retaining the stopped worker progress trail" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "failed-narrative", task: "Explain a failed run")
+    run.update!(status: "failed", phase: "failed", phase_summary: "Planner contract validation failed.")
+    worker = create_run_worker(run, nickname: "worker-failed", status: "stopped", stop_reason: "Handoff failed")
+    FileUtils.mkdir_p(File.dirname(worker.log_path))
+    File.write(worker.log_path,
+      { type: "assistant", message: { content: [ { type: "text", text: "[STATUS] Backend rejected the recording request." } ] } }.to_json)
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_text("Run failed")
+    expect(page).to have_text("Planner contract validation failed.")
+    expect(page).to have_text("No automatic retry is scheduled.")
+    expect(page).to have_text("Review the failure, then restart or launch a replacement run.")
+    expect(page).to have_no_text("No action required")
+    expect(page).to have_text("Backend rejected the recording request.")
+  end
+
+  it "shows an actionable handoff rejection in the run timeline" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "handoff-rejected", task: "Explain a rejected handoff")
+    BusEvent.publish(
+      "worker.handoff_rejected", run_id: run.run_id,
+      payload: { error: "diagnosis evidenceCitation not found in diagnosis.md: paraphrase" }
+    )
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_text(
+      "Handoff rejected: diagnosis evidenceCitation not found in diagnosis.md: paraphrase"
+    )
   end
 
   it "updates the run detail page live when new status and tick data arrive", :js do
@@ -250,8 +353,8 @@ RSpec.describe "workspace runs", type: :system do
     )
 
     visit workspace_run_path(workspace, run)
-    expect(page).to have_text("No worker lifecycle activity yet.")
-    expect(page).to have_text("What’s happening")
+    expect(page).to have_text("No activity has been recorded yet.")
+    expect(page).to have_text("Monitoring")
     expect(page).to have_text("0")
 
     publisher = Thread.new do
@@ -280,7 +383,7 @@ RSpec.describe "workspace runs", type: :system do
       end
     end
 
-    expect(page).to have_text("What’s happening")
+    expect(page).to have_text("How it got here")
     expect(page).to have_text("planning")
     expect(page).to have_text("The planner is deciding what to do next.")
     expect(page).to have_text("Planning next step")

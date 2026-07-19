@@ -45,6 +45,31 @@ RSpec.describe TickRunJob do
     assert_equal state, Orchestrator::TickState.latest(run.run_id)
   end
 
+  it "includes the stopped worker artifact in dead-end recovery context" do
+    workspace = Workspace.create!(name: "tick-artifact-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
+    run = Run.create!(
+      workspace: workspace, run_id: "tick-artifact-#{SecureRandom.hex(4)}", task: "Recover from a rejected handoff",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running"
+    )
+    Orchestrator::TickState.write(
+      run_id: run.run_id, phase: "waiting_on_workers", tick_count: 1,
+      last_plan_summary: "Worker was assigned.", pending_spawn_keys: [], following_steps: []
+    )
+    worker = run.workers.create!(
+      worker_id: SecureRandom.uuid, role: "worker", nickname: "worker", reason: "Diagnose.", scope: "diagnosis.md",
+      status: "stopped", pid: 123_456, command: "claude", args: [], started_at: 2.minutes.ago, stopped_at: 1.minute.ago,
+      prompt_path: Rails.root.join("tmp/worker.prompt.txt").to_s, log_path: Rails.root.join("tmp/worker.log").to_s,
+      last_message_path: Rails.root.join("tmp/worker.last.txt").to_s, env_path: Rails.root.join("tmp/worker.env").to_s
+    )
+    Orchestrator::ArtifactStore.write(run.target_root, run.run_id, worker.scope, "Confirmed backend boot failure at config/application.rb:22.")
+
+    without_spawning_workers { TickRunJob.new.send(:tick_run, run) }
+
+    request = SpawnRequest.open_only.find_by!(run_id: run.run_id, requested_role: "planner")
+    expect(request.context).to include("Recovery artifact diagnosis.md from worker")
+    expect(request.context).to include("Confirmed backend boot failure at config/application.rb:22.")
+  end
+
   it "clears an expired capacity phase when work is active" do
     workspace = Workspace.create!(name: "tick-capacity-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
     run = Run.create!(

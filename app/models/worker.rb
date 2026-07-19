@@ -1,3 +1,5 @@
+require "digest"
+
 # Replaces WorkflowWorkerRecord (workflow-worker-runtime.ts) as the source
 # of truth for the worker registry. Wire format (#as_json) mirrors that TS
 # type field-for-field.
@@ -10,7 +12,7 @@
 # required for that ordering to keep working.
 class Worker < ApplicationRecord
   ROLES = %w[orchestrator worker planner infrastructure].freeze
-  STATUSES = %w[running stopped].freeze
+  STATUSES = %w[launching running stopped].freeze
   OUTPUT_TAIL_MAX_CHARS = 1_200
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, optional: true, inverse_of: :workers
@@ -23,10 +25,22 @@ class Worker < ApplicationRecord
 
   before_validation :assign_started_at, on: :create
 
-  after_create_commit :publish_spawned_event
+  after_create_commit :publish_spawned_event, if: -> { status == "running" }
+  after_update_commit :publish_running_event
   after_update_commit :publish_stopped_event
 
   scope :active, -> { where(status: "running") }
+
+  def self.issue_capability
+    token = SecureRandom.hex(32)
+    [ token, Digest::SHA256.hexdigest(token) ]
+  end
+
+  def self.authenticate_capability(token)
+    return if token.blank?
+
+    find_by(capability_token_digest: Digest::SHA256.hexdigest(token), status: %w[launching running])
+  end
 
   def self.mark_handoff_completed!(run_id:, nickname: nil, role: nil)
     workers = where(run_id: run_id)
@@ -52,6 +66,9 @@ class Worker < ApplicationRecord
       exitStatusPath: exit_status_path,
       exitCode: exit_code,
       model: model,
+      executionMode: execution_mode,
+      writeScope: write_scope,
+      allowedPaths: allowed_paths,
       agentTurnCount: agent_turn_count,
       inputTokens: input_tokens,
       outputTokens: output_tokens,
@@ -82,6 +99,8 @@ class Worker < ApplicationRecord
       exitCode: exit_code,
       stopReason: stop_reason,
       model: model,
+      executionMode: execution_mode,
+      writeScope: write_scope,
       agentTurnCount: agent_turn_count,
       inputTokens: input_tokens,
       outputTokens: output_tokens,
@@ -111,6 +130,10 @@ class Worker < ApplicationRecord
     BusEvent.publish("worker.spawned", run_id: run_id, payload: {
       runId: run_id, role: role, nickname: nickname, reason: reason, workerId: worker_id
     })
+  end
+
+  def publish_running_event
+    publish_spawned_event if saved_change_to_status? && status == "running"
   end
 
   def publish_stopped_event

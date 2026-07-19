@@ -73,11 +73,22 @@ class TickRunJob < ApplicationJob
       run_id: run.run_id,
       following_steps: previous_state[:following_steps] || []
     )
+    finding = [ finding, recovery_artifact_evidence(run) ].compact.join(" ")
     plan = Orchestrator::Planner.build_stalled_worker_recovery_plan(
       task: run.task,
       recovery_finding: finding,
       following_steps: previous_state[:following_steps] || []
     )
     Orchestrator::Planner.publish_planner_jobs(run_id: run.run_id, summary: plan[:summary], plan: plan)
+  end
+
+  def recovery_artifact_evidence(run)
+    worker = run.workers.where(status: "stopped").order(stopped_at: :desc).first
+    return unless worker
+
+    window = Orchestrator::ArtifactStore.read_window(run.target_root, run.run_id, worker.scope, offset: 0, limit: 6_000)
+    "Recovery artifact #{worker.scope} from #{worker.nickname}:\n#{window[:content]}"
+  rescue Errno::ENOENT, ArgumentError
+    nil
   end
 end

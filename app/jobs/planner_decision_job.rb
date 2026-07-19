@@ -7,11 +7,7 @@ class PlannerDecisionJob < ApplicationJob
     record = PlannerDecision.find(id)
     return if record.status == "completed"
 
-    record.update!(
-      status: "running", started_at: Time.current, error: nil,
-      model_calls: 0, model_attempts: [], context_requests: [], context_bytes: 0,
-      input_tokens: nil, output_tokens: nil, cache_read_input_tokens: nil, total_cost_usd: nil
-    )
+    record.update!(status: "running", started_at: record.started_at || Time.current, error: nil)
     result = decide(record)
     return if result[:chaperone_pending]
 
@@ -50,15 +46,22 @@ class PlannerDecisionJob < ApplicationJob
       result = Orchestrator::PlannerDecisionRunner.call(
         run: record.run, request: record.spawn_request, additional_context: additional_context, model_tier: model_tier
       )
-      record_model_call!(record, result)
+      attempt = record_model_call!(record, result)
       if result[:outcome] == "decision"
-        if record.run.run_context_entries.where(kind: "acceptance_criterion").empty? && Array(result[:acceptance_criteria]).empty?
+        existing_contract = record.run.run_context_entries.where(kind: "acceptance_criterion").exists?
+        if existing_contract && Array(result[:acceptance_criteria]).any?
+          attempt.update!(rejection_reason: "Ignored acceptanceCriteria because the run contract is already established")
+          result[:acceptance_criteria] = []
+        end
+        if !existing_contract && Array(result[:acceptance_criteria]).empty?
+          reject_attempt!(attempt, "Initial planner decision omitted the acceptance contract")
           return queue_planner_chaperone!(record, "Small planner omitted the initial acceptance contract.") if model_tier == :small
 
           raise Orchestrator::PlannerDecisionRunner::Error, "Strong planner omitted the initial acceptance contract"
         end
         if result[:next_step].nil? && blocked_worker_handoff?(record)
           reason = "Small planner tried to complete the run after a worker reported blocked evidence."
+          reject_attempt!(attempt, reason)
           return queue_planner_chaperone!(record, reason) if model_tier == :small
 
           return safe_diagnosis(record, result, "Blocked worker evidence still requires a bounded next step.")
@@ -74,19 +77,24 @@ class PlannerDecisionJob < ApplicationJob
             run_id: record.run_id, next_step: result[:next_step], following_steps: result[:following_steps]
           )
         rescue ArgumentError => error
+          reject_attempt!(attempt, error.message)
           if model_tier == :small
             return queue_planner_chaperone!(record, "Small planner proposed a policy-invalid plan: #{error.message}")
           end
 
           return safe_diagnosis(record, result, "The proposed plan violated orchestration policy: #{error.message}")
         end
+        attempt.update!(disposition: "accepted")
       end
       if result[:outcome] == "needs_stronger_model"
+        attempt.update!(disposition: "needs_chaperone")
         return safe_diagnosis(record, result, "The authorized strong planner could not make a bounded decision.") if model_tier == :strong
 
         return queue_planner_chaperone!(record, "Small planner requested stronger reasoning.")
       end
       return result unless result[:outcome] == "needs_context"
+
+      attempt.update!(disposition: "needs_context")
 
       if result[:context_request].blank?
         raise Orchestrator::PlannerDecisionRunner::Error, "Planner requested more context without naming it"
@@ -123,9 +131,9 @@ class PlannerDecisionJob < ApplicationJob
       summary: "#{reason} Diagnose the target and establish a concrete baseline before planning changes.",
       next_step: {
         owner: "worker", artifact: "initial-diagnosis.md",
-        success_check: "Identify the exact target, reproduce the reported slowness, and record measured baseline evidence.",
+        success_check: "Identify the exact target, reproduce the reported behavior, and record concrete baseline evidence.",
         mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
-        lineage_key: "#{record.run_id}:initial-performance-diagnosis"
+        lineage_key: "#{record.run_id}:initial-diagnosis"
       },
       following_steps: [], context_request: nil,
       model: result[:model], model_tier: result[:model_tier]
@@ -164,7 +172,19 @@ class PlannerDecisionJob < ApplicationJob
       end
       record.model = result[:model] if result[:model].present?
       record.save!
+      record.attempts.create!(
+        sequence: (record.attempts.maximum(:sequence) || 0) + 1,
+        model_tier: result[:model_tier].presence || "unknown",
+        model: result[:model],
+        outcome: result[:outcome].presence || "decision",
+        proposal: result.except(:usage),
+        usage: usage
+      )
     end
+  end
+
+  def reject_attempt!(attempt, reason)
+    attempt.update!(disposition: "rejected", rejection_reason: reason)
   end
 
   def record_context_request!(record, context)

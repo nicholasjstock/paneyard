@@ -3,7 +3,7 @@ Rails.application.routes.draw do
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   # Can be used by load balancers and uptime monitors to verify that the app is live.
-  get "up" => "rails/health#show", as: :rails_health_check
+  get "up" => "health#show", as: :rails_health_check
 
   # MCP endpoint worker/planner CLI subprocesses connect to (see
   # app/services/orchestrator/mcp_server.rb, app/mcp_tools/) -- Streamable
@@ -11,6 +11,7 @@ Rails.application.routes.draw do
   # fresh per worker like the old scripts/workflow-mcp-server.ts did.
   mount Orchestrator::ChaperoneMcpEndpoint.new => "/mcp/chaperone"
   mount Orchestrator::WorkspaceChatMcpEndpoint.new => "/mcp/workspace-chat"
+  mount Orchestrator::WorkerMcpEndpoint.new => "/mcp/worker"
   mcp_transport = MCP::Server::Transports::StreamableHTTPTransport.new(Orchestrator::McpServer.build)
   mount mcp_transport => "/mcp"
 

@@ -69,8 +69,17 @@ module Orchestrator
         begin
           worker = WorkerSpawner.spawn_worker(
             run: run, role: role, nickname: nickname, reason: reason, scope: request.scope, prompt: prompt,
-            worker_id: worker_id, mode: execution_mode(request), model_tier: request.model_tier
+            worker_id: worker_id, mode: execution_mode(request), write_scope: write_scope(request),
+            allowed_paths: allowed_paths(request), model_tier: request.model_tier
           )
+        rescue Orchestrator::TargetPreflight::Error => e
+          request.update!(
+            status: "dismissed", dismissed_by: "target_preflight",
+            dismissal_note: "Worker #{nickname} was not launched: #{e.message}"
+          )
+          run.update!(status: "failed", stopped_at: Time.current)
+          run.publish_phase!(phase: "failed", owner: "target_preflight", summary: e.message)
+          next
         rescue => e
           # The claim promised a worker that never came into existence --
           # undo it so dependents don't wait forever on a workerId that
@@ -135,7 +144,20 @@ module Orchestrator
     end
 
     def execution_mode(request)
-      request.text.to_s[/\bExecution mode: ([a-z_]+)\./i, 1]&.downcase
+      request.execution_mode.presence || request.text.to_s[/\bExecution mode: ([a-z_]+)\./i, 1]&.downcase
+    end
+
+    def write_scope(request)
+      request.write_scope.presence || request.text.to_s[/\bWrite scope: ([a-z_]+)\./i, 1]&.downcase
+    end
+
+    def allowed_paths(request)
+      return Array(request.allowed_paths) if request.allowed_paths.present?
+
+      raw = request.text.to_s[/\bAllowed repository paths: (.+?)\./i, 1]
+      return [] if raw.blank? || raw.casecmp?("none")
+
+      raw.split(",").map(&:strip)
     end
   end
 end

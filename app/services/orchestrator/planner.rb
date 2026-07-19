@@ -6,28 +6,16 @@ module Orchestrator
   module Planner
     module_function
 
-    FRONTEND_KEYWORDS = %w[frontend].freeze
-    BACKEND_KEYWORDS = %w[backend].freeze
-    INFRASTRUCTURE_KEYWORDS = %w[playwright docker infrastructure toolchain].freeze
-
     # stall_finding is accepted but intentionally unused -- matches
     # scripts/workflow-mcp.ts's planWorkflowIteration exactly, which also
     # accepts stallFinding without reading it in the routing logic
     # (findingText is built from verifierFinding only). Not a bug to fix
     # here; this is a faithful port.
     def plan_workflow_iteration(task:, verifier_finding: nil, stall_finding: nil)
-      finding_text = [ verifier_finding ].compact.join("\n").downcase
-
-      fix_step =
-        if FRONTEND_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "worker", artifact: "fix-summary.md", success_check: "Reproduce the frontend failure and identify the confirmed boundary with consumer evidence; keep repository application files read-only." }
-        elsif BACKEND_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "worker", artifact: "fix-summary.md", success_check: "Reproduce the backend failure and identify the confirmed boundary with request evidence; keep repository application files read-only." }
-        elsif INFRASTRUCTURE_KEYWORDS.any? { |kw| finding_text.include?(kw) }
-          { owner: "infrastructure", artifact: "fix-summary.md", success_check: "Reproduce the infrastructure failure and identify the confirmed runtime boundary; keep repository files read-only." }
-        else
-          { owner: "worker", artifact: "fix-summary.md", success_check: "Reproduce the reported failure and identify the confirmed boundary with direct evidence; keep repository files read-only." }
-        end
+      fix_step = {
+        owner: "worker", artifact: "fix-summary.md",
+        success_check: "Reproduce the reported failure and identify the confirmed boundary with direct evidence; keep repository files read-only."
+      }
 
       verify_step = {
         owner: "worker",
@@ -105,6 +93,10 @@ module Orchestrator
         text: StepPolicy.worker_instructions(step),
         context: summary,
         requested_role: step[:owner],
+        execution_mode: step[:mode],
+        write_scope: step[:write_scope],
+        allowed_paths: Array(step[:allowed_paths]),
+        evidence_refs: Array(step[:evidence_refs]),
         lineage_key: step[:lineage_key].presence || step[:artifact],
         priority: "blocking",
         tags: [ step[:owner], step[:artifact], "planner-job" ]

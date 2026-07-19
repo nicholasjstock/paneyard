@@ -19,15 +19,18 @@ class WorkerReconcileJob < ApplicationJob
       exit_code = read_exit_code(worker.exit_status_path)
       output = Orchestrator::LogReader.read_tail_lines(worker.log_path, 12).to_s
       usage = Orchestrator::LogReader.claude_usage(worker.log_path)
+      persist_claude_final_response(worker)
+      stop_reason = worker.stop_reason.presence || stop_reason_for(worker, exit_code, output)
       worker.update!(
         status: "stopped",
         stopped_at: Time.current,
         exit_code: exit_code,
-        stop_reason: worker.stop_reason.presence || stop_reason_for(worker, exit_code, output),
+        stop_reason:,
         **usage
       )
       capacity_failure = claude_capacity_failure?(output) && worker.handoff_completed_at.blank?
-      TickRunJob.perform_later unless capacity_failure
+      review = record_failed_attempt(worker, stop_reason:, output:) unless capacity_failure || worker.handoff_completed_at.present?
+      TickRunJob.perform_later unless capacity_failure || review
       block_run_for_capacity!(worker, output) if capacity_failure
     end
   end
@@ -50,11 +53,22 @@ class WorkerReconcileJob < ApplicationJob
     nil
   end
 
-    def stop_reason_for(worker, exit_code, output)
-      return "Worker exited successfully after completing its handoff." if worker.handoff_completed_at.present? && exit_code == 0
-      return "Worker exited with status #{exit_code} after completing its handoff." if worker.handoff_completed_at.present? && exit_code.present?
-      return "Worker stopped after completing its handoff." if worker.handoff_completed_at.present?
-      return "Claude session limit reached; worker exited before completing its handoff." if output.match?(/hit your session limit/i)
+  def persist_claude_final_response(worker)
+    return unless worker.command == "claude"
+
+    response = Orchestrator::LogReader.claude_final_response(worker.log_path)
+    return if response.blank?
+
+    File.write(worker.last_message_path, "#{response.rstrip}\n")
+  rescue Errno::ENOENT, Errno::EACCES
+    nil
+  end
+
+  def stop_reason_for(worker, exit_code, output)
+    return "Worker exited successfully after completing its handoff." if worker.handoff_completed_at.present? && exit_code == 0
+    return "Worker exited with status #{exit_code} after completing its handoff." if worker.handoff_completed_at.present? && exit_code.present?
+    return "Worker stopped after completing its handoff." if worker.handoff_completed_at.present?
+    return "Claude session limit reached; worker exited before completing its handoff." if output.match?(/hit your session limit/i)
     return "Claude rate limit reached; worker exited before completing its handoff." if output.match?(/rate limit|too many requests/i)
     return "Worker exited with status #{exit_code} before completing its handoff." if exit_code.present?
 
@@ -63,6 +77,28 @@ class WorkerReconcileJob < ApplicationJob
 
   def claude_capacity_failure?(output)
     output.match?(/hit your session limit|rate limit|too many requests/i)
+  end
+
+  def record_failed_attempt(worker, stop_reason:, output:)
+    request = SpawnRequest.find_by(fulfilled_worker_id: worker.worker_id)
+    return unless request
+    return if StepAttempt.exists?(worker_id: worker.worker_id)
+
+    attempt = StepAttempt.create!(
+      run: worker.run, spawn_request: request, worker_id: worker.worker_id,
+      lineage_key: request.lineage_key.presence || request.scope,
+      mode: worker.execution_mode.presence || Orchestrator::SpawnRequestedWorkers.execution_mode(request).presence || "unknown",
+      outcome: "failed", result: "#{stop_reason}\n#{output}".strip,
+      evidence_citations: []
+    )
+    review = Orchestrator::ChaperoneTrigger.call(attempt)
+    if review
+      worker.run.publish_phase!(
+        phase: "planning", owner: "chaperone",
+        summary: "Chaperone is reviewing repeated worker failures for #{attempt.lineage_key}."
+      )
+    end
+    review
   end
 
   def block_run_for_capacity!(worker, output)

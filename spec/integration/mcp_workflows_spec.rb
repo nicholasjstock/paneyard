@@ -197,12 +197,12 @@ RSpec.describe "MCP workflow integrations" do
       "Evidence: POST completed at 12:00:01Z; reproduction stopped before the GET request."
     )
 
-    expect do
-      McpTools::WorkerTurnTool.call(
-        runId: run.run_id, role: "worker", nickname: worker.nickname, scope: worker.scope,
-        result: "Diagnosis complete.", task: run.task, server_context: nil
-      )
-    end.to raise_error(ArgumentError, "diagnosis worker_turn requires evidenceOutcome=confirmed or blocked")
+    rejected = McpTools::WorkerTurnTool.call(
+      runId: run.run_id, role: "worker", nickname: worker.nickname, scope: worker.scope,
+      result: "Diagnosis complete.", task: run.task, server_context: nil
+    )
+    expect(rejected.error?).to be(true)
+    expect(rejected.content.first[:text]).to include("requires evidenceOutcome=confirmed or blocked")
 
     response = McpTools::WorkerTurnTool.call(
       runId: run.run_id, role: "worker", nickname: worker.nickname, scope: worker.scope,
@@ -214,6 +214,29 @@ RSpec.describe "MCP workflow integrations" do
 
     expect(response.structured_content[:plannerRequest][:requestId]).to be_present
     expect(worker.reload.handoff_completed_at).to be_present
+  end
+
+  it "returns the exact missing citation as an actionable tool error" do
+    run = create_run("mcp-diagnosis-citation")
+    worker = create_worker(run, role: "worker", nickname: "worker-diagnosis", scope: "diagnosis.md")
+    run.spawn_requests.create!(
+      asked_by: "planner", scope: worker.scope, text: "Execution mode: diagnosis. Capture evidence.",
+      requested_role: "worker", priority: "blocking", status: "fulfilled",
+      fulfilled_by: "tick_run_job", fulfilled_at: Time.current, fulfilled_worker_id: worker.worker_id
+    )
+    Orchestrator::ArtifactStore.write(run.target_root, run.run_id, worker.scope, "Exact artifact sentence.")
+
+    response = McpTools::WorkerTurnTool.call(
+      runId: run.run_id, role: "worker", nickname: worker.nickname, scope: worker.scope,
+      result: "[BLOCKED] Could not reproduce.", task: run.task, evidenceOutcome: "blocked",
+      evidenceCitations: [ "Paraphrased sentence." ], server_context: nil
+    )
+
+    expect(response.error?).to be(true)
+    expect(response.content.first[:text]).to include(
+      "diagnosis evidenceCitation not found in diagnosis.md: Paraphrased sentence."
+    )
+    expect(BusEvent.where(run_id: run.run_id, event_type: "worker.handoff_rejected")).to exist
   end
 
   it "turns a planner decision into completion state when nextStep is nil" do

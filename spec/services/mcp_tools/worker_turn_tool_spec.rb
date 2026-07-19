@@ -29,4 +29,35 @@ RSpec.describe McpTools::WorkerTurnTool do
     assert_includes request.context, "scope performance-verification.md"
     assert_includes request.tags, "evidence-blocked"
   end
+
+  it "uses the authenticated worker even when caller identity fields name another worker" do
+    root = Dir.mktmpdir("worker-turn-capability")
+    workspace = Workspace.create!(name: "worker-capability-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "worker-capability-#{SecureRandom.hex(4)}", task: "Verify identity",
+      target_root: root, launcher_variant: "claude", status: "running"
+    )
+    authenticated = create_worker(run, "worker-auth", "auth-report.md")
+    other = create_worker(run, "worker-other", "other-report.md")
+
+    described_class.call(
+      runId: run.run_id, role: "worker", nickname: other.nickname, scope: other.scope,
+      task: "Verify identity", result: "[DONE] Authenticated result.",
+      server_context: { worker_id: authenticated.worker_id }
+    )
+
+    expect(authenticated.reload.handoff_completed_at).to be_present
+    expect(other.reload.handoff_completed_at).to be_nil
+  end
+
+  def create_worker(run, nickname, scope)
+    run.workers.create!(
+      worker_id: SecureRandom.uuid, role: "worker", nickname:, reason: "Verify it.", scope:,
+      status: "running", pid: 12_345, command: "claude", args: [],
+      prompt_path: Rails.root.join("tmp/#{nickname}.prompt").to_s,
+      log_path: Rails.root.join("tmp/#{nickname}.log").to_s,
+      last_message_path: Rails.root.join("tmp/#{nickname}.last").to_s,
+      env_path: Rails.root.join("tmp/#{nickname}.env").to_s
+    )
+  end
 end

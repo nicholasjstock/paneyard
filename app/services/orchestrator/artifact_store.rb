@@ -11,9 +11,15 @@ module Orchestrator
 
     DEFAULT_READ_LIMIT = 2_000
     MAX_READ_LIMIT = 8_000
+    DEFAULT_OUTPUT_DIR = File.join(".workflow-orchestrator", "artifacts")
+    LEGACY_OUTPUT_DIR = File.join("front", "demo-output", "agents-sdk")
 
     def output_dir(root_dir)
-      File.join(root_dir, "front", "demo-output", "agents-sdk")
+      generic = File.join(root_dir, DEFAULT_OUTPUT_DIR)
+      legacy = File.join(root_dir, LEGACY_OUTPUT_DIR)
+      return legacy if !Dir.exist?(generic) && Dir.exist?(legacy)
+
+      generic
     end
 
     def sanitize_run_id(run_id)
@@ -46,6 +52,13 @@ module Orchestrator
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, content)
       path
+    end
+
+    def names(root_dir, run_id)
+      run_dir = File.join(output_dir(root_dir), sanitize_run_id(run_id))
+      return [] unless Dir.exist?(run_dir)
+
+      Dir.children(run_dir).select { |name| File.file?(File.join(run_dir, name)) }.sort
     end
 
     def read(root_dir, run_id, artifact_name)

@@ -55,7 +55,15 @@ module Orchestrator
         an existing criterion. A verified update requires a workspace-relative evidenceRef; blocked work, source edits alone,
         estimates, and absence of errors are not positive verification. Waive only when the user explicitly authorized it.
         Never return nextStep=null while completion_blockers remain after applying justified acceptanceUpdates.
-        A diagnosis step must be artifact_only. An implementation step must name exact allowedPaths.
+        A diagnosis step must be artifact_only. An implementation step must name exact workspace-relative file paths in
+        allowedPaths. An exact file path names one file: it must not end in "/" and must not contain glob characters
+        (*, ?, [, ], {, or }). Directory paths such as "front/" and patterns such as "front/**/*.ts" are invalid.
+        Use mode=recording for running a demo or collecting recording/timing artifacts, even when owner=infrastructure;
+        recording and verification must use writeScope=artifact_only and allowedPaths=[]. Use mode=infrastructure only
+        when the step is authorized to modify exact infrastructure files with writeScope=scoped_changes.
+        When the run has a performance objective, every proposed step's successCheck must explicitly retain it. A
+        verification step must require evidence that the result is faster than the baseline; merely collecting or
+        comparing timings does not verify the requested improvement.
         If the task is ambiguous and no known source contains the missing detail, choose a bounded diagnosis step that locates
         the target and measures a baseline. Do not use needs_context to search the repository or repeatedly ask for absent facts.
         Give a step a stable lineageKey describing its objective. When retrying the same objective, preserve its lineageKey;

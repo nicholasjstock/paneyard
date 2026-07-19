@@ -96,6 +96,28 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "persists Claude's final response for the worker view" do
+    workspace = Workspace.create!(name: "reconcile-final-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-final-#{SecureRandom.hex(4)}", task: "Persist final response",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    last_message_path = File.join(workspace.root_path, "worker.last-message.txt")
+    File.write(log_path, { type: "result", result: "The verification completed.", usage: {} }.to_json << "\n")
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "worker", nickname: "worker-final",
+      reason: "Verify it.", scope: "verification.md", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path:, env_path: log_path, command: "claude"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    expect(File.read(last_message_path)).to eq("The verification completed.\n")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "diagnostic worker payload excludes the launch prompt" do
     directory = Dir.mktmpdir
     log_path = File.join(directory, "worker.log")

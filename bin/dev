@@ -3,6 +3,27 @@
 # TickRunJob's recurring schedule (config/recurring.yml) actually fires
 # in dev. Both processes are killed together on exit.
 
+require "socket"
+
+unless system("bundle", "check", out: File::NULL)
+  warn "bin/dev: Ruby dependencies are incomplete. Run bin/setup, then retry bin/dev."
+  exit 1
+end
+
+unless system("./bin/rails", "db:abort_if_pending_migrations", out: File::NULL)
+  warn "bin/dev: the database is not prepared. Run bin/setup (or bin/rails db:prepare), then retry bin/dev."
+  exit 1
+end
+
+port = Integer(ENV.fetch("PORT", "3000"), 10)
+begin
+  probe = TCPServer.new("127.0.0.1", port)
+  probe.close
+rescue Errno::EADDRINUSE
+  warn "bin/dev: port #{port} is already in use. Stop its owning service or choose another PORT before retrying."
+  exit 1
+end
+
 pids = [
   Process.spawn("./bin/rails", "server", *ARGV),
   Process.spawn("./bin/jobs")

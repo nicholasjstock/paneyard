@@ -104,10 +104,16 @@ class Run < ApplicationRecord
   # phase/owner/summary WorkflowRunStatus mirrors, and emits the matching
   # "run.status" bus event.
   def publish_phase!(phase:, owner:, summary:)
-    update!(phase: phase, phase_owner: owner, phase_summary: summary, phase_updated_at: Time.current)
-    BusEvent.publish("run.status", run_id: run_id, payload: {
-      runId: run_id, phase: phase, owner: owner, summary: summary
-    })
+    with_lock do
+      return phase_status_json if self.phase == phase && phase_owner == owner && phase_summary == summary
+
+      update!(phase: phase, phase_owner: owner, phase_summary: summary, phase_updated_at: Time.current)
+      BusEvent.publish("run.status", run_id: run_id, payload: {
+        runId: run_id, phase: phase, owner: owner, summary: summary
+      })
+    end
+
+    phase_status_json
   end
 
   def phase_status_json

@@ -62,6 +62,63 @@ RSpec.describe PlannerDecisionJob do
     assert_equal 1, record.reload.model_calls
     assert_equal "awaiting_chaperone", record.status
     assert_equal "planner", run.chaperone_reviews.last.subject_type
+    attempt = record.attempts.sole
+    assert_equal "rejected", attempt.disposition
+    assert_equal "allowedPaths must name exact files: front/", attempt.rejection_reason
+    assert_equal [ "front/" ], attempt.proposal.dig("next_step", "allowed_paths")
+  end
+
+  it "preserves the rejected proposal when a chaperone retry succeeds" do
+    run, _request, record = build_decision
+    invalid = {
+      outcome: "decision", summary: "Change broad areas.",
+      next_step: {
+        owner: "worker", artifact: "fix.md", success_check: "Implement the fix.", mode: "implementation",
+        write_scope: "scoped_changes", allowed_paths: [ "front/" ], evidence_refs: [ "diagnosis.md" ]
+      },
+      following_steps: [], context_request: nil, usage: { input_tokens: 10, output_tokens: 5 },
+      model: "haiku", model_tier: "small"
+    }
+    valid = {
+      outcome: "decision", summary: "Diagnose first.",
+      next_step: {
+        owner: "worker", artifact: "diagnosis.md", success_check: "Locate and measure the bottleneck.", mode: "diagnosis",
+        write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+      },
+      following_steps: [], context_request: nil, usage: { input_tokens: 20, output_tokens: 8 },
+      model: "haiku", model_tier: "small"
+    }
+
+    with_stubbed_runner(->(**) { invalid }) { PlannerDecisionJob.perform_now(record.id) }
+    with_stubbed_runner(->(**) { valid }) { PlannerDecisionJob.perform_now(record.id) }
+
+    expect(record.reload.status).to eq("completed")
+    expect(record.model_calls).to eq(2)
+    expect(record.input_tokens).to eq(30)
+    expect(record.attempts.pluck(:sequence, :disposition)).to eq([ [ 1, "rejected" ], [ 2, "accepted" ] ])
+    expect(record.attempts.first.proposal.dig("next_step", "allowed_paths")).to eq([ "front/" ])
+  end
+
+  it "preserves but ignores a later attempt to replace the acceptance contract" do
+    run, _request, record = build_decision
+    result = {
+      outcome: "decision", summary: "Continue with existing acceptance.",
+      next_step: {
+        owner: "worker", artifact: "diagnosis.md", success_check: "Capture the remaining evidence.",
+        mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+      },
+      following_steps: [], context_request: nil,
+      acceptance_criteria: [ { key: "replacement", content: "Replace the contract" } ], acceptance_updates: [],
+      usage: {}, model: "haiku", model_tier: "small"
+    }
+
+    with_stubbed_runner(->(**) { result }) { PlannerDecisionJob.perform_now(record.id) }
+
+    expect(record.reload.status).to eq("completed")
+    expect(record.decision.fetch("acceptance_criteria")).to be_empty
+    expect(record.attempts.sole.proposal.dig("acceptance_criteria", 0, "key")).to eq("replacement")
+    expect(record.attempts.sole.rejection_reason).to include("contract is already established")
+    expect(run.run_context_entries.where(kind: "acceptance_criterion").pluck(:entry_key)).to eq([ "existing-outcome" ])
   end
 
   it "does not complete a run after a blocked worker handoff" do

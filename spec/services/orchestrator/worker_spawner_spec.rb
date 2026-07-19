@@ -2,7 +2,10 @@ require "rails_helper"
 
 RSpec.describe Orchestrator::WorkerSpawner do
   it "extracts diagnosis mode from the planner request used by the spawn path" do
-    request = instance_double(SpawnRequest, text: "Execution mode: diagnosis. Write scope: artifact_only.")
+    request = instance_double(
+      SpawnRequest, execution_mode: nil,
+      text: "Execution mode: diagnosis. Write scope: artifact_only."
+    )
 
     expect(Orchestrator::SpawnRequestedWorkers.execution_mode(request)).to eq("diagnosis")
   end
@@ -85,6 +88,37 @@ RSpec.describe Orchestrator::WorkerSpawner do
 
       expect(worker.model).to eq("haiku")
       expect(worker.args).to include("--model", "haiku")
+      expect(File.read(worker.prompt_path)).to include(
+        "runId: #{run.run_id}",
+        "workerId: #{worker.worker_id}",
+        "nickname: diagnosis-worker",
+        "scope/artifact: diagnosis.md"
+      )
+      environment = JSON.parse(File.read(worker.env_path))
+      expect(environment).to include(
+        "WORKFLOW_RUN_ID" => run.run_id,
+        "WORKFLOW_WORKER_ID" => worker.worker_id,
+        "WORKFLOW_WORKER_NICKNAME" => "diagnosis-worker",
+        "WORKFLOW_WORKER_SCOPE" => "diagnosis.md"
+      )
+    end
+  end
+
+  describe ".stop_worker" do
+    it "signals the worker process group so foreground children stop with their launcher" do
+      log_path = File.join(Dir.mktmpdir("worker-stop"), "worker.log")
+      File.write(log_path, "")
+      worker = instance_double(
+        Worker,
+        status: "running", pid: 43_210, log_path:, worker_id: "worker-id", run_id: "run-id",
+        role: "worker", nickname: "worker", scope: "report.md", reason: "test", command: "claude"
+      )
+      allow(worker).to receive(:update!)
+      allow(Process).to receive(:kill).with(0, 43_210).and_return(1)
+
+      expect(Process).to receive(:kill).with("SIGTERM", -43_210)
+
+      described_class.stop_worker(worker:, reason: "run stopped")
     end
   end
 end

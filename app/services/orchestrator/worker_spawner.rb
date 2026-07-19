@@ -1,3 +1,5 @@
+require "shellwords"
+
 module Orchestrator
   # Ports scripts/workflow-worker-spawn.ts's spawnWorkerProcess -- forks a
   # real codex/claude CLI subprocess against a run's workspace. Unlike the
@@ -25,7 +27,8 @@ module Orchestrator
     MASKED_API_KEY_VALUES = [ "", "[set]", "[secure]", "[redacted]" ].freeze
     CODEX_WORKER_MODEL = "gpt-5.6-luna"
 
-    def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil, model_tier: "small")
+    def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil,
+      write_scope: nil, allowed_paths: [], model_tier: "small")
       raise ArgumentError, "Planner processes were removed; queue a PlannerDecisionJob instead" if role == "planner"
 
       # nickname flows straight into file paths under workers_dir below --
@@ -36,9 +39,10 @@ module Orchestrator
       # on every spawn path (spawn_worker MCP tool, and the ops UI has no
       # server-side control over what a planner/worker asks for).
       validate_safe_path_segment!(nickname)
+      TargetPreflight.check!(run:, mode:)
 
       root_dir = run.target_root
-      workers_dir = File.join(root_dir, "front", "demo-output", "agents-sdk", "workers")
+      workers_dir = File.join(ArtifactStore.output_dir(root_dir), "workers")
       FileUtils.mkdir_p(workers_dir)
 
       worker_id ||= SecureRandom.uuid
@@ -48,6 +52,15 @@ module Orchestrator
       last_message_path = File.join(workers_dir, "#{file_basename}.last-message.txt")
       exit_status_path = File.join(workers_dir, "#{file_basename}.exit-status.txt")
       env_path = File.join(workers_dir, "#{file_basename}.env.json")
+      mcp_config_path = File.join(workers_dir, "#{file_basename}.mcp.json")
+      claude_settings_path = File.join(workers_dir, "#{file_basename}.claude-settings.json")
+      runtime_dir = Rails.root.join("tmp", "workers", worker_id).to_s
+      FileUtils.mkdir_p(runtime_dir)
+
+      policy = WorkerExecutionPolicy.new(
+        root_dir:, mode:, write_scope: write_scope.presence || "artifact_only", allowed_paths:,
+        profile_name: "worker-#{worker_id.delete('-')}"
+      )
 
       driver = run.launcher_variant
       selected_model = if driver == "claude"
@@ -56,21 +69,47 @@ module Orchestrator
         CODEX_WORKER_MODEL
       end
       enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
+      enriched_prompt = worker_identity_prompt(
+        run_id: run.run_id, worker_id:, nickname:, role:, scope:, mode:, write_scope:, allowed_paths:,
+        target_root: root_dir
+      ) + enriched_prompt
+      capability_token, capability_token_digest = Worker.issue_capability
+      write_worker_mcp_config(mcp_config_path, capability_token)
+      write_claude_settings(claude_settings_path, policy) if driver == "claude"
       command, args =
         if driver == "claude"
-          [ "claude", claude_args(enriched_prompt, role: role, mode:, model_tier:) ]
+          [ "claude", claude_args(
+            enriched_prompt, role:, mode:, mcp_config_path:, settings_path: claude_settings_path,
+            target_root: root_dir, policy:, model_tier:
+          ) ]
         else
-          [ "codex", codex_args(root_dir: root_dir, last_message_path: last_message_path, role: role) ]
+          validate_codex_permission_profile_compatibility!(root_dir)
+          [ "codex", codex_args(
+            root_dir:, last_message_path:, policy:
+          ) ]
         end
 
-      driver == "claude" ? write_claude_mcp_config(root_dir) : write_codex_mcp_config(root_dir)
-      worker_env = build_worker_env.merge("WORKER_LOG_PATH" => log_path)
+      worker_env = build_worker_env.merge(
+        "WORKER_LOG_PATH" => log_path,
+        "WORKFLOW_RUN_ID" => run.run_id,
+        "WORKFLOW_WORKER_ID" => worker_id,
+        "WORKFLOW_WORKER_NICKNAME" => nickname,
+        "WORKFLOW_WORKER_SCOPE" => scope,
+        "WORKFLOW_WORKER_TOKEN" => capability_token
+      )
 
       File.write(prompt_path, enriched_prompt)
       File.write(log_path, "")
       File.delete(last_message_path) if File.exist?(last_message_path)
       File.delete(exit_status_path) if File.exist?(exit_status_path)
       File.write(env_path, "#{JSON.pretty_generate(build_worker_env_snapshot(worker_env))}\n")
+
+      worker = run.workers.create!(
+        worker_id:, role:, nickname:, reason:, scope:, status: "launching", pid: 0,
+        prompt_path:, log_path:, last_message_path:, exit_status_path:, env_path:, mcp_config_path:,
+        command:, args: [], model: selected_model, capability_token_digest:, execution_mode: mode,
+        write_scope:, allowed_paths: Array(allowed_paths)
+      )
 
       # Brakeman flags this as command injection because command/args/paths
       # trace back to caller-supplied role/nickname/scope. Safe as written:
@@ -82,19 +121,15 @@ module Orchestrator
       stdin_read, stdin_write = IO.pipe
       pid = Process.spawn(
         worker_env, "/bin/sh", "-c", worker_exit_wrapper, "workflow-worker-wrapper", exit_status_path, command, *args,
-        chdir: root_dir, pgroup: true, in: stdin_read, out: [ log_path, "a" ], err: [ log_path, "a" ]
+        chdir: driver == "claude" ? runtime_dir : root_dir,
+        pgroup: true, in: stdin_read, out: [ log_path, "a" ], err: [ log_path, "a" ]
       )
       stdin_read.close
       stdin_write.write(enriched_prompt) if driver != "claude"
       stdin_write.close
       Process.detach(pid)
 
-      worker = run.workers.create!(
-        worker_id: worker_id, role: role, nickname: nickname, reason: reason, scope: scope,
-        status: "running", pid: pid, prompt_path: prompt_path, log_path: log_path,
-        last_message_path: last_message_path, exit_status_path: exit_status_path, env_path: env_path,
-        command: command, args: args, model: selected_model
-      )
+      worker.update!(status: "running", pid:, args:)
 
       append_lifecycle_line(
         log_path, event: "spawned", worker_id: worker.worker_id, run_id: run.run_id, role: role,
@@ -102,12 +137,15 @@ module Orchestrator
       )
 
       worker
+    rescue => error
+      worker&.update!(status: "stopped", stopped_at: Time.current, stop_reason: "Worker failed to launch: #{error.message}")
+      raise
     end
 
     def stop_worker(worker:, reason:)
       if worker.status == "running"
         begin
-          Process.kill("SIGTERM", worker.pid) if process_alive?(worker.pid)
+          Process.kill("SIGTERM", -worker.pid) if process_alive?(worker.pid)
         rescue Errno::ESRCH
           nil
         end
@@ -145,10 +183,19 @@ module Orchestrator
     # Agent instructions are plain prompt text, so Claude does not read the
     # YAML front matter in .claude/agents/*.md as model configuration. Keep
     # cost routing here at the actual CLI boundary instead.
-    def claude_args(prompt, role: "worker", mode: nil, model_tier: "small")
+    def claude_args(prompt, role: "worker", mode: nil, mcp_config_path:, settings_path:, target_root:, policy:,
+      model_tier: "small")
       [
         "--model", claude_model_for(role, mode:, model_tier:),
-        "--permission-mode", "bypassPermissions",
+        "--permission-mode", "dontAsk",
+        "--tools", policy.claude_tools,
+        "--settings", settings_path,
+        "--setting-sources", "",
+        "--add-dir", target_root,
+        "--mcp-config", mcp_config_path,
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--no-session-persistence",
         "--output-format", "stream-json",
         "--include-partial-messages",
         "--verbose",
@@ -160,8 +207,35 @@ module Orchestrator
       model_tier.to_s == "strong" ? "sonnet" : "haiku"
     end
 
-    def codex_args(root_dir:, last_message_path:, role:)
-      [ "exec", "--model", CODEX_WORKER_MODEL, "--dangerously-bypass-approvals-and-sandbox", "-C", root_dir, "-o", last_message_path, "-" ]
+    def codex_args(root_dir:, last_message_path:, policy:)
+      mcp_overrides = [
+        %(mcp_servers.workflow.url=#{"#{rails_mcp_url}/worker".to_json}),
+        %(mcp_servers.workflow.bearer_token_env_var="WORKFLOW_WORKER_TOKEN"),
+        %(mcp_servers.workflow.default_tools_approval_mode="approve")
+      ]
+      config_args = (policy.codex_config_overrides + mcp_overrides).flat_map { |override| [ "-c", override ] }
+
+      [
+        "exec", "--model", CODEX_WORKER_MODEL, "--ask-for-approval", "never",
+        *config_args, "-C", root_dir, "-o", last_message_path, "-"
+      ]
+    end
+
+    # Codex permission profiles and the legacy sandbox_mode setting are
+    # mutually exclusive. If any active user or project config still declares
+    # sandbox_mode, Codex would ignore our exact-path profile. Fail closed
+    # rather than launch a worker with broader access than its persisted policy.
+    def validate_codex_permission_profile_compatibility!(root_dir)
+      config_paths = [ File.join(root_dir, ".codex", "config.toml") ]
+      codex_home = resolve_codex_home
+      config_paths << File.join(codex_home, "config.toml") if codex_home.present?
+      incompatible = config_paths.select do |path|
+        File.exist?(path) && File.foreach(path).any? { |line| line.match?(/^\s*sandbox_mode\s*=/) }
+      end
+      return if incompatible.empty?
+
+      raise ArgumentError,
+        "Codex worker policy cannot coexist with legacy sandbox_mode in #{incompatible.join(', ')}"
     end
 
     # The shell remains the tracked process while the CLI runs. It records the
@@ -176,31 +250,47 @@ module Orchestrator
       "#{base}/mcp"
     end
 
-    def write_claude_mcp_config(root_dir)
-      config = { "mcpServers" => { "workflow" => { "type" => "http", "url" => rails_mcp_url } } }
-      File.write(File.join(root_dir, ".mcp.json"), "#{JSON.pretty_generate(config)}\n")
+    def write_worker_mcp_config(path, token)
+      config = {
+        "mcpServers" => {
+          "workflow" => {
+            "type" => "http", "url" => "#{rails_mcp_url}/worker",
+            "headers" => { "Authorization" => "Bearer #{token}" }
+          }
+        }
+      }
+      File.write(path, "#{JSON.pretty_generate(config)}\n")
+      File.chmod(0o600, path)
     end
 
-    # .codex/config.toml is a hand-maintained file that can hold other
-    # unrelated settings ([features], [agents], etc) -- rather than a full
-    # TOML round-trip (no TOML-writing gem is in this app's dependency
-    # set, and adding one for this one narrow, fixed-shape block isn't
-    # worth it), this replaces just the [mcp_servers.workflow] table
-    # in-place by text, leaving everything else in the file untouched.
-    def write_codex_mcp_config(root_dir)
-      config_path = File.join(root_dir, ".codex", "config.toml")
-      new_block = <<~TOML
-        [mcp_servers.workflow]
-        url = "#{rails_mcp_url}"
-        default_tools_approval_mode = "approve"
-      TOML
+    def write_claude_settings(path, policy)
+      File.write(path, "#{JSON.pretty_generate(policy.claude_settings)}\n")
+      File.chmod(0o600, path)
+    end
 
-      existing = File.exist?(config_path) ? File.read(config_path) : ""
-      table_pattern = /^\[mcp_servers\.workflow\].*?(?=^\[|\z)/m
-      updated = existing.match?(table_pattern) ? existing.sub(table_pattern, new_block) : "#{existing.chomp}\n\n#{new_block}".lstrip
+    def worker_identity_prompt(run_id:, worker_id:, nickname:, role:, scope:, mode:, write_scope:, allowed_paths:,
+      target_root:)
+      <<~PROMPT
+        # Runtime identity (authoritative)
 
-      FileUtils.mkdir_p(File.dirname(config_path))
-      File.write(config_path, updated)
+        - runId: #{run_id}
+        - workerId: #{worker_id}
+        - nickname: #{nickname}
+        - role: #{role}
+        - scope/artifact: #{scope}
+        - execution mode: #{mode || "unspecified"}
+        - write scope: #{write_scope || "unspecified"}
+        - authorized workspace files: #{Array(allowed_paths).presence&.join(", ") || "none"}
+
+        Rails authenticates MCP calls with this worker's private capability. Do not invent or alter identity fields.
+        `worker_turn` derives nickname and scope from that capability; pass runId, role, task, and result.
+        The target workspace root is `#{target_root}`. Start repository commands with `cd #{Shellwords.escape(target_root)}`.
+        Bash is available under a launcher-enforced filesystem policy. Repository writes are limited to the exact
+        authorized paths above; artifact-only workers have read-only workspace access. Run the repository's native
+        commands in the foreground through Bash so they remain inside this worker's sandbox and process group.
+        Use `write_workflow_artifact` for the assigned artifact.
+
+      PROMPT
     end
 
     def build_prompt_with_persona(driver:, role:, prompt:)
@@ -293,6 +383,11 @@ module Orchestrator
         LOGNAME: resolved.call("LOGNAME"),
         TMPDIR: resolved.call("TMPDIR"),
         WORKER_LOG_PATH: resolved.call("WORKER_LOG_PATH"),
+        WORKFLOW_RUN_ID: resolved.call("WORKFLOW_RUN_ID"),
+        WORKFLOW_WORKER_ID: resolved.call("WORKFLOW_WORKER_ID"),
+        WORKFLOW_WORKER_NICKNAME: resolved.call("WORKFLOW_WORKER_NICKNAME"),
+        WORKFLOW_WORKER_SCOPE: resolved.call("WORKFLOW_WORKER_SCOPE"),
+        WORKFLOW_WORKER_TOKEN: resolved.call("WORKFLOW_WORKER_TOKEN").present? ? "[set]" : nil,
         OPENAI_API_KEY: resolved.call("OPENAI_API_KEY").present? ? "[set]" : nil,
         OPENAI_BASE_URL: resolved.call("OPENAI_BASE_URL")
       }

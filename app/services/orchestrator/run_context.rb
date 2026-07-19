@@ -88,7 +88,13 @@ module Orchestrator
       root = Pathname.new(run.target_root).expand_path
       candidate = root.join(evidence_ref.to_s).cleanpath
       inside_workspace = candidate.to_s == root.to_s || candidate.to_s.start_with?("#{root}#{File::SEPARATOR}")
-      raise ArgumentError, "Verified acceptance evidence does not exist: #{evidence_ref}" unless inside_workspace && candidate.file?
+      workspace_evidence = inside_workspace && candidate.file?
+      artifact_evidence = begin
+        File.file?(ArtifactStore.resolve_path(run.target_root, run.run_id, evidence_ref))
+      rescue ArgumentError
+        false
+      end
+      raise ArgumentError, "Verified acceptance evidence does not exist: #{evidence_ref}" unless workspace_evidence || artifact_evidence
     end
     private_class_method :validate_evidence!
 

@@ -1,0 +1,139 @@
+<details class="planner-decision-row"
+         data-controller="accordion-state"
+         data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
+         data-accordion-state-key-value="run:<%= decision.run_id %>:planner:<%= decision.decision_id %>">
+  <summary>
+    <span class="planner-sequence">Decision <%= number %></span>
+    <span class="planner-trigger"><%= planner_decision_trigger(decision) %></span>
+    <strong class="planner-route"><%= planner_decision_route(decision) %></strong>
+    <span class="badge <%= decision.status %>"><%= decision.status.humanize.downcase %></span>
+    <span class="planner-row-usage muted">
+      <%= pluralize(decision.model_calls, "call") %> &middot;
+      <%= number_with_delimiter((decision.input_tokens || 0) + (decision.output_tokens || 0)) %> tokens &middot;
+      <%= number_to_currency(decision.total_cost_usd || 0) %>
+    </span>
+  </summary>
+
+  <div class="planner-decision-body">
+    <div class="planner-facts">
+      <div>
+        <span class="stat-label">Requested by</span>
+        <strong><%= decision.spawn_request.asked_by %></strong>
+        <span class="muted mono"><%= decision.spawn_request.scope %></span>
+      </div>
+      <div>
+        <span class="stat-label">Models</span>
+        <strong><%= planner_decision_models(decision) %></strong>
+        <span class="muted"><%= planner_decision_duration(decision) %></span>
+      </div>
+      <div>
+        <span class="stat-label">Context added</span>
+        <strong><%= number_to_human_size(decision.context_bytes) %></strong>
+        <span class="muted"><%= pluralize(decision.context_requests.count, "request") %></span>
+      </div>
+    </div>
+
+    <section class="planner-section">
+      <span class="stat-label">Trigger</span>
+      <p><%= decision.spawn_request.text %></p>
+      <% if decision.spawn_request.context.present? %><p class="muted"><%= decision.spawn_request.context %></p><% end %>
+    </section>
+
+    <% if decision.decision.present? %>
+      <section class="planner-section">
+        <span class="stat-label">Accepted decision</span>
+        <p><strong><%= decision.decision["summary"] %></strong></p>
+        <% if (step = decision.decision["next_step"]) %>
+          <div class="planner-step">
+            <strong><%= planner_step_title(step) %></strong>
+            <span class="muted"><%= [ step["mode"], step["write_scope"] ].compact.join(" · ") %></span>
+            <p><%= step["success_check"] %></p>
+            <% if Array(step["allowed_paths"]).any? %>
+              <p class="muted">Writes: <span class="mono"><%= Array(step["allowed_paths"]).join(", ") %></span></p>
+            <% end %>
+            <% if Array(step["evidence_refs"]).any? %>
+              <p class="muted">Evidence: <%= Array(step["evidence_refs"]).join(", ") %></p>
+            <% end %>
+          </div>
+        <% else %>
+          <p class="muted">No next worker step; this decision completed the run.</p>
+        <% end %>
+
+        <% if Array(decision.decision["following_steps"]).any? %>
+          <span class="stat-label">Following queue</span>
+          <ol class="planner-following-steps">
+            <% Array(decision.decision["following_steps"]).each do |following_step| %>
+              <li><strong><%= planner_step_title(following_step) %></strong> &middot; <%= following_step["success_check"] %></li>
+            <% end %>
+          </ol>
+        <% end %>
+      </section>
+    <% end %>
+
+    <% if decision.context_requests.any? %>
+      <section class="planner-section">
+        <span class="stat-label">Context requests</span>
+        <% decision.context_requests.each do |request| %>
+          <div class="planner-context-request">
+            <span class="mono"><%= request["source"] %>:<%= request["reference"] %></span>
+            <span class="muted">
+              offset <%= number_with_delimiter(request["offset"] || 0) %> &middot;
+              requested <%= number_with_delimiter(request["max_chars"] || 0) %> chars &middot;
+              returned <%= number_to_human_size(request["returned_bytes"] || 0) %>
+            </span>
+            <p><%= request["question"] %></p>
+          </div>
+        <% end %>
+      </section>
+    <% end %>
+
+    <% if decision.attempts.any? %>
+      <section class="planner-section">
+        <span class="stat-label">Model attempts</span>
+        <div class="planner-attempts">
+          <% decision.attempts.each do |attempt| %>
+            <article class="planner-attempt <%= attempt.disposition %>">
+              <div class="card-title">
+                <strong>Attempt <%= attempt.sequence %> &middot; <%= attempt.model_tier %><% if attempt.model.present? %>: <%= attempt.model %><% end %></strong>
+                <span class="badge <%= attempt.disposition %>"><%= attempt.disposition.humanize.downcase %></span>
+              </div>
+              <p class="muted">Outcome: <%= attempt.outcome.humanize.downcase %></p>
+              <% if attempt.rejection_reason.present? %><p class="attempt-rejection"><%= attempt.rejection_reason %></p><% end %>
+              <% if attempt.proposal["summary"].present? %><p><%= attempt.proposal["summary"] %></p><% end %>
+              <% if (proposed_step = attempt.proposal["next_step"]) %>
+                <p class="muted">Proposed: <strong><%= planner_step_title(proposed_step) %></strong></p>
+              <% end %>
+              <% if attempt.usage.present? %>
+                <p class="muted">
+                  <%= number_with_delimiter(attempt.usage["input_tokens"] || 0) %> input &middot;
+                  <%= number_with_delimiter(attempt.usage["output_tokens"] || 0) %> output &middot;
+                  <%= number_to_currency(attempt.usage["total_cost_usd"] || 0) %>
+                </p>
+              <% end %>
+            </article>
+          <% end %>
+        </div>
+      </section>
+    <% end %>
+
+    <% if decision.error.present? %>
+      <% error_summary = planner_decision_error_summary(decision) %>
+      <section class="planner-section planner-error">
+        <span class="stat-label">Failure / review reason</span>
+        <p><%= error_summary %></p>
+        <% if error_summary != decision.error %>
+          <details class="persisted-error">
+            <summary>Show complete persisted error</summary>
+            <pre class="log compact"><%= decision.error %></pre>
+          </details>
+        <% end %>
+      </section>
+    <% end %>
+
+    <details class="persisted-json">
+      <summary>Persisted identifiers and final JSON</summary>
+      <p class="muted mono">decision <%= decision.decision_id %> &middot; request <%= decision.spawn_request_id %></p>
+      <pre class="log compact"><%= JSON.pretty_generate(decision.decision || {}) %></pre>
+    </details>
+  </div>
+</details>

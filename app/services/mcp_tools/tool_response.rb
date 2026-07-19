@@ -20,5 +20,15 @@ module McpTools
         structured_content: camelized
       )
     end
+
+
+    def error(message, code: "validation_error")
+      payload = { error: code, message: message.to_s }
+      MCP::Tool::Response.new(
+        [ { type: "text", text: JSON.generate(payload) } ],
+        error: true,
+        structured_content: Orchestrator::WireFormat.camelize_keys(payload)
+      )
+    end
   end
 end

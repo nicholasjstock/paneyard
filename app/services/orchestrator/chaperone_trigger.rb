@@ -5,7 +5,7 @@ module Orchestrator
     def call(attempt)
       failures = StepAttempt.where(
         run_id: attempt.run_id, lineage_key: attempt.lineage_key,
-        mode: "diagnosis", outcome: %w[blocked failed]
+        mode: attempt.mode, outcome: %w[blocked failed]
       ).order(:created_at)
       return if failures.count < 2
       return if ChaperoneReview.where(run_id: attempt.run_id, lineage_key: attempt.lineage_key, status: %w[queued running]).exists?

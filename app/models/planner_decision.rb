@@ -4,6 +4,7 @@ class PlannerDecision < ApplicationRecord
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, inverse_of: :planner_decisions
   belongs_to :spawn_request, foreign_key: :spawn_request_id, primary_key: :request_id
+  has_many :attempts, -> { order(:sequence) }, class_name: "PlannerDecisionAttempt", dependent: :destroy
 
   validates :decision_id, :run_id, :spawn_request_id, presence: true
   validates :decision_id, :spawn_request_id, uniqueness: true

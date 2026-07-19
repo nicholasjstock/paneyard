@@ -75,6 +75,17 @@ RSpec.describe Orchestrator::ObjectiveAlignment do
     assert_includes error.message, "performance objective"
   end
 
+  it "recognizes timings artifacts as retaining a performance objective" do
+    run, = build_diagnosis("Make the phone demo faster")
+
+    assert_nothing_raised do
+      described_class.validate_step!(
+        run_id: run.run_id,
+        step: { mode: "infrastructure", success_check: "Recording completes with populated timings.json." }
+      )
+    end
+  end
+
   private
 
   def reject_diagnosis(run, request, worker)

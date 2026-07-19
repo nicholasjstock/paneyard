@@ -79,4 +79,23 @@ RSpec.describe Orchestrator::RunContext do
     )
     expect(described_class.completion_blockers(run_id: run.run_id)).to be_empty
   end
+
+  it "accepts a run-scoped workflow artifact as verification evidence" do
+    root = Dir.mktmpdir("planner-artifact-evidence")
+    workspace = Workspace.create!(name: "artifact-evidence-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "artifact-evidence-#{SecureRandom.hex(4)}", task: "Verify it",
+      target_root: root, launcher_variant: "claude", status: "running"
+    )
+    described_class.apply_planner_acceptance!(
+      run:, criteria: [ { key: "verified-result", content: "Positive evidence exists." } ], updates: []
+    )
+    Orchestrator::ArtifactStore.write(root, run.run_id, "diagnosis.md", "Positive artifact evidence.")
+
+    described_class.apply_planner_acceptance!(
+      run:, criteria: [], updates: [ { key: "verified-result", status: "verified", evidence_ref: "diagnosis.md" } ]
+    )
+
+    expect(described_class.completion_blockers(run_id: run.run_id)).to be_empty
+  end
 end

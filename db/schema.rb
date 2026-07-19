@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_19_103100) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -60,6 +60,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
     t.integer "tick_count", null: false
     t.datetime "updated_at", null: false
     t.index ["run_id", "tick_count"], name: "index_orchestrator_ticks_on_run_id_and_tick_count", unique: true
+  end
+
+  create_table "planner_decision_attempts", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "disposition", default: "proposed", null: false
+    t.string "model"
+    t.string "model_tier", null: false
+    t.string "outcome", null: false
+    t.integer "planner_decision_id", null: false
+    t.json "proposal", default: {}, null: false
+    t.text "rejection_reason"
+    t.integer "sequence", null: false
+    t.datetime "updated_at", null: false
+    t.json "usage", default: {}, null: false
+    t.index ["planner_decision_id", "sequence"], name: "idx_on_planner_decision_id_sequence_e323d6f32e", unique: true
+    t.index ["planner_decision_id"], name: "index_planner_decision_attempts_on_planner_decision_id"
   end
 
   create_table "planner_decisions", force: :cascade do |t|
@@ -127,6 +143,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
   end
 
   create_table "spawn_requests", force: :cascade do |t|
+    t.json "allowed_paths", default: [], null: false
     t.datetime "asked_at", null: false
     t.string "asked_by", null: false
     t.text "context"
@@ -134,6 +151,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
     t.text "dismissal_note"
     t.datetime "dismissed_at"
     t.string "dismissed_by"
+    t.json "evidence_refs", default: [], null: false
+    t.string "execution_mode"
     t.datetime "fulfilled_at"
     t.string "fulfilled_by"
     t.string "fulfilled_worker_id"
@@ -149,6 +168,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
     t.json "tags", default: [], null: false
     t.text "text", null: false
     t.datetime "updated_at", null: false
+    t.string "write_scope"
     t.index ["request_id"], name: "index_spawn_requests_on_request_id", unique: true
     t.index ["run_id", "status"], name: "index_spawn_requests_on_run_id_and_status"
   end
@@ -195,12 +215,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
 
   create_table "workers", force: :cascade do |t|
     t.integer "agent_turn_count"
+    t.json "allowed_paths", default: [], null: false
     t.json "args", default: [], null: false
     t.bigint "cache_creation_input_tokens"
     t.bigint "cache_read_input_tokens"
+    t.string "capability_token_digest"
     t.string "command", null: false
     t.datetime "created_at", null: false
     t.string "env_path", null: false
+    t.string "execution_mode"
     t.integer "exit_code"
     t.string "exit_status_path"
     t.datetime "handoff_completed_at"
@@ -208,6 +231,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
     t.string "last_message_path", null: false
     t.string "log_path", null: false
     t.datetime "log_updated_at"
+    t.string "mcp_config_path"
     t.string "model"
     t.string "nickname", null: false
     t.bigint "output_tokens"
@@ -224,6 +248,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
     t.decimal "total_cost_usd", precision: 12, scale: 6
     t.datetime "updated_at", null: false
     t.string "worker_id", null: false
+    t.string "write_scope"
+    t.index ["capability_token_digest"], name: "index_workers_on_capability_token_digest", unique: true
     t.index ["run_id", "status"], name: "index_workers_on_run_id_and_status"
     t.index ["worker_id"], name: "index_workers_on_worker_id", unique: true
   end
@@ -276,6 +302,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_002000) do
     t.index ["root_path"], name: "index_workspaces_on_root_path", unique: true
   end
 
+  add_foreign_key "planner_decision_attempts", "planner_decisions"
   add_foreign_key "runs", "workspaces"
   add_foreign_key "workspace_chat_messages", "workspace_chats"
   add_foreign_key "workspace_chats", "workspaces"

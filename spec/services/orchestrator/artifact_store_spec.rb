@@ -16,6 +16,7 @@ RSpec.describe Orchestrator::ArtifactStore do
     assert_equal 500, second[:content].bytesize
     assert_nil second[:next_offset]
     assert_not second[:truncated]
+    assert_equal [ "report.md" ], Orchestrator::ArtifactStore.names(root_dir, "run-1")
   ensure
     FileUtils.remove_entry(root_dir) if root_dir && Dir.exist?(root_dir)
   end

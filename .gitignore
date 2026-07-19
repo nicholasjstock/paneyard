@@ -34,6 +34,7 @@
 
 # Planner test artifacts use generated run IDs and never belong in source control.
 /front/demo-output/agents-sdk/planner-job-*/
+/.workflow-orchestrator/
 
 # Ignore key files for decrypting credentials and more.
 /config/*.key

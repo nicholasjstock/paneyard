@@ -24,6 +24,8 @@ module Orchestrator
         last_activity_at: last_activity_at,
         output_preview: output_preview,
         output_source: output_source,
+        progress_updates: progress_updates,
+        latest_progress: progress_updates.last,
         log_available: File.file?(@worker.log_path),
         started_at: @worker.started_at,
         stopped_at: @worker.stopped_at,
@@ -77,6 +79,10 @@ module Orchestrator
     end
 
     attr_reader :output_source
+
+    def progress_updates
+      @progress_updates ||= Orchestrator::LogReader.progress_updates(@worker.log_path)
+    end
 
     def read_file(path)
       return unless File.file?(path)

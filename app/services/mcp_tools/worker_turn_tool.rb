@@ -29,11 +29,12 @@ module McpTools
           }
         }
       },
-      required: %w[runId role nickname scope result task]
+      required: %w[runId role result task]
     )
 
-    def self.call(runId:, role:, nickname:, scope:, result:, task:, server_context:, evidenceOutcome: nil, evidenceCitations: [], diagnosisFindings: nil)
-      worker = resolve_worker!(run_id: runId, role:, nickname:, scope:)
+    def self.call(runId:, role:, result:, task:, server_context:, nickname: nil, scope: nil, evidenceOutcome: nil, evidenceCitations: [], diagnosisFindings: nil)
+      authenticated_worker = WorkerAuthorization.worker!(server_context:, run_id: runId)
+      worker = authenticated_worker || resolve_worker!(run_id: runId, role:, nickname:, scope:)
       nickname = worker.nickname
       scope = worker.scope
       previous_state = Orchestrator::TickState.latest(runId)
@@ -45,10 +46,17 @@ module McpTools
       Orchestrator::TickState.write(structured[:next_state])
       worker.update_column(:handoff_completed_at, Time.current)
       ToolResponse.structured(structured)
+    rescue ArgumentError, Orchestrator::ObjectiveAlignment::Error => error
+      BusEvent.publish(
+        "worker.handoff_rejected",
+        run_id: runId,
+        payload: { runId: runId, nickname: nickname, scope: scope, error: error.message }
+      )
+      ToolResponse.error("worker_turn rejected: #{error.message}")
     end
 
     def self.resolve_worker!(run_id:, role:, nickname:, scope:)
-      exact = Worker.find_by(run_id:, nickname:)
+      exact = Worker.find_by(run_id:, nickname:) if nickname.present?
       return exact if exact
 
       candidates = Worker.active.where(run_id:, role:)

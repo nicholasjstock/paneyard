@@ -4,7 +4,7 @@ module Orchestrator
 
     class Error < ArgumentError; end
 
-    PERFORMANCE_INTENT = /\b(slow|slower|fast|faster|speed|performance|latency|duration|timing|throughput|fps)\b/i
+    PERFORMANCE_INTENT = /\b(slow|slower|fast|faster|speed|performance|latency|duration|timings?|throughput|fps)\b/i
     MEASUREMENT = /\b\d+(?:\.\d+)?\s*(?:ms|milliseconds?|s|sec(?:ond)?s?|m|min(?:ute)?s?|fps|frames?\s+per\s+second|%)\b/i
 
     def performance_objective?(task)
