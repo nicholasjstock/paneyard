@@ -23,6 +23,26 @@ RSpec.describe McpTools::WorkspaceChatRunControlTool do
     end
   end
 
+  it "resumes a completed tick and requests recovery work instead of completing again" do
+    workspace, chat = create_workspace_with_chat("completed")
+    run = create_run(workspace, "completed-run")
+    run.update!(status: "completed", stopped_at: Time.current)
+    Orchestrator::TickState.write(
+      run_id: run.run_id, phase: "completed", tick_count: 4,
+      last_plan_summary: "Verification ended blocked.", pending_spawn_keys: [], following_steps: []
+    )
+    WorkspaceChatContext.chat = chat
+
+    perform_enqueued_jobs do
+      described_class.call(runId: run.run_id, action: "resume", server_context: nil)
+    end
+
+    expect(run.reload.status).to eq("running")
+    expect(run.stopped_at).to be_nil
+    expect(Orchestrator::TickState.latest(run.run_id)[:phase]).to eq("planning")
+    expect(run.spawn_requests.open_only.find_by(requested_role: "planner")).to be_present
+  end
+
   private
 
   def create_workspace_with_chat(label)

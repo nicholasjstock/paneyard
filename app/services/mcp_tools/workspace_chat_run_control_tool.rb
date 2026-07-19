@@ -19,8 +19,15 @@ module McpTools
       when "stop"
         StopRunJob.perform_later(run.id)
       when "resume"
-        run.update!(status: "running", capacity_available_at: nil)
-        run.publish_phase!(phase: "planning", owner: "workspace_chat", summary: "Workspace chat resumed this run.")
+        previous_state = Orchestrator::TickState.latest(run.run_id)
+        run.update!(status: "running", stopped_at: nil, capacity_available_at: nil)
+        Orchestrator::TickState.write(
+          previous_state.merge(
+            phase: "planning", tick_count: previous_state[:tick_count] + 1,
+            last_plan_summary: "Workspace chat resumed this run for recovery planning.",
+            pending_spawn_keys: [], last_stall_finding: nil, last_updated_at: Time.current.iso8601(3)
+          )
+        )
         TickRunJob.perform_later
       when "tick"
         TickRunJob.perform_later
