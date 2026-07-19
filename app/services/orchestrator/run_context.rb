@@ -37,6 +37,9 @@ module Orchestrator
     end
 
     def upsert!(run_id:, entry_key:, kind:, status:, content:, evidence_ref:, created_by:)
+      if kind == "acceptance_criterion" && status == "verified"
+        AcceptanceCriteria.validate_verification!(run_id:, entry_key:, evidence_ref:)
+      end
       entry = RunContextEntry.find_or_initialize_by(run_id: run_id, entry_key: entry_key)
       entry.assign_attributes(
         kind: kind,
