@@ -44,6 +44,7 @@ class ChaperoneReviewJob < ApplicationJob
     end
   rescue => e
     review&.update!(status: "failed", summary: e.message, completed_at: Time.current)
+    Orchestrator::ApplyChaperoneDecision.handle_review_failure(review: review) if review
     raise
   end
 

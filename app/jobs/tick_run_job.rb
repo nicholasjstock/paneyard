@@ -67,7 +67,12 @@ class TickRunJob < ApplicationJob
     return if PlannerDecision.active.where(run_id: run.run_id).exists?
     return if SpawnRequest.where(run_id: run.run_id, status: "open").exists?
     return if previous_state[:phase].in?(%w[starting completed])
-    return if previous_state[:phase] == "blocked_on_user" && UserQuestion.exists?(run_id: run.run_id, status: "open", priority: "blocking")
+    # Checked independent of previous_state[:phase]: that mirror is only
+    # refreshed by an actual worker/planner Turn, so a blocking question
+    # raised outside a Turn (e.g. a chaperone review that failed instead of
+    # reaching a decision) would otherwise leave this stale and let recovery
+    # dispatch new work behind a question the operator hasn't answered yet.
+    return if UserQuestion.exists?(run_id: run.run_id, status: "open", priority: "blocking")
 
     finding = Orchestrator::Turn.build_dead_end_finding(
       run_id: run.run_id,

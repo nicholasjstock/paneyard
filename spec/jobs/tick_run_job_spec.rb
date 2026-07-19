@@ -70,6 +70,28 @@ RSpec.describe TickRunJob do
     expect(request.context).to include("Confirmed backend boot failure at config/application.rb:22.")
   end
 
+  it "does not dispatch recovery work while an open blocking question exists, even if tick state predates it" do
+    workspace = Workspace.create!(name: "tick-blocked-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
+    run = Run.create!(
+      workspace: workspace, run_id: "tick-blocked-#{SecureRandom.hex(4)}", task: "Do not race an unanswered question",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running"
+    )
+    Orchestrator::TickState.write(
+      run_id: run.run_id, phase: "waiting_on_workers", tick_count: 1,
+      last_plan_summary: "Worker was assigned.", pending_spawn_keys: [], following_steps: []
+    )
+    UserQuestion.create!(
+      run_id: run.run_id, asked_by: "chaperone", scope: "workflow-plan.md",
+      text: "The chaperone review could not complete.", priority: "blocking", status: "open"
+    )
+
+    without_spawning_workers do
+      TickRunJob.new.send(:tick_run, run)
+    end
+
+    expect(SpawnRequest.open_only.where(run_id: run.run_id, requested_role: "planner")).to be_empty
+  end
+
   it "clears an expired capacity phase when work is active" do
     workspace = Workspace.create!(name: "tick-capacity-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
     run = Run.create!(

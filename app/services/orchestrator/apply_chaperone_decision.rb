@@ -35,6 +35,48 @@ module Orchestrator
       TickRunJob.perform_later
     end
 
+    # A ChaperoneReview that itself fails (its model call errored, or the
+    # process running it was killed) never calls submit_chaperone_decision,
+    # so nothing else ever moves its subject (a PlannerDecision, still
+    # "awaiting_chaperone", or step attempts still "queued") out of an
+    # active state. Left alone, TickRunJob's stall recovery treats that
+    # subject as still in flight forever and the run silently stops making
+    # progress. Escalate the same way a chaperone "stop" outcome would:
+    # mark the subject failed and ask the operator, rather than retrying or
+    # promoting on Rails' own initiative.
+    def handle_review_failure(review:)
+      return unless review.status == "failed"
+
+      scope =
+        if review.subject_type == "planner"
+          decision = PlannerDecision.find_by(decision_id: review.subject_id)
+          return if decision.nil? || !decision.status.in?(PlannerDecision::ACTIVE_STATUSES)
+
+          decision.update!(
+            status: "failed",
+            error: "Chaperone review failed before submitting a decision: #{review.summary}",
+            completed_at: Time.current
+          )
+          decision.spawn_request&.scope
+        else
+          attempts = StepAttempt.where(attempt_id: review.step_attempt_ids)
+          return if attempts.empty? || attempts.where(chaperone_status: "failed").exists?
+
+          attempts.update_all(chaperone_status: "failed", chaperone_summary: review.summary)
+          attempts.order(:created_at).last&.spawn_request&.scope
+        end
+
+      question_text = review.subject_type == "planner" ? planner_stop_question : diagnosis_stop_question
+      UserQuestion.create!(
+        run_id: review.run_id, asked_by: "chaperone", scope: scope.presence || "run",
+        text: "The chaperone review could not complete (it failed before reaching a decision). #{question_text}",
+        context: stop_question_context(review:, summary: review.summary), priority: "blocking",
+        tags: %w[chaperone execution_failed]
+      )
+      review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: review.summary)
+      TickRunJob.perform_later
+    end
+
     def apply_planner_decision(review:, action:, summary:)
       decision = PlannerDecision.find_by!(decision_id: review.subject_id)
       request = decision.spawn_request
