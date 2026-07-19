@@ -38,6 +38,12 @@ Rails.application.routes.draw do
       end
     end
 
+    resources :run_commands, only: [], param: :command_id do
+      member do
+        post :stop
+      end
+    end
+
     resources :questions, only: %i[index] do
       member do
         post :answer

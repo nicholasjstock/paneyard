@@ -31,6 +31,7 @@ class Run < ApplicationRecord
   has_many :planner_decisions, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :step_attempts, foreign_key: :run_id, primary_key: :run_id, dependent: :destroy
   has_many :chaperone_reviews, foreign_key: :run_id, primary_key: :run_id, dependent: :destroy
+  has_many :run_commands, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
 
   validates :run_id, presence: true, uniqueness: true
   validates :task, presence: true
@@ -41,6 +42,11 @@ class Run < ApplicationRecord
   scope :active, -> { where(status: NON_TERMINAL_STATUSES) }
 
   after_commit :broadcast_workspace_refresh, on: %i[create update]
+  # Single integration point for all run-command cleanup: fires whether the
+  # run reaches a terminal status via explicit cancellation (StopRunJob),
+  # normal completion (TickRunJob), or failure -- no other job needs its own
+  # cleanup call.
+  after_commit :stop_active_run_commands, on: :update, if: -> { saved_change_to_status? && terminal? }
 
   # Every standalone/bus-only entrypoint (a bare supervisor loop tick, a
   # worker's own MCP tool calls) can reference a runId that was never
@@ -127,5 +133,11 @@ class Run < ApplicationRecord
   def broadcast_workspace_refresh
     Turbo::StreamsChannel.broadcast_refresh_to("run_#{run_id}")
     Turbo::StreamsChannel.broadcast_refresh_to("workspace_#{workspace_id}_runs") if workspace_id.present?
+  end
+
+  def stop_active_run_commands
+    run_commands.active.find_each do |command|
+      Orchestrator::RunCommandRunner.stop(command: command, reason: "run reached terminal status: #{status}")
+    end
   end
 end

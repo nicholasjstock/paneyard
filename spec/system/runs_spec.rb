@@ -128,6 +128,29 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text("Final artifact line that must remain visible")
   end
 
+  it "shows a run-scoped background command and can stop it from the dashboard" do
+    workspace = create_workspace
+    FileUtils.mkdir_p(workspace.root_path)
+    run = create_run(workspace:, suffix: "run-commands", task: "Show run commands on the dashboard")
+    command = Orchestrator::RunCommandRunner.start(
+      run: run, requested_by_worker_id: "worker-1", executable: "/bin/sleep", arguments: [ "30" ],
+      purpose: "keep a dev server alive for verification"
+    )
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_text("Run commands")
+    expect(page).to have_text("keep a dev server alive for verification")
+    expect(page).to have_text("running")
+
+    find("summary", text: "Run commands").click
+    find("summary", text: "keep a dev server alive for verification").click
+    click_button "Stop"
+
+    expect(page).to have_text("Run command stopped.")
+    expect(command.reload.status).to eq("stopped")
+  end
+
   it "renders every persisted planner decision with its attempts and context" do
     workspace = create_workspace
     run = create_run(workspace:, suffix: "planner-history", task: "Explain every planning decision")

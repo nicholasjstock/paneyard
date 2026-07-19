@@ -286,8 +286,12 @@ module Orchestrator
         `worker_turn` derives nickname and scope from that capability; pass runId, role, task, and result.
         The target workspace root is `#{target_root}`. Start repository commands with `cd #{Shellwords.escape(target_root)}`.
         Bash is available under a launcher-enforced filesystem policy. Repository writes are limited to the exact
-        authorized paths above; artifact-only workers have read-only workspace access. Run the repository's native
-        commands in the foreground through Bash so they remain inside this worker's sandbox and process group.
+        authorized paths above; artifact-only workers have read-only workspace access. Run bounded commands (they
+        exit on their own) in the foreground through Bash so they remain inside this worker's sandbox and process
+        group. Any command that is long-running by nature (a dev server, a watcher, anything that does not exit on
+        its own) MUST always be started with `start_run_command` instead, even if you only need it for the rest of
+        this turn -- `&`, `nohup`, and log redirection do not reliably keep a process alive even across your own
+        next Bash call.
         Use `write_workflow_artifact` for the assigned artifact.
 
       PROMPT

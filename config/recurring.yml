@@ -22,6 +22,9 @@ production: &recurring_jobs
   reconcile_workers:
     class: WorkerReconcileJob
     schedule: every minute
+  reconcile_run_commands:
+    class: RunCommandReconcileJob
+    schedule: every minute
 
 development:
   <<: *recurring_jobs

@@ -15,7 +15,12 @@ module Orchestrator
           ::McpTools::WriteWorkflowArtifactTool,
           ::McpTools::GetRunContextTool,
           ::McpTools::WriteScopedFileTool,
-          ::McpTools::WorkerTurnTool
+          ::McpTools::WorkerTurnTool,
+          ::McpTools::StartRunCommandTool,
+          ::McpTools::GetRunCommandTool,
+          ::McpTools::ListRunCommandsTool,
+          ::McpTools::ReadRunCommandLogTool,
+          ::McpTools::StopRunCommandTool
         ]
       )
     end

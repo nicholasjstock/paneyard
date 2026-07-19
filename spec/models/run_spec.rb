@@ -34,4 +34,29 @@ RSpec.describe Run, type: :model do
     expect(run.bus_events.where(event_type: "run.status").count).to eq(1)
     expect(run.reload.phase_updated_at).to eq(first_updated_at)
   end
+
+  it "stops its own active run commands when it reaches a terminal status, without touching another run's" do
+    workspace = Workspace.create!(name: "cleanup-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir("workflow-cleanup"))
+    run = workspace.runs.create!(
+      run_id: "cleanup-#{SecureRandom.hex(4)}", task: "Stop active commands on completion", workspace:,
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    other_run = workspace.runs.create!(
+      run_id: "other-#{SecureRandom.hex(4)}", task: "Unrelated run", workspace:,
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    command = Orchestrator::RunCommandRunner.start(
+      run: run, requested_by_worker_id: "worker-1", executable: "/bin/sleep", arguments: [ "30" ]
+    )
+    other_command = Orchestrator::RunCommandRunner.start(
+      run: other_run, requested_by_worker_id: "worker-2", executable: "/bin/sleep", arguments: [ "30" ]
+    )
+
+    run.update!(status: "completed", stopped_at: Time.current)
+
+    expect(command.reload.status).to eq("stopped")
+    expect(other_command.reload.status).to eq("running")
+  ensure
+    Orchestrator::RunCommandRunner.stop(command: other_command, reason: "test cleanup") if other_command
+  end
 end

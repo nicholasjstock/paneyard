@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_19_103100) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_19_185048) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -47,6 +47,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_103100) do
     t.index ["run_id", "status"], name: "index_chaperone_reviews_on_run_id_and_status"
     t.index ["subject_type", "subject_id", "status"], name: "index_chaperone_reviews_on_subject_and_status"
     t.index ["token_digest"], name: "index_chaperone_reviews_on_token_digest", unique: true
+  end
+
+  create_table "guarded_command_executions", force: :cascade do |t|
+    t.json "args", default: [], null: false
+    t.string "command", null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.string "cwd", null: false
+    t.string "execution_id", null: false
+    t.integer "exit_code"
+    t.string "exit_status_path", null: false
+    t.string "log_path", null: false
+    t.string "operation", null: false
+    t.integer "pid", default: 0, null: false
+    t.string "run_id", null: false
+    t.datetime "started_at"
+    t.string "status", default: "launching", null: false
+    t.datetime "updated_at", null: false
+    t.string "worker_id", null: false
+    t.index ["execution_id"], name: "index_guarded_command_executions_on_execution_id", unique: true
+    t.index ["run_id", "operation"], name: "index_guarded_command_executions_on_run_id_and_operation"
+    t.index ["worker_id", "status"], name: "index_guarded_command_executions_on_worker_id_and_status"
   end
 
   create_table "orchestrator_ticks", force: :cascade do |t|
@@ -101,6 +123,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_103100) do
     t.index ["decision_id"], name: "index_planner_decisions_on_decision_id", unique: true
     t.index ["run_id", "status"], name: "index_planner_decisions_on_run_id_and_status"
     t.index ["spawn_request_id"], name: "index_planner_decisions_on_spawn_request_id", unique: true
+  end
+
+  create_table "run_commands", force: :cascade do |t|
+    t.json "arguments", default: [], null: false
+    t.string "command_id", null: false
+    t.datetime "created_at", null: false
+    t.json "environment", default: {}, null: false
+    t.string "executable", null: false
+    t.integer "exit_code"
+    t.string "exit_status_path"
+    t.text "failure_message"
+    t.datetime "finished_at"
+    t.datetime "last_checked_at"
+    t.string "log_path"
+    t.integer "pid"
+    t.integer "process_group_id"
+    t.text "purpose"
+    t.string "requested_by_worker_id"
+    t.string "run_id", null: false
+    t.integer "signal"
+    t.datetime "started_at"
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.string "working_directory", null: false
+    t.index ["command_id"], name: "index_run_commands_on_command_id", unique: true
+    t.index ["run_id", "status"], name: "index_run_commands_on_run_id_and_status"
   end
 
   create_table "run_context_entries", force: :cascade do |t|

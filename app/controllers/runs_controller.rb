@@ -45,6 +45,7 @@ class RunsController < ApplicationController
     @activity_feed = build_activity_feed
     @workspace_chat = current_workspace.workspace_chats.first_or_create!
     @workspace_chat_messages = @workspace_chat.messages.order(:created_at)
+    @run_commands = @run.run_commands.order(started_at: :desc, created_at: :desc).limit(20).to_a
   end
 
   def stop
