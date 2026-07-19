@@ -18,6 +18,7 @@ class LaunchRunJob < ApplicationJob
       priority: "blocking",
       tags: %w[ops-hub launch]
     )
+    Orchestrator::ProjectInitTrigger.call(run: run)
 
     run.update!(status: "running", started_at: Time.current)
   rescue => e

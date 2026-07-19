@@ -23,6 +23,8 @@ Rails.application.routes.draw do
   root "workspaces#index"
 
   resources :workspaces, only: %i[index show new create destroy] do
+    resource :project_setup, only: %i[create]
+
     resources :chats, controller: "workspace_chats", only: %i[index create show] do
       resources :messages, controller: "workspace_chat_messages", only: %i[create]
     end

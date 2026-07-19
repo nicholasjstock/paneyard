@@ -193,6 +193,102 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "pauses the run for capacity instead of failing a rate-limited chaperone review" do
+    workspace = Workspace.create!(name: "reconcile-chaperone-capacity-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-chaperone-capacity-#{SecureRandom.hex(4)}", task: "Reconcile a rate-limited chaperone",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "You've hit your session limit · resets 5pm (Europe/Paris)\n")
+    review = ChaperoneReview.create!(
+      run:, lineage_key: "diagnosis-lineage", step_attempt_ids: [], status: "running",
+      token_digest: SecureRandom.hex(32), expires_at: 1.hour.from_now, started_at: Time.current
+    )
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "chaperone", nickname: "chaperone-test",
+      reason: "Chaperone review.", scope: review.lineage_key, status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+    run.spawn_requests.create!(
+      asked_by: "chaperone", scope: review.lineage_key, lineage_key: review.lineage_key,
+      text: "Repeated blocked diagnosis.", requested_role: "chaperone", priority: "blocking",
+      status: "fulfilled", fulfilled_worker_id: worker.worker_id
+    )
+
+    WorkerReconcileJob.perform_now
+
+    assert_equal "stopped", worker.reload.status
+    assert_equal "running", review.reload.status
+    assert_nil UserQuestion.find_by(run_id: run.run_id, priority: "blocking", status: "open")
+    assert_operator run.reload.capacity_available_at, :>, Time.current
+    assert_equal "waiting_on_capacity", run.phase
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
+  it "records a normal stop for a project_init worker that already recorded the primary finding" do
+    workspace = Workspace.create!(name: "reconcile-project-init-done-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-project-init-done-#{SecureRandom.hex(4)}", task: "Reconcile a finished project_init",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "findings recorded\n")
+    Orchestrator::ProjectMemory.record!(
+      run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+      content: "Run `bin/dev` from the repository root.", evidence_ref: "bin/dev", recorded_by: "project_init"
+    )
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "project_init", nickname: "project-init-test",
+      reason: "Discover the dev environment.", scope: "project-setup", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+    run.spawn_requests.create!(
+      asked_by: "orchestrator", scope: "project-setup", lineage_key: "project-init:#{workspace.id}",
+      text: "Discover the dev environment.", requested_role: "project_init", priority: "blocking",
+      status: "fulfilled", fulfilled_worker_id: worker.worker_id
+    )
+
+    WorkerReconcileJob.perform_now
+
+    assert_equal "stopped", worker.reload.status
+    expect(StepAttempt.where(worker_id: worker.worker_id)).to be_empty
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
+  it "records a failed attempt and escalates to chaperone after repeated project_init failures" do
+    workspace = Workspace.create!(name: "reconcile-project-init-fail-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-project-init-fail-#{SecureRandom.hex(4)}", task: "Reconcile a failed project_init",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "crashed before recording anything\n")
+
+    2.times do |i|
+      worker = Worker.create!(
+        worker_id: SecureRandom.uuid, run_id: run.run_id, role: "project_init", nickname: "project-init-test-#{i}",
+        reason: "Discover the dev environment.", scope: "project-setup", status: "running", pid: 999_999_990 + i,
+        prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+      )
+      run.spawn_requests.create!(
+        asked_by: "orchestrator", scope: "project-setup", lineage_key: "project-init:#{workspace.id}",
+        text: "Discover the dev environment.", requested_role: "project_init", priority: "blocking",
+        execution_mode: "diagnosis", write_scope: "artifact_only",
+        status: "fulfilled", fulfilled_worker_id: worker.worker_id
+      )
+
+      WorkerReconcileJob.perform_now
+    end
+
+    assert_equal 2, StepAttempt.where(lineage_key: "project-init:#{workspace.id}").count
+    assert run.chaperone_reviews.exists?(lineage_key: "project-init:#{workspace.id}", status: "queued")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "diagnostic worker payload excludes the launch prompt" do
     directory = Dir.mktmpdir
     log_path = File.join(directory, "worker.log")

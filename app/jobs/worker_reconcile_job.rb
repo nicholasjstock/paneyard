@@ -28,12 +28,20 @@ class WorkerReconcileJob < ApplicationJob
         stop_reason:,
         **usage
       )
+      capacity_failure = claude_capacity_failure?(output) && worker.handoff_completed_at.blank?
+
       if worker.role == "chaperone"
-        handle_chaperone_worker_stop(worker)
+        handle_chaperone_worker_stop(worker) unless capacity_failure
+        block_run_for_capacity!(worker, output) if capacity_failure
         next
       end
 
-      capacity_failure = claude_capacity_failure?(output) && worker.handoff_completed_at.blank?
+      if worker.role == "project_init"
+        handle_project_init_worker_stop(worker) unless capacity_failure
+        block_run_for_capacity!(worker, output) if capacity_failure
+        next
+      end
+
       review = record_failed_attempt(worker, stop_reason:, output:) unless capacity_failure || worker.handoff_completed_at.present?
       TickRunJob.perform_later unless capacity_failure || review
       block_run_for_capacity!(worker, output) if capacity_failure
@@ -120,6 +128,21 @@ class WorkerReconcileJob < ApplicationJob
 
     review.update!(status: "failed", summary: worker.stop_reason, completed_at: Time.current)
     Orchestrator::ApplyChaperoneDecision.handle_review_failure(review: review)
+  end
+
+  # Whether the process died from success, a crash, or a bad discovery, the
+  # only thing that matters is whether the primary fact now exists -- that
+  # single check is both the completion signal and the idempotency guard
+  # (see Orchestrator::ProjectInitTrigger). A success needs no further
+  # bookkeeping; a miss reuses the exact same failed-attempt/chaperone
+  # escalation path every other worker role already gets.
+  def handle_project_init_worker_stop(worker)
+    return if worker.run.workspace.workspace_memory_entries.current.exists?(
+      entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY
+    )
+
+    output = Orchestrator::LogReader.read_tail_lines(worker.log_path, 12).to_s
+    record_failed_attempt(worker, stop_reason: worker.stop_reason, output:)
   end
 
   def block_run_for_capacity!(worker, output)

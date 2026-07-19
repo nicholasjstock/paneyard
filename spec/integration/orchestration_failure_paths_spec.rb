@@ -3,6 +3,10 @@ require "rails_helper"
 RSpec.describe "orchestration failure paths" do
   it "marks the run failed when launch setup raises" do
     run = create_run("launch-failure", status: "launching")
+    Orchestrator::ProjectMemory.record!(
+      run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+      content: "Not exercised by this spec.", evidence_ref: "n/a", recorded_by: "project_init"
+    )
 
     allow_any_instance_of(Run).to receive(:update!).and_call_original
     allow_any_instance_of(Run).to receive(:update!)

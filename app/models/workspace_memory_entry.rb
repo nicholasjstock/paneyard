@@ -1,7 +1,7 @@
 class WorkspaceMemoryEntry < ApplicationRecord
   KINDS = %w[architecture convention operational_rule known_hazard].freeze
   STATUSES = %w[confirmed superseded].freeze
-  RECORDERS = %w[planner operator].freeze
+  RECORDERS = %w[planner operator project_init].freeze
 
   belongs_to :workspace
   belongs_to :supersedes, class_name: "WorkspaceMemoryEntry", optional: true

@@ -22,6 +22,10 @@ RSpec.describe "run orchestration end to end" do
         status: "launching",
         launched_by: "operator"
       )
+      Orchestrator::ProjectMemory.record!(
+        run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+        content: "Not exercised by this spec.", evidence_ref: "n/a", recorded_by: "project_init"
+      )
 
       LaunchRunJob.perform_now(run.id)
 

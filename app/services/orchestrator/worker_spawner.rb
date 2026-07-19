@@ -76,6 +76,7 @@ module Orchestrator
           run_id: run.run_id, worker_id:, nickname:, role:, scope:, mode:, write_scope:, allowed_paths:,
           target_root: root_dir
         ) + enriched_prompt
+        enriched_prompt = workspace_memory_prompt(run) + enriched_prompt
       end
       if mcp_override
         write_worker_mcp_config(
@@ -326,6 +327,23 @@ module Orchestrator
         this turn -- `&`, `nohup`, and log redirection do not reliably keep a process alive even across your own
         next Bash call.
         Use `write_workflow_artifact` for the assigned artifact.
+
+      PROMPT
+    end
+
+    # Prepended so no worker has to remember to ask for this -- see
+    # Orchestrator::ProjectInitTrigger/RecordProjectSetupTool for how these
+    # entries get written. Reuses ProjectMemory.snapshot's own brief bound
+    # (top entries, truncated content) rather than querying the table directly.
+    def workspace_memory_prompt(run)
+      entries = ProjectMemory.snapshot(run_id: run.run_id)[:entries]
+      return "" if entries.empty?
+
+      lines = entries.map { |entry| "- [#{entry[:kind]}] #{entry[:key]}: #{entry[:content]}" }
+      <<~PROMPT
+        # Durable project knowledge for this workspace (evidence-backed; call get_project_memory for full detail if needed)
+
+        #{lines.join("\n")}
 
       PROMPT
     end

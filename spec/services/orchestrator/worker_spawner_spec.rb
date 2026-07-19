@@ -103,6 +103,31 @@ RSpec.describe Orchestrator::WorkerSpawner do
       )
     end
 
+    it "injects the workspace's recorded project setup into every spawned worker's prompt" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-memory")
+      workspace = Workspace.create!(name: "memory-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Use the recorded dev environment",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+      Orchestrator::ProjectMemory.record!(
+        run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+        content: "Run `bin/dev` from the repository root to start every service together.",
+        evidence_ref: "bin/dev", recorded_by: "project_init"
+      )
+
+      allow(Process).to receive(:spawn).and_return(34_568)
+      allow(Process).to receive(:detach)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "memory-worker", reason: "Start the app.",
+        scope: "task.md", prompt: "Start the app and reproduce the bug."
+      )
+
+      expect(File.read(worker.prompt_path)).to include("Run `bin/dev` from the repository root to start every service together.")
+    end
+
     it "spawns a chaperone worker on a Claude run against the curated MCP override instead of the normal worker MCP config" do
       workspace_root = Dir.mktmpdir("workflow-worker-spawner-chaperone")
       workspace = Workspace.create!(name: "chaperone-#{SecureRandom.hex(4)}", root_path: workspace_root)

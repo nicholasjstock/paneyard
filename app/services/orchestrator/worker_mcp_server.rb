@@ -20,7 +20,9 @@ module Orchestrator
           ::McpTools::GetRunCommandTool,
           ::McpTools::ListRunCommandsTool,
           ::McpTools::ReadRunCommandLogTool,
-          ::McpTools::StopRunCommandTool
+          ::McpTools::StopRunCommandTool,
+          ::McpTools::GetProjectMemoryTool,
+          ::McpTools::RecordProjectSetupTool
         ]
       )
     end

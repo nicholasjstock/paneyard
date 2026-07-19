@@ -4,6 +4,7 @@
 
 <div class="toolbar">
   <h1><%= current_workspace.name %> Runs</h1>
+  <%= button_to "Re-run project setup", workspace_project_setup_path(current_workspace), method: :post, class: "btn" %>
   <%= link_to "Launch task", new_workspace_run_path(current_workspace), class: "btn primary" %>
 </div>
 

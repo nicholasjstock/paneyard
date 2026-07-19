@@ -11,7 +11,7 @@ require "digest"
 # Accepting a client-supplied id here and treating it as authoritative is
 # required for that ordering to keep working.
 class Worker < ApplicationRecord
-  ROLES = %w[orchestrator worker planner infrastructure chaperone].freeze
+  ROLES = %w[orchestrator worker planner infrastructure chaperone project_init].freeze
   STATUSES = %w[launching running stopped].freeze
   OUTPUT_TAIL_MAX_CHARS = 1_200
 
