@@ -12,6 +12,7 @@ Rails.application.routes.draw do
   mount Orchestrator::ChaperoneMcpEndpoint.new => "/mcp/chaperone"
   mount Orchestrator::WorkspaceChatMcpEndpoint.new => "/mcp/workspace-chat"
   mount Orchestrator::WorkerMcpEndpoint.new => "/mcp/worker"
+  mount Orchestrator::PlannerDecisionMcpEndpoint.new => "/mcp/planner-decision"
   mcp_transport = MCP::Server::Transports::StreamableHTTPTransport.new(Orchestrator::McpServer.build)
   mount mcp_transport => "/mcp"
 

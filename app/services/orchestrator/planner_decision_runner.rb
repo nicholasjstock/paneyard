@@ -2,6 +2,17 @@ require "open3"
 require "tempfile"
 
 module Orchestrator
+  # Runs the bounded planner CLI invocation for one PlannerDecision. Unlike
+  # the pre-refactor version, this does not parse a final structured JSON
+  # blob from stdout -- the model's only way to submit its decision is by
+  # calling submit_planner_decision (see McpTools::SubmitPlannerDecisionTool
+  # / Orchestrator::PlannerDecisionSubmission), which persists directly from
+  # inside that live tool call. By the time this call returns, the decision
+  # record already reflects whatever happened; the caller (PlannerDecisionJob)
+  # just checks its resulting status. What this still returns is aggregate
+  # usage/cost/model metadata from the process's own final envelope, applied
+  # once to the decision record -- that's a property of the whole invocation,
+  # not of any individual tool call within it.
   module PlannerDecisionRunner
     class Error < StandardError
       attr_reader :output
@@ -18,143 +29,63 @@ module Orchestrator
     CLAUDE_MODELS = { small: "haiku", strong: "sonnet" }.freeze
     CODEX_SMALL_MODEL = WorkerSpawner::CODEX_WORKER_MODEL
 
-    STEP_SCHEMA = {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        owner: { type: "string", enum: StepPolicy::PLANNER_STEP_OWNERS },
-        artifact: { type: "string" },
-        successCheck: { type: "string" },
-        mode: { type: "string", enum: StepPolicy::MODES },
-        writeScope: { type: "string", enum: StepPolicy::WRITE_SCOPES },
-        allowedPaths: { type: "array", items: { type: "string" } },
-        evidenceRefs: { type: "array", items: { type: "string" } },
-        operatorApprovalQuestionId: { type: [ "string", "null" ] },
-        lineageKey: { type: [ "string", "null" ] }
-      },
-      required: %w[owner artifact successCheck mode writeScope allowedPaths evidenceRefs]
-    }.freeze
-
-    ACCEPTANCE_CRITERION_SCHEMA = {
-      type: "object", additionalProperties: false,
-      properties: {
-        key: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
-        content: { type: "string" }
-      },
-      required: %w[key content]
-    }.freeze
-
-    ACCEPTANCE_UPDATE_SCHEMA = {
-      type: "object", additionalProperties: false,
-      properties: {
-        key: { type: "string" }, status: { type: "string", enum: %w[verified waived] },
-        evidenceRef: { type: [ "string", "null" ] }
-      },
-      required: %w[key status evidenceRef]
-    }.freeze
-
-    SCHEMA = {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        outcome: { type: "string", enum: %w[decision needs_context needs_stronger_model] },
-        summary: { type: "string" },
-        nextStep: STEP_SCHEMA.merge(type: [ "object", "null" ]),
-        followingSteps: { type: "array", maxItems: 5, items: STEP_SCHEMA },
-        contextRequest: {
-          type: [ "object", "null" ],
-          additionalProperties: false,
-          properties: {
-            source: { type: "string", enum: PlannerContextResolver::SOURCES },
-            reference: { type: "string" },
-            question: { type: "string" },
-            offset: { type: [ "integer", "null" ], minimum: 0 },
-            maxChars: { type: "integer", minimum: 1 }
-          },
-          required: %w[source reference question offset maxChars]
-        },
-        acceptanceCriteria: { type: "array", maxItems: 8, items: ACCEPTANCE_CRITERION_SCHEMA },
-        acceptanceUpdates: { type: "array", maxItems: 8, items: ACCEPTANCE_UPDATE_SCHEMA }
-      },
-      required: %w[outcome summary nextStep followingSteps contextRequest acceptanceCriteria acceptanceUpdates]
-    }.freeze
-
-    def call(run:, request:, additional_context: [], model_tier: :small, command_runner: Open3.method(:capture3))
+    def call(run:, request:, decision:, model_tier: :small, command_runner: Open3.method(:capture3))
       raise ArgumentError, "Unknown planner model tier: #{model_tier}" unless MODEL_TIERS.include?(model_tier)
 
-      prompt = PlannerBrief.build(run:, request:, additional_context:, model_tier:)
-      raw = if run.launcher_variant == "claude"
-        run_claude(run:, prompt:, model_tier:, command_runner:)
+      prompt = PlannerBrief.build(run:, request:, model_tier:)
+      if run.launcher_variant == "claude"
+        run_claude(run:, decision:, prompt:, model_tier:, command_runner:)
       else
-        run_codex(run:, prompt:, model_tier:, command_runner:)
+        run_codex(run:, decision:, prompt:, model_tier:, command_runner:)
       end
-      normalize(raw, model_tier:)
     end
 
-    def run_claude(run:, prompt:, model_tier:, command_runner:)
+    def run_claude(run:, decision:, prompt:, model_tier:, command_runner:)
       selected_model = CLAUDE_MODELS.fetch(model_tier)
-      args = [
-        "claude", "--model", selected_model, "--print", "--output-format", "json",
-        "--json-schema", JSON.generate(SCHEMA), "--tools", "", "--disable-slash-commands",
-        "--no-session-persistence", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-        "--system-prompt", "Return one structured workflow decision from the supplied evidence. Do not use tools.",
-        "--max-budget-usd", "0.25", "--", prompt
-      ]
-      stdout, stderr, status = command_runner.call(WorkerSpawner.build_worker_env, *args, chdir: run.target_root)
-      raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: "#{stdout}\n#{stderr}") unless status.success?
+      token = PlannerDecisionCapability.issue(decision)
+      Tempfile.create([ "planner-decision-mcp", ".json" ]) do |mcp_file|
+        mcp_file.chmod(0o600)
+        mcp_file.write(JSON.generate({
+          mcpServers: { planner_decision: {
+            type: "http", url: "#{WorkerSpawner.rails_mcp_url}/planner-decision",
+            headers: { Authorization: "Bearer #{token}" }
+          } }
+        }))
+        mcp_file.flush
+        args = [
+          "claude", "--model", selected_model, "--print", "--output-format", "json",
+          "--mcp-config", mcp_file.path, "--strict-mcp-config",
+          "--allowedTools", "mcp__planner_decision__submit_planner_decision",
+          "--disable-slash-commands", "--no-session-persistence", "--max-budget-usd", "0.25", "--", prompt
+        ]
+        stdout, stderr, status = command_runner.call(WorkerSpawner.build_worker_env, *args, chdir: run.target_root)
+        raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: "#{stdout}\n#{stderr}") unless status.success?
 
-      envelope = JSON.parse(stdout)
-      decision = envelope["structured_output"] || parse_json_string(envelope["result"])
-      raise Error.new("Planner model returned no structured decision", output: stdout) unless decision.is_a?(Hash)
-
-      { decision: decision, usage: usage_from_claude(envelope), model: envelope.dig("modelUsage")&.keys&.last || selected_model }
+        envelope = JSON.parse(stdout)
+        { usage: usage_from_claude(envelope), model: envelope.dig("modelUsage")&.keys&.last || selected_model }
+      end
     rescue JSON::ParserError => e
       raise Error.new("Planner model returned invalid JSON: #{e.message}", output: stdout)
     end
 
-    def run_codex(run:, prompt:, model_tier:, command_runner:)
-      Tempfile.create([ "planner-schema", ".json" ]) do |schema_file|
-        Tempfile.create([ "planner-decision", ".json" ]) do |output_file|
-          schema_file.write(JSON.generate(SCHEMA))
-          schema_file.flush
-          model_args = model_tier == :small ? [ "--model", CODEX_SMALL_MODEL ] : []
-          args = [
-            "codex", "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
-            *model_args, "--output-schema", schema_file.path,
-            "--output-last-message", output_file.path, "--cd", run.target_root, prompt
-          ]
-          stdout, stderr, status = command_runner.call(WorkerSpawner.build_worker_env, *args, chdir: run.target_root)
-          raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: "#{stdout}\n#{stderr}") unless status.success?
+    def run_codex(run:, decision:, prompt:, model_tier:, command_runner:)
+      token = PlannerDecisionCapability.issue(decision)
+      env = WorkerSpawner.build_worker_env.merge("PLANNER_DECISION_TOKEN" => token)
+      Tempfile.create([ "planner-decision", ".txt" ]) do |output_file|
+        model_args = model_tier == :small ? [ "--model", CODEX_SMALL_MODEL ] : []
+        args = [
+          "codex", "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
+          *model_args,
+          "-c", %(mcp_servers.planner_decision.url=#{"#{WorkerSpawner.rails_mcp_url}/planner-decision".to_json}),
+          "-c", 'mcp_servers.planner_decision.bearer_token_env_var="PLANNER_DECISION_TOKEN"',
+          "--output-last-message", output_file.path, "--cd", run.target_root, prompt
+        ]
+        stdout, stderr, status = command_runner.call(env, *args, chdir: run.target_root)
+        raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: "#{stdout}\n#{stderr}") unless status.success?
 
-          { decision: JSON.parse(File.read(output_file.path)), usage: {}, model: model_tier == :small ? CODEX_SMALL_MODEL : "default" }
-        end
+        { usage: {}, model: model_tier == :small ? CODEX_SMALL_MODEL : "default" }
       end
-    rescue JSON::ParserError => e
-      raise Error.new("Planner model returned invalid JSON: #{e.message}")
     end
-
-    def normalize(result, model_tier:)
-      decision = result.fetch(:decision)
-      {
-        outcome: decision.fetch("outcome", "decision"),
-        summary: decision.fetch("summary"),
-        next_step: WireFormat.underscore_keys(decision["nextStep"]),
-        following_steps: WireFormat.underscore_keys(decision.fetch("followingSteps")),
-        context_request: WireFormat.underscore_keys(decision["contextRequest"]),
-        acceptance_criteria: WireFormat.underscore_keys(decision.fetch("acceptanceCriteria", [])),
-        acceptance_updates: WireFormat.underscore_keys(decision.fetch("acceptanceUpdates", [])),
-        usage: result[:usage],
-        model: result[:model],
-        model_tier: model_tier.to_s
-      }
-    end
-
-    def parse_json_string(value)
-      value.is_a?(String) ? JSON.parse(value) : value
-    rescue JSON::ParserError
-      nil
-    end
-    private_class_method :parse_json_string
 
     def usage_from_claude(envelope)
       usage = envelope["usage"] || {}

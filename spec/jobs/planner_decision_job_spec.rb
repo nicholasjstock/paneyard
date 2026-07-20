@@ -1,26 +1,42 @@
 require "rails_helper"
 
 RSpec.describe PlannerDecisionJob do
-  it "persists and dispatches one bounded model decision" do
-    run, request, record = build_decision
-    result = {
-      summary: "Run the verification.",
-      next_step: {
-        owner: "worker", artifact: "verify.md", success_check: "Confirm behavior.",
-        mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
-      },
-      following_steps: [], usage: { input_tokens: 100, output_tokens: 20 }, model: "sonnet"
-    }
+  it "applies aggregate usage/model from the runner once the decision has been submitted via the tool" do
+    run, _request, record = build_decision
 
-    with_stubbed_runner(->(**) { result }) do
+    with_stubbed_runner(->(decision:, **) {
+      Orchestrator::PlannerDecisionSubmission.call(
+        decision:,
+        params: {
+          outcome: "decision", summary: "Run the verification.",
+          next_step: {
+            owner: "worker", artifact: "verify.md", success_check: "Confirm behavior.",
+            mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+          },
+          following_steps: [], context_request: nil, acceptance_criteria: [], acceptance_updates: []
+        }
+      )
+      { usage: { input_tokens: 100, output_tokens: 20 }, model: "sonnet" }
+    }) do
       PlannerDecisionJob.perform_now(record.id)
     end
 
     assert_equal "completed", record.reload.status
     assert_equal 100, record.input_tokens
     assert_equal "sonnet", record.model
+    assert_equal 1, record.model_calls
     assert_equal "verify.md", run.spawn_requests.open_only.find_by!(requested_role: "worker").scope
-    assert_equal "planning", Orchestrator::TickState.latest(run.run_id)[:phase]
+  end
+
+  it "fails the run when the process exits cleanly without ever submitting a decision" do
+    run, _request, record = build_decision
+
+    with_stubbed_runner(->(**) { { usage: {}, model: "haiku" } }) do
+      expect { PlannerDecisionJob.perform_now(record.id) }.to raise_error(Orchestrator::PlannerDecisionRunner::Error)
+    end
+
+    assert_equal "failed", record.reload.status
+    assert_equal "failed", run.reload.status
   end
 
   it "fails the run instead of retrying an invalid planner call forever" do
@@ -37,278 +53,39 @@ RSpec.describe PlannerDecisionJob do
     assert_equal "failed", run.phase
   end
 
-  it "routes a policy-invalid small plan to the chaperone without self-promoting" do
+  it "does not fail an already-completed decision even if the runner raises afterward" do
     run, _request, record = build_decision
-    tiers = []
-    runner = lambda do |model_tier:, **|
-      tiers << model_tier
-      {
-        outcome: "decision", summary: "Change the application.",
-        next_step: {
-          owner: "worker", artifact: "fix.md", success_check: "Implement the performance fix.",
-          mode: "implementation", write_scope: "scoped_changes", allowed_paths: [ "front/" ], evidence_refs: [ "guess" ]
-        },
-        following_steps: [], context_request: nil, usage: {},
-        model: model_tier == :small ? "haiku" : "sonnet", model_tier: model_tier.to_s
-      }
+
+    with_stubbed_runner(->(decision:, **) {
+      Orchestrator::PlannerDecisionSubmission.call(
+        decision:,
+        params: {
+          outcome: "decision", summary: "Done.",
+          next_step: nil, following_steps: [], context_request: nil, acceptance_criteria: [], acceptance_updates: []
+        }
+      )
+      raise Orchestrator::PlannerDecisionRunner::Error, "late nonzero exit after the tool already succeeded"
+    }) do
+      expect { PlannerDecisionJob.perform_now(record.id) }.not_to raise_error
     end
 
-    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
-      with_stubbed_runner(runner) { PlannerDecisionJob.perform_now(record.id) }
-    end
-
-    assert_equal [ :small ], tiers
-    assert_equal 1, record.reload.model_calls
-    assert_equal "awaiting_chaperone", record.status
-    assert_equal "planner", run.chaperone_reviews.last.subject_type
-    attempt = record.attempts.sole
-    assert_equal "rejected", attempt.disposition
-    assert_equal "allowedPaths must name exact files: front/", attempt.rejection_reason
-    assert_equal [ "front/" ], attempt.proposal.dig("next_step", "allowed_paths")
-  end
-
-  it "preserves the rejected proposal when a chaperone retry succeeds" do
-    run, _request, record = build_decision
-    invalid = {
-      outcome: "decision", summary: "Change broad areas.",
-      next_step: {
-        owner: "worker", artifact: "fix.md", success_check: "Implement the fix.", mode: "implementation",
-        write_scope: "scoped_changes", allowed_paths: [ "front/" ], evidence_refs: [ "diagnosis.md" ]
-      },
-      following_steps: [], context_request: nil, usage: { input_tokens: 10, output_tokens: 5 },
-      model: "haiku", model_tier: "small"
-    }
-    valid = {
-      outcome: "decision", summary: "Diagnose first.",
-      next_step: {
-        owner: "worker", artifact: "diagnosis.md", success_check: "Locate and measure the bottleneck.", mode: "diagnosis",
-        write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
-      },
-      following_steps: [], context_request: nil, usage: { input_tokens: 20, output_tokens: 8 },
-      model: "haiku", model_tier: "small"
-    }
-
-    with_stubbed_runner(->(**) { invalid }) { PlannerDecisionJob.perform_now(record.id) }
-    with_stubbed_runner(->(**) { valid }) { PlannerDecisionJob.perform_now(record.id) }
-
-    expect(record.reload.status).to eq("completed")
-    expect(record.model_calls).to eq(2)
-    expect(record.input_tokens).to eq(30)
-    expect(record.attempts.pluck(:sequence, :disposition)).to eq([ [ 1, "rejected" ], [ 2, "accepted" ] ])
-    expect(record.attempts.first.proposal.dig("next_step", "allowed_paths")).to eq([ "front/" ])
-  end
-
-  it "preserves but ignores a later attempt to replace the acceptance contract" do
-    run, _request, record = build_decision
-    result = {
-      outcome: "decision", summary: "Continue with existing acceptance.",
-      next_step: {
-        owner: "worker", artifact: "diagnosis.md", success_check: "Capture the remaining evidence.",
-        mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
-      },
-      following_steps: [], context_request: nil,
-      acceptance_criteria: [ { key: "replacement", content: "Replace the contract" } ], acceptance_updates: [],
-      usage: {}, model: "haiku", model_tier: "small"
-    }
-
-    with_stubbed_runner(->(**) { result }) { PlannerDecisionJob.perform_now(record.id) }
-
-    expect(record.reload.status).to eq("completed")
-    expect(record.decision.fetch("acceptance_criteria")).to be_empty
-    expect(record.attempts.sole.proposal.dig("acceptance_criteria", 0, "key")).to eq("replacement")
-    expect(record.attempts.sole.rejection_reason).to include("contract is already established")
-    expect(run.run_context_entries.where(kind: "acceptance_criterion").pluck(:entry_key)).to eq([ "existing-outcome" ])
-  end
-
-  it "does not complete a run after a blocked worker handoff" do
-    run, request, record = build_decision
-    request.update!(tags: %w[planner worker-turn-followup evidence-blocked])
-    result = {
-      outcome: "decision", summary: "No executable steps remain.", next_step: nil,
-      following_steps: [], context_request: nil, usage: {}, model: "haiku", model_tier: "small"
-    }
-
-    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
-      with_stubbed_runner(->(**) { result }) { PlannerDecisionJob.perform_now(record.id) }
-    end
-
-    assert_equal "awaiting_chaperone", record.reload.status
+    assert_equal "completed", record.reload.status
     assert_equal "running", run.reload.status
-    assert_equal "planner", run.chaperone_reviews.last.subject_type
   end
 
-  it "routes an omitted initial acceptance contract to the chaperone" do
-    run, _request, record = build_decision(with_acceptance: false)
-    result = {
-      outcome: "decision", summary: "Start diagnosis.",
-      next_step: {
-        owner: "worker", artifact: "diagnosis.md", success_check: "Locate the failure.",
-        mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
-      },
-      following_steps: [], acceptance_criteria: [], acceptance_updates: [],
-      context_request: nil, usage: {}, model: "haiku", model_tier: "small"
-    }
-
-    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
-      with_stubbed_runner(->(**) { result }) { PlannerDecisionJob.perform_now(record.id) }
-    end
-
-    expect(record.reload.status).to eq("awaiting_chaperone")
-    expect(run.run_context_entries.where(kind: "acceptance_criterion")).to be_empty
-  end
-
-  it "reruns with narrowly requested context before committing a decision" do
-    run, _request, record = build_decision
-    Orchestrator::ArtifactStore.write(run.target_root, run.run_id, "diagnosis.md", "Confirmed boundary: admin session was missing.")
-    calls = []
-    runner = lambda do |additional_context:, **|
-      calls << additional_context
-      if additional_context.empty?
-        {
-          outcome: "needs_context", summary: "Need the diagnosis.", next_step: nil, following_steps: [],
-          context_request: {
-            source: "artifact", reference: "diagnosis.md", question: "What boundary was confirmed?",
-            offset: nil, max_chars: 2_000
-          },
-          usage: { input_tokens: 50, output_tokens: 10 }, model: "sonnet"
-        }
-      else
-        {
-          outcome: "decision", summary: "Implement the confirmed fix.",
-          next_step: {
-            owner: "worker", artifact: "fix.md", success_check: "Apply the confirmed session fix.",
-            mode: "implementation", write_scope: "scoped_changes",
-            allowed_paths: [ "front/scripts/record-demo.ts" ], evidence_refs: [ "diagnosis.md" ]
-          },
-          following_steps: [], context_request: nil,
-          usage: { input_tokens: 70, output_tokens: 20 }, model: "sonnet"
-        }
-      end
-    end
-
-    with_stubbed_runner(runner) { PlannerDecisionJob.perform_now(record.id) }
-
-    assert_equal 2, calls.length
-    assert_includes calls.last.first[:content], "admin session was missing"
-    assert_equal 120, record.reload.input_tokens
-    assert_equal 30, record.output_tokens
-    assert_equal 2, record.model_calls
-    assert_equal 46, record.context_bytes
-    assert_equal 2_000, record.context_requests.first.fetch("max_chars")
-    assert_equal "fix.md", run.spawn_requests.open_only.find_by!(requested_role: "worker").scope
-  end
-
-  it "turns repeated unavailable context into a bounded diagnosis" do
-    run, _request, record = build_decision
-    calls = 0
-    tiers = []
-    runner = lambda do |model_tier:, **|
-      calls += 1
-      tiers << model_tier
-      {
-        outcome: "needs_context", summary: "Still need more.", next_step: nil, following_steps: [],
-        context_request: {
-          source: "artifact", reference: "missing-#{calls}.md", question: "What happened on attempt #{calls}?", offset: nil, max_chars: 1_000
-        },
-        usage: {}, model: model_tier == :small ? "haiku" : "sonnet", model_tier: model_tier.to_s
-      }
-    end
-
-    with_stubbed_runner(runner) { PlannerDecisionJob.perform_now(record.id) }
-
-    assert_equal 1, calls
-    assert_equal [ :small ], tiers
-    assert_equal "completed", record.reload.status
-    assert_equal 1, record.model_calls
-    assert_equal 1, record.context_requests.length
-    diagnosis = run.spawn_requests.open_only.find_by!(requested_role: "worker")
-    assert_equal "initial-diagnosis.md", diagnosis.scope
-    assert_equal "planner-job", diagnosis.tags.last
-    assert_equal "planner", diagnosis.asked_by
-  end
-
-  it "small planner requests chaperone review instead of promoting itself" do
-    run, _request, record = build_decision
-    tiers = []
-    runner = lambda do |model_tier:, **|
-      tiers << model_tier
-      if model_tier == :small
-        {
-          outcome: "needs_stronger_model", summary: "This decision needs stronger reasoning.",
-          next_step: nil, following_steps: [], context_request: nil,
-          usage: { input_tokens: 20, output_tokens: 5 }, model: "haiku", model_tier: "small"
-        }
-      else
-        {
-          outcome: "decision", summary: "Use the verified path.", next_step: nil, following_steps: [],
-          context_request: nil, usage: { input_tokens: 30, output_tokens: 8 },
-          model: "sonnet", model_tier: "strong"
-        }
-      end
-    end
-
-    assert_difference -> { SpawnRequest.where(requested_role: "chaperone").count }, 1 do
-      with_stubbed_runner(runner) { PlannerDecisionJob.perform_now(record.id) }
-    end
-
-    assert_equal [ :small ], tiers
-    assert_equal 1, record.reload.model_calls
-    assert_equal [ "small" ], record.model_attempts.map { |attempt| attempt.fetch("tier") }
-    assert_equal "awaiting_chaperone", record.status
-    assert_equal "planner", run.chaperone_reviews.last.subject_type
-  end
-
-  it "returns to the small model after a promoted planner receives fresh context" do
+  it "reopens the request and blocks the run for capacity on a rate-limit failure" do
     run, request, record = build_decision
-    request.update!(model_tier: "strong")
-    Orchestrator::ArtifactStore.write(run.target_root, run.run_id, "diagnosis.md", "Exact target: front/scripts/record-demo.ts")
-    tiers = []
-    final_context = nil
-    runner = lambda do |model_tier:, additional_context:, **|
-      tiers << model_tier
-      if tiers == [ :strong ]
-        {
-          outcome: "needs_context", summary: "Need the exact path.", next_step: nil, following_steps: [],
-          context_request: { source: "artifact", reference: "diagnosis.md", question: "What is the target?", offset: 0, max_chars: 1_000 },
-          usage: {}, model: "sonnet", model_tier: "strong"
-        }
-      else
-        final_context = additional_context.last[:content]
-        {
-          outcome: "decision", summary: "The small model can use the resolved fact.", next_step: nil,
-          following_steps: [], context_request: nil, usage: {}, model: "haiku", model_tier: "small"
-        }
-      end
+    error = Orchestrator::PlannerDecisionRunner::Error.new("hit your session limit · resets 5pm (Europe/Paris)")
+
+    with_stubbed_runner(->(**) { raise error }) do
+      assert_raises(Orchestrator::PlannerDecisionRunner::Error) { PlannerDecisionJob.perform_now(record.id) }
     end
 
-    with_stubbed_runner(runner) { PlannerDecisionJob.perform_now(record.id) }
-
-    assert_equal %i[strong small], tiers
-    assert_equal %w[strong small], record.reload.model_attempts.map { |attempt| attempt.fetch("tier") }
-    assert_includes final_context, "front/scripts/record-demo.ts"
-  end
-
-  it "strips excess path authority from a strong verification plan instead of restarting diagnosis" do
-    run, request, record = build_decision
-    request.update!(model_tier: "strong")
-    runner = lambda do |**|
-      {
-        outcome: "decision", summary: "Verify the completed optimization.",
-        next_step: {
-          owner: "worker", artifact: "verification-results.md", success_check: "Measure runtime below 200 seconds.",
-          mode: "verification", write_scope: "artifact_only",
-          allowed_paths: [ "front/scripts/record-demo.ts" ], evidence_refs: [ "performance-optimization.md" ]
-        },
-        following_steps: [], context_request: nil, usage: {}, model: "sonnet", model_tier: "strong"
-      }
-    end
-
-    with_stubbed_runner(runner) { PlannerDecisionJob.perform_now(record.id) }
-
-    assert_equal "completed", record.reload.status
-    assert_empty record.decision.dig("next_step", "allowed_paths")
-    assert_equal "verification-results.md", run.spawn_requests.open_only.find_by!(requested_role: "worker").scope
-    refute_equal "initial-diagnosis.md", run.spawn_requests.open_only.first.scope
+    assert_equal "failed", record.reload.status
+    assert_equal "open", request.reload.status
+    assert_equal "running", run.reload.status
+    assert_operator run.capacity_available_at, :>, Time.current
+    assert_equal "waiting_on_capacity", run.phase
   end
 
   private

@@ -34,12 +34,18 @@ RSpec.describe "run orchestration end to end" do
 
       File.write(File.join(@workspace_root, "verified-outcome.md"), "The launched run is responsive.")
 
-      allow(Orchestrator::PlannerDecisionRunner).to receive(:call).and_return(
-        summary: "Bounded planner completed the run.", next_step: nil, following_steps: [],
-        acceptance_criteria: [ { key: "requested-outcome", content: "The launched run is investigated and verified responsive." } ],
-        acceptance_updates: [ { key: "requested-outcome", status: "verified", evidence_ref: "verified-outcome.md" } ],
-        usage: { input_tokens: 40, output_tokens: 10 }, model: "test-planner"
-      )
+      allow(Orchestrator::PlannerDecisionRunner).to receive(:call) do |decision:, **|
+        Orchestrator::PlannerDecisionSubmission.call(
+          decision:,
+          params: {
+            outcome: "decision", summary: "Bounded planner completed the run.", next_step: nil, following_steps: [],
+            context_request: nil,
+            acceptance_criteria: [ { key: "requested-outcome", content: "The launched run is investigated and verified responsive." } ],
+            acceptance_updates: [ { key: "requested-outcome", status: "verified", evidence_ref: "verified-outcome.md" } ]
+          }
+        )
+        { usage: { input_tokens: 40, output_tokens: 10 }, model: "test-planner" }
+      end
 
       perform_enqueued_jobs do
         TickRunJob.perform_now

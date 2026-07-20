@@ -47,7 +47,11 @@ module Orchestrator
 
       <<~PROMPT
         You are a workflow planner. Make exactly one bounded orchestration decision from the Rails-prepared evidence below.
-        Do not inspect files, call tools, update memory, or execute work. Return only the JSON object required by the schema.
+        Do not inspect files, update memory, or execute work. You must submit your decision by calling
+        submit_planner_decision -- it is your only way to finish this turn; a text-only response is a failure.
+        If it returns accepted=false, read the error, correct your proposal, and call submit_planner_decision again.
+        Call it as many times as needed for outcome=needs_context (its response includes the fetched context you asked
+        for); call it exactly once to finish with outcome=decision or outcome=needs_stronger_model.
         Choose at most one nextStep. Keep followingSteps ordered and limited to concrete work already justified by the evidence.
         On the initial decision, define a concise acceptanceCriteria contract derived directly from the user's requested
         outcomes. Criteria describe observable outcomes, not implementation steps. On later decisions return acceptanceCriteria=[];
