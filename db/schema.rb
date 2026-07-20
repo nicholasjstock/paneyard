@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_20_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_20_150000) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -333,7 +333,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_20_120000) do
   create_table "workspace_chats", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.text "last_error"
-    t.string "session_id"
+    t.string "launcher_variant", default: "claude", null: false
     t.string "status", default: "idle", null: false
     t.string "title", default: "New conversation", null: false
     t.datetime "updated_at", null: false

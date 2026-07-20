@@ -7,6 +7,9 @@ class WorkspaceChatMessagesController < ApplicationController
       return redirect_to return_path(chat), alert: "Wait for the current chat turn to finish."
     end
 
+    launcher_variant = params[:launcher_variant].presence
+    chat.update!(launcher_variant:) if launcher_variant && WorkspaceChat::LAUNCHER_VARIANTS.include?(launcher_variant)
+
     content = params.require(:workspace_chat_message).require(:content).to_s.strip
     message = chat.messages.create!(role: "user", content:, status: "queued")
     chat.update!(title: content.first(60)) if chat.messages.where(role: "user").count == 1

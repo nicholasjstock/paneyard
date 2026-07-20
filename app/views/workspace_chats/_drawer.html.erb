@@ -47,6 +47,11 @@
             rows: 3, required: true, disabled: chat.status == "processing",
             data: { chat_drawer_target: "input", action: "keydown->chat-drawer#submitOnEnter" } %>
       <div class="chat-composer-footer">
+        <select name="launcher_variant" class="chat-model-picker">
+          <% WorkspaceChat::LAUNCHER_VARIANTS.each do |variant| %>
+            <option value="<%= variant %>" <%= "selected" if chat.launcher_variant == variant %>><%= variant.capitalize %></option>
+          <% end %>
+        </select>
         <span class="muted">History belongs to <%= chat.workspace.name %>.</span>
         <%= form.submit chat.status == "processing" ? "Working…" : "Send",
               class: "btn primary", disabled: chat.status == "processing" %>

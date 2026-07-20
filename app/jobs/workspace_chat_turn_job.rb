@@ -10,7 +10,7 @@ class WorkspaceChatTurnJob < ApplicationJob
     message.update!(status: "processing")
     result = Orchestrator::WorkspaceChatRunner.call(chat:, message: message.content)
     WorkspaceChat.transaction do
-      chat.update!(session_id: result[:session_id].presence || chat.session_id, status: "idle")
+      chat.update!(status: "idle")
       message.update!(status: "completed")
       chat.messages.create!(role: "assistant", content: result[:response], status: "completed", usage: result[:usage])
     end

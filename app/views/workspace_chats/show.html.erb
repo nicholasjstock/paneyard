@@ -49,6 +49,11 @@
           disabled: @chat.status == "processing",
           autofocus: true %>
     <div class="chat-composer-footer">
+      <select name="launcher_variant" class="chat-model-picker">
+        <% WorkspaceChat::LAUNCHER_VARIANTS.each do |variant| %>
+          <option value="<%= variant %>" <%= "selected" if @chat.launcher_variant == variant %>><%= variant.capitalize %></option>
+        <% end %>
+      </select>
       <span class="muted">Scoped to this worktree and workspace state.</span>
       <%= form.submit @chat.status == "processing" ? "Working…" : "Send",
             class: "btn primary", disabled: @chat.status == "processing" %>
