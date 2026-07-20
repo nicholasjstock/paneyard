@@ -253,6 +253,7 @@ RSpec.describe WorkerReconcileJob do
     WorkerReconcileJob.perform_now
 
     assert_equal "stopped", worker.reload.status
+    assert_equal "Project setup discovery completed and recorded its findings.", worker.stop_reason
     expect(StepAttempt.where(worker_id: worker.worker_id)).to be_empty
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)

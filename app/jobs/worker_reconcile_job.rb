@@ -78,6 +78,7 @@ class WorkerReconcileJob < ApplicationJob
   end
 
   def stop_reason_for(worker, exit_code, output)
+    return project_init_stop_reason(worker, exit_code) if worker.role == "project_init"
     return "Worker exited successfully after completing its handoff." if worker.handoff_completed_at.present? && exit_code == 0
     return "Worker exited with status #{exit_code} after completing its handoff." if worker.handoff_completed_at.present? && exit_code.present?
     return "Worker stopped after completing its handoff." if worker.handoff_completed_at.present?
@@ -86,6 +87,27 @@ class WorkerReconcileJob < ApplicationJob
     return "Worker exited with status #{exit_code} before completing its handoff." if exit_code.present?
 
     "Process no longer running (detected by Rails reconciliation, exit status unavailable)."
+  end
+
+  # project_init never calls worker_turn (see handle_project_init_worker_stop),
+  # so handoff_completed_at is never set even on a full success -- the
+  # generic handoff-based messages above would misreport a successful run
+  # as having stopped "before completing its handoff". Use the same
+  # completion signal handle_project_init_worker_stop uses instead.
+  def project_init_stop_reason(worker, exit_code)
+    if project_init_completed?(worker)
+      "Project setup discovery completed and recorded its findings."
+    elsif exit_code.present?
+      "Project setup discovery exited with status #{exit_code} without recording its findings."
+    else
+      "Process no longer running (detected by Rails reconciliation, exit status unavailable)."
+    end
+  end
+
+  def project_init_completed?(worker)
+    worker.run.workspace.workspace_memory_entries.current.exists?(
+      entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY
+    )
   end
 
   def claude_capacity_failure?(output)
@@ -137,9 +159,7 @@ class WorkerReconcileJob < ApplicationJob
   # bookkeeping; a miss reuses the exact same failed-attempt/chaperone
   # escalation path every other worker role already gets.
   def handle_project_init_worker_stop(worker)
-    return if worker.run.workspace.workspace_memory_entries.current.exists?(
-      entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY
-    )
+    return if project_init_completed?(worker)
 
     output = Orchestrator::LogReader.read_tail_lines(worker.log_path, 12).to_s
     record_failed_attempt(worker, stop_reason: worker.stop_reason, output:)
