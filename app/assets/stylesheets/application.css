@@ -113,9 +113,16 @@ h2 { font-size: 1.1rem; margin: 1.5rem 0 0.75rem; }
   border: 1px solid var(--border);
   color: var(--muted);
 }
-.badge.running, .badge.answered, .badge.completed, .badge.fulfilled { color: var(--success); border-color: var(--success); }
-.badge.blocking, .badge.blocked_on_user, .badge.failed, .badge.stalled, .badge.attention { color: var(--danger); border-color: var(--danger); }
-.badge.launching, .badge.stopping, .badge.open, .badge.planning, .badge.queued { color: var(--warn); border-color: var(--warn); }
+.badge.running, .badge.answered, .badge.completed, .badge.fulfilled, .badge.verified, .badge.waived { color: var(--success); border-color: var(--success); }
+.badge.blocking, .badge.blocked_on_user, .badge.failed, .badge.stalled, .badge.attention, .badge.blocked { color: var(--danger); border-color: var(--danger); }
+.badge.launching, .badge.stopping, .badge.open, .badge.planning, .badge.queued, .badge.pending, .badge.in_progress { color: var(--warn); border-color: var(--warn); }
+
+.acceptance-criteria-list { list-style: none; margin: 0; padding: 0; }
+.acceptance-criteria-list .acceptance-criteria-list { margin-top: 0.5rem; margin-left: 1.5rem; }
+.acceptance-criterion { padding: 0.4rem 0; border-top: 1px solid var(--border); }
+.acceptance-criterion:first-child { border-top: none; }
+.acceptance-criterion-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.acceptance-criterion.resolved .acceptance-criterion-row > span:not(.badge) { color: var(--muted); }
 
 .btn {
   display: inline-block;

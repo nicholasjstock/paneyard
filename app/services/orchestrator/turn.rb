@@ -112,7 +112,7 @@ module Orchestrator
 
     def run_planner_turn(run_id:, summary:, next_step:, following_steps:, now: Time.current, previous_state: nil)
       StepPolicy.validate_plan!(run_id:, next_step:, following_steps:)
-      completion_blockers = Orchestrator::RunContext.completion_blockers(run_id: run_id)
+      completion_blockers = Orchestrator::AcceptanceCriteria.completion_blockers(run_id: run_id)
       if next_step.nil? && completion_blockers.any?
         raise ArgumentError, "Cannot complete run while acceptance criteria remain pending: #{completion_blockers.join(', ')}"
       end

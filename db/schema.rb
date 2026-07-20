@@ -10,7 +10,30 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_20_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_20_170000) do
+  create_table "acceptance_criteria", force: :cascade do |t|
+    t.text "content", null: false
+    t.datetime "created_at", null: false
+    t.string "evidence_ref"
+    t.string "key", null: false
+    t.integer "parent_id"
+    t.string "run_id", null: false
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.index ["parent_id"], name: "index_acceptance_criteria_on_parent_id"
+    t.index ["run_id", "key"], name: "index_acceptance_criteria_on_run_id_and_key", unique: true
+  end
+
+  create_table "acceptance_criterion_steps", force: :cascade do |t|
+    t.integer "acceptance_criterion_id", null: false
+    t.datetime "created_at", null: false
+    t.string "lineage_key", null: false
+    t.string "run_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["acceptance_criterion_id", "lineage_key"], name: "idx_on_acceptance_criterion_id_lineage_key_539667c7eb"
+    t.index ["acceptance_criterion_id"], name: "index_acceptance_criterion_steps_on_acceptance_criterion_id"
+  end
+
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -119,6 +142,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_20_150000) do
 
   create_table "planner_decisions", force: :cascade do |t|
     t.integer "cache_read_input_tokens"
+    t.text "cli_output"
     t.datetime "completed_at"
     t.integer "context_bytes", default: 0, null: false
     t.json "context_requests", default: [], null: false
@@ -367,6 +391,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_20_150000) do
     t.index ["root_path"], name: "index_workspaces_on_root_path", unique: true
   end
 
+  add_foreign_key "acceptance_criteria", "acceptance_criteria", column: "parent_id"
+  add_foreign_key "acceptance_criterion_steps", "acceptance_criteria", column: "acceptance_criterion_id"
   add_foreign_key "planner_decision_attempts", "planner_decisions"
   add_foreign_key "runs", "workspaces"
   add_foreign_key "workspace_chat_messages", "workspace_chats"

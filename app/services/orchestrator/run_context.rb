@@ -4,6 +4,10 @@ module Orchestrator
   # Compiles curated, current operational knowledge for one run. It is kept
   # separate from the unbounded event log so planners receive decisions and
   # acceptance gates without replaying every worker transcript.
+  #
+  # Acceptance criteria are not handled here -- see Orchestrator::AcceptanceCriteria,
+  # which owns that whole lifecycle as its own first-class model rather than a
+  # RunContextEntry kind. This module covers the other four kinds only.
   module RunContext
     module_function
 
@@ -18,8 +22,6 @@ module Orchestrator
     # new agent from spending its context window on history it may not need.
     def snapshot(run_id:, entry_keys: nil)
       entries = RunContextEntry.where(run_id: run_id).order(:kind, :entry_key)
-      grouped = entries.group_by(&:kind)
-      criteria = grouped.fetch("acceptance_criterion", []).map(&:as_json)
       selected_entries = select_entries(entries.to_a, entry_keys)
 
       {
@@ -28,18 +30,11 @@ module Orchestrator
         entries: selected_entries,
         available_entry_keys: entries.limit(AVAILABLE_KEY_LIMIT).pluck(:entry_key),
         available_entry_count: entries.count,
-        retrieval_hint: "Request entryKeys for full details only when a specific fact, decision, or evidence reference is needed.",
-        completion_blockers: criteria_completion_blockers(criteria)
+        retrieval_hint: "Request entryKeys for full details only when a specific fact, decision, or evidence reference is needed."
       }
     end
 
-    def completion_blockers(run_id:)
-      criteria = RunContextEntry.where(run_id: run_id, kind: "acceptance_criterion").map(&:as_json)
-      criteria_completion_blockers(criteria)
-    end
-
     def upsert!(run_id:, entry_key:, kind:, status:, content:, evidence_ref:, created_by:)
-      validate_evidence!(run_id:, evidence_ref:) if kind == "acceptance_criterion" && status == "verified"
       entry = RunContextEntry.find_or_initialize_by(run_id: run_id, entry_key: entry_key)
       entry.assign_attributes(
         kind: kind,
@@ -50,37 +45,6 @@ module Orchestrator
       )
       entry.save!
       entry
-    end
-
-    def apply_planner_acceptance!(run:, criteria:, updates:)
-      existing = run.run_context_entries.where(kind: "acceptance_criterion")
-      if existing.empty?
-        raise ArgumentError, "Initial planner decision requires an acceptance contract" if criteria.empty?
-
-        criteria.each do |criterion|
-          key = criterion.fetch(:key).to_s
-          raise ArgumentError, "Invalid acceptance criterion key: #{key}" unless key.match?(/\A[a-z0-9][a-z0-9-]{0,63}\z/)
-
-          upsert!(
-            run_id: run.run_id, entry_key: key, kind: "acceptance_criterion", status: "pending",
-            content: criterion.fetch(:content), evidence_ref: nil, created_by: "planner"
-          )
-        end
-      elsif criteria.any?
-        raise ArgumentError, "Acceptance contract is immutable after the initial planner decision"
-      end
-
-      updates.each do |update|
-        entry = existing.find_by(entry_key: update.fetch(:key)) ||
-          run.run_context_entries.find_by!(kind: "acceptance_criterion", entry_key: update.fetch(:key))
-        status = update.fetch(:status).to_s
-        raise ArgumentError, "Planner may only verify or waive acceptance criteria" unless status.in?(%w[verified waived])
-
-        upsert!(
-          run_id: run.run_id, entry_key: entry.entry_key, kind: entry.kind, status:,
-          content: entry.content, evidence_ref: update[:evidence_ref], created_by: "planner"
-        )
-      end
     end
 
     def validate_evidence!(run_id:, evidence_ref:)
@@ -96,13 +60,6 @@ module Orchestrator
       end
       raise ArgumentError, "Verified acceptance evidence does not exist: #{evidence_ref}" unless workspace_evidence || artifact_evidence
     end
-    private_class_method :validate_evidence!
-
-    def criteria_completion_blockers(criteria)
-      criteria.select { |criterion| !%w[verified waived].include?(criterion[:status] || criterion["status"]) }
-        .map { |criterion| criterion[:key] || criterion["key"] }
-    end
-    private_class_method :criteria_completion_blockers
 
     def select_entries(entries, entry_keys)
       if entry_keys.present?
@@ -119,7 +76,7 @@ module Orchestrator
     private_class_method :select_entries
 
     def brief_kind_rank(kind)
-      %w[operator_decision acceptance_criterion constraint fact rejected_approach].index(kind) || 99
+      %w[operator_decision constraint fact rejected_approach].index(kind) || 99
     end
     private_class_method :brief_kind_rank
 

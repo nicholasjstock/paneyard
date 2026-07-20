@@ -32,6 +32,7 @@ class PlannerDecisionJob < ApplicationJob
         record[key] = (record[key] || 0) + usage[key] if usage[key]
       end
       record.model = result[:model] if result[:model].present?
+      record.cli_output = result[:cli_output] if result[:cli_output].present?
       record.save!
     end
   end
@@ -39,7 +40,10 @@ class PlannerDecisionJob < ApplicationJob
   def fail_decision!(record, error)
     return unless record
 
-    record.update!(status: "failed", error: error.message, completed_at: Time.current)
+    record.update!(
+      status: "failed", error: error.message, completed_at: Time.current,
+      cli_output: error.try(:output).presence || record.cli_output
+    )
     if error.message.match?(/session limit|rate limit|too many requests|429/i)
       request = record.spawn_request
       request.update!(

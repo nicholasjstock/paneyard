@@ -39,6 +39,7 @@ class RunsController < ApplicationController
     @timeline_events = build_timeline(raw_events).last(8).reverse
     @artifacts = collect_artifacts
     @planner_decisions = @run.planner_decisions.includes(:spawn_request, :attempts).order(created_at: :desc).to_a
+    @acceptance_criteria = @run.acceptance_criteria.roots.includes(:children).to_a
     @latest_planner_decision = @planner_decisions.first
     @usage_summary = usage_summary
     @run_now = build_run_now

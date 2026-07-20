@@ -18,9 +18,10 @@ module Orchestrator
           phase: state[:phase],
           last_plan_summary: truncate(state[:last_plan_summary]),
           following_steps: state[:following_steps],
-          completion_blockers: RunContext.completion_blockers(run_id: run.run_id)
+          completion_blockers: AcceptanceCriteria.completion_blockers(run_id: run.run_id)
         },
         run_context: RunContext.snapshot(run_id: run.run_id),
+        acceptance_criteria: AcceptanceCriteria.tree(run_id: run.run_id),
         open_questions: run.user_questions.where(status: "open").order(:asked_at).limit(3).map(&:as_diagnostic_json),
         recent_attempts: run.step_attempts.order(created_at: :desc).limit(5).reverse.map do |attempt|
           {
@@ -53,11 +54,18 @@ module Orchestrator
         Call it as many times as needed for outcome=needs_context (its response includes the fetched context you asked
         for); call it exactly once to finish with outcome=decision or outcome=needs_stronger_model.
         Choose at most one nextStep. Keep followingSteps ordered and limited to concrete work already justified by the evidence.
-        On the initial decision, define a concise acceptanceCriteria contract derived directly from the user's requested
-        outcomes. Criteria describe observable outcomes, not implementation steps. On later decisions return acceptanceCriteria=[];
-        the established contract is immutable. Use acceptanceUpdates only when supplied worker evidence positively satisfies
-        an existing criterion. A verified update requires a workspace-relative evidenceRef; blocked work, source edits alone,
-        estimates, and absence of errors are not positive verification. Waive only when the user explicitly authorized it.
+        On the initial decision, define a concise top-level acceptanceCriteria contract (parentKey=null for each) derived
+        directly from the user's requested outcomes. Criteria describe observable outcomes, not implementation steps. The
+        top-level contract is immutable after the first decision -- never propose new parentKey=null criteria later. At any
+        later decision, you may decompose an existing criterion (top-level or already-nested) into child sub-goals by
+        proposing new criteria whose parentKey names that existing criterion's key; do this only when a criterion genuinely
+        needs breaking down to be addressable. A criterion with children resolves only once every child resolves; its own
+        status is then ignored. Every step you propose, including diagnosis, must set addressesCriteria to the real, current
+        acceptance criteria keys (top-level or nested, see the acceptance_criteria tree below) it works toward -- Rails checks
+        this structurally, not by parsing prose, so name exact keys. Use acceptanceUpdates only when supplied worker evidence
+        positively satisfies an existing criterion. A verified update requires a workspace-relative evidenceRef; blocked work,
+        source edits alone, estimates, and absence of errors are not positive verification. Waive only when the user explicitly
+        authorized it. Use blocked when a criterion is genuinely stuck rather than silently leaving it pending.
         Never return nextStep=null while completion_blockers remain after applying justified acceptanceUpdates.
         A diagnosis step must be artifact_only. An implementation step must name exact workspace-relative file paths in
         allowedPaths. An exact file path names one file: it must not end in "/" and must not contain glob characters

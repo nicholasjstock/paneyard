@@ -34,10 +34,17 @@ module Orchestrator
     end
 
     def handle_decision(decision:, params:, attempt:, model_tier:)
-      existing_contract = decision.run.run_context_entries.where(kind: "acceptance_criterion").exists?
-      if existing_contract && Array(params[:acceptance_criteria]).any?
-        attempt.update!(rejection_reason: "Ignored acceptanceCriteria because the run contract is already established")
-        params[:acceptance_criteria] = []
+      existing_contract = decision.run.acceptance_criteria.roots.exists?
+      if existing_contract
+        # New top-level (parentKey-less) criteria can't be added once the
+        # contract exists -- silently drop only those, same leniency the
+        # flat model always had. A parentKey'd entry is a legitimate
+        # decomposition of an existing criterion and passes through untouched.
+        new_roots, decompositions = Array(params[:acceptance_criteria]).partition { |c| c[:parent_key].blank? }
+        if new_roots.any?
+          attempt.update!(rejection_reason: "Ignored acceptanceCriteria because the run contract is already established")
+          params[:acceptance_criteria] = decompositions
+        end
       end
       if !existing_contract && Array(params[:acceptance_criteria]).empty?
         return reject_decision!(decision:, attempt:, model_tier:, reason: "Initial planner decision omitted the acceptance contract")
@@ -50,8 +57,19 @@ module Orchestrator
       normalized = StepPolicy.normalize_plan(next_step: params[:next_step], following_steps: params[:following_steps])
       params[:next_step] = normalized[:next_step]
       params[:following_steps] = normalized[:following_steps]
+      # Criteria proposed in *this* call aren't persisted until persist_decision!
+      # runs (after validation succeeds), so a step in this same call referencing
+      # the contract it just proposed would otherwise fail with "unknown
+      # criteria" -- pass the union of what's already saved and what's being
+      # proposed right now.
+      acceptance_criteria_keys = (
+        AcceptanceCriteria.current_keys(run_id: decision.run_id) + Array(params[:acceptance_criteria]).map { |c| c[:key].to_s }
+      ).uniq
       begin
-        StepPolicy.validate_plan!(run_id: decision.run_id, next_step: params[:next_step], following_steps: params[:following_steps])
+        StepPolicy.validate_plan!(
+          run_id: decision.run_id, next_step: params[:next_step], following_steps: params[:following_steps],
+          acceptance_criteria_keys:
+        )
       rescue ArgumentError => error
         return reject_decision!(decision:, attempt:, model_tier:, reason: error.message)
       end
@@ -175,7 +193,8 @@ module Orchestrator
             owner: "worker", artifact: "initial-diagnosis.md",
             success_check: "Identify the exact target, reproduce the reported behavior, and record concrete baseline evidence.",
             mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
-            lineage_key: "#{decision.run_id}:initial-diagnosis"
+            lineage_key: "#{decision.run_id}:initial-diagnosis",
+            addresses_criteria: AcceptanceCriteria.current_keys(run_id: decision.run_id)
           },
           following_steps: []
         }
@@ -185,9 +204,10 @@ module Orchestrator
 
     def persist_decision!(decision:, params:)
       PlannerDecision.transaction do
-        RunContext.apply_planner_acceptance!(
+        AcceptanceCriteria.apply!(
           run: decision.run, criteria: Array(params[:acceptance_criteria]), updates: Array(params[:acceptance_updates])
         )
+        AcceptanceCriteria.record_step!(run: decision.run, next_step: params[:next_step])
         previous_state = TickState.latest(decision.run_id)
         turn = Turn.run_planner_turn(
           run_id: decision.run_id, summary: params[:summary], next_step: params[:next_step],

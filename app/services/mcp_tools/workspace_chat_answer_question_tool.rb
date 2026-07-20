@@ -8,7 +8,8 @@ module McpTools
     )
 
     def self.call(questionId:, answer:, server_context:)
-      workspace = WorkspaceChatContext.chat&.workspace or raise "Workspace chat capability missing"
+      chat = server_context && WorkspaceChat.find_by(id: server_context[:chat_id])
+      workspace = chat&.workspace or raise "Workspace chat capability missing"
       question = UserQuestion.joins(:run).where(runs: { workspace_id: workspace.id }).find_by!(question_id: questionId, status: "open")
       question.update!(status: "answered", answer_text: answer, answered_by: "workspace_chat", answered_at: Time.current)
       TickRunJob.perform_later

@@ -1,0 +1,17 @@
+<ul class="acceptance-criteria-list">
+  <% criteria.each do |criterion| %>
+    <li class="acceptance-criterion <%= criterion.status %> <%= "resolved" if criterion.resolved? %>">
+      <div class="acceptance-criterion-row">
+        <span class="badge <%= criterion.status %>"><%= criterion.status.humanize.downcase %></span>
+        <span class="mono acceptance-criterion-key"><%= criterion.key %></span>
+        <span><%= criterion.content %></span>
+        <% if criterion.evidence_ref.present? %>
+          <span class="muted">evidence: <span class="mono"><%= criterion.evidence_ref %></span></span>
+        <% end %>
+      </div>
+      <% if criterion.children.any? %>
+        <%= render "acceptance_criteria", criteria: criterion.children %>
+      <% end %>
+    </li>
+  <% end %>
+</ul>

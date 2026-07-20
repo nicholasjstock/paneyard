@@ -11,7 +11,8 @@ RSpec.describe PlannerDecisionJob do
           outcome: "decision", summary: "Run the verification.",
           next_step: {
             owner: "worker", artifact: "verify.md", success_check: "Confirm behavior.",
-            mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+            mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
+            addresses_criteria: [ "existing-outcome" ]
           },
           following_steps: [], context_request: nil, acceptance_criteria: [], acceptance_updates: []
         }
@@ -111,9 +112,9 @@ RSpec.describe PlannerDecisionJob do
     )
     record = PlannerDecision.create!(run:, spawn_request: request, status: "queued")
     if with_acceptance
-      RunContextEntry.create!(
-        run_id: run.run_id, entry_key: "existing-outcome", kind: "acceptance_criterion", status: "verified",
-        content: "Existing test outcome", evidence_ref: "Gemfile", created_by: "test"
+      AcceptanceCriterion.create!(
+        run_id: run.run_id, key: "existing-outcome", status: "verified",
+        content: "Existing test outcome", evidence_ref: "Gemfile"
       )
     end
     [ run, request, record ]

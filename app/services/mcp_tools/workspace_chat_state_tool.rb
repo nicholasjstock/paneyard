@@ -7,7 +7,8 @@ module McpTools
     )
 
     def self.call(server_context:, runId: nil)
-      workspace = WorkspaceChatContext.chat&.workspace or raise "Workspace chat capability missing"
+      chat = server_context && WorkspaceChat.find_by(id: server_context[:chat_id])
+      workspace = chat&.workspace or raise "Workspace chat capability missing"
       runs = workspace.runs.order(created_at: :desc)
       runs = runs.where(run_id: runId) if runId.present?
       ToolResponse.structured(

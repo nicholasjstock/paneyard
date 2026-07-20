@@ -80,7 +80,22 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
       expect(decision.reload.decision.fetch("acceptance_criteria")).to be_empty
       expect(decision.attempts.sole.proposal.dig("acceptance_criteria", 0, "key")).to eq("replacement")
       expect(decision.attempts.sole.rejection_reason).to include("contract is already established")
-      expect(run.run_context_entries.where(kind: "acceptance_criterion").pluck(:entry_key)).to eq([ "existing-outcome" ])
+      expect(run.acceptance_criteria.pluck(:key)).to eq([ "existing-outcome" ])
+    end
+
+    it "allows a parentKey'd decomposition even when the top-level contract is already established" do
+      run, _request, decision = build_decision(with_acceptance: true)
+      params = decision_params(
+        summary: "Decompose the existing outcome.",
+        next_step: step("diagnosis.md", mode: "diagnosis", addresses_criteria: [ "existing-outcome-sub" ]),
+        acceptance_criteria: [ { key: "existing-outcome-sub", content: "Sub-goal.", parent_key: "existing-outcome" } ]
+      )
+
+      result = described_class.call(decision:, params:)
+
+      expect(result).to eq({ accepted: true })
+      child = run.acceptance_criteria.find_by!(key: "existing-outcome-sub")
+      expect(child.parent.key).to eq("existing-outcome")
     end
 
     it "rejects, then escalates, an initial decision that omits the acceptance contract" do
@@ -214,8 +229,9 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
     }
   end
 
-  def step(artifact, mode: "diagnosis", success_check: "Confirm the expected behavior.", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [])
-    { owner: "worker", artifact:, success_check:, mode:, write_scope:, allowed_paths:, evidence_refs: }
+  def step(artifact, mode: "diagnosis", success_check: "Confirm the expected behavior.", write_scope: "artifact_only",
+           allowed_paths: [], evidence_refs: [], addresses_criteria: [ "existing-outcome" ])
+    { owner: "worker", artifact:, success_check:, mode:, write_scope:, allowed_paths:, evidence_refs:, addresses_criteria: }
   end
 
   def build_decision(with_acceptance: true)
@@ -230,9 +246,9 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
     )
     decision = PlannerDecision.create!(run:, spawn_request: request, status: "running")
     if with_acceptance
-      RunContextEntry.create!(
-        run_id: run.run_id, entry_key: "existing-outcome", kind: "acceptance_criterion", status: "verified",
-        content: "Existing test outcome", evidence_ref: "Gemfile", created_by: "test"
+      AcceptanceCriterion.create!(
+        run_id: run.run_id, key: "existing-outcome", status: "verified",
+        content: "Existing test outcome", evidence_ref: "Gemfile"
       )
     end
     [ run, request, decision ]

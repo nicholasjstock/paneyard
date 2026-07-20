@@ -11,25 +11,27 @@ module McpTools
         writeScope: { type: "string", enum: Orchestrator::StepPolicy::WRITE_SCOPES },
         allowedPaths: { type: "array", items: { type: "string" } },
         evidenceRefs: { type: "array", items: { type: "string" } },
+        addressesCriteria: { type: "array", items: { type: "string" }, maxItems: 8 },
         operatorApprovalQuestionId: { type: [ "string", "null" ] },
         lineageKey: { type: [ "string", "null" ] }
       },
-      required: %w[owner artifact successCheck mode writeScope allowedPaths evidenceRefs]
+      required: %w[owner artifact successCheck mode writeScope allowedPaths evidenceRefs addressesCriteria]
     }.freeze
 
     ACCEPTANCE_CRITERION_SCHEMA = {
       type: "object", additionalProperties: false,
       properties: {
         key: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
-        content: { type: "string" }
+        content: { type: "string" },
+        parentKey: { type: [ "string", "null" ] }
       },
-      required: %w[key content]
+      required: %w[key content parentKey]
     }.freeze
 
     ACCEPTANCE_UPDATE_SCHEMA = {
       type: "object", additionalProperties: false,
       properties: {
-        key: { type: "string" }, status: { type: "string", enum: %w[verified waived] },
+        key: { type: "string" }, status: { type: "string", enum: %w[verified waived blocked] },
         evidenceRef: { type: [ "string", "null" ] }
       },
       required: %w[key status evidenceRef]
@@ -66,7 +68,7 @@ module McpTools
     )
 
     def self.call(outcome:, summary:, nextStep:, followingSteps:, contextRequest:, acceptanceCriteria:, acceptanceUpdates:, server_context:)
-      decision = PlannerDecisionContext.decision
+      decision = server_context && PlannerDecision.find_by(decision_id: server_context[:decision_id])
       raise ArgumentError, "submit_planner_decision requires an authenticated planner decision capability" unless decision
 
       params = {

@@ -69,6 +69,14 @@ module Orchestrator
       step = plan[:next_step]
       return [] if step.nil?
 
+      # The normal planner-submitted path always sets this already (the
+      # model declared it); the Rails-hardcoded recovery builders above
+      # (plan_workflow_iteration, build_stalled_worker_recovery_plan) never
+      # do, so default to "addresses everything currently outstanding"
+      # rather than failing acceptance-criteria validation on a step Rails
+      # generated itself.
+      step[:addresses_criteria] ||= AcceptanceCriteria.current_keys(run_id: run_id)
+
       StepPolicy.validate!(run_id:, step:)
 
       existing_request = SpawnRequest

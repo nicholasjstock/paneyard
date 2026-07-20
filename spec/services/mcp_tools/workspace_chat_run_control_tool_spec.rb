@@ -3,23 +3,20 @@ require "rails_helper"
 RSpec.describe McpTools::WorkspaceChatRunControlTool do
   include ActiveJob::TestHelper
 
-  after { WorkspaceChatContext.reset }
-
   it "resumes a run and queues orchestration only inside the chat workspace" do
     own_workspace, chat = create_workspace_with_chat("own")
     other_workspace, = create_workspace_with_chat("other")
     run = create_run(own_workspace, "own-run")
     other_run = create_run(other_workspace, "other-run")
-    WorkspaceChatContext.chat = chat
 
     assert_enqueued_with(job: TickRunJob) do
-      McpTools::WorkspaceChatRunControlTool.call(runId: run.run_id, action: "resume", server_context: nil)
+      McpTools::WorkspaceChatRunControlTool.call(runId: run.run_id, action: "resume", server_context: { chat_id: chat.id })
     end
 
     assert_equal "running", run.reload.status
     assert_equal "planning", run.phase
     assert_raises(ActiveRecord::RecordNotFound) do
-      McpTools::WorkspaceChatRunControlTool.call(runId: other_run.run_id, action: "resume", server_context: nil)
+      McpTools::WorkspaceChatRunControlTool.call(runId: other_run.run_id, action: "resume", server_context: { chat_id: chat.id })
     end
   end
 
@@ -31,10 +28,9 @@ RSpec.describe McpTools::WorkspaceChatRunControlTool do
       run_id: run.run_id, phase: "completed", tick_count: 4,
       last_plan_summary: "Verification ended blocked.", pending_spawn_keys: [], following_steps: []
     )
-    WorkspaceChatContext.chat = chat
 
     perform_enqueued_jobs do
-      described_class.call(runId: run.run_id, action: "resume", server_context: nil)
+      described_class.call(runId: run.run_id, action: "resume", server_context: { chat_id: chat.id })
     end
 
     expect(run.reload.status).to eq("running")

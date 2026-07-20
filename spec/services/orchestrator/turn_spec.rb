@@ -72,9 +72,8 @@ RSpec.describe Orchestrator::Turn do
       workspace: workspace, run_id: "turn-context-#{SecureRandom.hex(4)}", task: "Verify completion",
       target_root: Rails.root.to_s, launcher_variant: "codex", status: "running"
     )
-    RunContextEntry.create!(
-      run_id: run.run_id, entry_key: "proof", kind: "acceptance_criterion", status: "pending",
-      content: "End-to-end proof is required.", created_by: "planner"
+    AcceptanceCriterion.create!(
+      run_id: run.run_id, key: "proof", status: "pending", content: "End-to-end proof is required."
     )
 
     error = assert_raises(ArgumentError) do

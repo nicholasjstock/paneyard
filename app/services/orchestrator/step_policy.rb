@@ -16,9 +16,14 @@ module Orchestrator
     IMPLEMENTATION_LANGUAGE = /\b(implement|fix|patch|modify|edit|change|land|ship)\b/i
     NEGATED_IMPLEMENTATION_LANGUAGE = /\b(do not|don't|never)\b(?:\s+\w+){0,3}\s+(implement|fix|patch|modify|edit|change|land|ship)\b/i
 
-    def validate_plan!(run_id:, next_step:, following_steps:)
-      validate!(run_id: run_id, step: next_step) if next_step
-      Array(following_steps).each { |step| validate!(run_id: run_id, step: step) }
+    def validate_plan!(run_id:, next_step:, following_steps:, acceptance_criteria_keys: nil)
+      keys = acceptance_criteria_keys || current_acceptance_criteria_keys(run_id)
+      validate!(run_id: run_id, step: next_step, acceptance_criteria_keys: keys) if next_step
+      Array(following_steps).each { |step| validate!(run_id: run_id, step: step, acceptance_criteria_keys: keys) }
+    end
+
+    def current_acceptance_criteria_keys(run_id)
+      Orchestrator::AcceptanceCriteria.current_keys(run_id: run_id)
     end
 
     # Remove authority that a non-writing step cannot use. This repair can
@@ -42,7 +47,7 @@ module Orchestrator
     end
     private_class_method :normalize_step
 
-    def validate!(run_id:, step:)
+    def validate!(run_id:, step:, acceptance_criteria_keys: nil)
       owner = step[:owner].to_s
       mode = step[:mode].to_s
       write_scope = step[:write_scope].to_s
@@ -67,7 +72,8 @@ module Orchestrator
       end
 
       require_operator_approval!(run_id:, step:, allowed_paths:)
-      ObjectiveAlignment.validate_step!(run_id:, step:)
+      keys = acceptance_criteria_keys || current_acceptance_criteria_keys(run_id)
+      require_acceptance_criteria_reference!(step:, acceptance_criteria_keys: keys)
       step
     end
 
@@ -118,6 +124,23 @@ module Orchestrator
     def reject_ambiguous_paths!(paths)
       ambiguous = paths.select { |path| path.blank? || path.end_with?("/") || path.match?(/[\*\?\[\]\{\}]/) }
       raise ArgumentError, "allowedPaths must name exact files: #{ambiguous.join(', ')}" if ambiguous.any?
+    end
+
+    # Structural, not semantic: the step must name real, current acceptance
+    # criteria keys (top-level or nested children) -- Rails never tries to
+    # judge whether the step's prose "relates to" an objective by matching
+    # text. Empty acceptance_criteria_keys is a bootstrap exemption: nothing
+    # has been established yet to drift from (e.g. the very first decision's
+    # own Rails-generated fallback step, or a run whose contract genuinely
+    # doesn't exist yet).
+    def require_acceptance_criteria_reference!(step:, acceptance_criteria_keys:)
+      return if acceptance_criteria_keys.empty?
+
+      addresses = Array(step[:addresses_criteria]).map(&:to_s).reject(&:blank?)
+      raise ArgumentError, "Planner step must name which acceptance criteria it addresses (addressesCriteria)" if addresses.empty?
+
+      unknown = addresses - acceptance_criteria_keys
+      raise ArgumentError, "addressesCriteria names unknown criteria: #{unknown.join(', ')}" if unknown.any?
     end
 
     def require_operator_approval!(run_id:, step:, allowed_paths:)

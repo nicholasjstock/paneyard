@@ -54,6 +54,9 @@
             <% if Array(step["evidence_refs"]).any? %>
               <p class="muted">Evidence: <%= Array(step["evidence_refs"]).join(", ") %></p>
             <% end %>
+            <% if Array(step["addresses_criteria"]).any? %>
+              <p class="muted">Addresses: <span class="mono"><%= Array(step["addresses_criteria"]).join(", ") %></span></p>
+            <% end %>
           </div>
         <% else %>
           <p class="muted">No next worker step; this decision completed the run.</p>
@@ -135,5 +138,12 @@
       <p class="muted mono">decision <%= decision.decision_id %> &middot; request <%= decision.spawn_request_id %></p>
       <pre class="log compact"><%= JSON.pretty_generate(decision.decision || {}) %></pre>
     </details>
+
+    <% if decision.cli_output.present? %>
+      <details class="persisted-json">
+        <summary>Raw planner CLI output</summary>
+        <pre class="log compact"><%= decision.cli_output %></pre>
+      </details>
+    <% end %>
   </div>
 </details>

@@ -1,5 +1,5 @@
 class RunContextEntry < ApplicationRecord
-  KINDS = %w[acceptance_criterion fact constraint rejected_approach operator_decision].freeze
+  KINDS = %w[fact constraint rejected_approach operator_decision].freeze
   STATUSES = %w[pending confirmed verified waived rejected superseded].freeze
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, optional: true, inverse_of: :run_context_entries
@@ -27,7 +27,7 @@ class RunContextEntry < ApplicationRecord
   private
 
   def evidence_required?
-    kind == "fact" || (kind == "acceptance_criterion" && status == "verified")
+    kind == "fact"
   end
 
   def publish_change

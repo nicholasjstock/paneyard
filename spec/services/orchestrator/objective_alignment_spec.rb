@@ -56,34 +56,6 @@ RSpec.describe Orchestrator::ObjectiveAlignment do
     end
   end
 
-  it "rejects downstream work that drops the performance objective" do
-    run, = build_diagnosis("Make the phone demo faster")
-
-    error = assert_raises(ArgumentError) do
-      Orchestrator::StepPolicy.validate!(
-        run_id: run.run_id,
-        step: {
-          owner: "worker", artifact: "fix.md", success_check: "Correct nested coverage-item routing.",
-          mode: "implementation", write_scope: "scoped_changes",
-          allowed_paths: [ "front/scripts/record-demo.ts" ], evidence_refs: [ "initial-diagnosis.md" ]
-        }
-      )
-    end
-
-    assert_includes error.message, "performance objective"
-  end
-
-  it "recognizes timings artifacts as retaining a performance objective" do
-    run, = build_diagnosis("Make the phone demo faster")
-
-    assert_nothing_raised do
-      described_class.validate_step!(
-        run_id: run.run_id,
-        step: { mode: "infrastructure", success_check: "Recording completes with populated timings.json." }
-      )
-    end
-  end
-
   private
 
   def reject_diagnosis(run, request, worker)

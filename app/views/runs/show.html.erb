@@ -83,6 +83,18 @@
     </section>
   </div>
 
+  <% if @acceptance_criteria.any? %>
+    <section class="panel span-2 acceptance-criteria-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Acceptance criteria</h2>
+          <p class="muted">The run's outcome contract, established on the first planner decision.</p>
+        </div>
+      </div>
+      <%= render "acceptance_criteria", criteria: @acceptance_criteria %>
+    </section>
+  <% end %>
+
   <details class="panel secondary-panel run-usage-panel" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:usage">
     <summary>
       <span>

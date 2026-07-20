@@ -23,17 +23,6 @@ module Orchestrator
       end
     end
 
-    def validate_step!(run_id:, step:)
-      run = Run.find_by!(run_id:)
-      return unless performance_objective?(run.task)
-      return if step[:mode].to_s == "diagnosis"
-
-      alignment_text = [ step[:success_check], *Array(step[:evidence_refs]) ].join(" ")
-      return if alignment_text.match?(PERFORMANCE_INTENT)
-
-      raise ArgumentError, "step does not retain the run's performance objective"
-    end
-
     def reject!(run:, request:, artifact:, reason:)
       RunContext.upsert!(
         run_id: run.run_id,

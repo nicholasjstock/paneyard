@@ -28,6 +28,7 @@ module Orchestrator
     MODEL_TIERS = %i[small strong].freeze
     CLAUDE_MODELS = { small: "haiku", strong: "sonnet" }.freeze
     CODEX_SMALL_MODEL = WorkerSpawner::CODEX_WORKER_MODEL
+    OUTPUT_LIMIT = 50_000
 
     def call(run:, request:, decision:, model_tier: :small, command_runner: Open3.method(:capture3))
       raise ArgumentError, "Unknown planner model tier: #{model_tier}" unless MODEL_TIERS.include?(model_tier)
@@ -59,13 +60,16 @@ module Orchestrator
           "--disable-slash-commands", "--no-session-persistence", "--max-budget-usd", "0.25", "--", prompt
         ]
         stdout, stderr, status = command_runner.call(WorkerSpawner.build_worker_env, *args, chdir: run.target_root)
-        raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: "#{stdout}\n#{stderr}") unless status.success?
+        raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: bounded_output("#{stdout}\n#{stderr}")) unless status.success?
 
         envelope = JSON.parse(stdout)
-        { usage: usage_from_claude(envelope), model: envelope.dig("modelUsage")&.keys&.last || selected_model }
+        {
+          usage: usage_from_claude(envelope), model: envelope.dig("modelUsage")&.keys&.last || selected_model,
+          cli_output: bounded_output(stdout)
+        }
       end
     rescue JSON::ParserError => e
-      raise Error.new("Planner model returned invalid JSON: #{e.message}", output: stdout)
+      raise Error.new("Planner model returned invalid JSON: #{e.message}", output: bounded_output(stdout))
     end
 
     def run_codex(run:, decision:, prompt:, model_tier:, command_runner:)
@@ -81,9 +85,9 @@ module Orchestrator
           "--output-last-message", output_file.path, "--cd", run.target_root, prompt
         ]
         stdout, stderr, status = command_runner.call(env, *args, chdir: run.target_root)
-        raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: "#{stdout}\n#{stderr}") unless status.success?
+        raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: bounded_output("#{stdout}\n#{stderr}")) unless status.success?
 
-        { usage: {}, model: model_tier == :small ? CODEX_SMALL_MODEL : "default" }
+        { usage: {}, model: model_tier == :small ? CODEX_SMALL_MODEL : "default", cli_output: bounded_output(stdout) }
       end
     end
 
@@ -95,5 +99,10 @@ module Orchestrator
       }.compact
     end
     private_class_method :usage_from_claude
+
+    def bounded_output(output)
+      output.to_s.last(OUTPUT_LIMIT)
+    end
+    private_class_method :bounded_output
   end
 end

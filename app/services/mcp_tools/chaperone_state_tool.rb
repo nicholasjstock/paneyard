@@ -20,7 +20,8 @@ module McpTools
         },
         objective: { task: review.run.task, phase: review.run.phase, summary: review.run.phase_summary },
         acceptance: {
-          blockers: Orchestrator::RunContext.completion_blockers(run_id: review.run_id),
+          blockers: Orchestrator::AcceptanceCriteria.completion_blockers(run_id: review.run_id),
+          tree: Orchestrator::AcceptanceCriteria.tree(run_id: review.run_id),
           brief: Orchestrator::RunContext.snapshot(run_id: review.run_id)[:entries]
         },
         attempts: attempts.each_with_index.map { |attempt, index| attempt_summary(attempt, index + 1) },

@@ -1,20 +1,18 @@
 require "rails_helper"
 
 RSpec.describe McpTools::SubmitPlannerDecisionTool do
-  after { PlannerDecisionContext.reset }
-
   it "delegates to PlannerDecisionSubmission using the decision from the authenticated context, not client input" do
     run, decision = build_decision
-    PlannerDecisionContext.decision = decision
 
     response = described_class.call(
       outcome: "decision", summary: "Run the verification.",
       nextStep: {
         "owner" => "worker", "artifact" => "verify.md", "successCheck" => "Confirm the expected behavior.",
-        "mode" => "verification", "writeScope" => "artifact_only", "allowedPaths" => [], "evidenceRefs" => []
+        "mode" => "verification", "writeScope" => "artifact_only", "allowedPaths" => [], "evidenceRefs" => [],
+        "addressesCriteria" => [ "existing-outcome" ]
       },
       followingSteps: [], contextRequest: nil, acceptanceCriteria: [], acceptanceUpdates: [],
-      server_context: nil
+      server_context: { decision_id: decision.decision_id }
     )
 
     expect(response.error?).to be_falsey
@@ -33,6 +31,16 @@ RSpec.describe McpTools::SubmitPlannerDecisionTool do
     expect(response.error?).to be(true)
   end
 
+  it "errors when the server_context names a decision that does not exist" do
+    response = described_class.call(
+      outcome: "needs_stronger_model", summary: "Need more reasoning.",
+      nextStep: nil, followingSteps: [], contextRequest: nil, acceptanceCriteria: [], acceptanceUpdates: [],
+      server_context: { decision_id: "unknown-decision" }
+    )
+
+    expect(response.error?).to be(true)
+  end
+
   def build_decision
     root = Dir.mktmpdir("submit-planner-decision-tool")
     workspace = Workspace.create!(name: "submit-planner-decision-#{SecureRandom.hex(4)}", root_path: root)
@@ -44,9 +52,9 @@ RSpec.describe McpTools::SubmitPlannerDecisionTool do
       asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",
       requested_role: "planner", priority: "blocking"
     )
-    RunContextEntry.create!(
-      run_id: run.run_id, entry_key: "existing-outcome", kind: "acceptance_criterion", status: "verified",
-      content: "Existing test outcome", evidence_ref: "Gemfile", created_by: "test"
+    AcceptanceCriterion.create!(
+      run_id: run.run_id, key: "existing-outcome", status: "verified",
+      content: "Existing test outcome", evidence_ref: "Gemfile"
     )
     [ run, PlannerDecision.create!(run:, spawn_request: request, status: "running") ]
   end

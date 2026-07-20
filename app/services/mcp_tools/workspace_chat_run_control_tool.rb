@@ -13,7 +13,8 @@ module McpTools
     )
 
     def self.call(runId:, action:, server_context:, requestId: nil)
-      workspace = WorkspaceChatContext.chat&.workspace or raise "Workspace chat capability missing"
+      chat = server_context && WorkspaceChat.find_by(id: server_context[:chat_id])
+      workspace = chat&.workspace or raise "Workspace chat capability missing"
       run = workspace.runs.find_by!(run_id: runId)
       case action
       when "stop"

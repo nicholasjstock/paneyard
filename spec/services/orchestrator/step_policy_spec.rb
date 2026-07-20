@@ -109,12 +109,48 @@ RSpec.describe Orchestrator::StepPolicy do
     assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
   end
 
+  it "is a no-op when the run has no acceptance criteria" do
+    step = diagnosis_step
+
+    assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
+  end
+
+  it "rejects a step that names no acceptance criteria once a contract exists" do
+    AcceptanceCriterion.create!(run_id: @run.run_id, key: "outcome", content: "Demo is faster.", status: "pending")
+
+    error = assert_raises(ArgumentError) do
+      Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step: diagnosis_step)
+    end
+
+    assert_equal "Planner step must name which acceptance criteria it addresses (addressesCriteria)", error.message
+  end
+
+  it "rejects a step that references an unknown acceptance criterion key" do
+    AcceptanceCriterion.create!(run_id: @run.run_id, key: "outcome", content: "Demo is faster.", status: "pending")
+
+    error = assert_raises(ArgumentError) do
+      Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step: diagnosis_step(addresses_criteria: [ "missing" ]))
+    end
+
+    assert_match(/addressesCriteria names unknown criteria: missing/, error.message)
+  end
+
+  it "accepts a step referencing a real current key, including a nested child" do
+    root = AcceptanceCriterion.create!(run_id: @run.run_id, key: "outcome", content: "Demo is faster.", status: "pending")
+    AcceptanceCriterion.create!(run_id: @run.run_id, key: "outcome-sub", parent: root, content: "Sub-goal.", status: "pending")
+
+    step = diagnosis_step(addresses_criteria: [ "outcome-sub" ])
+
+    assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
+  end
+
   private
 
-  def diagnosis_step(success_check: "Capture the POST and GET responses and report the failing boundary.")
+  def diagnosis_step(success_check: "Capture the POST and GET responses and report the failing boundary.", addresses_criteria: [])
     {
       owner: "worker", artifact: "diagnosis.md", success_check:,
-      mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+      mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
+      addresses_criteria:
     }
   end
 
