@@ -56,6 +56,34 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     assert_equal "fulfilled", request.reload.status
   end
 
+  it "spawns a verifier worker through the generic dispatch path with a read-only, artifact-only sandbox" do
+    workspace = Workspace.create!(name: "spawn-verifier-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "spawn-verifier-#{SecureRandom.hex(4)}", task: "Verify a claim",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    request = run.spawn_requests.create!(
+      asked_by: "planner", scope: "acceptance-verify-outcome", lineage_key: "acceptance:outcome",
+      text: "Independently verify the claim.", requested_role: "verifier", priority: "blocking",
+      model_tier: "small", execution_mode: "verification", write_scope: "artifact_only", allowed_paths: []
+    )
+
+    spawned = nil
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+      spawned = kwargs
+      instance_double(Worker, worker_id: kwargs[:worker_id])
+    end
+
+    Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    assert_equal "verifier", spawned[:role]
+    assert_equal "artifact_only", spawned[:write_scope]
+    assert_equal [], spawned[:allowed_paths]
+    assert_equal "verification", spawned[:mode]
+    assert_equal "small", spawned[:model_tier]
+    assert_equal "fulfilled", request.reload.status
+  end
+
   it "dismisses a chaperone spawn request when no matching pending review is found" do
     workspace = Workspace.create!(name: "spawn-chaperone-missing-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(

@@ -112,9 +112,9 @@ module Orchestrator
 
     def run_planner_turn(run_id:, summary:, next_step:, following_steps:, now: Time.current, previous_state: nil)
       StepPolicy.validate_plan!(run_id:, next_step:, following_steps:)
-      completion_blockers = Orchestrator::AcceptanceCriteria.completion_blockers(run_id: run_id)
-      if next_step.nil? && completion_blockers.any?
-        raise ArgumentError, "Cannot complete run while acceptance criteria remain pending: #{completion_blockers.join(', ')}"
+      planner_blockers = Orchestrator::AcceptanceCriteria.planner_blockers(run_id: run_id)
+      if next_step.nil? && planner_blockers.any?
+        raise ArgumentError, "Cannot complete run while acceptance criteria remain pending: #{planner_blockers.join(', ')}"
       end
 
       # An open blocking question means the run is waiting on the user, not
@@ -137,12 +137,17 @@ module Orchestrator
       # the run alive after a nil next_step, otherwise every completed planner
       # turn becomes waiting_on_workers and the stall recovery loop restarts.
       active_executor_exists = Worker.where(run_id: run_id, status: "running").where.not(role: "planner").exists?
+      # A criterion can be unresolved (ready_for_verification) with no
+      # active_executor yet -- the verifier SpawnRequest this same update
+      # just created hasn't been dispatched by SpawnRequestedWorkers yet.
+      # The run must not read "completed" in that gap.
+      unresolved_criteria_exist = Orchestrator::AcceptanceCriteria.completion_blockers(run_id: run_id).any?
       completion_phase =
         if has_open_blocking_question
           "blocked_on_user"
         elsif next_step
           "planning"
-        elsif active_executor_exists
+        elsif active_executor_exists || unresolved_criteria_exist
           "waiting_on_workers"
         else
           "completed"

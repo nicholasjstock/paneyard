@@ -16,9 +16,16 @@ module FakeAgentProcess
     require File.join(app_root, "config/environment")
 
     prompt = read_prompt(argv: argv, stdin: stdin)
-    run_id = prompt[/Run (.+?)\. Bus request:/m, 1] || raise("Missing run id in prompt: #{prompt.inspect}")
-    role = detect_role(argv: argv, prompt: prompt)
-    scope = prompt[/Bus request: (.+?)\. Requested by:/m, 1] || "workflow-plan.md"
+    # Persona files are prepended ahead of the actual task (see
+    # WorkerSpawner#build_prompt_with_persona) and can themselves contain
+    # the word "Run" -- extracting from the full prompt with a permissive,
+    # multiline-spanning pattern risks matching persona prose instead of
+    # the real task line. Only the task section (after "Current task:") is
+    # Rails-authored and safe to parse this way.
+    task = task_section(prompt)
+    run_id = task[/Run (\S+)\. Bus request:/, 1] || raise("Missing run id in prompt: #{prompt.inspect}")
+    role = detect_role(argv: argv, prompt: task)
+    scope = task[/Bus request: (\S+)\. Requested by:/, 1] || "workflow-plan.md"
 
     worker = find_worker(run_id: run_id, role: role)
     append_log(worker.log_path, "[fake-agent] starting role=#{role} run_id=#{run_id} scope=#{scope}") if worker
@@ -44,6 +51,29 @@ module FakeAgentProcess
         summary: "Fake planner completed the run.",
         nextStep: nil,
         followingSteps: [],
+        server_context: nil
+      )
+    elsif role == "verifier"
+      worker ||= wait_for_worker(run_id: run_id, role: role)
+      criterion_key = scope.delete_prefix("acceptance-verify-")
+      evidence_name = "verifier-evidence-#{criterion_key}.md"
+      McpTools::WriteWorkflowArtifactTool.call(
+        runId: run_id,
+        artifactName: evidence_name,
+        content: "# Fake independent verification\n\nReproduced the underlying claim for #{criterion_key}.\n",
+        server_context: nil
+      )
+      McpTools::SubmitAcceptanceVerificationTool.call(
+        runId: run_id, criterionKey: criterion_key, outcome: "verified", evidenceRef: evidence_name,
+        summary: "Fake verifier independently reproduced the claim.", server_context: nil
+      )
+      McpTools::WorkerTurnTool.call(
+        runId: run_id,
+        role: "worker",
+        nickname: worker.nickname,
+        scope: scope,
+        result: "[DONE] Fake verifier verified #{criterion_key}.",
+        task: worker.reason,
         server_context: nil
       )
     else
@@ -88,6 +118,12 @@ module FakeAgentProcess
     else
       prompt[/Target role: ([^.]+)\./, 1] || "worker"
     end
+  end
+
+  def task_section(prompt)
+    marker = "Current task:\n"
+    index = prompt.index(marker)
+    index ? prompt[(index + marker.length)..] : prompt
   end
 
   def wait_for_worker(run_id:, role:)

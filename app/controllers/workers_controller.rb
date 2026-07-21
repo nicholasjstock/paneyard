@@ -45,6 +45,7 @@ class WorkersController < ApplicationController
   def build_log_payload(worker)
     full = Orchestrator::LogReader.read_full_content(worker.log_path)
     last_message = File.exist?(worker.last_message_path) ? File.read(worker.last_message_path) : nil
+    assignment = SpawnRequest.find_by(fulfilled_worker_id: worker.worker_id)
 
     {
       "workerId" => worker.worker_id,
@@ -57,6 +58,10 @@ class WorkersController < ApplicationController
       "startedAt" => worker.started_at&.iso8601(3),
       "stoppedAt" => worker.stopped_at&.iso8601(3),
       "stopReason" => worker.stop_reason,
+      "reason" => worker.reason,
+      "scope" => worker.scope,
+      "assignmentText" => assignment&.text,
+      "assignmentContext" => assignment&.context,
       "model" => worker.model,
       "agentTurnCount" => worker.agent_turn_count,
       "inputTokens" => worker.input_tokens,

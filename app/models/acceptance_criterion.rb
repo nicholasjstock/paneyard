@@ -1,5 +1,5 @@
 class AcceptanceCriterion < ApplicationRecord
-  STATUSES = %w[pending in_progress verified waived blocked].freeze
+  STATUSES = %w[pending in_progress ready_for_verification verified waived blocked].freeze
   KEY_FORMAT = /\A[a-z0-9][a-z0-9-]{0,63}\z/
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, inverse_of: :acceptance_criteria
@@ -20,5 +20,14 @@ class AcceptanceCriterion < ApplicationRecord
   # verified/waived transition. Recurses naturally to any depth.
   def resolved?
     children.any? ? children.all?(&:resolved?) : status.in?(%w[verified waived])
+  end
+
+  # Distinguishes "the planner still owes this criterion a next step" from
+  # "this is unresolved but already being handled" -- pending/in_progress/
+  # blocked need the planner to keep proposing work; ready_for_verification
+  # is already in flight with an independently spawned verifier, so it must
+  # not force the planner to invent a next step it doesn't have.
+  def needs_planner_action?
+    children.any? ? children.any?(&:needs_planner_action?) : status.in?(%w[pending in_progress blocked])
   end
 end

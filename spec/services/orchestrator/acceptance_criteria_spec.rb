@@ -76,19 +76,33 @@ RSpec.describe Orchestrator::AcceptanceCriteria do
       described_class.apply!(run: @run, criteria: [ { key: "outcome", content: "Demo is faster.", parent_key: nil } ], updates: [])
     end
 
-    it "verifies a criterion given a real evidence_ref" do
+    it "moves a criterion to ready_for_verification given a real candidate evidence_ref, and requests an independent verifier" do
       Orchestrator::ArtifactStore.write(@run.target_root, @run.run_id, "timings.json", "94.2s")
 
-      described_class.apply!(run: @run, criteria: [], updates: [ { key: "outcome", status: "verified", evidence_ref: "timings.json" } ])
+      described_class.apply!(run: @run, criteria: [], updates: [ { key: "outcome", status: "ready_for_verification", evidence_ref: "timings.json" } ])
 
       criterion = @run.acceptance_criteria.find_by!(key: "outcome")
-      assert_equal "verified", criterion.status
+      assert_equal "ready_for_verification", criterion.status
       assert_equal "timings.json", criterion.evidence_ref
+
+      request = @run.spawn_requests.find_by!(requested_role: "verifier")
+      assert_equal "acceptance-verify-outcome", request.scope
+      assert_equal "acceptance:outcome", request.lineage_key
+      assert_equal "artifact_only", request.write_scope
     end
 
-    it "rejects verification without evidence that actually exists" do
+    it "rejects a direct verified status -- only an independent verifier can set that" do
+      Orchestrator::ArtifactStore.write(@run.target_root, @run.run_id, "timings.json", "94.2s")
+
       error = assert_raises(ArgumentError) do
-        described_class.apply!(run: @run, criteria: [], updates: [ { key: "outcome", status: "verified", evidence_ref: "missing.json" } ])
+        described_class.apply!(run: @run, criteria: [], updates: [ { key: "outcome", status: "verified", evidence_ref: "timings.json" } ])
+      end
+      assert_match(/verify|waive|block/i, error.message)
+    end
+
+    it "rejects requesting verification without evidence that actually exists" do
+      error = assert_raises(ArgumentError) do
+        described_class.apply!(run: @run, criteria: [], updates: [ { key: "outcome", status: "ready_for_verification", evidence_ref: "missing.json" } ])
       end
       assert_match(/evidence/i, error.message)
     end
@@ -105,6 +119,57 @@ RSpec.describe Orchestrator::AcceptanceCriteria do
       assert_raises(ActiveRecord::RecordNotFound) do
         described_class.apply!(run: @run, criteria: [], updates: [ { key: "missing", status: "waived", evidence_ref: nil } ])
       end
+    end
+  end
+
+  describe ".verify!" do
+    before do
+      described_class.apply!(run: @run, criteria: [ { key: "outcome", content: "Demo is faster.", parent_key: nil } ], updates: [])
+      Orchestrator::ArtifactStore.write(@run.target_root, @run.run_id, "claimed-timings.json", "94.2s")
+      described_class.apply!(run: @run, criteria: [], updates: [ { key: "outcome", status: "ready_for_verification", evidence_ref: "claimed-timings.json" } ])
+    end
+
+    it "verifies given fresh, independently produced evidence" do
+      Orchestrator::ArtifactStore.write(@run.target_root, @run.run_id, "verifier-timings.json", "93.8s")
+
+      criterion = described_class.verify!(
+        run: @run, criterion_key: "outcome", outcome: "verified", evidence_ref: "verifier-timings.json", summary: "Reran the timing script myself."
+      )
+
+      assert_equal "verified", criterion.status
+      assert_equal "verifier-timings.json", criterion.evidence_ref
+      assert_equal [ "acceptance-verify:outcome" ], criterion.fulfillment_steps.pluck(:lineage_key)
+    end
+
+    it "rejects verifying with the same evidence the criterion already carries" do
+      error = assert_raises(ArgumentError) do
+        described_class.verify!(
+          run: @run, criterion_key: "outcome", outcome: "verified", evidence_ref: "claimed-timings.json", summary: "Looks right to me."
+        )
+      end
+      assert_match(/independently produced/i, error.message)
+    end
+
+    it "sends a rejected criterion back to blocked and records the reasoning as run context" do
+      criterion = described_class.verify!(
+        run: @run, criterion_key: "outcome", outcome: "rejected", evidence_ref: nil,
+        summary: "Could not reproduce the claimed runtime; the script never completed."
+      )
+
+      assert_equal "blocked", criterion.status
+      entry = @run.run_context_entries.find_by!(kind: "rejected_approach")
+      assert_equal "rejected", entry.status
+      assert_includes entry.content, "outcome"
+      assert_includes entry.content, "never completed"
+    end
+
+    it "raises when the criterion is not awaiting verification" do
+      described_class.apply!(run: @run, criteria: [], updates: [ { key: "outcome", status: "blocked", evidence_ref: nil } ])
+
+      error = assert_raises(ArgumentError) do
+        described_class.verify!(run: @run, criterion_key: "outcome", outcome: "verified", evidence_ref: "verifier-timings.json", summary: "N/A")
+      end
+      assert_match(/not awaiting verification/i, error.message)
     end
   end
 

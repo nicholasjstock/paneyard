@@ -31,7 +31,7 @@ module McpTools
     ACCEPTANCE_UPDATE_SCHEMA = {
       type: "object", additionalProperties: false,
       properties: {
-        key: { type: "string" }, status: { type: "string", enum: %w[verified waived blocked] },
+        key: { type: "string" }, status: { type: "string", enum: %w[ready_for_verification waived blocked] },
         evidenceRef: { type: [ "string", "null" ] }
       },
       required: %w[key status evidenceRef]

@@ -56,10 +56,19 @@ module Orchestrator
 
       spawn_env = { "HOME" => ENV["HOME"], "PATH" => ENV["PATH"] }.merge(environment.to_h.transform_keys(&:to_s))
 
+      # unsetenv_others: true is required here -- Process.spawn otherwise
+      # merges spawn_env onto this Rails process's own OS environment
+      # rather than replacing it, so this orchestrator's own Bundler
+      # activation (BUNDLE_GEMFILE, RUBYOPT, GEM_HOME -- set by
+      # config/boot.rb's `require "bundler/setup"`) would leak into a
+      # target-repo command, making a Ruby/Bundler-based command (e.g. a
+      # `bin/dev` that shells out to `bundle exec foreman`) resolve gems
+      # against this app's Gemfile.lock instead of the target repo's.
       pid = Process.spawn(
         spawn_env, "/bin/sh", "-c", WorkerSpawner.worker_exit_wrapper, "run-command-wrapper",
         exit_status_path, executable, *Array(arguments).map(&:to_s),
-        chdir: target_dir, pgroup: true, in: File::NULL, out: [ log_path, "a" ], err: [ log_path, "a" ]
+        chdir: target_dir, pgroup: true, unsetenv_others: true,
+        in: File::NULL, out: [ log_path, "a" ], err: [ log_path, "a" ]
       )
       Process.detach(pid)
 
@@ -84,6 +93,14 @@ module Orchestrator
         return command
       end
 
+      # The tracked pid (the process-group leader) is gone, but a child it
+      # spawned before exiting/crashing -- a dev server started by a
+      # process manager like foreman, for instance -- can still be alive
+      # in the same process group and keep holding a port. Best-effort,
+      # one-time reap on this exited->terminal transition; harmless if
+      # nothing (or nothing reachable) remains.
+      reap_process_group!(command)
+
       exit_code, signal = read_exit_status(command.exit_status_path)
       if exit_code.nil? && signal.nil?
         command.update!(
@@ -94,6 +111,14 @@ module Orchestrator
         command.update!(status: "exited", exit_code:, signal:, finished_at: Time.current, last_checked_at: Time.current)
       end
       command
+    end
+
+    def reap_process_group!(command)
+      return if command.process_group_id.blank?
+
+      Process.kill("SIGTERM", -command.process_group_id)
+    rescue Errno::ESRCH, Errno::EPERM
+      nil
     end
 
     def reconcile_active!

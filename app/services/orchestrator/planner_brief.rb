@@ -62,11 +62,16 @@ module Orchestrator
         needs breaking down to be addressable. A criterion with children resolves only once every child resolves; its own
         status is then ignored. Every step you propose, including diagnosis, must set addressesCriteria to the real, current
         acceptance criteria keys (top-level or nested, see the acceptance_criteria tree below) it works toward -- Rails checks
-        this structurally, not by parsing prose, so name exact keys. Use acceptanceUpdates only when supplied worker evidence
-        positively satisfies an existing criterion. A verified update requires a workspace-relative evidenceRef; blocked work,
-        source edits alone, estimates, and absence of errors are not positive verification. Waive only when the user explicitly
-        authorized it. Use blocked when a criterion is genuinely stuck rather than silently leaving it pending.
-        Never return nextStep=null while completion_blockers remain after applying justified acceptanceUpdates.
+        this structurally, not by parsing prose, so name exact keys. You cannot mark a criterion verified yourself -- use
+        acceptanceUpdates with status=ready_for_verification and a workspace-relative evidenceRef naming the candidate
+        evidence once supplied worker evidence appears to positively satisfy an existing criterion; Rails then spawns an
+        independent verifier worker that re-checks the claim itself and is the only thing that can set status=verified.
+        Blocked work, source edits alone, estimates, and absence of errors are not positive evidence -- do not propose
+        ready_for_verification for those. Waive only when the user explicitly authorized it. Use blocked when a criterion
+        is genuinely stuck rather than silently leaving it pending.
+        Never return nextStep=null while completion_blockers remain that are still pending, in_progress, or blocked
+        after applying justified acceptanceUpdates -- a criterion you just moved to ready_for_verification does not
+        require a nextStep; Rails has already spawned an independent verifier for it.
         A diagnosis step must be artifact_only. An implementation step must name exact workspace-relative file paths in
         allowedPaths. An exact file path names one file: it must not end in "/" and must not contain glob characters
         (*, ?, [, ], {, or }). Directory paths such as "front/" and patterns such as "front/**/*.ts" are invalid.

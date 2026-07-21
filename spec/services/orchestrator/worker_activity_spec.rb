@@ -59,6 +59,29 @@ RSpec.describe Orchestrator::WorkerActivity do
     expect(activity[:output_preview]).not_to include("line 1\n")
   end
 
+  it "surfaces the fulfilling spawn request's instructions as the assignment" do
+    worker = create_worker
+    worker.run.spawn_requests.create!(
+      asked_by: "planner", scope: worker.scope, requested_role: worker.role, priority: "blocking",
+      text: "Run the failing scenario and capture a real timing measurement.",
+      context: "Previous attempt only produced a code-inspection estimate.",
+      fulfilled_worker_id: worker.worker_id
+    )
+
+    activity = described_class.for_workers([ worker ]).first
+
+    expect(activity[:assignment_text]).to eq("Run the failing scenario and capture a real timing measurement.")
+    expect(activity[:assignment_context]).to eq("Previous attempt only produced a code-inspection estimate.")
+  end
+
+  it "leaves the assignment blank when no spawn request fulfilled this worker" do
+    worker = create_worker
+
+    activity = described_class.for_workers([ worker ]).first
+
+    expect(activity[:assignment_text]).to be_nil
+  end
+
   it "sorts active workers before attention and quiet stopped history" do
     running = create_worker
     attention = create_worker(status: "stopped", stop_reason: "Process no longer running.")

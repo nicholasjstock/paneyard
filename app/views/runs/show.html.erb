@@ -243,6 +243,19 @@
                 <span class="mono">pid <%= worker.pid %></span>
               </div>
               <p><strong>Assigned:</strong> <%= worker.reason %></p>
+              <% if activity[:assignment_text].present? %>
+                <details class="worker-assignment"
+                         data-controller="accordion-state"
+                         data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
+                         data-accordion-state-key-value="run:<%= @run.run_id %>:worker:<%= worker.worker_id %>:assignment">
+                  <summary>Full instructions</summary>
+                  <pre class="log compact"><%= activity[:assignment_text] %></pre>
+                  <% if activity[:assignment_context].present? %>
+                    <p class="muted">Context</p>
+                    <pre class="log compact"><%= activity[:assignment_context] %></pre>
+                  <% end %>
+                </details>
+              <% end %>
               <% if worker.stop_reason.present? %><p class="worker-stop-reason"><strong>Stop reason:</strong> <%= worker.stop_reason %></p><% end %>
               <% if worker.agent_turn_count.present? %>
                 <p class="muted">

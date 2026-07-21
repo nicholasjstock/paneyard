@@ -7,12 +7,14 @@ module Orchestrator
     DISPLAY_TAIL_LINES = 6
 
     def self.for_workers(workers)
-      workers.map { |worker| new(worker).as_json }
+      assignments = SpawnRequest.where(fulfilled_worker_id: workers.map(&:worker_id)).index_by(&:fulfilled_worker_id)
+      workers.map { |worker| new(worker, assignment: assignments[worker.worker_id]).as_json }
         .sort_by { |activity| [ activity[:sort_rank], -(activity[:started_at]&.to_i || 0) ] }
     end
 
-    def initialize(worker)
+    def initialize(worker, assignment: nil)
       @worker = worker
+      @assignment = assignment
     end
 
     def as_json
@@ -29,7 +31,9 @@ module Orchestrator
         log_available: File.file?(@worker.log_path),
         started_at: @worker.started_at,
         stopped_at: @worker.stopped_at,
-        sort_rank: sort_rank
+        sort_rank: sort_rank,
+        assignment_text: @assignment&.text,
+        assignment_context: @assignment&.context
       }
     end
 

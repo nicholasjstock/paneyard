@@ -23,7 +23,8 @@ module Orchestrator
           ::McpTools::StopRunCommandTool,
           ::McpTools::GetProjectMemoryTool,
           ::McpTools::RecordProjectSetupTool,
-          ::McpTools::ReportFailedApproachTool
+          ::McpTools::ReportFailedApproachTool,
+          ::McpTools::SubmitAcceptanceVerificationTool
         ]
       )
     end

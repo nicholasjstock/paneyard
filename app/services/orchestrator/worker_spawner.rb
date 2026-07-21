@@ -355,6 +355,11 @@ module Orchestrator
         # the launcher-specific, repository-owned reliability workflow.
         persona_paths.unshift(agent_prompt_path(driver: driver, role: "worker"))
         persona_paths << infrastructure_skill_path(driver)
+      elsif role == "verifier"
+        # A verifier keeps the normal worker bus contract (worker_turn,
+        # get_run_context, etc.) and layers on its own independent-review
+        # discipline.
+        persona_paths.unshift(agent_prompt_path(driver: driver, role: "worker"))
       end
       instructions = persona_paths.filter_map { |path| File.read(path) if File.exist?(path) }
       return prompt if instructions.empty?

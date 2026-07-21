@@ -87,6 +87,43 @@ RSpec.describe Orchestrator::RunCommandRunner do
     expect(BusEvent.where(run_id: run.run_id, event_type: "command.stopped").count).to eq(1)
   end
 
+  it "does not leak this process's own Bundler environment into the spawned command" do
+    run = create_run
+    original_bundle_gemfile = ENV["BUNDLE_GEMFILE"]
+    original_rubyopt = ENV["RUBYOPT"]
+    ENV["BUNDLE_GEMFILE"] = "/definitely/not/the/target/repo/Gemfile"
+    ENV["RUBYOPT"] = "-rsomething-target-repo-does-not-have"
+
+    command = described_class.start(
+      run: run, requested_by_worker_id: "worker-1", executable: "/bin/sh",
+      arguments: [ "-c", "echo BUNDLE_GEMFILE=[$BUNDLE_GEMFILE] RUBYOPT=[$RUBYOPT]" ]
+    )
+
+    wait_until { described_class.reconcile!(command.reload).status == "exited" }
+
+    expect(File.read(command.log_path)).to include("BUNDLE_GEMFILE=[] RUBYOPT=[]")
+  ensure
+    ENV["BUNDLE_GEMFILE"] = original_bundle_gemfile
+    ENV["RUBYOPT"] = original_rubyopt
+  end
+
+  it "reaps a surviving child left behind in the process group once the leader disappears" do
+    run = create_run
+    command = described_class.start(
+      run: run, requested_by_worker_id: "worker-1", executable: "/bin/sh",
+      arguments: [ "-c", "/bin/sleep 30 & echo $! > #{run.target_root}/child.pid; exit 0" ]
+    )
+
+    wait_until { File.exist?("#{run.target_root}/child.pid") && File.read("#{run.target_root}/child.pid").present? }
+    child_pid = File.read("#{run.target_root}/child.pid").to_i
+    expect(process_alive?(child_pid)).to be(true)
+
+    wait_until { described_class.reconcile!(command.reload).terminal? }
+    wait_until { !process_alive?(child_pid) }
+
+    expect(process_alive?(child_pid)).to be(false)
+  end
+
   it "rejects a working directory that escapes the run's target_root" do
     run = create_run
 

@@ -9,10 +9,17 @@ module Orchestrator
     DETAIL_ENTRY_LIMIT = 20
     AVAILABLE_KEY_LIMIT = 50
 
+    # Relevance tier for the brief, most load-bearing first: how to
+    # operate this workspace at all (operational_rule) beats a hazard you
+    # can only hit after you're already running it, which beats general
+    # architecture notes. Not the same order as WorkspaceMemoryEntry::KINDS
+    # (that list's order is just its declared vocabulary).
+    KIND_BRIEF_PRIORITY = %w[operational_rule known_hazard architecture convention].freeze
+
     def snapshot(run_id:, entry_keys: nil)
       run = Run.find_or_create_for_bus!(run_id)
       workspace = run.workspace
-      entries = workspace.workspace_memory_entries.current.order(:kind, :entry_key, :created_at).to_a
+      entries = brief_order(workspace.workspace_memory_entries.current.to_a)
 
       {
         workspace_id: workspace.id,
@@ -56,6 +63,25 @@ module Orchestrator
       end
     end
     private_class_method :select_entries
+
+    # A workspace's primary dev-environment fact always leads (see
+    # Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY) -- alphabetical
+    # order by entry_key is otherwise meaningless for relevance, so within
+    # a kind prefer the most recently confirmed entry, since a newer
+    # confirmation is more likely to reflect the current state of the repo.
+    def brief_order(entries)
+      entries.sort_by do |entry|
+        [ kind_rank(entry), entry.created_at.to_i * -1 ]
+      end
+    end
+    private_class_method :brief_order
+
+    def kind_rank(entry)
+      return -1 if entry.entry_key == Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY
+
+      KIND_BRIEF_PRIORITY.index(entry.kind) || KIND_BRIEF_PRIORITY.length
+    end
+    private_class_method :kind_rank
 
     def truncate(value, limit)
       text = value.to_s

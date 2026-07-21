@@ -29,6 +29,25 @@
     <% end %>
   </div>
 
+  <% if @log["assignmentText"].present? || @log["reason"].present? %>
+    <div class="card">
+      <h2>Assignment</h2>
+      <% if @log["scope"].present? %>
+        <p class="muted">scope <span class="mono"><%= @log["scope"] %></span></p>
+      <% end %>
+      <% if @log["reason"].present? %>
+        <p><%= @log["reason"] %></p>
+      <% end %>
+      <% if @log["assignmentText"].present? %>
+        <pre class="log"><%= @log["assignmentText"] %></pre>
+      <% end %>
+      <% if @log["assignmentContext"].present? %>
+        <h3>Context</h3>
+        <pre class="log"><%= @log["assignmentContext"] %></pre>
+      <% end %>
+    </div>
+  <% end %>
+
   <% if @log["agentTurnCount"].present? %>
     <div class="card">
       <h2>Usage</h2>
