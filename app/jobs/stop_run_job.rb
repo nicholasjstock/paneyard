@@ -14,6 +14,7 @@ class StopRunJob < ApplicationJob
     run.update!(status: "stopping")
 
     stop_active_workers(run)
+    stop_active_run_commands(run)
 
     run.update!(status: "stopped", stopped_at: Time.current)
   end
@@ -26,5 +27,11 @@ class StopRunJob < ApplicationJob
     rescue => e
       Rails.logger.warn("StopRunJob: failed to stop worker #{worker.worker_id} for run #{run.run_id}: #{e.message}")
     end
+  end
+
+  def stop_active_run_commands(run)
+    Orchestrator::RunCommandRunner.stop_all_for_run(run: run, reason: "run stopped from ops hub")
+  rescue => e
+    Rails.logger.warn("StopRunJob: failed to stop run commands for run #{run.run_id}: #{e.message}")
   end
 end
