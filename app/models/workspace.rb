@@ -25,6 +25,13 @@ class Workspace < ApplicationRecord
     protected_path_patterns.present?
   end
 
+  # A workspace owns a project directory; its durable source checkout is the
+  # conventional `main` child. Task runs receive sibling worktrees beneath
+  # this directory, never inside the source checkout.
+  def source_root
+    Pathname(root_path).join("main").expand_path.to_s
+  end
+
   private
 
   def source_checkout_is_not_changed_while_runs_are_active

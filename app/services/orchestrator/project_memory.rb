@@ -17,7 +17,7 @@ module Orchestrator
       {
         workspace_id: workspace.id,
         workspace_name: workspace.name,
-        target_root: workspace.root_path,
+        target_root: workspace.source_root,
         context_mode: entry_keys.present? ? "selected" : "brief",
         entries: select_entries(entries, entry_keys),
         available_entry_keys: entries.first(AVAILABLE_KEY_LIMIT).map(&:entry_key),

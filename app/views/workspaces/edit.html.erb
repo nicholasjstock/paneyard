@@ -4,8 +4,8 @@
 
 <%= form_with model: @workspace, url: workspace_path(@workspace), method: :patch, local: true do |form| %>
   <div class="field">
-    <%= form.label :root_path, "Source checkout" %>
-    <p class="muted">The clean Git checkout named <span class="mono">main</span>. Task runs receive sibling worktrees.</p>
+    <%= form.label :root_path, "Workspace root" %>
+    <p class="muted">The clean Git checkout is expected at <span class="mono">main</span> beneath this directory. Task runs receive sibling worktrees.</p>
     <%= form.text_field :root_path, disabled: @workspace.runs.active.exists? %>
   </div>
 

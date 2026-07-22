@@ -24,7 +24,7 @@ module Orchestrator
       run = workspace.runs.create!(
         run_id: generate_run_id,
         task: TASK,
-        target_root: workspace.root_path, launcher_variant: "claude",
+        target_root: workspace.source_root, launcher_variant: "claude",
         status: "launching", launched_by: "workspace_init"
       )
       Orchestrator::ProjectInitTrigger.call(run:, force:)

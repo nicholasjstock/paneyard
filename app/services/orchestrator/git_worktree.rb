@@ -6,7 +6,7 @@ module Orchestrator
     module_function
 
     def provision!(run)
-      source_root = Pathname(run.workspace.root_path).expand_path
+      source_root = Pathname(run.workspace.source_root)
       name = run.worktree_name.presence || name_for(run)
       branch = "workflow/#{name}"
       worktree = source_root.parent.join(name)

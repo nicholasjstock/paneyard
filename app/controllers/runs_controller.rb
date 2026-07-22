@@ -17,7 +17,7 @@ class RunsController < ApplicationController
     @run.worktree_name = Orchestrator::GitWorktree.name_for(@run)
     @run.status = "launching"
     @run.launched_by = current_operator
-    @run.target_root = current_workspace.root_path
+    @run.target_root = current_workspace.source_root
 
     if @run.save
       LaunchRunJob.perform_later(@run.id)

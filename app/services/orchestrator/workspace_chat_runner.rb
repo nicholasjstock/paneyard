@@ -38,7 +38,7 @@ module Orchestrator
           "--mcp-config", mcp_file.path, "--strict-mcp-config",
           "--no-session-persistence", "--", prompt
         ]
-        stdout, stderr, status = command_runner.call(WorkerSpawner.build_worker_env, *args, chdir: chat.workspace.root_path)
+        stdout, stderr, status = command_runner.call(WorkerSpawner.build_worker_env, *args, chdir: chat.workspace.source_root)
         raise Error, "Workspace chat exited #{status.exitstatus}: #{stderr.presence || stdout}" unless status.success?
 
         envelope = JSON.parse(stdout)
@@ -57,10 +57,10 @@ module Orchestrator
         "-c", 'sandbox_mode="workspace-write"',
         "-c", "mcp_servers.workspace_chat.url=\"#{workspace_chat_mcp_url}\"",
         "-c", 'mcp_servers.workspace_chat.bearer_token_env_var="WORKSPACE_CHAT_TOKEN"',
-        "--sandbox", "workspace-write", "-C", chat.workspace.root_path, prompt
+        "--sandbox", "workspace-write", "-C", chat.workspace.source_root, prompt
       ]
       env = WorkerSpawner.build_worker_env.merge("WORKSPACE_CHAT_TOKEN" => token)
-      stdout, stderr, status = command_runner.call(env, *args, chdir: chat.workspace.root_path)
+      stdout, stderr, status = command_runner.call(env, *args, chdir: chat.workspace.source_root)
       raise Error, "Workspace chat exited #{status.exitstatus}: #{stderr.presence || stdout}" unless status.success?
 
       parse_codex(stdout)
@@ -73,7 +73,7 @@ module Orchestrator
       end.join("\n\n")
       <<~PROMPT
         You are the persistent operator chat for workspace #{chat.workspace.name}.
-        Your filesystem authority is limited to #{chat.workspace.root_path}. You may inspect and modify that worktree when the operator asks.
+        Your filesystem authority is limited to #{chat.workspace.source_root}. You may inspect and modify that source checkout when the operator asks.
         Use only the workspace_chat MCP tools for orchestrator state and operations; never access SQLite directly or act on another workspace.
         Answer operational questions from fresh tool state, not remembered state. Explain mutations before or as you perform them.
 

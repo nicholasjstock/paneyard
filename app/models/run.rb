@@ -72,7 +72,7 @@ class Run < ApplicationRecord
       run_id: run_id,
       task: "(unspecified — auto-created from bus activity)",
       workspace: default_workspace,
-      target_root: default_workspace.root_path,
+      target_root: default_workspace.source_root,
       launcher_variant: "codex",
       status: "running"
     )

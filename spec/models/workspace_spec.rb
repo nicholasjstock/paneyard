@@ -1,6 +1,12 @@
 require "rails_helper"
 
 RSpec.describe Workspace do
+  it "derives the source checkout from the workspace root" do
+    workspace = Workspace.new(root_path: "/Users/stockn/Source/example")
+
+    expect(workspace.source_root).to eq("/Users/stockn/Source/example/main")
+  end
+
   it "is not initialized until it has declared protected path patterns" do
     workspace = Workspace.create!(name: "workspace-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
 
