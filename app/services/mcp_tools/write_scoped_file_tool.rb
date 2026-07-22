@@ -1,7 +1,7 @@
 module McpTools
   class WriteScopedFileTool < MCP::Tool
     tool_name "write_scoped_file"
-    description "Replace one exact planner-authorized workspace file. Unavailable to artifact-only workers."
+    description "Replace one exact planner-authorized workspace file. Unavailable to source-protected workers."
     input_schema(
       properties: {
         runId: { type: "string" },

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_21_173000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_22_113000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -208,6 +208,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_21_173000) do
 
   create_table "runs", force: :cascade do |t|
     t.string "active_branch_key"
+    t.string "base_sha"
+    t.string "branch_name"
     t.datetime "capacity_available_at"
     t.datetime "created_at", null: false
     t.string "launched_by"
@@ -217,7 +219,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_21_173000) do
     t.string "phase_owner"
     t.text "phase_summary"
     t.datetime "phase_updated_at"
+    t.datetime "publication_completed_at"
+    t.text "publication_error"
+    t.datetime "publication_started_at"
+    t.string "publication_status"
+    t.string "pull_request_url"
     t.string "run_id", null: false
+    t.string "source_root"
     t.datetime "started_at"
     t.string "status", default: "launching", null: false
     t.datetime "stopped_at"
@@ -226,11 +234,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_21_173000) do
     t.text "task", null: false
     t.datetime "updated_at", null: false
     t.integer "workspace_id", null: false
+    t.string "worktree_name"
     t.index ["active_branch_key"], name: "index_runs_on_active_branch_key"
     t.index ["capacity_available_at"], name: "index_runs_on_capacity_available_at"
+    t.index ["publication_status"], name: "index_runs_on_publication_status"
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
     t.index ["workspace_id"], name: "index_runs_on_workspace_id"
+    t.index ["worktree_name"], name: "index_runs_on_worktree_name"
   end
 
   create_table "spawn_requests", force: :cascade do |t|
@@ -387,6 +398,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_21_173000) do
   create_table "workspaces", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "name", null: false
+    t.json "protected_path_patterns", default: [], null: false
     t.string "root_path", null: false
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_workspaces_on_name", unique: true

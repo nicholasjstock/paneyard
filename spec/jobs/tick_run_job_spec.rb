@@ -1,6 +1,21 @@
 require "rails_helper"
 
 RSpec.describe TickRunJob do
+  it "queues PR finalization instead of immediately completing a managed run" do
+    workspace = Workspace.create!(name: "tick-publish-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace: workspace, run_id: "tick-publish-#{SecureRandom.hex(4)}", task: "Publish changes",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running", worktree_name: "publish-changes-a1b2"
+    )
+    Orchestrator::TickState.write(run_id: run.run_id, phase: "completed", tick_count: 1, last_plan_summary: "Done.", pending_spawn_keys: [], following_steps: [])
+
+    expect { TickRunJob.new.send(:tick_run, run) }.to have_enqueued_job(FinalizeRunPublicationJob).with(run.id)
+    expect(run.reload.status).to eq("running")
+    expect(run.publication_status).to eq("queued")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   it "does not overwrite a planner decision while fulfilling its worker request" do
     workspace = Workspace.create!(name: "tick-job-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
     run = Run.create!(

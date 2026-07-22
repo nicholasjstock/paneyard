@@ -19,7 +19,7 @@ module McpTools
         },
         blockerKey: {
           type: [ "string", "null" ],
-          description: "Required alongside plannerTier: a short stable slug (letters, digits, hyphens) naming the specific condition blocking progress, e.g. 'stale-recorder-assertion' or 'docker-unavailable'. Reuse the same key if a later review is stopped by the identical blocker recurring -- that lineage+blocker+tier combination gets at most one repair replan. Use a new key when the evidence shows a genuinely different blocker, even in the same lineage, so it gets its own replan."
+          description: "Required alongside plannerTier: a short stable slug (letters, digits, hyphens) naming the specific condition blocking progress, e.g. 'stale-recorder-assertion' or 'docker-unavailable'. Check get_chaperone_state's priorBlockers list first -- if the current blocker is the same underlying condition as one already listed there, reuse that exact key even if you would have phrased it differently; a new key only tricks the exhaustion guard into allowing a repair that already failed. Use a new key only when the evidence shows a genuinely different blocker, even in the same lineage, so it gets its own replan."
         },
         contextRequests: {
           type: "array",

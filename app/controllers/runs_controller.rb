@@ -1,6 +1,7 @@
 class RunsController < ApplicationController
   before_action :require_workspace
-  before_action :set_run, only: %i[show stop switch_launcher]
+  before_action :require_initialized_workspace, only: %i[new create]
+  before_action :set_run, only: %i[show stop switch_launcher retry_publication]
 
   def index
     @runs = current_workspace.runs.order(created_at: :desc)
@@ -13,6 +14,7 @@ class RunsController < ApplicationController
   def create
     @run = current_workspace.runs.new(run_params)
     @run.run_id = generate_run_id
+    @run.worktree_name = Orchestrator::GitWorktree.name_for(@run)
     @run.status = "launching"
     @run.launched_by = current_operator
     @run.target_root = current_workspace.root_path
@@ -65,7 +67,31 @@ class RunsController < ApplicationController
     redirect_to workspace_run_path(current_workspace, @run), alert: error.message
   end
 
+  def retry_publication
+    unless @run.publication_retryable?
+      redirect_to workspace_run_path(current_workspace, @run), alert: "This run is not awaiting PR publication retry."
+      return
+    end
+
+    @run.update!(status: "running", publication_status: "queued", publication_error: nil)
+    FinalizeRunPublicationJob.perform_later(@run.id)
+    redirect_to workspace_run_path(current_workspace, @run), notice: "Retrying PR publication…"
+  end
+
   private
+
+  # StepPolicy fails closed (protects everything) until a workspace has
+  # declared its own protected paths (Workspace#initialized?), so no real
+  # task run may launch before that -- the bootstrap run that does the
+  # declaring is created separately, via Orchestrator::WorkspaceInit, not
+  # through this controller.
+  def require_initialized_workspace
+    return if current_workspace.initialized?
+
+    redirect_to workspace_runs_path(current_workspace),
+      alert: "This workspace is still initializing (discovering its dev environment and protected paths). " \
+        "Wait for that run to finish before launching a new one."
+  end
 
   def set_run
     @run = current_workspace.runs.find_by!(run_id: params[:id])
@@ -319,9 +345,22 @@ class RunsController < ApplicationController
     # worker lifecycle is implementation detail, not a second review.
     return false if event["type"].in?(%w[worker.spawned worker.stopped]) && event.dig("payload", "role") == "chaperone"
 
+    # A handoff_rejected event is the worker correcting itself mid-turn (a
+    # DiagnosisEvidenceGate citation complaint it then fixed, for example) --
+    # only a rejection whose worker never went on to complete a handoff is
+    # something an operator needs to see.
+    return false if event["type"] == "worker.handoff_rejected" && handoff_later_completed?(event)
+
     return true unless event["type"] == "run.status"
 
     event.dig("payload", "phase").in?(%w[blocked_on_user waiting_on_capacity failed stopped completed])
+  end
+
+  def handoff_later_completed?(event)
+    nickname = event.dig("payload", "nickname")
+    return false if nickname.blank?
+
+    @run.workers.where(nickname: nickname).where.not(handoff_completed_at: nil).exists?
   end
 
   def activity_event_actor(event)

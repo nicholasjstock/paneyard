@@ -28,13 +28,24 @@ class TickRunJob < ApplicationJob
 
     previous_state = Orchestrator::TickState.latest(run.run_id)
     if previous_state[:phase] == "completed"
-      run.update!(status: "completed", stopped_at: run.stopped_at || Time.current) unless run.status == "completed"
+      finalize_completed_run(run)
       return
     end
 
     Orchestrator::SpawnRequestedWorkers.call(run: run)
     clear_expired_capacity_phase(run)
     request_recovery_planner_if_dead_end(run, previous_state)
+  end
+
+  def finalize_completed_run(run)
+    if run.worktree_name.present?
+      return if run.publication_status.in?(%w[publishing published no_changes])
+
+      run.update!(publication_status: "queued", publication_error: nil)
+      FinalizeRunPublicationJob.perform_later(run.id)
+    else
+      run.update!(status: "completed", stopped_at: run.stopped_at || Time.current) unless run.status == "completed"
+    end
   end
 
   def clear_expired_capacity_phase(run)

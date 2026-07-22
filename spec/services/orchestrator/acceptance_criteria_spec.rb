@@ -88,7 +88,7 @@ RSpec.describe Orchestrator::AcceptanceCriteria do
       request = @run.spawn_requests.find_by!(requested_role: "verifier")
       assert_equal "acceptance-verify-outcome", request.scope
       assert_equal "acceptance:outcome", request.lineage_key
-      assert_equal "artifact_only", request.write_scope
+      assert_equal "source_protected", request.write_scope
     end
 
     it "rejects a direct verified status -- only an independent verifier can set that" do

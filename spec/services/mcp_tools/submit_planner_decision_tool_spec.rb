@@ -8,7 +8,7 @@ RSpec.describe McpTools::SubmitPlannerDecisionTool do
       outcome: "decision", summary: "Run the verification.",
       nextStep: {
         "owner" => "worker", "artifact" => "verify.md", "successCheck" => "Confirm the expected behavior.",
-        "mode" => "verification", "writeScope" => "artifact_only", "allowedPaths" => [], "evidenceRefs" => [],
+        "mode" => "verification", "writeScope" => "source_protected", "allowedPaths" => [], "evidenceRefs" => [],
         "addressesCriteria" => [ "existing-outcome" ]
       },
       followingSteps: [], contextRequest: nil, acceptanceCriteria: [], acceptanceUpdates: [],

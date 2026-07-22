@@ -88,6 +88,14 @@ class Run < ApplicationRecord
     !active?
   end
 
+  def managed_worktree?
+    worktree_name.present?
+  end
+
+  def publication_retryable?
+    managed_worktree? && publication_status == "failed"
+  end
+
   def capacity_blocked?(now: Time.current)
     capacity_available_at.present? && capacity_available_at > now
   end

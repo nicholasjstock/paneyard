@@ -60,7 +60,7 @@ module Orchestrator
       FileUtils.mkdir_p(runtime_dir)
 
       policy = WorkerExecutionPolicy.new(
-        root_dir:, mode:, write_scope: write_scope.presence || "artifact_only", allowed_paths:,
+        root_dir:, mode:, write_scope: write_scope.presence || "source_protected", allowed_paths:,
         profile_name: "worker-#{worker_id.delete('-')}"
       ) unless mcp_override
 
@@ -325,8 +325,10 @@ module Orchestrator
         Rails authenticates MCP calls with this worker's private capability. Do not invent or alter identity fields.
         `worker_turn` derives nickname and scope from that capability; pass runId, role, task, and result.
         The target workspace root is `#{target_root}`. Start repository commands with `cd #{Shellwords.escape(target_root)}`.
-        Bash is available under a launcher-enforced filesystem policy. Repository writes are limited to the exact
-        authorized paths above; artifact-only workers have read-only workspace access. Run bounded commands (they
+        Bash is available under a launcher-enforced filesystem policy. Writes to tracked repository source are limited
+        to the exact authorized paths above -- source-protected workers have none. Gitignored paths (caches, build
+        output, node_modules, etc.) stay writable regardless, since tooling needs them and they aren't source. Run
+        bounded commands (they
         exit on their own) in the foreground through Bash so they remain inside this worker's sandbox and process
         group. Any command that is long-running by nature (a dev server, a watcher, anything that does not exit on
         its own) MUST always be started with `start_run_command` instead, even if you only need it for the rest of

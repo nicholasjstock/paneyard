@@ -34,7 +34,7 @@ module McpTools
           content: finding.fetch(:content), evidence_ref: finding.fetch(:evidenceRef), recorded_by: "project_init"
         )
       end
-      ToolResponse.structured(entries.map(&:as_json))
+      ToolResponse.structured(entries: entries.map(&:as_json))
     rescue ArgumentError => error
       ToolResponse.error(error.message)
     end

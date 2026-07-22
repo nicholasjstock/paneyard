@@ -4,7 +4,7 @@ This checklist comes from the `demo-20260719-091717-8d06` failure review. Items 
 
 ## Worker containment and identity
 
-- [x] Enforce execution policy at the launcher boundary while retaining Bash: `artifact_only` workers receive a read-only target, and writing workers receive exact-path grants.
+- [x] Enforce execution policy at the launcher boundary while retaining Bash: `source_protected` workers get no tracked-source write access (gitignored/cache paths remain writable regardless), and writing workers receive exact-path grants.
 - [x] Include the worker's exact `nickname`, `scope`, `runId`, and artifact name in its prompt and environment so `worker_turn` cannot depend on model guesses.
 - [x] Authenticate worker-originated MCP calls against the active worker identity instead of trusting caller-supplied `askedBy`, `nickname`, or `scope` values.
 - [x] Prevent a worker with a rejected or incomplete handoff from spawning a concurrent replacement that bypasses planner/chaperone routing.

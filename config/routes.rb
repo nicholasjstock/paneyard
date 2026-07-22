@@ -23,7 +23,7 @@ Rails.application.routes.draw do
   # Defines the root path route ("/")
   root "workspaces#index"
 
-  resources :workspaces, only: %i[index show new create destroy] do
+  resources :workspaces, only: %i[index show new create edit update destroy] do
     resource :project_setup, only: %i[create]
 
     resources :chats, controller: "workspace_chats", only: %i[index create show] do
@@ -33,6 +33,7 @@ Rails.application.routes.draw do
       member do
         post :stop
         post :switch_launcher
+        post :retry_publication
       end
     end
 

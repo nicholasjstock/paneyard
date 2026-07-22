@@ -4,7 +4,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
   it "extracts diagnosis mode from the planner request used by the spawn path" do
     request = instance_double(
       SpawnRequest, execution_mode: nil,
-      text: "Execution mode: diagnosis. Write scope: artifact_only."
+      text: "Execution mode: diagnosis. Write scope: source_protected."
     )
 
     expect(Orchestrator::SpawnRequestedWorkers.execution_mode(request)).to eq("diagnosis")

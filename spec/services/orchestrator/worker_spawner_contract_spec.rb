@@ -4,7 +4,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
   it "Claude workers request incremental stream output" do
     root = Dir.mktmpdir("worker-policy")
     policy = Orchestrator::WorkerExecutionPolicy.new(
-      root_dir: root, mode: "diagnosis", write_scope: "artifact_only", allowed_paths: []
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
     )
     args = Orchestrator::WorkerSpawner.send(
       :claude_args, "Do the work.", role: "worker", mcp_config_path: "/tmp/mcp.json",
@@ -71,7 +71,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
   it "passes the promoted Codex model to both ordinary and chaperone workers" do
     root = Dir.mktmpdir("worker-policy")
     policy = Orchestrator::WorkerExecutionPolicy.new(
-      root_dir: root, mode: "diagnosis", write_scope: "artifact_only", allowed_paths: []
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
     )
 
     ordinary_args = Orchestrator::WorkerSpawner.send(

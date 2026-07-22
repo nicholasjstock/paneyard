@@ -73,13 +73,13 @@ module Orchestrator
         Never return nextStep=null while completion_blockers remain that are still pending, in_progress, or blocked
         after applying justified acceptanceUpdates -- a criterion you just moved to ready_for_verification does not
         require a nextStep; Rails has already spawned an independent verifier for it.
-        A diagnosis step must be artifact_only. An implementation step must name exact workspace-relative file paths in
+        A diagnosis step must be source_protected. An implementation step must name exact workspace-relative file paths in
         allowedPaths. An exact file path names one file: it must not end in "/" and must not contain glob characters
         (*, ?, [, ], {, or }). Directory paths such as "front/" and patterns such as "front/**/*.ts" are invalid.
         Every nextStep or followingSteps artifact must be a filename only (for example "phone-demo-baseline.md"), never
         a path such as "artifacts/phone-demo-baseline.md"; Rails places it in the managed run artifact directory.
         Use mode=recording for running a demo or collecting recording/timing artifacts, even when owner=infrastructure;
-        recording and verification must use writeScope=artifact_only and allowedPaths=[]. Use mode=infrastructure only
+        recording and verification must use writeScope=source_protected and allowedPaths=[]. Use mode=infrastructure only
         when the step is authorized to modify exact infrastructure files with writeScope=scoped_changes.
         When the run has a performance objective, every proposed step's successCheck must explicitly retain it. A
         verification step must require evidence that the result is faster than the baseline; merely collecting or
@@ -88,7 +88,7 @@ module Orchestrator
         the target and measures a baseline. Do not use needs_context to search the repository or repeatedly ask for absent facts.
         Treat a user question as a last resort. When worker evidence identifies an exact, non-protected workspace file and a
         bounded implementation or infrastructure change can remove the blocker, choose that scoped change first, then verify it.
-        Do not ask the user merely because a prior artifact-only diagnosis could not edit the identified file; a subsequent
+        Do not ask the user merely because a prior source-protected diagnosis could not edit the identified file; a subsequent
         implementation step may authorize that exact path. Ask only when the next action needs a protected-path approval,
         an external credential/resource, or a materially open-ended product decision.
         Give a step a stable lineageKey describing its objective. When retrying the same objective, preserve its lineageKey;

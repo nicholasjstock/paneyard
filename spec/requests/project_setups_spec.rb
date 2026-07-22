@@ -11,14 +11,17 @@ RSpec.describe "project setups", type: :request do
     expect(request).to be_present
   end
 
-  it "alerts instead of spawning when the workspace has no active run" do
+  it "launches a bootstrap run when the workspace has no active run to piggyback on" do
     workspace = Workspace.create!(name: "project-setup-request-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
 
-    post workspace_project_setup_path(workspace)
+    expect do
+      post workspace_project_setup_path(workspace)
+    end.to change { workspace.runs.count }.by(1)
 
     expect(response).to redirect_to(workspace_runs_path(workspace))
-    follow_redirect!
-    expect(response.body).to include("Start a run before re-running project setup.")
+    run = workspace.runs.order(:created_at).last
+    expect(run.launched_by).to eq("workspace_init")
+    expect(run.spawn_requests.find_by(requested_role: "project_init")).to be_present
   end
 
   def create_workspace_with_active_run

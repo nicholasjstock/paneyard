@@ -18,7 +18,7 @@ RSpec.describe "live Codex planner smoke", type: :system, live_agent: true do
       asked_by: "system",
       requested_role: "planner",
       scope: "live-codex-planner-smoke",
-      text: "Submit one valid initial planner decision. Define one acceptance criterion and one artifact-only diagnosis next step that addresses it.",
+      text: "Submit one valid initial planner decision. Define one acceptance criterion and one source-protected diagnosis next step that addresses it.",
       priority: "blocking"
     )
     request.update!(

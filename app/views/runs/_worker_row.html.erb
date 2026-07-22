@@ -9,6 +9,7 @@
   <summary>
     <span class="worker-name"><%= is_chaperone ? "Chaperone review" : worker.nickname %></span>
     <span class="badge <%= activity[:display_status] %>"><%= chaperone_review&.status == "completed" ? "reviewed" : (is_chaperone ? "reviewing" : activity[:status_label]) %></span>
+    <% if worker.model.present? %><span class="worker-model mono muted"><%= worker.model %></span><% end %>
     <span class="worker-scope mono"><%= is_chaperone ? "reviewed #{worker.scope}" : worker.scope %></span>
     <span class="worker-activity muted">
       <% if activity[:last_activity_at] %>active <%= time_ago_in_words(activity[:last_activity_at]) %> ago<% else %>no activity recorded<% end %>

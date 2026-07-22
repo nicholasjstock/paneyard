@@ -55,7 +55,7 @@ RSpec.describe Orchestrator::Turn do
       summary: "Pivoting to a new bounded approach.",
       next_step: {
         owner: "worker", artifact: "baseline.json", success_check: "Baseline recorded.",
-        mode: "recording", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+        mode: "recording", write_scope: "source_protected", allowed_paths: [], evidence_refs: []
       },
       following_steps: [],
       previous_state: Orchestrator::TickState.default_state(run.run_id)
@@ -100,7 +100,7 @@ RSpec.describe Orchestrator::Turn do
         run_id: run.run_id, summary: "Skip ahead.",
         next_step: {
           owner: "worker", artifact: "verify-bottlenecks.md", success_check: "Confirm bottlenecks.",
-          mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
+          mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: [],
           addresses_criteria: [ "bottlenecks" ]
         },
         following_steps: [], previous_state: Orchestrator::TickState.default_state(run.run_id)

@@ -11,7 +11,7 @@ RSpec.describe PlannerDecisionJob do
           outcome: "decision", summary: "Run the verification.",
           next_step: {
             owner: "worker", artifact: "verify.md", success_check: "Confirm behavior.",
-            mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
+            mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: [],
             addresses_criteria: [ "existing-outcome" ]
           },
           following_steps: [], context_request: nil, acceptance_criteria: [], acceptance_updates: []

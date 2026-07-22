@@ -194,7 +194,12 @@ module Orchestrator
 
     def resolve_chaperone_context!(review:, context_requests:)
       Array(context_requests).map do |request|
-        normalized = request.deep_symbolize_keys
+        # contextRequests arrives in the MCP wire format's camelCase (maxChars);
+        # PlannerContextResolver.resolve expects snake_case, same as the planner's
+        # own needs_context path (submit_planner_decision_tool.rb) -- deep_symbolize_keys
+        # alone leaves :maxChars unconverted and PlannerContextResolver.resolve
+        # crashes with a bare KeyError looking up :max_chars.
+        normalized = Orchestrator::WireFormat.underscore_keys(request)
         raise ArgumentError, "Chaperone context source is not permitted" unless %w[artifact run_context worker_log].include?(normalized[:source])
 
         resolved = PlannerContextResolver.resolve(run: review.run, context_request: normalized)

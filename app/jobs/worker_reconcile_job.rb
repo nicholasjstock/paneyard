@@ -155,14 +155,42 @@ class WorkerReconcileJob < ApplicationJob
   # Whether the process died from success, a crash, or a bad discovery, the
   # only thing that matters is whether the primary fact now exists -- that
   # single check is both the completion signal and the idempotency guard
-  # (see Orchestrator::ProjectInitTrigger). A success needs no further
-  # bookkeeping; a miss reuses the exact same failed-attempt/chaperone
-  # escalation path every other worker role already gets.
+  # (see Orchestrator::ProjectInitTrigger). A miss reuses the exact same
+  # failed-attempt/chaperone escalation path every other worker role
+  # already gets. A success needs no further bookkeeping for a normal task
+  # run's own project_init request, but Orchestrator::WorkspaceInit's
+  # dedicated bootstrap run has no planner watching it (deliberately -- see
+  # that module's comment), so nothing else will ever end it; resolve it
+  # here instead of leaving it to sit "running" and eventually trip
+  # TickRunJob's stalled-worker recovery into re-planning the same
+  # discovery from scratch.
   def handle_project_init_worker_stop(worker)
-    return if project_init_completed?(worker)
+    unless project_init_completed?(worker)
+      output = Orchestrator::LogReader.read_tail_lines(worker.log_path, 12).to_s
+      record_failed_attempt(worker, stop_reason: worker.stop_reason, output:)
+      return
+    end
 
-    output = Orchestrator::LogReader.read_tail_lines(worker.log_path, 12).to_s
-    record_failed_attempt(worker, stop_reason: worker.stop_reason, output:)
+    complete_bootstrap_run!(worker.run) if bootstrap_run?(worker.run)
+  end
+
+  def bootstrap_run?(run)
+    run.launched_by == "workspace_init"
+  end
+
+  def complete_bootstrap_run!(run)
+    return unless run.status.in?(Run::NON_TERMINAL_STATUSES)
+
+    if run.workspace.initialized?
+      run.update!(status: "completed", stopped_at: Time.current)
+      run.publish_phase!(phase: "completed", owner: "orchestrator", summary: "Workspace initialization complete.")
+    else
+      run.update!(status: "stopped", stopped_at: Time.current)
+      run.publish_phase!(
+        phase: "blocked_on_user", owner: "orchestrator",
+        summary: "Dev environment recorded, but protected paths were not declared. Re-run project setup to retry."
+      )
+    end
   end
 
   def block_run_for_capacity!(worker, output)

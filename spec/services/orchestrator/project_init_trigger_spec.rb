@@ -9,7 +9,7 @@ RSpec.describe Orchestrator::ProjectInitTrigger do
     request = run.spawn_requests.find_by!(requested_role: "project_init")
     assert_equal "blocking", request.priority
     assert_equal "diagnosis", request.execution_mode
-    assert_equal "artifact_only", request.write_scope
+    assert_equal "source_protected", request.write_scope
     assert_equal "project-init:#{run.workspace_id}", request.lineage_key
   end
 

@@ -3,16 +3,9 @@ module Orchestrator
     module_function
 
     MODES = %w[diagnosis implementation verification recording infrastructure].freeze
-    WRITE_SCOPES = %w[artifact_only tests_only scoped_changes].freeze
+    WRITE_SCOPES = %w[source_protected tests_only scoped_changes].freeze
     EXECUTOR_OWNERS = %w[worker infrastructure planner].freeze
     PLANNER_STEP_OWNERS = %w[worker infrastructure].freeze
-    PROTECTED_PATH_PATTERNS = [
-      %r{(^|/)controllers?(/|$)},
-      %r{(^|/)db/migrate(/|$)},
-      %r{(^|/)(schema\.(rb|sql)|structure\.sql)$},
-      %r{(^|/)generated(/|$)},
-      %r{(^|/)openapi\.(ya?ml|json)$}
-    ].freeze
     IMPLEMENTATION_LANGUAGE = /\b(implement|fix|patch|modify|edit|change|land|ship)\b/i
     NEGATED_IMPLEMENTATION_LANGUAGE = /\b(do not|don't|never)\b(?:\s+\w+){0,3}\s+(implement|fix|patch|modify|edit|change|land|ship)\b/i
 
@@ -40,7 +33,7 @@ module Orchestrator
 
       normalized = step.deep_dup
       if normalized[:mode].to_s.in?(%w[verification recording]) ||
-          (normalized[:mode].to_s == "diagnosis" && normalized[:write_scope].to_s == "artifact_only")
+          (normalized[:mode].to_s == "diagnosis" && normalized[:write_scope].to_s == "source_protected")
         normalized[:allowed_paths] = []
       end
       normalized
@@ -68,7 +61,7 @@ module Orchestrator
         raise ArgumentError, "#{mode} step requires exact allowedPaths" if allowed_paths.empty?
         raise ArgumentError, "#{mode} step requires writeScope=scoped_changes" unless write_scope == "scoped_changes"
       when "verification", "recording"
-        raise ArgumentError, "#{mode} step must use writeScope=artifact_only" unless write_scope == "artifact_only"
+        raise ArgumentError, "#{mode} step must use writeScope=source_protected" unless write_scope == "source_protected"
         raise ArgumentError, "#{mode} step cannot authorize repository paths" if allowed_paths.any?
       end
 
@@ -91,7 +84,7 @@ module Orchestrator
         lines << "Before worker_turn, write the artifact and pass evidenceOutcome=confirmed or blocked plus evidenceCitations copied verbatim from that artifact. Use blocked when the reproduction did not reach the target boundary."
       end
       unless step[:operator_approval_question_id].present?
-        lines << "No operator approval exists for controller, OpenAPI, migration, schema, or generated-file changes."
+        lines << "No operator approval exists for this workspace's declared protected paths."
       end
       lines.join(" ")
     end
@@ -100,11 +93,11 @@ module Orchestrator
       if diagnosis_requests_implementation?(step[:success_check].to_s)
         raise ArgumentError, "diagnosis step cannot also request implementation"
       end
-      unless write_scope.in?(%w[artifact_only tests_only])
-        raise ArgumentError, "diagnosis step must use artifact_only or tests_only write scope"
+      unless write_scope.in?(%w[source_protected tests_only])
+        raise ArgumentError, "diagnosis step must use source_protected or tests_only write scope"
       end
-      if write_scope == "artifact_only" && allowed_paths.any?
-        raise ArgumentError, "artifact-only diagnosis cannot authorize repository paths"
+      if write_scope == "source_protected" && allowed_paths.any?
+        raise ArgumentError, "source-protected diagnosis cannot authorize repository paths"
       end
       return unless write_scope == "tests_only"
 
@@ -158,7 +151,8 @@ module Orchestrator
     end
 
     def require_operator_approval!(run_id:, step:, allowed_paths:)
-      protected_paths = allowed_paths.select { |path| PROTECTED_PATH_PATTERNS.any? { |pattern| path.match?(pattern) } }
+      patterns = workspace_protected_patterns(run_id)
+      protected_paths = allowed_paths.select { |path| protected_path?(path, patterns) }
       return if protected_paths.empty?
 
       question_id = step[:operator_approval_question_id].presence
@@ -167,5 +161,28 @@ module Orchestrator
         raise ArgumentError, "Protected paths require an answered operator question: #{protected_paths.join(', ')}"
       end
     end
+
+    # Fail-closed, deliberately with no orchestrator-wide fallback pattern
+    # list: a hardcoded regex ("controllers?") false-positived on a harmless
+    # Stimulus JS controller and would silently never match an equivalent
+    # sensitive file in a non-Rails repo -- a safety gate that looks like it
+    # works but doesn't generalize. Each workspace declares its own globs
+    # (via project_init's record_protected_paths); until it has, every
+    # allowed path is protected. RunsController blocks a workspace from
+    # starting any real task run before that declaration exists (see
+    # Workspace#initialized?), so this blank-patterns branch only ever
+    # applies to the bootstrap run itself, which never proposes writable
+    # paths in the first place.
+    def protected_path?(path, patterns)
+      return true if patterns.blank?
+
+      patterns.any? { |glob| File.fnmatch?(glob, path, File::FNM_PATHNAME) }
+    end
+    private_class_method :protected_path?
+
+    def workspace_protected_patterns(run_id)
+      Run.find_by(run_id: run_id)&.workspace&.protected_path_patterns
+    end
+    private_class_method :workspace_protected_patterns
   end
 end

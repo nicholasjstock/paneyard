@@ -254,7 +254,7 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
     }
   end
 
-  def step(artifact, mode: "diagnosis", success_check: "Confirm the expected behavior.", write_scope: "artifact_only",
+  def step(artifact, mode: "diagnosis", success_check: "Confirm the expected behavior.", write_scope: "source_protected",
            allowed_paths: [], evidence_refs: [], addresses_criteria: [ "existing-outcome" ])
     { owner: "worker", artifact:, success_check:, mode:, write_scope:, allowed_paths:, evidence_refs:, addresses_criteria: }
   end

@@ -7,7 +7,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       request = run.spawn_requests.create!(
         asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
         priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
-        write_scope: "artifact_only", allowed_paths: []
+        write_scope: "source_protected", allowed_paths: []
       )
       attempt = StepAttempt.create!(
         run:, spawn_request: request, worker_id: SecureRandom.uuid, lineage_key: "criterion:phone-flow",
@@ -19,7 +19,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       )
 
       described_class.call(
-        review:, action: "stop", summary: "The artifact-only retry cannot change the endpoint.",
+        review:, action: "stop", summary: "The source-protected retry cannot change the endpoint.",
         planner_tier: "strong", blocker_key: "hardcoded-endpoint",
         context_requests: [ { source: "artifact", reference: "recording.md", question: "Why did the retry fail?", max_chars: 500 } ]
       )
@@ -33,12 +33,39 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       expect(review.reload.action).to eq("stop")
     end
 
+    it "resolves contextRequests in their actual MCP wire shape (string keys, camelCase maxChars)" do
+      run = create_run
+      request = run.spawn_requests.create!(
+        asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
+        priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
+        write_scope: "source_protected", allowed_paths: []
+      )
+      attempt = StepAttempt.create!(
+        run:, spawn_request: request, worker_id: SecureRandom.uuid, lineage_key: "criterion:phone-flow",
+        mode: "recording", outcome: "blocked", result: "The exact endpoint file is front/src/config.ts."
+      )
+      review = ChaperoneReview.create!(
+        run:, lineage_key: "criterion:phone-flow", step_attempt_ids: [ attempt.attempt_id ], subject_type: "diagnosis",
+        status: "running", token_digest: SecureRandom.hex(32), expires_at: 1.hour.from_now
+      )
+
+      described_class.call(
+        review:, action: "stop", summary: "The source-protected retry cannot change the endpoint.",
+        planner_tier: "strong", blocker_key: "hardcoded-endpoint",
+        context_requests: [ { "source" => "artifact", "reference" => "recording.md", "question" => "Why did the retry fail?", "maxChars" => 500 } ]
+      )
+
+      expect(UserQuestion.where(run_id: run.run_id, priority: "blocking", status: "open")).to be_empty
+      replan = SpawnRequest.find_by!(run_id: run.run_id, requested_role: "planner", asked_by: "chaperone")
+      expect(replan.context).to include("front/src/config.ts")
+    end
+
     it "asks only after the same blocker was already replanned at the same tier for the lineage" do
       run = create_run
       source = run.spawn_requests.create!(
         asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
         priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
-        write_scope: "artifact_only", allowed_paths: []
+        write_scope: "source_protected", allowed_paths: []
       )
       run.spawn_requests.create!(
         asked_by: "chaperone", scope: Orchestrator::Turn::PLANNER_FOLLOWUP_SCOPE, text: "Repair replan.",
@@ -69,7 +96,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       source = run.spawn_requests.create!(
         asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
         priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
-        write_scope: "artifact_only", allowed_paths: []
+        write_scope: "source_protected", allowed_paths: []
       )
       attempt = StepAttempt.create!(
         run:, spawn_request: source, worker_id: SecureRandom.uuid, lineage_key: "criterion:phone-flow",
@@ -91,7 +118,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       source = run.spawn_requests.create!(
         asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
         priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
-        write_scope: "artifact_only", allowed_paths: []
+        write_scope: "source_protected", allowed_paths: []
       )
       run.spawn_requests.create!(
         asked_by: "chaperone", scope: Orchestrator::Turn::PLANNER_FOLLOWUP_SCOPE, text: "Repair replan.",
@@ -124,7 +151,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       source = run.spawn_requests.create!(
         asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
         priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
-        write_scope: "artifact_only", allowed_paths: []
+        write_scope: "source_protected", allowed_paths: []
       )
       run.spawn_requests.create!(
         asked_by: "chaperone", scope: Orchestrator::Turn::PLANNER_FOLLOWUP_SCOPE, text: "Repair replan.",

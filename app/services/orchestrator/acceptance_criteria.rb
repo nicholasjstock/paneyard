@@ -60,7 +60,7 @@ module Orchestrator
         run_id: run.run_id, asked_by: "planner", requested_role: "verifier",
         scope: "acceptance-verify-#{criterion.key}", lineage_key: "acceptance:#{criterion.key}",
         model_tier: "small", priority: "blocking", execution_mode: "verification",
-        write_scope: "artifact_only", allowed_paths: [],
+        write_scope: "source_protected", allowed_paths: [],
         text: "Independently verify whether this acceptance criterion is actually satisfied. Do not treat the " \
           "candidate evidence as proof -- reproduce the underlying claim yourself (rerun the check, the test, " \
           "or the measurement). Criterion: #{criterion.content} Candidate evidence to investigate (not to " \

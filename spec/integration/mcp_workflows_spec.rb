@@ -28,7 +28,7 @@ RSpec.describe "MCP workflow integrations" do
         artifact: "api-diagnosis.md",
         successCheck: "Capture the POST response, subsequent GET response, and rendered state.",
         mode: "diagnosis",
-        writeScope: "artifact_only",
+        writeScope: "source_protected",
         allowedPaths: [],
         evidenceRefs: []
       },
@@ -57,7 +57,7 @@ RSpec.describe "MCP workflow integrations" do
           artifact: "api-diagnosis.md",
           successCheck: "Capture the response and then implement the smallest fix.",
           mode: "diagnosis",
-          writeScope: "artifact_only",
+          writeScope: "source_protected",
           allowedPaths: [],
           evidenceRefs: []
         },
@@ -346,7 +346,7 @@ RSpec.describe "MCP workflow integrations" do
         artifact: "phone-recording-report.md",
         successCheck: "Write the recording report.",
         mode: "recording",
-        writeScope: "artifact_only",
+        writeScope: "source_protected",
         allowedPaths: [],
         evidenceRefs: [ "prior recording attempt" ]
       },

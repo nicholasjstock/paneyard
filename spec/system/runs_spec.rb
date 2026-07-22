@@ -184,7 +184,7 @@ RSpec.describe "workspace runs", type: :system do
       decision: {
         summary: "Gather direct runtime evidence.",
         next_step: {
-          owner: "worker", artifact: "diagnosis.md", mode: "diagnosis", write_scope: "artifact_only",
+          owner: "worker", artifact: "diagnosis.md", mode: "diagnosis", write_scope: "source_protected",
           success_check: "Reproduce the failure.", allowed_paths: [], evidence_refs: []
         },
         following_steps: []
@@ -382,6 +382,36 @@ RSpec.describe "workspace runs", type: :system do
     )
   end
 
+  it "hides a handoff rejection the same worker went on to self-correct" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "handoff-self-corrected", task: "Explain a self-corrected handoff")
+    create_run_worker(run, nickname: "worker-1", status: "stopped", handoff_completed_at: Time.current)
+    BusEvent.publish(
+      "worker.handoff_rejected", run_id: run.run_id,
+      payload: { nickname: "worker-1", error: "diagnosis evidenceCitation not found in diagnosis.md: paraphrase" }
+    )
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_no_text("Handoff rejected")
+  end
+
+  it "keeps a handoff rejection visible when that worker never completed a handoff" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "handoff-never-corrected", task: "Explain a stuck handoff")
+    create_run_worker(run, nickname: "worker-1", status: "stopped", stop_reason: "Handoff failed")
+    BusEvent.publish(
+      "worker.handoff_rejected", run_id: run.run_id,
+      payload: { nickname: "worker-1", error: "diagnosis evidenceCitation not found in diagnosis.md: paraphrase" }
+    )
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_text(
+      "Handoff rejected: diagnosis evidenceCitation not found in diagnosis.md: paraphrase"
+    )
+  end
+
   it "keeps routine orchestration phases out of recent activity while retaining blocking transitions" do
     workspace = create_workspace
     run = create_run(workspace:, suffix: "activity-filter", task: "Keep the activity feed focused")
@@ -516,7 +546,10 @@ RSpec.describe "workspace runs", type: :system do
 
   def create_workspace
     suffix = SecureRandom.hex(4)
-    Workspace.create!(name: "planner-#{suffix}", root_path: "/tmp/planner-#{suffix}")
+    Workspace.create!(
+      name: "planner-#{suffix}", root_path: "/tmp/planner-#{suffix}",
+      protected_path_patterns: [ "app/controllers/**/*.rb" ]
+    )
   end
 
   def create_run(workspace:, suffix:, task:, status: "running", started_at: Time.current)
@@ -532,7 +565,7 @@ RSpec.describe "workspace runs", type: :system do
     )
   end
 
-  def create_run_worker(run, nickname:, status: "running", stop_reason: nil)
+  def create_run_worker(run, nickname:, status: "running", stop_reason: nil, handoff_completed_at: nil)
     workers_dir = File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers")
     run.workers.create!(
       worker_id: SecureRandom.uuid,
@@ -549,7 +582,8 @@ RSpec.describe "workspace runs", type: :system do
       command: "claude",
       args: [],
       stopped_at: status == "stopped" ? Time.current : nil,
-      stop_reason: stop_reason
+      stop_reason: stop_reason,
+      handoff_completed_at: handoff_completed_at
     )
   end
 end

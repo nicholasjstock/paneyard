@@ -8,6 +8,12 @@
     <span class="eyebrow">Run <span class="mono"><%= @run.run_id %></span></span>
     <h1><%= @run.task %></h1>
     <span class="muted"><%= current_workspace.name %> &middot; <%= @run.launcher_variant %></span>
+    <% if @run.managed_worktree? %>
+      <p class="muted mono"><%= @run.worktree_name %> &middot; <%= @run.branch_name %></p>
+      <p class="muted mono"><%= @run.target_root %></p>
+      <% if @run.pull_request_url.present? %><p><%= link_to "Open pull request", @run.pull_request_url, target: "_blank", rel: "noopener" %></p><% end %>
+      <% if @run.publication_error.present? %><p class="error-banner">PR publication: <%= @run.publication_error %></p><% end %>
+    <% end %>
   </div>
   <div class="toolbar-actions" data-controller="chat-drawer"
        data-action="keydown.esc@window->chat-drawer#close turbo:before-morph-element@document->chat-drawer#beforeMorph input->chat-drawer#saveDraft turbo:submit-start->chat-drawer#clearDraft">
@@ -21,6 +27,9 @@
       <%= button_to "Kill run", stop_workspace_run_path(current_workspace, @run), method: :post,
             class: "btn danger",
             data: { turbo_confirm: "Stop run #{@run.run_id}? This cascades to every active worker under it." } %>
+    <% end %>
+    <% if @run.publication_retryable? %>
+      <%= button_to "Retry PR publication", retry_publication_workspace_run_path(current_workspace, @run), method: :post, class: "btn primary" %>
     <% end %>
     <%= render "workspace_chats/drawer", chat: @workspace_chat, messages: @workspace_chat_messages, run: @run %>
   </div>

@@ -56,7 +56,7 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     assert_equal "fulfilled", request.reload.status
   end
 
-  it "spawns a verifier worker through the generic dispatch path with a read-only, artifact-only sandbox" do
+  it "spawns a verifier worker through the generic dispatch path with a read-only, source-protected sandbox" do
     workspace = Workspace.create!(name: "spawn-verifier-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(
       run_id: "spawn-verifier-#{SecureRandom.hex(4)}", task: "Verify a claim",
@@ -65,7 +65,7 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     request = run.spawn_requests.create!(
       asked_by: "planner", scope: "acceptance-verify-outcome", lineage_key: "acceptance:outcome",
       text: "Independently verify the claim.", requested_role: "verifier", priority: "blocking",
-      model_tier: "small", execution_mode: "verification", write_scope: "artifact_only", allowed_paths: []
+      model_tier: "small", execution_mode: "verification", write_scope: "source_protected", allowed_paths: []
     )
 
     spawned = nil
@@ -77,7 +77,7 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     Orchestrator::SpawnRequestedWorkers.call(run:)
 
     assert_equal "verifier", spawned[:role]
-    assert_equal "artifact_only", spawned[:write_scope]
+    assert_equal "source_protected", spawned[:write_scope]
     assert_equal [], spawned[:allowed_paths]
     assert_equal "verification", spawned[:mode]
     assert_equal "small", spawned[:model_tier]
@@ -93,12 +93,12 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     first = run.spawn_requests.create!(
       asked_by: "planner", scope: "acceptance-verify-first", lineage_key: "acceptance:first",
       text: "Verify the first claim.", requested_role: "verifier", priority: "blocking",
-      model_tier: "small", execution_mode: "verification", write_scope: "artifact_only", allowed_paths: []
+      model_tier: "small", execution_mode: "verification", write_scope: "source_protected", allowed_paths: []
     )
     second = run.spawn_requests.create!(
       asked_by: "planner", scope: "acceptance-verify-second", lineage_key: "acceptance:second",
       text: "Verify the second claim.", requested_role: "verifier", priority: "blocking",
-      model_tier: "small", execution_mode: "verification", write_scope: "artifact_only", allowed_paths: []
+      model_tier: "small", execution_mode: "verification", write_scope: "source_protected", allowed_paths: []
     )
 
     expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker).once.and_return(instance_double(Worker))
@@ -123,7 +123,7 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     verifier_request = run.spawn_requests.create!(
       asked_by: "planner", scope: "acceptance-verify-outcome", lineage_key: "acceptance:outcome",
       text: "Verify the claim.", requested_role: "verifier", priority: "blocking",
-      model_tier: "small", execution_mode: "verification", write_scope: "artifact_only", allowed_paths: []
+      model_tier: "small", execution_mode: "verification", write_scope: "source_protected", allowed_paths: []
     )
 
     expect(Orchestrator::WorkerSpawner).not_to receive(:spawn_worker)

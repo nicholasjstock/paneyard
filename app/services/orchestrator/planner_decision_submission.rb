@@ -192,7 +192,7 @@ module Orchestrator
           next_step: {
             owner: "worker", artifact: "initial-diagnosis.md",
             success_check: "Identify the exact target, reproduce the reported behavior, and record concrete baseline evidence.",
-            mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
+            mode: "diagnosis", write_scope: "source_protected", allowed_paths: [], evidence_refs: [],
             lineage_key: "#{decision.run_id}:initial-diagnosis",
             addresses_criteria: AcceptanceCriteria.current_keys(run_id: decision.run_id)
           },

@@ -21,11 +21,11 @@ module Orchestrator
         owner: "worker",
         artifact: "verifier-report.md",
         success_check: "Confirms the change addresses the task and cites positive evidence from generated artifacts.",
-        mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+        mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: []
       }
 
       fix_step.merge!(
-        mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [],
+        mode: "diagnosis", write_scope: "source_protected", allowed_paths: [],
         evidence_refs: [ verifier_finding ].compact
       )
 
@@ -49,7 +49,7 @@ module Orchestrator
           owner: "planner",
           artifact: "workflow-plan.md",
           success_check: "Inspect the recovery evidence, identify why the handoff did not complete, and publish the next bounded step with planner_turn.",
-          mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [ summarized_finding ]
+          mode: "diagnosis", write_scope: "source_protected", allowed_paths: [], evidence_refs: [ summarized_finding ]
         },
         following_steps: following_steps
       }

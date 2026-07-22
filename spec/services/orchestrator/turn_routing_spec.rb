@@ -8,7 +8,7 @@ RSpec.describe "turn routing" do
       last_plan_summary: "Implement then verify.", pending_spawn_keys: [],
       following_steps: [ {
         owner: "worker", artifact: "verify.md", success_check: "Confirm behavior.",
-        mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+        mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: []
       } ]
     )
 
@@ -31,7 +31,7 @@ RSpec.describe "turn routing" do
       last_plan_summary: "Implement then verify.", pending_spawn_keys: [],
       following_steps: [ {
         owner: "worker", artifact: "verify.md", success_check: "Confirm behavior.",
-        mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
+        mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: [],
         addresses_criteria: [ "demo-verified" ]
       } ]
     )
@@ -56,7 +56,7 @@ RSpec.describe "turn routing" do
       last_plan_summary: "Verify baseline, then bottlenecks.", pending_spawn_keys: [],
       following_steps: [ {
         owner: "worker", artifact: "verify-bottlenecks.md", success_check: "Confirm bottlenecks.",
-        mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
+        mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: [],
         addresses_criteria: [ "bottlenecks" ]
       } ]
     )

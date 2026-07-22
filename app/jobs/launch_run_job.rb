@@ -10,6 +10,7 @@ class LaunchRunJob < ApplicationJob
 
   def perform(id)
     run = Run.find(id)
+    Orchestrator::GitWorktree.provision!(run)
     run.spawn_requests.create!(
       asked_by: run.launched_by.presence || "ops_hub",
       scope: "workflow-plan.md",
@@ -22,7 +23,7 @@ class LaunchRunJob < ApplicationJob
 
     run.update!(status: "running", started_at: Time.current)
   rescue => e
-    run&.update!(status: "failed")
+    run&.update!(status: "failed", publication_status: "failed", publication_error: e.message)
     raise
   end
 end

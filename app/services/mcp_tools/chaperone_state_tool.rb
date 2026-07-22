@@ -25,6 +25,7 @@ module McpTools
           brief: Orchestrator::RunContext.snapshot(run_id: review.run_id)[:entries]
         },
         attempts: attempts.each_with_index.map { |attempt, index| attempt_summary(attempt, index + 1) },
+        priorBlockers: prior_blockers(review),
         plannerAttempt: planner_decision && {
           status: planner_decision.status, model: planner_decision.model,
           modelAttempts: planner_decision.model_attempts, contextRequests: planner_decision.context_requests,
@@ -33,6 +34,22 @@ module McpTools
         artifacts: artifacts.map { |artifact| artifact.slice(:name, :exists, :size_bytes, :updated_at, :preview) },
         recentTransitions: Orchestrator::TickState.history(review.run_id, limit: 5)[:entries]
       )
+    end
+
+    # Every prior "stop" replan for this lineage, oldest first, so a repeat
+    # of the identical blocker under new wording gets recognized and reused
+    # instead of minting a fresh blockerKey that dodges the exhaustion guard
+    # (Orchestrator::ApplyChaperoneDecision.bounded_replan_already_requested?
+    # matches on exact key).
+    def self.prior_blockers(review)
+      SpawnRequest.where(
+        run_id: review.run_id, asked_by: "chaperone", requested_role: "planner", lineage_key: review.lineage_key
+      ).where("tags LIKE ?", "%stopped_retry%").order(:created_at).filter_map do |request|
+        key = request.tags.find { |tag| tag.start_with?("blocker:") }&.delete_prefix("blocker:")
+        next unless key
+
+        { blockerKey: key, tier: request.model_tier, requestedAt: request.created_at.iso8601(3), summary: request.context.first(400) }
+      end
     end
 
     def self.attempt_summary(attempt, number)

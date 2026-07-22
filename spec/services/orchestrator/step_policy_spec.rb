@@ -7,7 +7,7 @@ RSpec.describe Orchestrator::StepPolicy do
         run_id: "unused",
         step: {
           owner: "orchestrator", artifact: "verification.md", success_check: "Verify behavior.",
-          mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: []
+          mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: []
         }
       )
     end
@@ -18,11 +18,11 @@ RSpec.describe Orchestrator::StepPolicy do
   it "normalizes excess path authority away from non-writing steps" do
     plan = Orchestrator::StepPolicy.normalize_plan(
       next_step: {
-        mode: "verification", write_scope: "artifact_only",
+        mode: "verification", write_scope: "source_protected",
         allowed_paths: [ "front/scripts/record-demo.ts" ]
       },
       following_steps: [
-        { mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [ "front/" ] }
+        { mode: "diagnosis", write_scope: "source_protected", allowed_paths: [ "front/" ] }
       ]
     )
 
@@ -109,6 +109,26 @@ RSpec.describe Orchestrator::StepPolicy do
     assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
   end
 
+  it "blocks a path matching a workspace-declared protected glob without answered operator approval" do
+    @run.workspace.update!(protected_path_patterns: [ "app/controllers/**/*.rb" ])
+
+    error = assert_raises(ArgumentError) do
+      Orchestrator::StepPolicy.validate!(
+        run_id: @run.run_id,
+        step: implementation_step(allowed_paths: [ "app/controllers/sessions_controller.rb" ])
+      )
+    end
+
+    assert_match(/Protected paths require an answered operator question/, error.message)
+  end
+
+  it "does not block a path outside the workspace's declared protected globs, including a same-named-but-different file" do
+    @run.workspace.update!(protected_path_patterns: [ "app/controllers/**/*.rb" ])
+    step = implementation_step(allowed_paths: [ "app/javascript/controllers/path_browser_controller.js" ])
+
+    assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
+  end
+
   it "is a no-op when the run has no acceptance criteria" do
     step = diagnosis_step
 
@@ -149,7 +169,7 @@ RSpec.describe Orchestrator::StepPolicy do
   def diagnosis_step(success_check: "Capture the POST and GET responses and report the failing boundary.", addresses_criteria: [])
     {
       owner: "worker", artifact: "diagnosis.md", success_check:,
-      mode: "diagnosis", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
+      mode: "diagnosis", write_scope: "source_protected", allowed_paths: [], evidence_refs: [],
       addresses_criteria:
     }
   end

@@ -13,6 +13,7 @@ RSpec.describe McpTools::RecordProjectSetupTool do
     )
 
     expect(response.error?).to be_falsey
+    expect(response.structured_content).to be_a(Hash) # MCP structuredContent must be a JSON object, not a bare array
     entry = run.workspace.workspace_memory_entries.current.find_by!(entry_key: "dev-environment")
     expect(entry.recorded_by).to eq("project_init")
     expect(entry.content).to include("bin/dev")

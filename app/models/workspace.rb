@@ -11,8 +11,26 @@ class Workspace < ApplicationRecord
 
   validates :name, presence: true, uniqueness: true
   validates :root_path, presence: true, uniqueness: true
+  validate :source_checkout_is_not_changed_while_runs_are_active
 
   def self.default
     order(:created_at).first
+  end
+
+  # Gates RunsController#new/#create -- a workspace with no declared
+  # protected paths is fail-closed (see StepPolicy#protected_path?), so no
+  # real task run may start until its bootstrap project_init run declares
+  # them, however briefly that takes.
+  def initialized?
+    protected_path_patterns.present?
+  end
+
+  private
+
+  def source_checkout_is_not_changed_while_runs_are_active
+    return unless will_save_change_to_root_path?
+    return unless runs.active.exists?
+
+    errors.add(:root_path, "cannot change while a run is active")
   end
 end

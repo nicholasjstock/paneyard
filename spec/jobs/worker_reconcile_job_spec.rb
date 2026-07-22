@@ -259,6 +259,64 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "completes a workspace_init bootstrap run once project_init has declared protected paths too" do
+    workspace = Workspace.create!(
+      name: "reconcile-bootstrap-done-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir,
+      protected_path_patterns: [ "app/controllers/**/*.rb" ]
+    )
+    run = Run.create!(
+      workspace:, run_id: "reconcile-bootstrap-done-#{SecureRandom.hex(4)}", task: Orchestrator::WorkspaceInit::TASK,
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running", launched_by: "workspace_init"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "findings recorded\n")
+    Orchestrator::ProjectMemory.record!(
+      run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+      content: "Run `bin/dev` from the repository root.", evidence_ref: "bin/dev", recorded_by: "project_init"
+    )
+    Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "project_init", nickname: "project-init-test",
+      reason: "Discover the dev environment.", scope: "project-setup", status: "running", pid: 999_999_988,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    run.reload
+    assert_equal "completed", run.status
+    assert_equal "completed", run.phase
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
+  it "stops (not completes) a workspace_init bootstrap run when only the dev-environment finding landed, not protected paths" do
+    workspace = Workspace.create!(name: "reconcile-bootstrap-partial-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-bootstrap-partial-#{SecureRandom.hex(4)}", task: Orchestrator::WorkspaceInit::TASK,
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running", launched_by: "workspace_init"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "findings recorded\n")
+    Orchestrator::ProjectMemory.record!(
+      run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+      content: "Run `bin/dev` from the repository root.", evidence_ref: "bin/dev", recorded_by: "project_init"
+    )
+    Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "project_init", nickname: "project-init-test",
+      reason: "Discover the dev environment.", scope: "project-setup", status: "running", pid: 999_999_987,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    run.reload
+    assert_equal "stopped", run.status
+    assert_equal "blocked_on_user", run.phase
+    refute workspace.reload.initialized?
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "records a failed attempt and escalates to chaperone after repeated project_init failures" do
     workspace = Workspace.create!(name: "reconcile-project-init-fail-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(
@@ -277,7 +335,7 @@ RSpec.describe WorkerReconcileJob do
       run.spawn_requests.create!(
         asked_by: "orchestrator", scope: "project-setup", lineage_key: "project-init:#{workspace.id}",
         text: "Discover the dev environment.", requested_role: "project_init", priority: "blocking",
-        execution_mode: "diagnosis", write_scope: "artifact_only",
+        execution_mode: "diagnosis", write_scope: "source_protected",
         status: "fulfilled", fulfilled_worker_id: worker.worker_id
       )
 
