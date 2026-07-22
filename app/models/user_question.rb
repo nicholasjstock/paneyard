@@ -16,6 +16,7 @@ class UserQuestion < ApplicationRecord
   before_validation :assign_asked_at, on: :create
 
   after_create_commit :publish_created_event
+  after_create_commit :enqueue_github_publication
   after_update_commit :publish_answered_event
 
   scope :open_only, -> { where(status: "open") }
@@ -34,7 +35,10 @@ class UserQuestion < ApplicationRecord
       tags: tags,
       answeredBy: answered_by,
       answeredAt: answered_at&.iso8601(3),
-      answerText: answer_text
+      answerText: answer_text,
+      githubCommentUrl: github_comment_url,
+      githubPublishedAt: github_published_at&.iso8601(3),
+      githubPublicationError: github_publication_error
     }
   end
 
@@ -76,6 +80,10 @@ class UserQuestion < ApplicationRecord
       questionId: question_id, runId: run_id, askedBy: asked_by, scope: scope,
       priority: priority, context: context, tags: tags
     })
+  end
+
+  def enqueue_github_publication
+    PublishUserQuestionJob.perform_later(id) if run&.managed_worktree?
   end
 
   def publish_answered_event

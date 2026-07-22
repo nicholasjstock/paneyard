@@ -2,7 +2,7 @@ class ResumeRunsFromPullRequestCommentsJob < ApplicationJob
   queue_as :default
 
   def perform
-    Run.where(publication_status: %w[published awaiting_approval cleanup_pushed]).where.not(pull_request_url: nil).find_each do |run|
+    Run.where.not(pull_request_url: nil).where.not(publication_status: "merged").find_each do |run|
       Orchestrator::PullRequestResume.comments_after(run).each do |comment|
         Orchestrator::PullRequestResume.resume!(run, comment)
       end

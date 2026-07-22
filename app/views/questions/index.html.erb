@@ -23,13 +23,15 @@
         <% if question["context"].present? %><p class="muted"><%= question["context"] %></p><% end %>
         <p class="muted">asked by <%= question["askedBy"] %> &middot; <span class="mono"><%= question["scope"] %></span></p>
 
+        <% if question["githubCommentUrl"].present? %>
+          <p><%= link_to "Open GitHub question", question["githubCommentUrl"], target: "_blank", rel: "noopener" %></p>
+        <% elsif question["runId"].present? %>
+          <% run = current_workspace.runs.find_by(run_id: question["runId"]) %>
+          <% if run&.pull_request_url.present? %><p><%= link_to "Open pull request", run.pull_request_url, target: "_blank", rel: "noopener" %></p><% end %>
+        <% end %>
         <% if question["status"] == "open" %>
-          <%= form_with url: answer_workspace_question_path(current_workspace, question["questionId"]), method: :post, local: true do |form| %>
-            <div class="field">
-              <%= form.text_area :answer_text, placeholder: "Your answer…" %>
-            </div>
-            <%= form.submit "Answer", class: "btn primary" %>
-          <% end %>
+          <p class="muted">Answer in the pull request with <span class="mono">Question <%= question["questionId"] %>: &lt;your answer&gt;</span>.</p>
+          <% if question["githubPublicationError"].present? %><p class="error-banner">GitHub publication: <%= question["githubPublicationError"] %></p><% end %>
         <% else %>
           <p class="muted">answered by <%= question["answeredBy"] %>: <%= question["answerText"] %></p>
         <% end %>

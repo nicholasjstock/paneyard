@@ -6,7 +6,11 @@ class FinalizeRunPublicationJob < ApplicationJob
     result = Orchestrator::RunPublication.publish!(run)
     return if result == :unmanaged
     run.update!(status: "completed", stopped_at: run.stopped_at || Time.current)
-    summary = result == :no_changes ? "Run completed with no source changes; no PR was created." : "Pull request published: #{run.pull_request_url}"
+    summary = if result == :no_changes
+      "Run completed with no source changes; no PR was created."
+    else
+      "Pull request ready for review: #{run.pull_request_url}"
+    end
     run.publish_phase!(phase: "completed", owner: "orchestrator", summary: summary)
   rescue Orchestrator::RunPublication::Error => error
     run.update!(status: "failed") if run&.persisted?

@@ -203,15 +203,14 @@
             <p class="question-text"><%= question.text %></p>
             <% if question.context.present? %><p class="muted"><%= question.context %></p><% end %>
             <p class="muted">asked by <%= question.asked_by %> &middot; <%= time_ago_in_words(question.asked_at) %> ago</p>
-            <%= form_with url: answer_workspace_question_path(current_workspace, question.question_id), method: :post, local: true,
-                  data: { controller: "question-form", action: "turbo:before-morph-element@document->question-form#beforeMorph" } do |form| %>
-              <div class="field">
-                <%= form.label :answer_text, "Your decision" %>
-                <%= form.text_area :answer_text, placeholder: "Describe the diagnostic result or choose how this run should proceed...", required: true,
-                      data: { question_form_target: "answer" } %>
-              </div>
-              <%= form.submit "Answer and Resume Monitoring", class: "btn primary" %>
+            <% if question.github_comment_url.present? %>
+              <p><%= link_to "Answer on GitHub", question.github_comment_url, target: "_blank", rel: "noopener", class: "btn primary" %></p>
+            <% elsif @run.pull_request_url.present? %>
+              <p><%= link_to "Open pull request to answer", @run.pull_request_url, target: "_blank", rel: "noopener", class: "btn primary" %></p>
+            <% else %>
+              <p class="muted">A draft pull request is being created for this question.</p>
             <% end %>
+            <p class="muted">Use <span class="mono">Question <%= question.question_id %>: &lt;your answer&gt;</span> in a PR comment.</p>
           </article>
         <% end %>
       </section>

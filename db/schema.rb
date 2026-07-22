@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_22_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_22_140000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -211,6 +211,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_130000) do
     t.string "base_sha"
     t.string "branch_name"
     t.datetime "capacity_available_at"
+    t.string "conversation_pr_status"
     t.datetime "created_at", null: false
     t.string "last_pull_request_comment_id"
     t.string "launched_by"
@@ -238,6 +239,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_130000) do
     t.string "worktree_name"
     t.index ["active_branch_key"], name: "index_runs_on_active_branch_key"
     t.index ["capacity_available_at"], name: "index_runs_on_capacity_available_at"
+    t.index ["conversation_pr_status"], name: "index_runs_on_conversation_pr_status"
     t.index ["publication_status"], name: "index_runs_on_publication_status"
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
@@ -304,6 +306,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_130000) do
     t.string "asked_by", null: false
     t.text "context"
     t.datetime "created_at", null: false
+    t.string "github_comment_id"
+    t.string "github_comment_url"
+    t.text "github_publication_error"
+    t.datetime "github_published_at"
     t.string "priority", default: "advisory", null: false
     t.string "question_id", null: false
     t.string "run_id", null: false
@@ -312,6 +318,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_130000) do
     t.json "tags", default: [], null: false
     t.text "text", null: false
     t.datetime "updated_at", null: false
+    t.index ["github_comment_id"], name: "index_user_questions_on_github_comment_id", unique: true
     t.index ["question_id"], name: "index_user_questions_on_question_id", unique: true
     t.index ["run_id", "status"], name: "index_user_questions_on_run_id_and_status"
   end

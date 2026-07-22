@@ -49,11 +49,7 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :questions, only: %i[index] do
-      member do
-        post :answer
-      end
-    end
+    resources :questions, only: %i[index]
 
     resources :events, only: %i[index]
   end

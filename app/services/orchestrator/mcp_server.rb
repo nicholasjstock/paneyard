@@ -15,7 +15,6 @@ module Orchestrator
           ::McpTools::PublishRunStatusTool,
           ::McpTools::AppendSpawnRequestTool,
           ::McpTools::AppendUserQuestionTool,
-          ::McpTools::AnswerUserQuestionTool,
           ::McpTools::FulfillSpawnRequestTool,
           ::McpTools::ListOpenSpawnRequestsTool,
           ::McpTools::ListOpenUserQuestionsTool,

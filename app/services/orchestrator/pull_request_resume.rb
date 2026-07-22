@@ -24,11 +24,17 @@ module Orchestrator
         raise Error, "Cannot resume a merged run" if run.publication_status == "merged"
 
         comment_id = comment.fetch("id").to_s
+        if UserQuestion.exists?(run_id: run.run_id, github_comment_id: comment_id)
+          run.update!(last_pull_request_comment_id: comment_id)
+          return
+        end
+
         author = comment.dig("user", "login") || "unknown"
         body = comment.fetch("body")
+        answer_referenced_questions!(run, body, author)
         RunContext.upsert!(
           run_id: run.run_id, entry_key: "pr-comment-#{comment_id}", kind: "operator_decision", status: "confirmed",
-          content: "Pull request comment from #{author}: #{body}", evidence_ref: nil, created_by: "github_pr_comment"
+          content: "Pull request comment from #{author}: #{body}", evidence_ref: comment["html_url"], created_by: "github_pr_comment"
         )
         run.update!(status: "running", stopped_at: nil, publication_status: "resume_requested", last_pull_request_comment_id: comment_id)
         SpawnRequest.create!(
@@ -39,6 +45,18 @@ module Orchestrator
         run.publish_phase!(phase: "planning", owner: "github", summary: "Resuming from pull request comment ##{comment_id}.")
       end
     end
+
+    def answer_referenced_questions!(run, body, author)
+      question_ids = body.to_s.scan(/\bQuestion\s+([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\s*:/i).flatten.uniq
+      return if question_ids.empty?
+
+      answer = body.to_s.sub(/\A\s*(?:Question\s+[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\s*:\s*)+/i, "").strip
+      question_ids.each do |question_id|
+        question = UserQuestion.find_by(run_id: run.run_id, question_id:, status: "open")
+        question&.update!(status: "answered", answered_by: "github:#{author}", answered_at: Time.current, answer_text: answer)
+      end
+    end
+    private_class_method :answer_referenced_questions!
 
     def repository_and_number(run)
       uri = URI.parse(run.pull_request_url)

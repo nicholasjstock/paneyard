@@ -1,4 +1,5 @@
 require "open3"
+require "uri"
 
 module Orchestrator
   module RunPublication
@@ -36,23 +37,83 @@ module Orchestrator
 
     def publish!(run)
       return :unmanaged if run.worktree_name.blank?
-      return :published if run.publication_status == "published"
-      return :no_changes if run.publication_status == "no_changes"
+      return :published if run.publication_status == "published" && run.conversation_pr_status == "ready"
+      return :no_changes if run.publication_status == "no_changes" && run.pull_request_url.blank?
 
       run.with_lock do
         return :published if run.reload.publication_status == "published"
 
         root = validated_root!(run)
-        raise Error, "Run changes have not been committed" unless run.publication_status == "committed"
+        unless run.publication_status.in?(%w[committed no_changes])
+          raise Error, "Run changes have not been committed"
+        end
 
         run.update!(publication_status: "publishing", publication_error: nil)
         git!(root, "push", "-u", "origin", run.branch_name)
         url = existing_pr_url(root, run.branch_name) || create_pr(root, run)
-        run.update!(publication_status: "awaiting_approval", pull_request_url: url, publication_completed_at: Time.current)
+        ready_pr!(root, url) if run.conversation_pr_status == "draft"
+        run.update!(publication_status: "awaiting_approval", pull_request_url: url, conversation_pr_status: "ready", publication_completed_at: Time.current)
         :published
       end
     rescue StandardError => error
       record_failure!(run, error)
+      raise error if error.is_a?(Error)
+
+      raise Error, error.message
+    end
+
+    # A question is sufficient reason to establish the run's shared GitHub
+    # conversation. A clean branch receives an empty commit because GitHub
+    # cannot open a PR for a branch identical to its base.
+    def ensure_conversation_pr!(run)
+      return run.pull_request_url if run.pull_request_url.present?
+
+      run.with_lock do
+        return run.reload.pull_request_url if run.pull_request_url.present?
+
+        root = validated_root!(run)
+        checkpoint_for_conversation!(run, root)
+        run.update!(conversation_pr_status: "publishing", publication_error: nil)
+        git!(root, "push", "-u", "origin", run.branch_name)
+        url = existing_pr_url(root, run.branch_name) || create_pr(root, run, draft: true)
+        run.update!(pull_request_url: url, conversation_pr_status: "draft")
+        url
+      end
+    rescue StandardError => error
+      run.update!(conversation_pr_status: "failed", publication_error: error.message) if run.persisted?
+      raise error if error.is_a?(Error)
+
+      raise Error, error.message
+    end
+
+    def publish_question!(question)
+      return :unmanaged unless question.run&.managed_worktree?
+
+      question.with_lock do
+        return :published if question.github_comment_id.present?
+
+        run = question.run
+        url = ensure_conversation_pr!(run)
+        root = validated_root!(run)
+        repository, number = repository_and_number(url)
+        body = <<~MARKDOWN
+          ## Workflow question #{question.question_id}
+
+          #{question.text}
+
+          #{question.context.presence || "No additional context was supplied."}
+
+          Reply in this PR with `Question #{question.question_id}: <your answer>` to answer and resume the run. Any PR comment will resume the run; only an explicit question reference records an answer.
+        MARKDOWN
+        output, error, status = Open3.capture3("gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}", chdir: root.to_s)
+        raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
+
+        comment = JSON.parse(output)
+        question.update!(github_comment_id: comment.fetch("id").to_s, github_comment_url: comment["html_url"], github_published_at: Time.current, github_publication_error: nil)
+        :published
+      end
+    rescue StandardError => error
+      question.update!(github_publication_error: error.message) if question.persisted?
       raise error if error.is_a?(Error)
 
       raise Error, error.message
@@ -117,13 +178,41 @@ module Orchestrator
       raise Error, error.message
     end
 
-    def create_pr(root, run)
+    def create_pr(root, run, draft: false)
       body = "Automated workflow run: #{run.run_id}\n\nWorktree: #{run.worktree_name}\nBase: #{run.base_sha}\n"
-      output, error, status = Open3.capture3("gh", "pr", "create", "--base", "main", "--head", run.branch_name, "--title", run.task.to_s.truncate(120), "--body", body, chdir: root.to_s)
+      args = [ "gh", "pr", "create", "--base", "main", "--head", run.branch_name, "--title", run.task.to_s.truncate(120), "--body", body ]
+      args << "--draft" if draft
+      output, error, status = Open3.capture3(*args, chdir: root.to_s)
       raise Error, "gh pr create failed: #{error.presence || output}" unless status.success?
 
       output.strip
     end
+
+    def ready_pr!(root, url)
+      _output, error, status = Open3.capture3("gh", "pr", "ready", url, chdir: root.to_s)
+      raise Error, "gh pr ready failed: #{error}" unless status.success?
+    end
+    private_class_method :ready_pr!
+
+    def checkpoint_for_conversation!(run, root)
+      dirty = git!(root, "status", "--porcelain").present?
+      git!(root, "add", "-A") if dirty
+      evidence_paths(run, root).each { |path| git!(root, "add", "-f", "--", path) }
+      message = dirty ? "Checkpoint before workflow question" : "Start workflow conversation"
+      git!(root, "commit", "--allow-empty", "-m", message)
+    end
+    private_class_method :checkpoint_for_conversation!
+
+    def repository_and_number(url)
+      uri = URI.parse(url)
+      parts = uri.path.split("/").reject(&:blank?)
+      raise Error, "Invalid pull request URL: #{url}" unless parts.length >= 4 && parts[-2] == "pull"
+
+      [ parts.first(2).join("/"), parts.last ]
+    rescue URI::InvalidURIError
+      raise Error, "Invalid pull request URL: #{url}"
+    end
+    private_class_method :repository_and_number
 
     def validated_root!(run)
       root = Pathname(run.target_root)

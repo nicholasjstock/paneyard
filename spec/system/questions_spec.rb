@@ -24,7 +24,7 @@ RSpec.describe "workspace questions", type: :system do
     expect(page).to have_no_text("Should not appear here")
   end
 
-  it "answers an open question from the workspace page" do
+  it "directs open questions to GitHub rather than offering a local answer form" do
     workspace, run = create_workspace_with_run("alpha")
     question = run.user_questions.create!(
       asked_by: "planner",
@@ -33,14 +33,13 @@ RSpec.describe "workspace questions", type: :system do
       priority: "blocking"
     )
 
-    visit workspace_questions_path(workspace)
-    fill_in "answer_text", with: "Use the simpler flow."
-    click_button "Answer"
+    question.update!(github_comment_url: "https://github.com/example/repo/pull/1#issuecomment-1")
 
-    expect(page).to have_text("Answer recorded.")
-    expect(question.reload.status).to eq("answered")
-    expect(question.answer_text).to eq("Use the simpler flow.")
-    expect(page).to have_text("answered by operator: Use the simpler flow.")
+    visit workspace_questions_path(workspace)
+
+    expect(page).to have_link("Open GitHub question", href: question.github_comment_url)
+    expect(page).to have_text("Question #{question.question_id}: <your answer>")
+    expect(page).to have_no_field("answer_text")
   end
 
   it "shows the empty state when a workspace has no questions" do

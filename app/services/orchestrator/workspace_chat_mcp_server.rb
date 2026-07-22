@@ -8,8 +8,7 @@ module Orchestrator
         server_context:,
         tools: [
           ::McpTools::WorkspaceChatStateTool,
-          ::McpTools::WorkspaceChatRunControlTool,
-          ::McpTools::WorkspaceChatAnswerQuestionTool
+          ::McpTools::WorkspaceChatRunControlTool
         ]
       )
     end
