@@ -15,8 +15,7 @@ module Orchestrator
       validate_source!(source_root)
       raise Error, "Worktree path already exists: #{worktree}" if worktree.exist?
 
-      git!(source_root, "fetch", "origin", "main")
-      base_sha = git!(source_root, "rev-parse", "origin/main").strip
+      base_sha = git!(source_root, "rev-parse", "HEAD").strip
       git!(source_root, "worktree", "add", "-b", branch, worktree.to_s, base_sha)
       run.update!(
         worktree_name: name, source_root: source_root.to_s, branch_name: branch,
@@ -36,6 +35,7 @@ module Orchestrator
       raise Error, "Source checkout does not exist: #{source_root}" unless source_root.directory?
       raise Error, "Source checkout must be named main: #{source_root}" unless source_root.basename.to_s == "main"
       raise Error, "Source checkout is not a Git repository: #{source_root}" unless git_success?(source_root, "rev-parse", "--is-inside-work-tree")
+      raise Error, "Source checkout must be on main" unless git!(source_root, "branch", "--show-current").strip == "main"
       raise Error, "Source checkout has uncommitted changes: #{source_root}" unless git!(source_root, "status", "--porcelain").empty?
       raise Error, "Source checkout has no origin remote: #{source_root}" unless git_success?(source_root, "remote", "get-url", "origin")
     end

@@ -27,5 +27,9 @@ RSpec.describe "runs", type: :request do
     expect do
       post workspace_runs_path(workspace), params: { run: { task: "Do something", launcher_variant: "claude" } }
     end.to change(Run, :count).by(1)
+
+    run = workspace.runs.order(:created_at).last
+    expect(run.worktree_name).to start_with("do-something-")
+    expect(run.target_root).to eq(workspace.source_root)
   end
 end
