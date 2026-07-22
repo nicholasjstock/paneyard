@@ -1,0 +1,3 @@
+Verified and submitted acceptance criterion `todo-file-created`.
+
+Independent check confirmed `todo.md` is a regular, 0-byte file at the repository root.
