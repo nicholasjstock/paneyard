@@ -84,47 +84,10 @@ RSpec.describe Orchestrator::StepPolicy do
     assert_match(/allowedPaths must name exact files/, error.message)
   end
 
-  it "rejects protected API files without answered operator approval" do
-    error = assert_raises(ArgumentError) do
-      Orchestrator::StepPolicy.validate!(
-        run_id: @run.run_id,
-        step: implementation_step(allowed_paths: [ "openapi.yaml" ])
-      )
-    end
-
-    assert_match(/Protected paths require an answered operator question/, error.message)
-  end
-
-  it "accepts a protected API file after explicit operator approval" do
-    question = @run.user_questions.create!(
-      asked_by: "planner", scope: "api-contract.md", text: "Approve the documented OpenAPI contract update?",
-      priority: "blocking", status: "answered", answered_by: "operator", answered_at: Time.current,
-      answer_text: "Approved: update openapi.yaml for this response contract."
-    )
-    step = implementation_step(
-      allowed_paths: [ "openapi.yaml" ],
-      operator_approval_question_id: question.question_id
-    )
-
-    assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
-  end
-
-  it "blocks a path matching a workspace-declared protected glob without answered operator approval" do
+  it "allows exact implementation paths even when they match workspace operational metadata" do
     @run.workspace.update!(protected_path_patterns: [ "app/controllers/**/*.rb" ])
 
-    error = assert_raises(ArgumentError) do
-      Orchestrator::StepPolicy.validate!(
-        run_id: @run.run_id,
-        step: implementation_step(allowed_paths: [ "app/controllers/sessions_controller.rb" ])
-      )
-    end
-
-    assert_match(/Protected paths require an answered operator question/, error.message)
-  end
-
-  it "does not block a path outside the workspace's declared protected globs, including a same-named-but-different file" do
-    @run.workspace.update!(protected_path_patterns: [ "app/controllers/**/*.rb" ])
-    step = implementation_step(allowed_paths: [ "app/javascript/controllers/path_browser_controller.js" ])
+    step = implementation_step(allowed_paths: [ "app/controllers/sessions_controller.rb" ])
 
     assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
   end
@@ -174,11 +137,11 @@ RSpec.describe Orchestrator::StepPolicy do
     }
   end
 
-  def implementation_step(allowed_paths:, operator_approval_question_id: nil)
+  def implementation_step(allowed_paths:)
     {
       owner: "worker", artifact: "fix.md", success_check: "Correct the confirmed defect.",
       mode: "implementation", write_scope: "scoped_changes", allowed_paths:,
-      evidence_refs: [ "diagnosis.md#confirmed-boundary" ], operator_approval_question_id:
+      evidence_refs: [ "diagnosis.md#confirmed-boundary" ]
     }
   end
 end

@@ -1,8 +1,8 @@
 module McpTools
   class RecordProtectedPathsTool < MCP::Tool
     tool_name "record_protected_paths"
-    description "Declare this workspace's protected path glob patterns -- paths a planner step may only touch " \
-      "with an answered operator approval question. Only callable by an authenticated project_init worker. " \
+    description "Declare this workspace's high-impact operational path glob patterns for setup visibility. " \
+      "Normal implementation authorization is controlled by each step's exact allowed paths. Only callable by an authenticated project_init worker. " \
       "Replaces any previously declared patterns for this workspace."
     input_schema(
       properties: {

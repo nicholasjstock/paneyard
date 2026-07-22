@@ -9,7 +9,7 @@ class ProjectSetupsController < ApplicationController
     else
       Orchestrator::WorkspaceInit.launch!(current_workspace, force: true)
       redirect_to workspace_runs_path(current_workspace),
-        notice: "Discovering dev environment and protected paths…"
+        notice: "Discovering dev environment and operational path metadata…"
     end
   end
 end

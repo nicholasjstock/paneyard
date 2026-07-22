@@ -17,10 +17,9 @@ class Workspace < ApplicationRecord
     order(:created_at).first
   end
 
-  # Gates RunsController#new/#create -- a workspace with no declared
-  # protected paths is fail-closed (see StepPolicy#protected_path?), so no
-  # real task run may start until its bootstrap project_init run declares
-  # them, however briefly that takes.
+  # Gates RunsController#new/#create until project_init has recorded its
+  # workspace setup. The patterns are operational metadata; normal workers
+  # are authorized by their exact step-level allowed paths.
   def initialized?
     protected_path_patterns.present?
   end

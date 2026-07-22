@@ -16,13 +16,11 @@ module Orchestrator
       state that clearly instead of leaving it to be guessed later. Call record_project_setup with your findings
       before finishing; your primary finding must use key "#{PRIMARY_ENTRY_KEY}". You may add up to 4 more findings
       for other clearly load-bearing commands (running tests, building for production) only if you find them with
-      the same evidence standard. Also identify this repo's sensitive files -- request-routing/handler logic,
-      database schema and migrations, and generated or API-contract files -- and call record_protected_paths
-      exactly once with concrete glob patterns for what you actually found here (for example
-      app/controllers/**/*.rb, db/migrate/**, db/schema.rb for a Rails app; **/views.py, **/migrations/** for
-      Django). Match on the actual language and file type, never on a bare word like "controller" alone -- a
-      JS/Stimulus app/javascript/controllers/*.js file is not a sensitive route handler. This call is required,
-      not optional: no real task run can start on this workspace until it lands. Do not modify any files.
+      the same evidence standard. Also call record_protected_paths exactly once with only genuinely high-impact
+      operational files you find (credentials, production environment configuration, or deployment configuration).
+      Do not include ordinary application source, views, controllers, routes, tests, schemas, or migrations: workers
+      receive exact per-step allowed paths for normal implementation work. This call is required, not optional: no
+      real task run can start on this workspace until it lands. Do not modify any files.
     TEXT
 
     def call(run:, force: false)

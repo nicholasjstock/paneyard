@@ -65,7 +65,6 @@ module Orchestrator
         raise ArgumentError, "#{mode} step cannot authorize repository paths" if allowed_paths.any?
       end
 
-      require_operator_approval!(run_id:, step:, allowed_paths:)
       keys = acceptance_criteria_keys || current_acceptance_criteria_keys(run_id)
       require_acceptance_criteria_reference!(step:, acceptance_criteria_keys: keys)
       step
@@ -82,9 +81,6 @@ module Orchestrator
       if step[:mode] == "diagnosis"
         lines << "This is an evidence-gathering task. Do not implement an application fix or change a public contract. Report the confirmed boundary back to the planner."
         lines << "Before worker_turn, write the artifact and pass evidenceOutcome=confirmed or blocked plus evidenceCitations copied verbatim from that artifact. Use blocked when the reproduction did not reach the target boundary."
-      end
-      unless step[:operator_approval_question_id].present?
-        lines << "No operator approval exists for this workspace's declared protected paths."
       end
       lines.join(" ")
     end
@@ -149,40 +145,5 @@ module Orchestrator
       unknown = addresses - acceptance_criteria_keys
       raise ArgumentError, "addressesCriteria names unknown criteria: #{unknown.join(', ')}" if unknown.any?
     end
-
-    def require_operator_approval!(run_id:, step:, allowed_paths:)
-      patterns = workspace_protected_patterns(run_id)
-      protected_paths = allowed_paths.select { |path| protected_path?(path, patterns) }
-      return if protected_paths.empty?
-
-      question_id = step[:operator_approval_question_id].presence
-      question = question_id && UserQuestion.find_by(question_id:, run_id:, status: "answered")
-      unless question&.answer_text.present?
-        raise ArgumentError, "Protected paths require an answered operator question: #{protected_paths.join(', ')}"
-      end
-    end
-
-    # Fail-closed, deliberately with no orchestrator-wide fallback pattern
-    # list: a hardcoded regex ("controllers?") false-positived on a harmless
-    # Stimulus JS controller and would silently never match an equivalent
-    # sensitive file in a non-Rails repo -- a safety gate that looks like it
-    # works but doesn't generalize. Each workspace declares its own globs
-    # (via project_init's record_protected_paths); until it has, every
-    # allowed path is protected. RunsController blocks a workspace from
-    # starting any real task run before that declaration exists (see
-    # Workspace#initialized?), so this blank-patterns branch only ever
-    # applies to the bootstrap run itself, which never proposes writable
-    # paths in the first place.
-    def protected_path?(path, patterns)
-      return true if patterns.blank?
-
-      patterns.any? { |glob| File.fnmatch?(glob, path, File::FNM_PATHNAME) }
-    end
-    private_class_method :protected_path?
-
-    def workspace_protected_patterns(run_id)
-      Run.find_by(run_id: run_id)&.workspace&.protected_path_patterns
-    end
-    private_class_method :workspace_protected_patterns
   end
 end

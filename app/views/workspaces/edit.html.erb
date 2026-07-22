@@ -10,10 +10,10 @@
   </div>
 
   <div class="field">
-    <%= form.label :protected_path_patterns_text, "Protected path patterns" %>
+    <%= form.label :protected_path_patterns_text, "High-impact operational path patterns" %>
     <p class="muted">
-      One glob pattern per line. A planner step may only touch a matching path with an answered operator
-      approval question. Proposed automatically by this workspace's project_init run; edit freely.
+      One glob pattern per line. This is workspace setup metadata for high-impact operational files. Normal workers
+      are authorized by the exact paths on their implementation step. Proposed automatically by project setup; edit freely.
     </p>
     <%= form.text_area :protected_path_patterns_text, value: @workspace.protected_path_patterns.join("\n"), rows: 10 %>
   </div>

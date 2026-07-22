@@ -80,11 +80,9 @@ class RunsController < ApplicationController
 
   private
 
-  # StepPolicy fails closed (protects everything) until a workspace has
-  # declared its own protected paths (Workspace#initialized?), so no real
-  # task run may launch before that -- the bootstrap run that does the
-  # declaring is created separately, via Orchestrator::WorkspaceInit, not
-  # through this controller.
+  # A workspace must complete its bootstrap setup before task runs launch.
+  # That setup records its local development environment and high-impact
+  # operational path metadata; execution authorization remains step-scoped.
   def require_initialized_workspace
     return if current_workspace.initialized?
 
