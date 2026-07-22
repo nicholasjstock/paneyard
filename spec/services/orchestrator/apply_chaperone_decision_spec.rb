@@ -20,7 +20,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
 
       described_class.call(
         review:, action: "stop", summary: "The artifact-only retry cannot change the endpoint.",
-        planner_tier: "strong",
+        planner_tier: "strong", blocker_key: "hardcoded-endpoint",
         context_requests: [ { source: "artifact", reference: "recording.md", question: "Why did the retry fail?", max_chars: 500 } ]
       )
 
@@ -28,11 +28,12 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       replan = SpawnRequest.find_by!(run_id: run.run_id, requested_role: "planner", asked_by: "chaperone")
       expect(replan.context).to include("front/src/config.ts")
       expect(replan.model_tier).to eq("strong")
+      expect(replan.tags).to include("blocker:hardcoded-endpoint")
       expect(run.reload.phase).to eq("planning")
       expect(review.reload.action).to eq("stop")
     end
 
-    it "asks only after the one bounded repair replan for the same lineage was used" do
+    it "asks only after the same blocker was already replanned at the same tier for the lineage" do
       run = create_run
       source = run.spawn_requests.create!(
         asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
@@ -41,8 +42,8 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       )
       run.spawn_requests.create!(
         asked_by: "chaperone", scope: Orchestrator::Turn::PLANNER_FOLLOWUP_SCOPE, text: "Repair replan.",
-        requested_role: "planner", priority: "blocking", lineage_key: "criterion:phone-flow",
-        tags: %w[planner chaperone stopped_retry replan]
+        requested_role: "planner", priority: "blocking", lineage_key: "criterion:phone-flow", model_tier: "strong",
+        tags: %w[planner chaperone stopped_retry replan blocker:hardcoded-endpoint]
       )
       attempt = StepAttempt.create!(
         run:, spawn_request: source, worker_id: SecureRandom.uuid, lineage_key: "criterion:phone-flow",
@@ -53,10 +54,102 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
         status: "running", token_digest: SecureRandom.hex(32), expires_at: 1.hour.from_now
       )
 
-      described_class.call(review:, action: "stop", summary: "The bounded repair route is exhausted.")
+      described_class.call(
+        review:, action: "stop", summary: "The bounded repair route is exhausted.",
+        planner_tier: "strong", blocker_key: "hardcoded-endpoint",
+        context_requests: [ { source: "artifact", reference: "recording.md", question: "Still blocked?", max_chars: 500 } ]
+      )
 
       expect(UserQuestion.where(run_id: run.run_id, priority: "blocking", status: "open").count).to eq(1)
       expect(run.reload.phase).to eq("blocked_on_user")
+    end
+
+    it "still asks the operator when no plannerTier is given" do
+      run = create_run
+      source = run.spawn_requests.create!(
+        asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
+        priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
+        write_scope: "artifact_only", allowed_paths: []
+      )
+      attempt = StepAttempt.create!(
+        run:, spawn_request: source, worker_id: SecureRandom.uuid, lineage_key: "criterion:phone-flow",
+        mode: "recording", outcome: "blocked", result: "No safe bounded repair exists."
+      )
+      review = ChaperoneReview.create!(
+        run:, lineage_key: "criterion:phone-flow", step_attempt_ids: [ attempt.attempt_id ], subject_type: "diagnosis",
+        status: "running", token_digest: SecureRandom.hex(32), expires_at: 1.hour.from_now
+      )
+
+      described_class.call(review:, action: "stop", summary: "No safe bounded repair exists.")
+
+      expect(UserQuestion.where(run_id: run.run_id, priority: "blocking", status: "open").count).to eq(1)
+      expect(run.reload.phase).to eq("blocked_on_user")
+    end
+
+    it "allows a second replan for a genuinely different blocker in the same lineage" do
+      run = create_run
+      source = run.spawn_requests.create!(
+        asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
+        priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
+        write_scope: "artifact_only", allowed_paths: []
+      )
+      run.spawn_requests.create!(
+        asked_by: "chaperone", scope: Orchestrator::Turn::PLANNER_FOLLOWUP_SCOPE, text: "Repair replan.",
+        requested_role: "planner", priority: "blocking", lineage_key: "criterion:phone-flow", model_tier: "small",
+        tags: %w[planner chaperone stopped_retry replan blocker:hardcoded-endpoint]
+      )
+      attempt = StepAttempt.create!(
+        run:, spawn_request: source, worker_id: SecureRandom.uuid, lineage_key: "criterion:phone-flow",
+        mode: "recording", outcome: "blocked", result: "The endpoint fix landed; recording now fails on a stale test assertion."
+      )
+      review = ChaperoneReview.create!(
+        run:, lineage_key: "criterion:phone-flow", step_attempt_ids: [ attempt.attempt_id ], subject_type: "diagnosis",
+        status: "running", token_digest: SecureRandom.hex(32), expires_at: 1.hour.from_now
+      )
+
+      described_class.call(
+        review:, action: "stop", summary: "A new blocker emerged after the endpoint fix.",
+        planner_tier: "small", blocker_key: "stale-test-assertion",
+        context_requests: [ { source: "artifact", reference: "recording.md", question: "What broke now?", max_chars: 500 } ]
+      )
+
+      expect(UserQuestion.where(run_id: run.run_id, priority: "blocking", status: "open")).to be_empty
+      replan = SpawnRequest.where(run_id: run.run_id, requested_role: "planner", asked_by: "chaperone").order(:id).last
+      expect(replan.tags).to include("blocker:stale-test-assertion")
+      expect(run.reload.phase).to eq("planning")
+    end
+
+    it "allows escalating the same blocker to a stronger tier after the small-tier replan was scoped too narrowly" do
+      run = create_run
+      source = run.spawn_requests.create!(
+        asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
+        priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
+        write_scope: "artifact_only", allowed_paths: []
+      )
+      run.spawn_requests.create!(
+        asked_by: "chaperone", scope: Orchestrator::Turn::PLANNER_FOLLOWUP_SCOPE, text: "Repair replan.",
+        requested_role: "planner", priority: "blocking", lineage_key: "criterion:phone-flow", model_tier: "small",
+        tags: %w[planner chaperone stopped_retry replan blocker:hardcoded-endpoint]
+      )
+      attempt = StepAttempt.create!(
+        run:, spawn_request: source, worker_id: SecureRandom.uuid, lineage_key: "criterion:phone-flow",
+        mode: "recording", outcome: "blocked", result: "The small-tier replan excluded the file that needed the fix."
+      )
+      review = ChaperoneReview.create!(
+        run:, lineage_key: "criterion:phone-flow", step_attempt_ids: [ attempt.attempt_id ], subject_type: "diagnosis",
+        status: "running", token_digest: SecureRandom.hex(32), expires_at: 1.hour.from_now
+      )
+
+      described_class.call(
+        review:, action: "stop", summary: "The small-tier envelope excluded the file that needed the fix.",
+        planner_tier: "strong", blocker_key: "hardcoded-endpoint",
+        context_requests: [ { source: "artifact", reference: "recording.md", question: "Still blocked?", max_chars: 500 } ]
+      )
+
+      expect(UserQuestion.where(run_id: run.run_id, priority: "blocking", status: "open")).to be_empty
+      replan = SpawnRequest.find_by!(run_id: run.run_id, requested_role: "planner", asked_by: "chaperone", model_tier: "strong")
+      expect(replan.tags).to include("blocker:hardcoded-endpoint")
+      expect(run.reload.phase).to eq("planning")
     end
   end
 

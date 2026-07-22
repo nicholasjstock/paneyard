@@ -17,6 +17,10 @@ module McpTools
           type: "string", enum: %w[small strong],
           description: "For stop only: request one bounded repair-planning turn. Choose small when the cited evidence makes the repair obvious; choose strong only when repair scope or tradeoffs need stronger reasoning."
         },
+        blockerKey: {
+          type: [ "string", "null" ],
+          description: "Required alongside plannerTier: a short stable slug (letters, digits, hyphens) naming the specific condition blocking progress, e.g. 'stale-recorder-assertion' or 'docker-unavailable'. Reuse the same key if a later review is stopped by the identical blocker recurring -- that lineage+blocker+tier combination gets at most one repair replan. Use a new key when the evidence shows a genuinely different blocker, even in the same lineage, so it gets its own replan."
+        },
         contextRequests: {
           type: "array",
           description: "For a stop-triggered repair plan only: the minimum bounded artifact, run_context, or worker_log windows the planner needs. Arbitrary workspace files are not available to the chaperone.",
@@ -34,12 +38,12 @@ module McpTools
       required: %w[action summary]
     )
 
-    def self.call(action:, summary:, server_context:, revisedInstruction: nil, plannerTier: nil, contextRequests: nil)
+    def self.call(action:, summary:, server_context:, revisedInstruction: nil, plannerTier: nil, contextRequests: nil, blockerKey: nil)
       review = ChaperoneReview.find(server_context[:review_id])
       review.record_tool_call!(tool_name)
       Orchestrator::ApplyChaperoneDecision.call(
         review:, action:, summary:, revised_instruction: revisedInstruction,
-        planner_tier: plannerTier, context_requests: contextRequests
+        planner_tier: plannerTier, context_requests: contextRequests, blocker_key: blockerKey
       )
       ToolResponse.structured(reviewId: review.review_id, action:, accepted: true)
     end

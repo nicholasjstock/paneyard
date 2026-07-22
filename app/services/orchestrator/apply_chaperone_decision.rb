@@ -2,7 +2,7 @@ module Orchestrator
   module ApplyChaperoneDecision
     module_function
 
-    def call(review:, action:, summary:, revised_instruction: nil, planner_tier: nil, context_requests: nil)
+    def call(review:, action:, summary:, revised_instruction: nil, planner_tier: nil, context_requests: nil, blocker_key: nil)
       raise ArgumentError, "Unknown chaperone action" unless ChaperoneReview::ACTIONS.include?(action)
 
       return apply_planner_decision(review:, action:, summary:, revised_instruction:) if review.subject_type == "planner"
@@ -32,7 +32,7 @@ module Orchestrator
           # the concrete evidence to the planner so it can authorize a narrow
           # follow-up (for example a non-protected endpoint/configuration fix)
           # before it considers asking the user.
-          queue_diagnosis_replan!(review:, source:, summary:, planner_tier:, context_requests:)
+          queue_diagnosis_replan!(review:, source:, summary:, planner_tier:, context_requests:, blocker_key:)
         end
         review.update!(status: "completed", action:, summary:, completed_at: Time.current)
         StepAttempt.where(attempt_id: review.step_attempt_ids).update_all(
@@ -118,7 +118,9 @@ module Orchestrator
     end
     private_class_method :diagnosis_stop_question
 
-    def queue_diagnosis_replan!(review:, source:, summary:, planner_tier:, context_requests:)
+    BLOCKER_KEY_PATTERN = /\A[a-z0-9]+(-[a-z0-9]+)*\z/
+
+    def queue_diagnosis_replan!(review:, source:, summary:, planner_tier:, context_requests:, blocker_key:)
       unless planner_tier.present?
         UserQuestion.create!(
           run_id: review.run_id, asked_by: "chaperone", scope: source.scope,
@@ -130,19 +132,21 @@ module Orchestrator
         return
       end
 
-      if bounded_replan_already_requested?(review)
+      tier = planner_tier.presence || "small"
+      raise ArgumentError, "Chaperone planner tier must be small or strong" unless %w[small strong].include?(tier)
+      raise ArgumentError, "A repair planner requires a blockerKey identifying the blocking condition" if blocker_key.blank?
+      raise ArgumentError, "blockerKey must be a lowercase-hyphenated slug" unless blocker_key.match?(BLOCKER_KEY_PATTERN)
+
+      if bounded_replan_already_requested?(review:, blocker_key:, tier:)
         UserQuestion.create!(
           run_id: review.run_id, asked_by: "chaperone", scope: source.scope,
-          text: "The one evidence-backed repair plan for this blocked lineage was already attempted. What should the run do next?",
+          text: "The evidence-backed repair plan for this blocker (\"#{blocker_key}\", #{tier} tier) was already attempted for this lineage. What should the run do next?",
           context: stop_question_context(review:, summary:), priority: "blocking",
           tags: %w[chaperone stopped repair_replan_exhausted]
         )
         review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: summary)
         return
       end
-
-      tier = planner_tier.presence || "small"
-      raise ArgumentError, "Chaperone planner tier must be small or strong" unless %w[small strong].include?(tier)
 
       latest_attempt = StepAttempt.where(attempt_id: review.step_attempt_ids).order(:created_at).last
       raise ArgumentError, "A repair planner requires at least one chaperone-selected context request" if Array(context_requests).empty?
@@ -164,20 +168,27 @@ module Orchestrator
         requested_role: "planner",
         model_tier: tier,
         priority: "blocking",
-        tags: %w[planner chaperone stopped_retry replan],
+        tags: [ "planner", "chaperone", "stopped_retry", "replan", "blocker:#{blocker_key}" ],
         lineage_key: review.lineage_key
       )
       review.run.publish_phase!(phase: "planning", owner: "chaperone", summary: "Chaperone stopped the retry and requested a bounded replan: #{summary}")
     end
     private_class_method :queue_diagnosis_replan!
 
-    def bounded_replan_already_requested?(review)
+    # Scoped per (lineage, blocker, tier) rather than per lineage: the same
+    # blocker recurring at the same tier means the replan already tried and
+    # failed to fix it, so stop for real. A new blocker, or the same blocker
+    # escalating from small to strong after a too-narrow small-tier envelope,
+    # both get their own one-shot repair budget instead of being lumped
+    # together as "this lineage already used its one replan."
+    def bounded_replan_already_requested?(review:, blocker_key:, tier:)
       SpawnRequest.where(
         run_id: review.run_id,
         asked_by: "chaperone",
         requested_role: "planner",
-        lineage_key: review.lineage_key
-      ).where("tags LIKE ?", "%stopped_retry%").exists?
+        lineage_key: review.lineage_key,
+        model_tier: tier
+      ).where("tags LIKE ?", "%stopped_retry%").any? { |request| request.tags.include?("blocker:#{blocker_key}") }
     end
     private_class_method :bounded_replan_already_requested?
 
