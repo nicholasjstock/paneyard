@@ -246,9 +246,10 @@ module Orchestrator
         raw.blank? || raw.casecmp?("none") ? [] : raw.split(",").map(&:strip)
       end
 
-      return paths unless run && execution_mode(request) == "implementation" && write_scope(request) == "scoped_changes"
+      return paths unless run && execution_mode(request).in?(%w[implementation infrastructure]) && write_scope(request) == "scoped_changes"
 
-      # A planner decides whether a worker is implementing; it must not have
+      # A planner decides whether a worker is implementing or repairing
+      # infrastructure; it must not have
       # to foresee every production and test file the implementation needs.
       # The project-init-discovered source patterns stay protected for all
       # other worker modes and are granted wholesale only here.

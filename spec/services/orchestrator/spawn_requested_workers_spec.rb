@@ -114,6 +114,36 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
   end
 
+  it "grants the protected source surface to scoped infrastructure workers" do
+    project_root = Dir.mktmpdir
+    source_root = File.join(project_root, "main")
+    FileUtils.mkdir_p(File.join(source_root, "app"))
+    workspace = Workspace.create!(
+      name: "spawn-infrastructure-roots-#{SecureRandom.hex(4)}", root_path: project_root,
+      protected_path_patterns: [ "app/**" ]
+    )
+    run = workspace.runs.create!(
+      run_id: "spawn-infrastructure-roots-#{SecureRandom.hex(4)}", task: "Repair setup", target_root: source_root,
+      launcher_variant: "codex", status: "running"
+    )
+    run.spawn_requests.create!(
+      asked_by: "planner", scope: "repair.md", text: "Repair the environment.", requested_role: "infrastructure", priority: "blocking",
+      execution_mode: "infrastructure", write_scope: "scoped_changes", allowed_paths: []
+    )
+
+    spawned = nil
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+      spawned = kwargs
+      instance_double(Worker, worker_id: kwargs[:worker_id])
+    end
+
+    Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    expect(spawned[:allowed_paths]).to eq([ "app/**" ])
+  ensure
+    FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
+  end
+
   it "dispatches only one queued verifier per run, leaving later work queued" do
     workspace = Workspace.create!(name: "serial-verifiers-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(
