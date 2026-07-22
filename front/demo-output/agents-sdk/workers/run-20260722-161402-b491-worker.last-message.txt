@@ -1,0 +1,5 @@
+[DONE] Baseline documented and handed to the planner.
+
+Artifact: [workspace-run-switcher-baseline.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491/front/demo-output/agents-sdk/run-20260722-161402-b491/workspace-run-switcher-baseline.md)
+
+Confirmed boundary: shared layout navigation, `ApplicationController#require_workspace`, `RunsController#index`, and existing `Run#active` scope. No source files changed.

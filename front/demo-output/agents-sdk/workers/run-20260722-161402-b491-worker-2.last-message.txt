@@ -1,0 +1,7 @@
+[BLOCKED] Approval boundary confirmed.
+
+- Protected target: `app/views/layouts/application.html.erb`
+- No answered operator approval exists.
+- No repository files changed.
+- Report written: [workspace-run-switcher-approval-request.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491/front/demo-output/agents-sdk/run-20260722-161402-b491/workspace-run-switcher-approval-request.md)
+- `worker_turn` reported the blocker to the planner with verbatim evidence citations.

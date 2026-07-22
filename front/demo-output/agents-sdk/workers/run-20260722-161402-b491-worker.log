@@ -1,0 +1,1480 @@
+[workflow] 2026-07-22T16:14:25.515Z worker:lifecycle: spawned worker {"worker_id":"3752a285-7742-4b2a-b6e4-d0421366d7ad","run_id":"run-20260722-161402-b491","role":"worker","nickname":"worker","pid":57613,"scope":"workspace-run-switcher-baseline.md","reason":"Bus request from planner for workspace-run-switcher-baseline.md.","command":"codex","status":"running","stop_reason":null}
+OpenAI Codex v0.145.0
+--------
+workdir: /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491
+model: gpt-5.6-luna
+provider: openai
+approval: never
+sandbox: custom permissions (network access enabled)
+reasoning effort: medium
+reasoning summaries: none
+session id: 019f8a9b-5e1d-7360-b83e-c4bb5567b369
+--------
+user
+# Durable project knowledge for this workspace (evidence-backed; call get_project_memory for full detail if needed)
+
+- [operational_rule] dev-environment: Run `bin/setup --skip-server` once to install Ruby dependencies and prepare the database. Then run `bin/dev` to start the full development environment. The `bin/dev` script starts the Rails server (Puma) and Solid Queue jobs process together, both exit on interrupt. It verifies bundle dependencies, pending migrations, and PORT availability (default 3000) before starting. Custom port: PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev
+- [operational_rule] test: Run `bundle exec rspec` to execute the full test suite.
+- [operational_rule] code-quality: Run `bin/rubocop` to check Ruby code style. This is part of the CI pipeline and uses .rubocop.yml configuration.
+- [operational_rule] ci-full: Run `bin/ci` to execute the complete CI pipeline including setup, rubocop, bundler-audit, importmap audit, and brakeman security analysis.
+- [operational_rule] tests: Run `bundle exec rspec` to execute the full test suite.
+- [operational_rule] port-customization: To use a non-default port for development, set the PORT environment variable: `PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev`. This is useful when the default port 3000 is already in use.
+
+# Runtime identity (authoritative)
+
+- runId: run-20260722-161402-b491
+- workerId: 3752a285-7742-4b2a-b6e4-d0421366d7ad
+- nickname: worker
+- role: worker
+- scope/artifact: workspace-run-switcher-baseline.md
+- execution mode: diagnosis
+- write scope: source_protected
+- authorized workspace files: none
+
+Rails authenticates MCP calls with this worker's private capability. Do not invent or alter identity fields.
+`worker_turn` derives nickname and scope from that capability; pass runId, role, task, and result.
+The target workspace root is `/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491`. Start repository commands with `cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491`.
+Bash is available under a launcher-enforced filesystem policy. Writes to tracked repository source are limited
+to the exact authorized paths above -- source-protected workers have none. Gitignored paths (caches, build
+output, node_modules, etc.) stay writable regardless, since tooling needs them and they aren't source. Run
+bounded commands (they
+exit on their own) in the foreground through Bash so they remain inside this worker's sandbox and process
+group. Any command that is long-running by nature (a dev server, a watcher, anything that does not exit on
+its own) MUST always be started with `start_run_command` instead, even if you only need it for the rest of
+this turn -- `&`, `nohup`, and log redirection do not reliably keep a process alive even across your own
+next Bash call.
+Use `write_workflow_artifact` for the assigned artifact.
+
+name = "worker"
+description = "Generic task worker: verifies artifacts or applies a scoped fix, depending on what the current bus request/prompt actually describes."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+You are a generic worker. Your identity for this run comes entirely from your bus request/prompt, not from a fixed role name — read it first to learn whether this task is a verification pass or a scoped code fix, then apply the matching discipline below.
+
+- Use the structured message format from `.codex/agents/MESSAGING_PROTOCOL.md`.
+- Use the `workflow` MCP server to resolve context and artifacts before doing anything else.
+- Only the orchestrator manages worker lifecycle. Do not call `spawn_worker`, `list_workers`, or `stop_worker` directly.
+- When you finish, call `worker_turn` with `role="worker"`, your `nickname`, `scope`, and a result beginning with `[DONE]`, `[BLOCKED]`, or `[FAILED]`. Rails promotes an already-planned following step after `[DONE]`; otherwise it queues one bounded planner decision. No planner agent process is spawned.
+- If an unexpected failure or decision would require changing files, configuration, tests, services, or tooling outside the assigned scope, do not investigate or repair it beyond the minimum read-only evidence needed to identify it. Write the partial result to the assigned artifact, then immediately call `worker_turn` with `result` marked `[BLOCKED]`, the exact error, command, affected path, and a suggested downstream scope. The follow-up planner decides whether to create a separate task.
+- Any command that is long-running by nature -- a dev server, a watcher, anything that does not exit on its own -- MUST always be started with `start_run_command`, even if you only need it for the rest of this turn. This is not a judgment call about whether it outlives you: `&`, `nohup`, `disown`, and log redirection do not reliably keep a process alive even across your own next command. Inspect `list_run_commands` before starting a duplicate; use `read_run_command_log` with an offset instead of re-reading the whole log; call `stop_run_command` when you no longer need it, unless run-level cleanup will handle it; report the `commandId` in your artifact and `worker_turn` result.
+- Never create or spawn another worker directly. Report `[BLOCKED]` through `worker_turn`; Rails and the planner own all follow-up routing.
+- Inspect the workspace and use its native commands; do not require orchestrator-specific source configuration or assume a language, package manager, directory layout, or service port.
+- Run bounded commands (they exit on their own) in the foreground and wait for them to finish before reporting. Long-running commands (a dev server, a watcher, anything that does not exit on its own) always use `start_run_command` instead -- see above; foreground children remain owned by the worker process group and inherit the Codex permission profile, so nothing detached this way survives even your next command.
+- Do not write project memory. Report candidate durable facts with their evidence in your artifact and `worker_turn`; the planner decides whether to promote them.
+- If something you try fails, call `report_failed_approach` with what you tried and what happened before moving on -- do this every time, not only in your final report.
+- Report files changed (if any), commands run, and the verification result in your final `worker_turn` result.
+- Do not modify code, and do not route around other workers, unless the task you were actually given calls for it.
+
+## If your task is verifying or analyzing artifacts (logs, screenshots, test output, or other generated evidence)
+
+- Prefer `collect_workflow_state` to inventory available evidence. `read_workflow_artifact` returns a small initial window; request a later `offset` only when that evidence leaves a specific question unanswered.
+- Prefer the fastest evidence source that can answer the question — logs or screenshots before a full pass over generated artifacts — and fall back to a deeper pass only when cheaper evidence is insufficient.
+- Within your own turn, go progressively deeper, not in parallel: a `fast` pass answers the cheapest useful question and surfaces critical failures as early as possible; if warranted, follow with `medium` (state transitions and timing gaps), then `slow` (the most complete timeline and edge-case findings).
+- Validate the artifact before analysis. A blank, corrupted, or unreadable artifact is a failure, not a success — never claim success without positive evidence.
+- Only report success when you can cite concrete evidence (timestamps, file references, visible content) for the expected outcome.
+- If baseline validation fails, or the evidence is inconclusive and another artifact is needed, emit `[FAILED]` or `[BLOCKED]` — do not emit `[DONE]` and do not say "all checks passed" without that evidence.
+
+## If your task is a scoped code fix
+
+- Read the task's structured execution policy and `successCheck` together. Repository writes are limited to the exact files in `Allowed repository paths`; an empty list means artifact output only.
+- Treat the structured execution policy in the current task as authoritative. In `diagnosis` mode, gather evidence and report the confirmed failure boundary; do not implement an application fix. Never edit a repository path that is not listed under `Allowed repository paths`.
+- A diagnosis handoff is accepted only when `worker_turn` includes `evidenceOutcome` (`confirmed` or `blocked`) and one or more `evidenceCitations` copied verbatim from the run-scoped artifact. Use `blocked` whenever the reproduction did not reach the assigned boundary; never promote code inspection or an earlier artifact into a confirmed runtime cause.
+- When diagnosis confirms exact implementation targets or measurements, also pass `diagnosisFindings` to `worker_turn`: `targetPaths` must contain exact workspace-relative files cited in the artifact, `measurements` contain numeric `{name, value, unit}` facts, and `objective` restates the bounded run objective. Rails persists these curated facts for the next planner; keep the full evidence in the artifact.
+- Inspect and cite the actual consumer before changing a producer or response shape. Controller, OpenAPI, migration, schema, or generated-file changes require the task to include an answered operator approval reference; otherwise stop and report the proposed contract change through `worker_turn`.
+- Add or update the preferred regression test for that scope first — a frontend test, a failing request spec, an infrastructure test, or the nearest equivalent — then implement the smallest defensible fix (TDD-first).
+- Verify the fix with the scope-appropriate command (typecheck, test run, or guarded command) before reporting done.
+- If the required verification command is broken by unrelated test infrastructure (for example aliases, runners, shared configuration, or unrelated assertions), do not fix that infrastructure inside this worker. Report the scoped code result and call `worker_turn` as `[BLOCKED]`; a passing test is not permission to expand the assignment.
+- Report files changed, commands run, and verification result.
+"""
+nickname_candidates = ["worker", "task-worker"]
+
+
+Current task:
+Run run-20260722-161402-b491. Bus request: workspace-run-switcher-baseline.md. Requested by: planner. Target role: worker. Execution mode: diagnosis. Write scope: source_protected. Allowed repository paths: none. Evidence references: none. Document the exact workspace-scoped routes, controllers, views, and existing navigation elements that render the current UI; record the current behavior and identify the smallest bounded source files needed to add a current-runs dropdown that preserves workspace-first scoping. This is an evidence-gathering task. Do not implement an application fix or change a public contract. Report the confirmed boundary back to the planner. Before worker_turn, write the artifact and pass evidenceOutcome=confirmed or blocked plus evidenceCitations copied verbatim from that artifact. Use blocked when the reproduction did not reach the target boundary. No operator approval exists for this workspace's declared protected paths. Context: First locate the existing workspace/run navigation and document the current UI flow so the switcher can be implemented against the correct Rails view and controller boundaries.. Write your report via write_workflow_artifact using artifactName="workspace-run-switcher-baseline.md". Use the shared workflow bus for blockers.
+codex
+I’m using the workflow handoff tools to resolve the assigned run context first, then I’ll trace the workspace/run routes, controller actions, views, and navigation in read-only mode and record exact evidence in the requested artifact.
+mcp: workflow/collect_workflow_state started
+mcp: workflow/collect_workflow_state (completed)
+mcp: workflow/get_run_context started
+mcp: workflow/get_run_context (completed)
+mcp: workflow/get_project_memory started
+mcp: workflow/get_project_memory (completed)
+exec
+/bin/zsh -lc "pwd; rg --files app config spec | sed -n '1,240p'; sed -n '1,220p' .codex/agents/MESSAGING_PROTOCOL.md; sed -n '1,260p' config/routes.rb" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491
+ succeeded in 0ms:
+/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491
+config/initializers/inflections.rb
+config/initializers/content_security_policy.rb
+config/initializers/assets.rb
+config/initializers/filter_parameter_logging.rb
+config/importmap.rb
+spec/worker_docs_spec.rb
+config/queue.yml
+config/boot.rb
+config/ci.rb
+config/cache.yml
+config/database.yml
+config/deploy.yml
+config/credentials.yml.enc
+config/bundler-audit.yml
+config/puma.rb
+config/application.rb
+config/storage.yml
+config/environment.rb
+config/recurring.yml
+spec/rails_helper.rb
+spec/services/orchestrator/spawn_requested_workers_spec.rb
+spec/services/orchestrator/planner_decision_submission_spec.rb
+spec/services/orchestrator/chaperone_routing_spec.rb
+spec/services/orchestrator/worker_spawner_spec.rb
+spec/services/orchestrator/apply_chaperone_decision_spec.rb
+spec/services/orchestrator/turn_spec.rb
+spec/services/orchestrator/pull_request_resume_spec.rb
+spec/services/orchestrator/tick_state_spec.rb
+spec/services/orchestrator/artifact_store_spec.rb
+spec/services/orchestrator/planner_decision_runner_spec.rb
+spec/services/orchestrator/worker_execution_policy_spec.rb
+spec/services/orchestrator/structured_diagnosis_findings_spec.rb
+spec/services/orchestrator/worker_activity_spec.rb
+spec/services/orchestrator/tick_state_history_spec.rb
+spec/services/orchestrator/objective_alignment_spec.rb
+spec/services/orchestrator/planner_decision_capability_spec.rb
+spec/services/orchestrator/switch_run_launcher_spec.rb
+spec/services/orchestrator/turn_routing_spec.rb
+spec/services/orchestrator/planner_spec.rb
+spec/services/orchestrator/run_command_runner_spec.rb
+spec/services/orchestrator/step_policy_spec.rb
+spec/services/orchestrator/workspace_chat_runner_spec.rb
+spec/services/orchestrator/worker_mcp_server_spec.rb
+spec/services/orchestrator/run_context_spec.rb
+spec/services/orchestrator/acceptance_criteria_spec.rb
+spec/services/orchestrator/target_preflight_spec.rb
+spec/services/orchestrator/acceptance_criteria_workers_spec.rb
+spec/services/orchestrator/worker_spawner_contract_spec.rb
+spec/services/orchestrator/run_usage_spec.rb
+spec/services/orchestrator/log_reader_spec.rb
+spec/services/orchestrator/workspace_chat_capability_spec.rb
+spec/services/orchestrator/project_memory_spec.rb
+spec/services/orchestrator/planner_context_resolver_spec.rb
+spec/services/orchestrator/project_init_trigger_spec.rb
+spec/services/orchestrator/git_worktree_spec.rb
+spec/services/orchestrator/run_publication_spec.rb
+config/cable.yml
+app/services/orchestrator/objective_alignment.rb
+app/services/orchestrator/mcp_server.rb
+app/services/orchestrator/artifact_store.rb
+app/services/orchestrator/workspace_chat_mcp_server.rb
+app/services/orchestrator/workspace_init.rb
+app/services/orchestrator/run_publication.rb
+app/services/orchestrator/log_reader.rb
+app/services/orchestrator/planner_decision_submission.rb
+app/services/orchestrator/planner.rb
+app/services/orchestrator/switch_run_launcher.rb
+app/services/orchestrator/tick_state.rb
+app/services/orchestrator/acceptance_criteria.rb
+app/services/orchestrator/worker_execution_policy.rb
+app/services/orchestrator/structured_diagnosis_findings.rb
+app/services/orchestrator/run_usage.rb
+app/services/orchestrator/wire_format.rb
+app/services/orchestrator/turn.rb
+app/services/orchestrator/apply_chaperone_decision.rb
+app/services/orchestrator/acceptance_criteria_workers.rb
+app/services/orchestrator/worker_mcp_endpoint.rb
+app/services/orchestrator/workspace_chat_mcp_endpoint.rb
+app/services/orchestrator/chaperone_trigger.rb
+app/services/orchestrator/git_worktree.rb
+app/services/orchestrator/project_memory.rb
+app/services/orchestrator/planner_context_resolver.rb
+app/services/orchestrator/planner_decision_runner.rb
+app/services/orchestrator/worker_mcp_server.rb
+app/services/orchestrator/chaperone_mcp_endpoint.rb
+app/services/orchestrator/planner_brief.rb
+app/services/orchestrator/run_context.rb
+app/services/orchestrator/workspace_chat_capability.rb
+app/services/orchestrator/spawn_requested_workers.rb
+app/services/orchestrator/run_command_runner.rb
+app/services/orchestrator/step_policy.rb
+app/services/orchestrator/workspace_chat_runner.rb
+app/services/orchestrator/diagnosis_evidence_gate.rb
+app/services/orchestrator/target_preflight.rb
+app/services/orchestrator/workspace_chat_brief.rb
+app/services/orchestrator/planner_decision_mcp_server.rb
+app/services/orchestrator/chaperone_mcp_server.rb
+app/services/orchestrator/planner_decision_mcp_endpoint.rb
+app/services/orchestrator/project_init_trigger.rb
+app/services/orchestrator/planner_decision_capability.rb
+app/services/orchestrator/worker_activity.rb
+app/services/orchestrator/worker_spawner.rb
+app/services/orchestrator/pull_request_resume.rb
+spec/spec_helper.rb
+config/routes.rb
+config/environments/test.rb
+config/environments/development.rb
+config/environments/production.rb
+spec/system/live_codex_planner_smoke_spec.rb
+spec/system/events_spec.rb
+spec/system/live_agent_runs_spec.rb
+spec/system/workers_spec.rb
+spec/system/workspaces_spec.rb
+spec/system/runs_spec.rb
+spec/system/questions_spec.rb
+spec/system/live_codex_chaperone_smoke_spec.rb
+spec/requests/runs_controller_spec.rb
+spec/requests/workspace_chat_messages_spec.rb
+spec/requests/chaperone_mcp_spec.rb
+spec/requests/health_spec.rb
+spec/requests/project_setups_spec.rb
+config/locales/en.yml
+app/services/background_job_health.rb
+spec/controllers/workspace_chats_controller_spec.rb
+spec/integration/orchestration_failure_paths_spec.rb
+app/services/mcp_tools/planner_turn_tool.rb
+spec/integration/live_agent_orchestration_spec.rb
+spec/integration/mcp_workflows_spec.rb
+spec/integration/run_orchestration_e2e_spec.rb
+app/services/mcp_tools/list_open_spawn_requests_tool.rb
+app/services/mcp_tools/report_failed_approach_tool.rb
+app/services/mcp_tools/publish_run_status_tool.rb
+app/services/mcp_tools/read_run_command_log_tool.rb
+app/services/mcp_tools/chaperone_read_artifact_tool.rb
+app/services/mcp_tools/submit_planner_decision_tool.rb
+app/services/mcp_tools/publish_planner_jobs_tool.rb
+app/services/mcp_tools/commit_run_changes_tool.rb
+app/models/workspace_memory_entry.rb
+app/models/chaperone_review.rb
+spec/support/fake_agent_harness.rb
+spec/support/database_cleaning.rb
+spec/support/fake_agent_process.rb
+spec/support/rails_server_harness.rb
+spec/jobs/planner_decision_job_spec.rb
+spec/jobs/merge_approved_runs_job_spec.rb
+spec/jobs/run_command_reconcile_job_spec.rb
+spec/support/legacy_assertion_compatibility.rb
+spec/models/acceptance_criterion_step_spec.rb
+spec/models/memory_candidate_spec.rb
+spec/models/workspace_chat_spec.rb
+spec/models/workspace_spec.rb
+spec/models/run_command_spec.rb
+spec/models/acceptance_criterion_spec.rb
+spec/models/run_spec.rb
+spec/models/chaperone_review_spec.rb
+spec/jobs/stop_run_job_spec.rb
+spec/support/system_specs.rb
+spec/support/live_agent_specs.rb
+spec/jobs/launch_run_job_spec.rb
+spec/jobs/broadcast_worker_logs_job_spec.rb
+spec/jobs/tick_run_job_spec.rb
+spec/jobs/worker_reconcile_job_spec.rb
+spec/services/mcp_tools/chaperone_state_tool_spec.rb
+spec/services/mcp_tools/workspace_chat_run_control_tool_spec.rb
+spec/services/mcp_tools/read_run_command_log_tool_spec.rb
+spec/services/mcp_tools/start_run_command_tool_spec.rb
+spec/services/mcp_tools/report_failed_approach_tool_spec.rb
+spec/services/mcp_tools/get_run_command_tool_spec.rb
+spec/services/mcp_tools/stop_run_command_tool_spec.rb
+spec/services/mcp_tools/record_run_context_entry_tool_spec.rb
+spec/services/mcp_tools/list_run_commands_tool_spec.rb
+spec/services/mcp_tools/submit_planner_decision_tool_spec.rb
+spec/services/mcp_tools/submit_acceptance_verification_tool_spec.rb
+spec/services/mcp_tools/record_protected_paths_tool_spec.rb
+spec/services/mcp_tools/worker_turn_tool_spec.rb
+spec/services/mcp_tools/record_project_setup_tool_spec.rb
+app/models/run.rb
+app/services/mcp_tools/workspace_chat_answer_question_tool.rb
+app/services/mcp_tools/plan_workflow_iteration_tool.rb
+app/services/mcp_tools/collect_workflow_state_tool.rb
+app/services/mcp_tools/stop_run_command_tool.rb
+app/services/mcp_tools/answer_user_question_tool.rb
+app/services/mcp_tools/get_run_command_tool.rb
+app/services/mcp_tools/list_recent_events_tool.rb
+app/services/mcp_tools/worker_turn_tool.rb
+app/services/mcp_tools/list_open_user_questions_tool.rb
+app/services/mcp_tools/worker_authorization.rb
+app/services/mcp_tools/append_user_question_tool.rb
+app/services/mcp_tools/record_run_context_entry_tool.rb
+app/services/mcp_tools/record_project_setup_tool.rb
+app/services/mcp_tools/stop_worker_tool.rb
+app/services/mcp_tools/read_orchestrator_tick_history_tool.rb
+app/models/bus_event.rb
+app/models/acceptance_criterion.rb
+app/services/mcp_tools/list_workers_tool.rb
+app/models/run_context_entry.rb
+app/models/workspace_chat.rb
+app/models/memory_candidate.rb
+app/models/user_question.rb
+app/models/planner_decision_attempt.rb
+app/models/workspace.rb
+app/models/planner_decision.rb
+app/models/chaperone_context.rb
+app/models/orchestrator_tick.rb
+app/models/spawn_request.rb
+app/models/workspace_chat_message.rb
+app/models/acceptance_criterion_step.rb
+app/services/mcp_tools/write_workflow_artifact_tool.rb
+app/models/step_attempt.rb
+app/models/run_command.rb
+app/models/application_record.rb
+app/models/worker.rb
+app/controllers/questions_controller.rb
+app/controllers/workspaces_controller.rb
+app/controllers/health_controller.rb
+app/controllers/events_controller.rb
+app/controllers/application_controller.rb
+app/helpers/application_helper.rb
+app/helpers/runs_helper.rb
+app/services/mcp_tools/record_project_memory_entry_tool.rb
+app/services/mcp_tools/chaperone_decision_tool.rb
+app/services/mcp_tools/append_spawn_request_tool.rb
+app/services/mcp_tools/record_protected_paths_tool.rb
+app/services/mcp_tools/chaperone_state_tool.rb
+app/services/mcp_tools/get_run_context_tool.rb
+app/services/mcp_tools/fulfill_spawn_request_tool.rb
+app/services/mcp_tools/submit_acceptance_verification_tool.rb
+app/services/mcp_tools/tool_response.rb
+app/services/mcp_tools/spawn_worker_tool.rb
+app/services/mcp_tools/write_scoped_file_tool.rb
+app/services/mcp_tools/workspace_chat_run_control_tool.rb
+app/services/mcp_tools/read_workflow_artifact_tool.rb
+app/services/mcp_tools/list_user_questions_tool.rb
+app/services/mcp_tools/get_project_memory_tool.rb
+app/services/mcp_tools/list_run_commands_tool.rb
+app/services/mcp_tools/start_run_command_tool.rb
+app/services/mcp_tools/ping_tool.rb
+app/services/mcp_tools/write_orchestrator_state_tool.rb
+app/services/mcp_tools/workspace_chat_state_tool.rb
+app/services/mcp_tools/read_orchestrator_state_tool.rb
+# Codex Agent Messaging Protocol
+
+Codex subagents in this repo should report progress with short structured lines, not prose-heavy status dumps.
+
+Format:
+
+```text
+[TAG] key="value" key2="value2" msg="Short summary"
+```
+
+Use these tags:
+
+- `[STATUS]` for progress updates
+- `[BLOCKED]` when waiting on an external condition or another agent
+- `[FAILED]` when the task cannot recover
+- `[DONE]` when the task finishes successfully
+- `[QUESTION_TO_USER]` when a child needs a user decision
+- `[RECEIVE_MESSAGE]` when a parent records a child update
+- `[TRANSITION]` when moving between major phases
+
+Guidelines:
+
+- Keep `msg` to one short sentence.
+- Include artifact paths, timestamps, durations, and evidence paths when relevant.
+- Prefer exact values over vague descriptions.
+- Use plain prose only for the final synthesized handoff back to the parent agent.
+- Route all user-facing questions and state synthesis through the orchestrator and the shared bus.
+- Workers and orchestrators should read the bus before deciding whether they have pending work.
+- Child agents should never rely on the user noticing raw logs; surface decisions explicitly with `[QUESTION_TO_USER]`.
+- Do not emit `[DONE]` for verification if the artifact is blank, black, static, corrupted, unreadable, or otherwise unsupported by positive evidence.
+- Emit an initial `[STATUS]` within 30 seconds of starting work.
+- For any task that runs longer than 60 seconds, emit another `[STATUS]` at least every 60 seconds.
+- If a child task shows no progress or no fresh evidence for 180 seconds, emit `[BLOCKED]` instead of waiting silently.
+Rails.application.routes.draw do
+  # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
+
+  # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
+  # Can be used by load balancers and uptime monitors to verify that the app is live.
+  get "up" => "health#show", as: :rails_health_check
+
+  # MCP endpoint worker/planner CLI subprocesses connect to (see
+  # app/services/orchestrator/mcp_server.rb, app/mcp_tools/) -- Streamable
+  # HTTP, hosted inside this already-running process rather than spawned
+  # fresh per worker like the old scripts/workflow-mcp-server.ts did.
+  mount Orchestrator::ChaperoneMcpEndpoint.new => "/mcp/chaperone"
+  mount Orchestrator::WorkspaceChatMcpEndpoint.new => "/mcp/workspace-chat"
+  mount Orchestrator::WorkerMcpEndpoint.new => "/mcp/worker"
+  mount Orchestrator::PlannerDecisionMcpEndpoint.new => "/mcp/planner-decision"
+  mcp_transport = MCP::Server::Transports::StreamableHTTPTransport.new(Orchestrator::McpServer.build)
+  mount mcp_transport => "/mcp"
+
+  # Render dynamic PWA files from app/views/pwa/* (remember to link manifest in application.html.erb)
+  # get "manifest" => "rails/pwa#manifest", as: :pwa_manifest
+  # get "service-worker" => "rails/pwa#service_worker", as: :pwa_service_worker
+
+  # Defines the root path route ("/")
+  root "workspaces#index"
+
+  resources :workspaces, only: %i[index show new create edit update destroy] do
+    resource :project_setup, only: %i[create]
+
+    resources :chats, controller: "workspace_chats", only: %i[index create show] do
+      resources :messages, controller: "workspace_chat_messages", only: %i[create]
+    end
+    resources :runs, only: %i[index new create show] do
+      member do
+        post :stop
+        post :switch_launcher
+        post :retry_publication
+      end
+    end
+
+    resources :workers, only: %i[index show] do
+      member do
+        post :stop
+      end
+    end
+
+    resources :run_commands, only: [], param: :command_id do
+      member do
+        post :stop
+      end
+    end
+
+    resources :questions, only: %i[index]
+
+    resources :events, only: %i[index]
+  end
+end
+
+exec
+/bin/zsh -lc "rg -n \"workspaces|runs|workspace|Run|Current|nav|navigation|link_to|form_with|select\" app/views app/controllers app/helpers spec/system spec/requests | sed -n '1,320p'; rg --files app/views app/controllers app/helpers | sort" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491
+ succeeded in 0ms:
+spec/system/live_codex_planner_smoke_spec.rb:5:    workspace_root = LiveAgentSpecs.workspace_root_for("codex")
+spec/system/live_codex_planner_smoke_spec.rb:6:    skip "Set LIVE_AGENT_WORKSPACE_ROOT or LIVE_AGENT_CODEX_WORKSPACE_ROOT" if workspace_root.blank?
+spec/system/live_codex_planner_smoke_spec.rb:9:    workspace = Workspace.create!(name: "live-codex-planner-#{SecureRandom.hex(4)}", root_path: workspace_root)
+spec/system/live_codex_planner_smoke_spec.rb:10:    run = workspace.runs.create!(
+spec/system/live_codex_planner_smoke_spec.rb:13:      target_root: workspace_root,
+spec/system/live_codex_planner_smoke_spec.rb:32:    visit workspace_run_path(workspace, run)
+spec/system/live_codex_planner_smoke_spec.rb:35:    allow(TickRunJob).to receive(:perform_later)
+app/controllers/project_setups_controller.rb:2:  before_action :require_workspace
+app/controllers/project_setups_controller.rb:5:    run = current_workspace.runs.active.order(created_at: :desc).first
+app/controllers/project_setups_controller.rb:8:      redirect_back fallback_location: workspace_runs_path(current_workspace), notice: "Re-running project setup…"
+app/controllers/project_setups_controller.rb:10:      Orchestrator::WorkspaceInit.launch!(current_workspace, force: true)
+app/controllers/project_setups_controller.rb:11:      redirect_to workspace_runs_path(current_workspace),
+spec/system/questions_spec.rb:3:RSpec.describe "workspace questions", type: :system do
+spec/system/questions_spec.rb:4:  it "lists only questions for the selected workspace" do
+spec/system/questions_spec.rb:5:    workspace, run = create_workspace_with_run("alpha")
+spec/system/questions_spec.rb:13:    other_workspace, other_run = create_workspace_with_run("beta")
+spec/system/questions_spec.rb:21:    visit workspace_questions_path(workspace)
+spec/system/questions_spec.rb:28:    workspace, run = create_workspace_with_run("alpha")
+spec/system/questions_spec.rb:38:    visit workspace_questions_path(workspace)
+spec/system/questions_spec.rb:45:  it "shows the empty state when a workspace has no questions" do
+spec/system/questions_spec.rb:46:    workspace, = create_workspace_with_run("alpha")
+spec/system/questions_spec.rb:48:    visit workspace_questions_path(workspace)
+spec/system/questions_spec.rb:54:    workspace, run = create_workspace_with_run("alpha")
+spec/system/questions_spec.rb:56:    visit workspace_questions_path(workspace)
+spec/system/questions_spec.rb:77:  def create_workspace_with_run(prefix)
+spec/system/questions_spec.rb:79:    workspace = Workspace.create!(name: "planner-#{suffix}", root_path: "/tmp/planner-#{suffix}")
+spec/system/questions_spec.rb:80:    run = Run.create!(
+spec/system/questions_spec.rb:83:      workspace: workspace,
+spec/system/questions_spec.rb:84:      target_root: workspace.root_path,
+spec/system/questions_spec.rb:90:    [ workspace, run ]
+app/views/questions/index.html.erb:1:<% content_for :title, "#{current_workspace.name} Questions" %>
+app/views/questions/index.html.erb:3:<%= turbo_stream_from "workspace_#{current_workspace.id}_questions" %>
+app/views/questions/index.html.erb:5:<h1><%= current_workspace.name %> Questions</h1>
+app/views/questions/index.html.erb:27:          <p><%= link_to "Open GitHub question", question["githubCommentUrl"], target: "_blank", rel: "noopener" %></p>
+app/views/questions/index.html.erb:29:          <% run = current_workspace.runs.find_by(run_id: question["runId"]) %>
+app/views/questions/index.html.erb:30:          <% if run&.pull_request_url.present? %><p><%= link_to "Open pull request", run.pull_request_url, target: "_blank", rel: "noopener" %></p><% end %>
+app/helpers/runs_helper.rb:1:module RunsHelper
+app/helpers/runs_helper.rb:15:    return "Run completion" if decision.status == "completed" && step.blank?
+spec/system/events_spec.rb:3:RSpec.describe "workspace events", type: :system do
+spec/system/events_spec.rb:4:  it "lists only recent events for the selected workspace" do
+spec/system/events_spec.rb:5:    workspace, run = create_workspace_with_run("alpha")
+spec/system/events_spec.rb:8:    other_workspace, other_run = create_workspace_with_run("beta")
+spec/system/events_spec.rb:11:    visit workspace_events_path(workspace)
+spec/system/events_spec.rb:17:  it "shows the empty state when a workspace has no recent events" do
+spec/system/events_spec.rb:18:    workspace, = create_workspace_with_run("alpha")
+spec/system/events_spec.rb:20:    visit workspace_events_path(workspace)
+spec/system/events_spec.rb:26:    workspace, run = create_workspace_with_run("alpha")
+spec/system/events_spec.rb:28:    visit workspace_events_path(workspace)
+spec/system/events_spec.rb:44:  def create_workspace_with_run(prefix)
+spec/system/events_spec.rb:46:    workspace = Workspace.create!(name: "planner-#{suffix}", root_path: "/tmp/planner-#{suffix}")
+spec/system/events_spec.rb:47:    run = Run.create!(
+spec/system/events_spec.rb:50:      workspace: workspace,
+spec/system/events_spec.rb:51:      target_root: workspace.root_path,
+spec/system/events_spec.rb:57:    [ workspace, run ]
+spec/requests/chaperone_mcp_spec.rb:13:    workspace = Workspace.create!(name: "chaperone-mcp-#{SecureRandom.hex(4)}", root_path: root)
+spec/requests/chaperone_mcp_spec.rb:14:    run = workspace.runs.create!(run_id: SecureRandom.uuid, task: "Inspect a repeated failure", target_root: root, launcher_variant: "claude")
+spec/requests/project_setups_spec.rb:4:  it "re-triggers project init against the workspace's active run" do
+spec/requests/project_setups_spec.rb:5:    workspace, run = create_workspace_with_active_run
+spec/requests/project_setups_spec.rb:7:    post workspace_project_setup_path(workspace)
+spec/requests/project_setups_spec.rb:9:    expect(response).to redirect_to(workspace_runs_path(workspace))
+spec/requests/project_setups_spec.rb:14:  it "launches a bootstrap run when the workspace has no active run to piggyback on" do
+spec/requests/project_setups_spec.rb:15:    workspace = Workspace.create!(name: "project-setup-request-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+spec/requests/project_setups_spec.rb:18:      post workspace_project_setup_path(workspace)
+spec/requests/project_setups_spec.rb:19:    end.to change { workspace.runs.count }.by(1)
+spec/requests/project_setups_spec.rb:21:    expect(response).to redirect_to(workspace_runs_path(workspace))
+spec/requests/project_setups_spec.rb:22:    run = workspace.runs.order(:created_at).last
+spec/requests/project_setups_spec.rb:23:    expect(run.launched_by).to eq("workspace_init")
+spec/requests/project_setups_spec.rb:27:  def create_workspace_with_active_run
+spec/requests/project_setups_spec.rb:29:    workspace = Workspace.create!(name: "project-setup-request-#{SecureRandom.hex(4)}", root_path: root)
+spec/requests/project_setups_spec.rb:30:    run = workspace.runs.create!(
+spec/requests/project_setups_spec.rb:34:    [ workspace, run ]
+spec/system/live_agent_runs_spec.rb:3:RSpec.describe "live agent workspace runs", type: :system, live_agent: true do
+spec/system/live_agent_runs_spec.rb:6:      workspace_root = LiveAgentSpecs.workspace_root_for(launcher_variant)
+spec/system/live_agent_runs_spec.rb:7:      skip "Set LIVE_AGENT_WORKSPACE_ROOT or LIVE_AGENT_#{launcher_variant.upcase}_WORKSPACE_ROOT for #{launcher_variant}" if workspace_root.blank?
+spec/system/live_agent_runs_spec.rb:10:      FileUtils.mkdir_p(File.join(workspace_root, "front", "demo-output", "agents-sdk"))
+spec/system/live_agent_runs_spec.rb:11:      workspace = Workspace.create!(
+spec/system/live_agent_runs_spec.rb:13:        root_path: workspace_root
+spec/system/live_agent_runs_spec.rb:16:      visit workspace_runs_path(workspace)
+spec/system/live_agent_runs_spec.rb:20:        select launcher_variant, from: "Launcher"
+spec/system/live_agent_runs_spec.rb:23:        run = wait_until(timeout: 10) { Run.order(:created_at).last }
+spec/system/live_agent_runs_spec.rb:24:        expect(page).to have_current_path(workspace_run_path(workspace, run))
+spec/system/live_agent_runs_spec.rb:28:          TickRunJob.perform_now
+spec/system/live_agent_runs_spec.rb:37:            TickRunJob.perform_now
+spec/system/live_agent_runs_spec.rb:41:          Rails.logger.error("live_agent_runs_spec background loop failed: #{e.class}: #{e.message}")
+spec/system/workspaces_spec.rb:3:RSpec.describe "workspaces", type: :system do
+spec/system/workspaces_spec.rb:4:  it "creates a workspace from the index flow, auto-launches its bootstrap run, and redirects into its runs" do
+spec/system/workspaces_spec.rb:8:      visit workspaces_path
+spec/system/workspaces_spec.rb:9:      click_link "Add workspace"
+spec/system/workspaces_spec.rb:12:      click_button "Add workspace"
+spec/system/workspaces_spec.rb:13:    end.to change(Run, :count).by(1)
+spec/system/workspaces_spec.rb:15:    expect(page).to have_text("Added workspace planner-app-#{suffix}. Discovering its dev environment and protected paths…")
+spec/system/workspaces_spec.rb:16:    expect(page).to have_current_path(%r{/workspaces/\d+/runs})
+spec/system/workspaces_spec.rb:17:    expect(page).to have_text("planner-app-#{suffix} Runs")
+spec/system/workspaces_spec.rb:21:    workspace = Workspace.find_by!(name: "planner-app-#{suffix}")
+spec/system/workspaces_spec.rb:22:    run = workspace.runs.sole
+spec/system/workspaces_spec.rb:23:    expect(run.launched_by).to eq("workspace_init")
+spec/system/workspaces_spec.rb:26:    # project_init's workspace-level findings, so queuing one here re-plans
+spec/system/workspaces_spec.rb:32:  it "lets an operator edit a workspace's protected path patterns" do
+spec/system/workspaces_spec.rb:33:    workspace = Workspace.create!(
+spec/system/workspaces_spec.rb:38:    visit workspaces_path
+spec/system/workspaces_spec.rb:39:    within(find(".card", text: workspace.name, match: :first)) { click_link "Edit" }
+spec/system/workspaces_spec.rb:46:    expect(page).to have_text("Updated workspace #{workspace.name}.")
+spec/system/workspaces_spec.rb:47:    expect(workspace.reload.protected_path_patterns).to eq(%w[app/controllers/**/*.rb db/migrate/**])
+spec/system/workspaces_spec.rb:50:  it "shows the empty state when no workspaces exist" do
+spec/system/workspaces_spec.rb:51:    visit workspaces_path
+spec/system/workspaces_spec.rb:53:    expect(page).to have_text("No workspaces registered yet.")
+spec/system/workspaces_spec.rb:56:  it "refuses to delete a workspace that still owns runs" do
+spec/system/workspaces_spec.rb:58:    workspace = Workspace.create!(name: "planner-app-#{suffix}", root_path: "/tmp/planner-app-#{suffix}")
+spec/system/workspaces_spec.rb:59:    Run.create!(
+spec/system/workspaces_spec.rb:60:      run_id: "demo-workspace-delete",
+spec/system/workspaces_spec.rb:61:      task: "Keep this workspace busy",
+spec/system/workspaces_spec.rb:62:      workspace: workspace,
+spec/system/workspaces_spec.rb:63:      target_root: workspace.root_path,
+spec/system/workspaces_spec.rb:70:    visit workspaces_path
+spec/system/workspaces_spec.rb:71:    within(find(".card", text: workspace.name, match: :first)) do
+spec/system/workspaces_spec.rb:75:    expect(page).to have_current_path(workspaces_path)
+spec/system/workspaces_spec.rb:76:    expect(page).to have_text("Cannot delete record because dependent runs exist")
+spec/system/workspaces_spec.rb:77:    expect(Workspace.exists?(workspace.id)).to be(true)
+spec/system/workspaces_spec.rb:80:  it "deletes an empty workspace from the index" do
+spec/system/workspaces_spec.rb:82:    workspace = Workspace.create!(name: "planner-app-#{suffix}", root_path: "/tmp/planner-app-#{suffix}")
+spec/system/workspaces_spec.rb:84:    visit workspaces_path
+spec/system/workspaces_spec.rb:85:    within(find(".card", text: workspace.name, match: :first)) do
+spec/system/workspaces_spec.rb:89:    expect(page).to have_text("Removed workspace planner-app-#{suffix}.")
+spec/system/workspaces_spec.rb:90:    expect(page).to have_text("No workspaces registered yet.")
+spec/system/workspaces_spec.rb:91:    expect(Workspace.exists?(workspace.id)).to be(false)
+spec/requests/runs_controller_spec.rb:3:RSpec.describe "runs", type: :request do
+spec/requests/runs_controller_spec.rb:4:  it "blocks launching a new run while the workspace is not yet initialized" do
+spec/requests/runs_controller_spec.rb:5:    workspace = Workspace.create!(name: "runs-controller-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+spec/requests/runs_controller_spec.rb:7:    get new_workspace_run_path(workspace)
+spec/requests/runs_controller_spec.rb:8:    expect(response).to redirect_to(workspace_runs_path(workspace))
+spec/requests/runs_controller_spec.rb:13:      post workspace_runs_path(workspace), params: { run: { task: "Do something", launcher_variant: "claude" } }
+spec/requests/runs_controller_spec.rb:14:    end.not_to change(Run, :count)
+spec/requests/runs_controller_spec.rb:15:    expect(response).to redirect_to(workspace_runs_path(workspace))
+spec/requests/runs_controller_spec.rb:18:  it "allows launching a new run once the workspace has declared protected paths" do
+spec/requests/runs_controller_spec.rb:19:    workspace = Workspace.create!(
+spec/requests/runs_controller_spec.rb:20:      name: "runs-controller-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir,
+spec/requests/runs_controller_spec.rb:24:    get new_workspace_run_path(workspace)
+spec/requests/runs_controller_spec.rb:28:      post workspace_runs_path(workspace), params: { run: { task: "Do something", launcher_variant: "claude" } }
+spec/requests/runs_controller_spec.rb:29:    end.to change(Run, :count).by(1)
+spec/requests/runs_controller_spec.rb:31:    run = workspace.runs.order(:created_at).last
+spec/requests/runs_controller_spec.rb:33:    expect(run.target_root).to eq(workspace.source_root)
+spec/requests/workspace_chat_messages_spec.rb:3:RSpec.describe "workspace chat messages", type: :request do
+spec/requests/workspace_chat_messages_spec.rb:5:    workspace, chat = create_workspace_with_chat
+spec/requests/workspace_chat_messages_spec.rb:7:    post workspace_chat_messages_path(workspace, chat),
+spec/requests/workspace_chat_messages_spec.rb:8:      params: { launcher_variant: "codex", workspace_chat_message: { content: "Switch to codex" } }
+spec/requests/workspace_chat_messages_spec.rb:14:    workspace, chat = create_workspace_with_chat
+spec/requests/workspace_chat_messages_spec.rb:17:    post workspace_chat_messages_path(workspace, chat), params: { workspace_chat_message: { content: "Keep going" } }
+spec/requests/workspace_chat_messages_spec.rb:23:    workspace, chat = create_workspace_with_chat
+spec/requests/workspace_chat_messages_spec.rb:26:      post workspace_chat_messages_path(workspace, chat),
+spec/requests/workspace_chat_messages_spec.rb:27:        params: { launcher_variant: "gpt4", workspace_chat_message: { content: "Try something else" } }
+spec/requests/workspace_chat_messages_spec.rb:33:  def create_workspace_with_chat
+spec/requests/workspace_chat_messages_spec.rb:34:    workspace = Workspace.create!(name: "chat-messages-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+spec/requests/workspace_chat_messages_spec.rb:35:    [ workspace, workspace.workspace_chats.create! ]
+spec/system/live_codex_chaperone_smoke_spec.rb:5:    workspace_root = LiveAgentSpecs.workspace_root_for("codex")
+spec/system/live_codex_chaperone_smoke_spec.rb:6:    skip "Set LIVE_AGENT_WORKSPACE_ROOT or LIVE_AGENT_CODEX_WORKSPACE_ROOT" if workspace_root.blank?
+spec/system/live_codex_chaperone_smoke_spec.rb:9:    FileUtils.mkdir_p(File.join(workspace_root, "front", "demo-output", "agents-sdk"))
+spec/system/live_codex_chaperone_smoke_spec.rb:10:    workspace = Workspace.create!(name: "live-codex-chaperone-#{SecureRandom.hex(4)}", root_path: workspace_root)
+spec/system/live_codex_chaperone_smoke_spec.rb:11:    run = workspace.runs.create!(
+spec/system/live_codex_chaperone_smoke_spec.rb:13:      target_root: workspace_root, launcher_variant: "codex", status: "running"
+spec/system/live_codex_chaperone_smoke_spec.rb:32:    visit workspace_run_path(workspace, run)
+app/controllers/questions_controller.rb:2:  before_action :require_workspace
+app/controllers/questions_controller.rb:5:    @questions = workspace_questions.order(asked_at: :desc).map { |question| JSON.parse(question.to_json) }
+app/controllers/questions_controller.rb:10:  def workspace_questions
+app/controllers/questions_controller.rb:11:    UserQuestion.joins(:run).where(runs: { workspace_id: current_workspace.id })
+app/controllers/workers_controller.rb:2:  before_action :require_workspace
+app/controllers/workers_controller.rb:9:    @workers = workspace_workers.order(started_at: :desc).map { |worker| JSON.parse(worker.to_json) }
+app/controllers/workers_controller.rb:14:    worker = workspace_workers.find_by(worker_id: @worker_id)
+app/controllers/workers_controller.rb:25:    worker = workspace_workers.find_by!(worker_id: params[:id])
+app/controllers/workers_controller.rb:34:    redirect_back fallback_location: workspace_workers_path(current_workspace), notice: "Worker stopped."
+app/controllers/workers_controller.rb:36:    redirect_back fallback_location: workspace_workers_path(current_workspace), alert: "Failed to stop worker: unknown worker #{params[:id]}"
+app/controllers/workers_controller.rb:41:  def workspace_workers
+app/controllers/workers_controller.rb:42:    Worker.joins(:run).where(runs: { workspace_id: current_workspace.id })
+app/controllers/events_controller.rb:2:  before_action :require_workspace
+app/controllers/events_controller.rb:6:      .where(runs: { workspace_id: current_workspace.id })
+app/controllers/workspace_chats_controller.rb:2:  before_action :require_workspace
+app/controllers/workspace_chats_controller.rb:5:    chat = current_workspace.workspace_chats.first_or_create!
+app/controllers/workspace_chats_controller.rb:6:    redirect_to workspace_chat_path(current_workspace, chat)
+app/controllers/workspace_chats_controller.rb:10:    chat = current_workspace.workspace_chats.first_or_create!
+app/controllers/workspace_chats_controller.rb:11:    redirect_to workspace_chat_path(current_workspace, chat)
+app/controllers/workspace_chats_controller.rb:15:    @chat = current_workspace.workspace_chats.find(params[:id])
+spec/system/workers_spec.rb:3:RSpec.describe "workspace workers", type: :system do
+spec/system/workers_spec.rb:4:  it "lists only workers for the selected workspace" do
+spec/system/workers_spec.rb:5:    workspace, run = create_workspace_with_run("alpha")
+spec/system/workers_spec.rb:8:    other_workspace, other_run = create_workspace_with_run("beta")
+spec/system/workers_spec.rb:11:    visit workspace_workers_path(workspace)
+spec/system/workers_spec.rb:18:    workspace, run = create_workspace_with_run("alpha")
+spec/system/workers_spec.rb:23:    visit workspace_worker_path(workspace, worker.worker_id)
+spec/system/workers_spec.rb:28:    expect(page).to have_link("Back to run", href: workspace_run_path(workspace, run))
+spec/system/workers_spec.rb:32:    workspace, run = create_workspace_with_run("alpha")
+spec/system/workers_spec.rb:35:    visit workspace_workers_path(workspace)
+spec/system/workers_spec.rb:43:  it "shows the empty state when a workspace has no workers" do
+spec/system/workers_spec.rb:44:    workspace, = create_workspace_with_run("alpha")
+spec/system/workers_spec.rb:46:    visit workspace_workers_path(workspace)
+spec/system/workers_spec.rb:52:    workspace, run = create_workspace_with_run("alpha")
+spec/system/workers_spec.rb:54:    visit workspace_workers_path(workspace)
+spec/system/workers_spec.rb:70:  def create_workspace_with_run(prefix)
+spec/system/workers_spec.rb:72:    workspace = Workspace.create!(name: "planner-#{suffix}", root_path: "/tmp/planner-#{suffix}")
+spec/system/workers_spec.rb:73:    run = Run.create!(
+spec/system/workers_spec.rb:76:      workspace: workspace,
+spec/system/workers_spec.rb:77:      target_root: workspace.root_path,
+spec/system/workers_spec.rb:83:    FileUtils.mkdir_p(File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers"))
+spec/system/workers_spec.rb:84:    [ workspace, run ]
+app/controllers/workspace_chat_messages_controller.rb:2:  before_action :require_workspace
+app/controllers/workspace_chat_messages_controller.rb:5:    chat = current_workspace.workspace_chats.find(params[:chat_id])
+app/controllers/workspace_chat_messages_controller.rb:13:    content = params.require(:workspace_chat_message).require(:content).to_s.strip
+app/controllers/workspace_chat_messages_controller.rb:23:    run = current_workspace.runs.find_by(run_id: params[:run_id])
+app/controllers/workspace_chat_messages_controller.rb:24:    run ? workspace_run_path(current_workspace, run) : workspace_chat_path(current_workspace, chat)
+app/controllers/application_controller.rb:8:  helper_method :current_workspace
+app/controllers/application_controller.rb:20:  def current_workspace
+app/controllers/application_controller.rb:21:    @current_workspace
+app/controllers/application_controller.rb:24:  def require_workspace
+app/controllers/application_controller.rb:25:    @current_workspace = Workspace.find(params[:workspace_id])
+app/controllers/run_commands_controller.rb:1:class RunCommandsController < ApplicationController
+app/controllers/run_commands_controller.rb:2:  before_action :require_workspace
+app/controllers/run_commands_controller.rb:5:    command = workspace_run_commands.find_by!(command_id: params[:command_id])
+app/controllers/run_commands_controller.rb:6:    Orchestrator::RunCommandRunner.stop(command: command, reason: stop_reason)
+app/controllers/run_commands_controller.rb:7:    redirect_back fallback_location: workspace_runs_path(current_workspace), notice: "Run command stopped."
+app/controllers/run_commands_controller.rb:9:    redirect_back fallback_location: workspace_runs_path(current_workspace), alert: "Failed to stop run command: unknown command #{params[:command_id]}"
+app/controllers/run_commands_controller.rb:14:  def workspace_run_commands
+app/controllers/run_commands_controller.rb:15:    RunCommand.joins(:run).where(runs: { workspace_id: current_workspace.id })
+app/controllers/workspaces_controller.rb:3:    @workspaces = Workspace.order(:name)
+app/controllers/workspaces_controller.rb:7:    workspace = Workspace.find(params[:id])
+app/controllers/workspaces_controller.rb:8:    redirect_to workspace_runs_path(workspace)
+app/controllers/workspaces_controller.rb:12:    @workspace = Workspace.new
+app/controllers/workspaces_controller.rb:16:    @workspace = Workspace.new(workspace_params)
+app/controllers/workspaces_controller.rb:18:    if @workspace.save
+app/controllers/workspaces_controller.rb:19:      Orchestrator::WorkspaceInit.launch!(@workspace)
+app/controllers/workspaces_controller.rb:20:      redirect_to workspace_runs_path(@workspace),
+app/controllers/workspaces_controller.rb:21:        notice: "Added workspace #{@workspace.name}. Discovering its dev environment and protected paths…"
+app/controllers/workspaces_controller.rb:28:    @workspace = Workspace.find(params[:id])
+app/controllers/workspaces_controller.rb:32:    @workspace = Workspace.find(params[:id])
+app/controllers/workspaces_controller.rb:34:    if @workspace.update(workspace_edit_params)
+app/controllers/workspaces_controller.rb:35:      redirect_to workspaces_path, notice: "Updated workspace #{@workspace.name}."
+app/controllers/workspaces_controller.rb:42:    workspace = Workspace.find(params[:id])
+app/controllers/workspaces_controller.rb:44:    if workspace.destroy
+app/controllers/workspaces_controller.rb:45:      redirect_to workspaces_path, notice: "Removed workspace #{workspace.name}."
+app/controllers/workspaces_controller.rb:47:      redirect_to workspaces_path, alert: workspace.errors.full_messages.to_sentence
+app/controllers/workspaces_controller.rb:53:  def workspace_params
+app/controllers/workspaces_controller.rb:54:    params.require(:workspace).permit(:name, :root_path)
+app/controllers/workspaces_controller.rb:57:  def workspace_edit_params
+app/controllers/workspaces_controller.rb:58:    permitted = params.require(:workspace).permit(:root_path, :protected_path_patterns_text)
+app/controllers/runs_controller.rb:1:class RunsController < ApplicationController
+app/controllers/runs_controller.rb:2:  before_action :require_workspace
+app/controllers/runs_controller.rb:3:  before_action :require_initialized_workspace, only: %i[new create]
+app/controllers/runs_controller.rb:7:    @runs = current_workspace.runs.order(created_at: :desc)
+app/controllers/runs_controller.rb:11:    @run = current_workspace.runs.new(launcher_variant: "claude")
+app/controllers/runs_controller.rb:15:    @run = current_workspace.runs.new(run_params)
+app/controllers/runs_controller.rb:20:    @run.target_root = current_workspace.source_root
+app/controllers/runs_controller.rb:23:      LaunchRunJob.perform_later(@run.id)
+app/controllers/runs_controller.rb:24:      redirect_to workspace_run_path(current_workspace, @run), notice: "Launching #{@run.run_id}…"
+app/controllers/runs_controller.rb:36:    @active_workers = @worker_activities.select { |activity| activity[:worker].status == "running" }
+app/controllers/runs_controller.rb:52:    @workspace_chat = current_workspace.workspace_chats.first_or_create!
+app/controllers/runs_controller.rb:53:    @workspace_chat_messages = @workspace_chat.messages.order(:created_at)
+app/controllers/runs_controller.rb:58:    StopRunJob.perform_now(@run.id)
+app/controllers/runs_controller.rb:59:    redirect_to workspace_run_path(current_workspace, @run), notice: "Stopping #{@run.run_id}…"
+app/controllers/runs_controller.rb:64:    Orchestrator::SwitchRunLauncher.call(run: @run, launcher_variant: target)
+app/controllers/runs_controller.rb:65:    redirect_to workspace_run_path(current_workspace, @run), notice: "Switched to #{target.capitalize} and resumed queued work."
+app/controllers/runs_controller.rb:66:  rescue Orchestrator::SwitchRunLauncher::Ineligible, ActionController::ParameterMissing => error
+app/controllers/runs_controller.rb:67:    redirect_to workspace_run_path(current_workspace, @run), alert: error.message
+app/controllers/runs_controller.rb:72:      redirect_to workspace_run_path(current_workspace, @run), alert: "This run is not awaiting PR publication retry."
+app/controllers/runs_controller.rb:77:    FinalizeRunPublicationJob.perform_later(@run.id)
+app/controllers/runs_controller.rb:78:    redirect_to workspace_run_path(current_workspace, @run), notice: "Retrying PR publication…"
+app/controllers/runs_controller.rb:83:  # StepPolicy fails closed (protects everything) until a workspace has
+app/controllers/runs_controller.rb:88:  def require_initialized_workspace
+app/controllers/runs_controller.rb:89:    return if current_workspace.initialized?
+app/controllers/runs_controller.rb:91:    redirect_to workspace_runs_path(current_workspace),
+app/controllers/runs_controller.rb:92:      alert: "This workspace is still initializing (discovering its dev environment and protected paths). " \
+app/controllers/runs_controller.rb:97:    @run = current_workspace.runs.find_by!(run_id: params[:id])
+app/controllers/runs_controller.rb:118:        timeline << event.merge("label" => "Run entered #{phase.tr('_', ' ')}")
+app/controllers/runs_controller.rb:143:          "Run failed",
+app/controllers/runs_controller.rb:162:          "Run stopped",
+app/controllers/runs_controller.rb:171:          "Run completed",
+app/controllers/runs_controller.rb:201:          @run.phase_summary.presence || "The model provider rejected the previous attempt because capacity was unavailable.",
+app/controllers/runs_controller.rb:221:          request["text"].presence || @run.phase_summary.presence || "The planner selected the next bounded step.",
+app/controllers/runs_controller.rb:231:          next_step_description(@following_steps.first, fallback: "The next planner turn will select the handoff."),
+app/controllers/runs_controller.rb:239:          @latest_tick&.dig("lastPlanSummary").presence || "Current run evidence is being reduced into one decision.",
+app/controllers/runs_controller.rb:263:      operator_action_required: state.in?([ "Run failed", "Your decision is needed", "Launch is queued" ]),
+app/controllers/runs_controller.rb:275:      "Run failed" => "failed",
+app/controllers/runs_controller.rb:277:      "Run stopped" => "stopped",
+app/controllers/runs_controller.rb:278:      "Run completed" => "complete",
+app/controllers/runs_controller.rb:432:      .select { |artifact| artifact[:exists] }
+app/controllers/runs_controller.rb:444:    Orchestrator::RunUsage.build(@run)
+app/views/runs/new.html.erb:1:<% content_for :title, "Launch task in #{current_workspace.name}" %>
+app/views/runs/new.html.erb:3:<h1>Launch task in <%= current_workspace.name %></h1>
+app/views/runs/new.html.erb:5:<%= form_with model: @run, url: workspace_runs_path(current_workspace), local: true do |form| %>
+app/views/runs/new.html.erb:13:    <%= form.select :launcher_variant, Run::LAUNCHER_VARIANTS.map { |v| [v, v] } %>
+app/views/runs/new.html.erb:17:  <%= link_to "Cancel", workspace_runs_path(current_workspace), class: "btn" %>
+spec/system/runs_spec.rb:3:RSpec.describe "workspace runs", type: :system do
+spec/system/runs_spec.rb:4:  it "launches a run and lands on the workspace-scoped detail page" do
+spec/system/runs_spec.rb:5:    workspace = create_workspace
+spec/system/runs_spec.rb:7:    visit workspace_runs_path(workspace)
+spec/system/runs_spec.rb:15:    run = Run.order(:created_at).last
+spec/system/runs_spec.rb:17:    expect(page).to have_current_path(workspace_run_path(workspace, run))
+spec/system/runs_spec.rb:19:    expect(page).to have_text(workspace.name)
+spec/system/runs_spec.rb:24:  it "opens the detail page from the workspace run list" do
+spec/system/runs_spec.rb:25:    workspace = create_workspace
+spec/system/runs_spec.rb:26:    run = create_run(workspace:, suffix: "detail-open", task: "Inspect the orchestrator detail page")
+spec/system/runs_spec.rb:28:    visit workspace_runs_path(workspace)
+spec/system/runs_spec.rb:31:    expect(page).to have_current_path(workspace_run_path(workspace, run))
+spec/system/runs_spec.rb:37:  it "updates the workspace run list live when a run is created", :js do
+spec/system/runs_spec.rb:38:    workspace = create_workspace
+spec/system/runs_spec.rb:40:    visit workspace_runs_path(workspace)
+spec/system/runs_spec.rb:41:    expect(page).to have_text("No runs launched yet.")
+spec/system/runs_spec.rb:46:        create_run(workspace: workspace, suffix: "list-live", task: "Appear on the workspace run list")
+spec/system/runs_spec.rb:50:    expect(page).to have_text("Appear on the workspace run list")
+spec/system/runs_spec.rb:56:  it "shows stale launching runs as launch queued" do
+spec/system/runs_spec.rb:57:    workspace = create_workspace
+spec/system/runs_spec.rb:59:      workspace: workspace,
+spec/system/runs_spec.rb:67:    visit workspace_runs_path(workspace)
+spec/system/runs_spec.rb:75:    workspace = create_workspace
+spec/system/runs_spec.rb:76:    run = create_run(workspace:, suffix: "capacity-switch", task: "Continue after capacity returns")
+spec/system/runs_spec.rb:79:    visit workspace_run_path(workspace, run)
+spec/system/runs_spec.rb:91:    workspace = create_workspace
+spec/system/runs_spec.rb:92:    FileUtils.mkdir_p(File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers"))
+spec/system/runs_spec.rb:93:    run = create_run(workspace:, suffix: "detail-sections", task: "Render every detail section")
+spec/system/runs_spec.rb:103:      prompt_path: File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers", "planner-main.prompt.txt"),
+spec/system/runs_spec.rb:104:      log_path: File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers", "planner-main.log"),
+spec/system/runs_spec.rb:105:      last_message_path: File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers", "planner-main.last-message.txt"),
+spec/system/runs_spec.rb:106:      env_path: File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers", "planner-main.env.json"),
+spec/system/runs_spec.rb:128:    artifact_path = Orchestrator::ArtifactStore.resolve_path(workspace.root_path, run.run_id, "fix-summary.md")
+app/controllers/application_controller.rb
+app/controllers/events_controller.rb
+app/controllers/health_controller.rb
+app/controllers/project_setups_controller.rb
+app/controllers/questions_controller.rb
+app/controllers/run_commands_controller.rb
+app/controllers/runs_controller.rb
+app/controllers/workers_controller.rb
+app/controllers/workspace_chat_messages_controller.rb
+app/controllers/workspace_chats_controller.rb
+app/controllers/workspaces_controller.rb
+app/helpers/application_helper.rb
+app/helpers/runs_helper.rb
+app/views/events/index.html.erb
+app/views/layouts/application.html.erb
+app/views/layouts/mailer.html.erb
+app/views/layouts/mailer.text.erb
+app/views/pwa/manifest.json.erb
+app/views/pwa/service-worker.js
+app/views/questions/index.html.erb
+app/views/runs/_acceptance_criteria.html.erb
+app/views/runs/_planner_decision.html.erb
+app/views/runs/_worker_row.html.erb
+app/views/runs/index.html.erb
+app/views/runs/new.html.erb
+app/views/runs/show.html.erb
+app/views/shared/_orchestrator_error.html.erb
+app/views/workers/index.html.erb
+app/views/workers/show.html.erb
+app/views/workspace_chats/_drawer.html.erb
+app/views/workspace_chats/show.html.erb
+app/views/workspaces/edit.html.erb
+app/views/workspaces/index.html.erb
+app/views/workspaces/new.html.erb
+
+exec
+/bin/zsh -lc "nl -ba app/controllers/application_controller.rb; nl -ba app/controllers/runs_controller.rb | sed -n '1,125p'; nl -ba app/controllers/workspaces_controller.rb; nl -ba app/views/layouts/application.html.erb; nl -ba app/views/workspaces/index.html.erb; nl -ba app/views/runs/index.html.erb; nl -ba app/views/runs/show.html.erb | sed -n '1,180p'; nl -ba app/views/runs/new.html.erb; nl -ba app/helpers/application_helper.rb; nl -ba app/helpers/runs_helper.rb" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491
+ succeeded in 0ms:
+     1	class ApplicationController < ActionController::Base
+     2	  # Only allow modern browsers supporting webp images, web push, badges, import maps, CSS nesting, and CSS :has.
+     3	  allow_browser versions: :modern unless Rails.env.test?
+     4	
+     5	  # Changes to the importmap will invalidate the etag for HTML responses
+     6	  stale_when_importmap_changes
+     7	
+     8	  helper_method :current_workspace
+     9	  helper_method :background_job_warning
+    10	
+    11	  private
+    12	
+    13	  # No auth in v1 (single-user local tool) -- placeholder for whoever is
+    14	  # at the keyboard, kept as a distinct concept so it's easy to wire up
+    15	  # real auth later without touching the rest of the launch/answer flows.
+    16	  def current_operator
+    17	    "operator"
+    18	  end
+    19	
+    20	  def current_workspace
+    21	    @current_workspace
+    22	  end
+    23	
+    24	  def require_workspace
+    25	    @current_workspace = Workspace.find(params[:workspace_id])
+    26	  end
+    27	
+    28	  def background_job_warning
+    29	    @background_job_warning ||= BackgroundJobHealth.warning
+    30	  end
+    31	end
+     1	class RunsController < ApplicationController
+     2	  before_action :require_workspace
+     3	  before_action :require_initialized_workspace, only: %i[new create]
+     4	  before_action :set_run, only: %i[show stop switch_launcher retry_publication]
+     5	
+     6	  def index
+     7	    @runs = current_workspace.runs.order(created_at: :desc)
+     8	  end
+     9	
+    10	  def new
+    11	    @run = current_workspace.runs.new(launcher_variant: "claude")
+    12	  end
+    13	
+    14	  def create
+    15	    @run = current_workspace.runs.new(run_params)
+    16	    @run.run_id = generate_run_id
+    17	    @run.worktree_name = Orchestrator::GitWorktree.name_for(@run)
+    18	    @run.status = "launching"
+    19	    @run.launched_by = current_operator
+    20	    @run.target_root = current_workspace.source_root
+    21	
+    22	    if @run.save
+    23	      LaunchRunJob.perform_later(@run.id)
+    24	      redirect_to workspace_run_path(current_workspace, @run), notice: "Launching #{@run.run_id}…"
+    25	    else
+    26	      render :new, status: :unprocessable_entity
+    27	    end
+    28	  end
+    29	
+    30	  def show
+    31	    recent_workers = @run.workers.order(started_at: :desc).limit(12).to_a
+    32	    workers = (@run.workers.where(status: "running").to_a + recent_workers).uniq
+    33	    @worker_activities = Orchestrator::WorkerActivity.for_workers(workers)
+    34	    @chaperone_reviews = @run.chaperone_reviews.order(created_at: :desc).to_a
+    35	    attach_chaperone_reviews
+    36	    @active_workers = @worker_activities.select { |activity| activity[:worker].status == "running" }
+    37	    @spawn_requests = SpawnRequest.open_only.where(run_id: @run.run_id).map { |request| JSON.parse(request.to_json) }
+    38	    @blocking_questions = @run.user_questions.open_only.where(priority: "blocking").order(:asked_at).to_a
+    39	    ticks = OrchestratorTick.for_run(@run.run_id).order(tick_count: :desc).limit(8).to_a.reverse
+    40	    @latest_tick = ticks.last && JSON.parse(ticks.last.to_json)
+    41	    @following_steps = Array(@latest_tick&.dig("followingSteps"))
+    42	    raw_events = BusEvent.where(run_id: @run.run_id).order(created_at: :desc).limit(20).to_a.reverse.map { |event| JSON.parse(event.to_json) }
+    43	    @timeline_events = build_timeline(raw_events).last(8).reverse
+    44	    @artifacts = collect_artifacts
+    45	    @planner_decisions = @run.planner_decisions.includes(:spawn_request, :attempts).order(created_at: :desc).to_a
+    46	    @acceptance_criteria = @run.acceptance_criteria.roots.includes(:children).to_a
+    47	    @criterion_worker_groups = Orchestrator::AcceptanceCriteriaWorkers.group(run_id: @run.run_id, activities: @worker_activities)
+    48	    @latest_planner_decision = @planner_decisions.first
+    49	    @usage_summary = usage_summary
+    50	    @run_now = build_run_now
+    51	    @activity_feed = build_activity_feed
+    52	    @workspace_chat = current_workspace.workspace_chats.first_or_create!
+    53	    @workspace_chat_messages = @workspace_chat.messages.order(:created_at)
+    54	    @run_commands = @run.run_commands.order(started_at: :desc, created_at: :desc).limit(20).to_a
+    55	  end
+    56	
+    57	  def stop
+    58	    StopRunJob.perform_now(@run.id)
+    59	    redirect_to workspace_run_path(current_workspace, @run), notice: "Stopping #{@run.run_id}…"
+    60	  end
+    61	
+    62	  def switch_launcher
+    63	    target = params.require(:launcher_variant)
+    64	    Orchestrator::SwitchRunLauncher.call(run: @run, launcher_variant: target)
+    65	    redirect_to workspace_run_path(current_workspace, @run), notice: "Switched to #{target.capitalize} and resumed queued work."
+    66	  rescue Orchestrator::SwitchRunLauncher::Ineligible, ActionController::ParameterMissing => error
+    67	    redirect_to workspace_run_path(current_workspace, @run), alert: error.message
+    68	  end
+    69	
+    70	  def retry_publication
+    71	    unless @run.publication_retryable?
+    72	      redirect_to workspace_run_path(current_workspace, @run), alert: "This run is not awaiting PR publication retry."
+    73	      return
+    74	    end
+    75	
+    76	    @run.update!(status: "running", publication_status: "queued", publication_error: nil)
+    77	    FinalizeRunPublicationJob.perform_later(@run.id)
+    78	    redirect_to workspace_run_path(current_workspace, @run), notice: "Retrying PR publication…"
+    79	  end
+    80	
+    81	  private
+    82	
+    83	  # StepPolicy fails closed (protects everything) until a workspace has
+    84	  # declared its own protected paths (Workspace#initialized?), so no real
+    85	  # task run may launch before that -- the bootstrap run that does the
+    86	  # declaring is created separately, via Orchestrator::WorkspaceInit, not
+    87	  # through this controller.
+    88	  def require_initialized_workspace
+    89	    return if current_workspace.initialized?
+    90	
+    91	    redirect_to workspace_runs_path(current_workspace),
+    92	      alert: "This workspace is still initializing (discovering its dev environment and protected paths). " \
+    93	        "Wait for that run to finish before launching a new one."
+    94	  end
+    95	
+    96	  def set_run
+    97	    @run = current_workspace.runs.find_by!(run_id: params[:id])
+    98	  end
+    99	
+   100	  def run_params
+   101	    params.require(:run).permit(:task, :launcher_variant)
+   102	  end
+   103	
+   104	  def generate_run_id
+   105	    "run-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}"
+   106	  end
+   107	
+   108	  def build_timeline(events)
+   109	    last_phase = nil
+   110	
+   111	    events.each_with_object([]) do |event, timeline|
+   112	      case event["type"]
+   113	      when "run.status"
+   114	        phase = event.dig("payload", "phase")
+   115	        next if phase.blank? || phase == last_phase
+   116	
+   117	        last_phase = phase
+   118	        timeline << event.merge("label" => "Run entered #{phase.tr('_', ' ')}")
+   119	      when "worker.spawned"
+   120	        timeline << event.merge("label" => "#{event.dig('payload', 'nickname')} started")
+   121	      when "worker.stopped"
+   122	        timeline << event.merge("label" => "#{event.dig('payload', 'nickname')} stopped")
+   123	      when "spawn_request.created"
+   124	        timeline << event.merge("label" => "#{event.dig('payload', 'requestedRole')} handoff requested")
+   125	      when "spawn_request.fulfilled"
+     1	class WorkspacesController < ApplicationController
+     2	  def index
+     3	    @workspaces = Workspace.order(:name)
+     4	  end
+     5	
+     6	  def show
+     7	    workspace = Workspace.find(params[:id])
+     8	    redirect_to workspace_runs_path(workspace)
+     9	  end
+    10	
+    11	  def new
+    12	    @workspace = Workspace.new
+    13	  end
+    14	
+    15	  def create
+    16	    @workspace = Workspace.new(workspace_params)
+    17	
+    18	    if @workspace.save
+    19	      Orchestrator::WorkspaceInit.launch!(@workspace)
+    20	      redirect_to workspace_runs_path(@workspace),
+    21	        notice: "Added workspace #{@workspace.name}. Discovering its dev environment and protected paths…"
+    22	    else
+    23	      render :new, status: :unprocessable_entity
+    24	    end
+    25	  end
+    26	
+    27	  def edit
+    28	    @workspace = Workspace.find(params[:id])
+    29	  end
+    30	
+    31	  def update
+    32	    @workspace = Workspace.find(params[:id])
+    33	
+    34	    if @workspace.update(workspace_edit_params)
+    35	      redirect_to workspaces_path, notice: "Updated workspace #{@workspace.name}."
+    36	    else
+    37	      render :edit, status: :unprocessable_entity
+    38	    end
+    39	  end
+    40	
+    41	  def destroy
+    42	    workspace = Workspace.find(params[:id])
+    43	
+    44	    if workspace.destroy
+    45	      redirect_to workspaces_path, notice: "Removed workspace #{workspace.name}."
+    46	    else
+    47	      redirect_to workspaces_path, alert: workspace.errors.full_messages.to_sentence
+    48	    end
+    49	  end
+    50	
+    51	  private
+    52	
+    53	  def workspace_params
+    54	    params.require(:workspace).permit(:name, :root_path)
+    55	  end
+    56	
+    57	  def workspace_edit_params
+    58	    permitted = params.require(:workspace).permit(:root_path, :protected_path_patterns_text)
+    59	    patterns = permitted[:protected_path_patterns_text].to_s.split("\n").map(&:strip).reject(&:blank?)
+    60	    { root_path: permitted[:root_path], protected_path_patterns: patterns }
+    61	  end
+    62	end
+     1	<!DOCTYPE html>
+     2	<html>
+     3	  <head>
+     4	    <title><%= content_for(:title) || "Workflow Orchestrator" %></title>
+     5	    <meta name="viewport" content="width=device-width,initial-scale=1">
+     6	    <meta name="apple-mobile-web-app-capable" content="yes">
+     7	    <meta name="application-name" content="Workflow Orchestrator">
+     8	    <meta name="mobile-web-app-capable" content="yes">
+     9	    <%= csrf_meta_tags %>
+    10	    <%= csp_meta_tag %>
+    11	
+    12	    <%= yield :head %>
+    13	
+    14	    <%# Enable PWA manifest for installable apps (make sure to enable in config/routes.rb too!) %>
+    15	    <%#= tag.link rel: "manifest", href: pwa_manifest_path(format: :json) %>
+    16	
+    17	    <link rel="icon" href="/icon.png" type="image/png">
+    18	    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    19	    <link rel="apple-touch-icon" href="/icon.png">
+    20	
+    21	    <%# Includes all stylesheet files in app/assets/stylesheets %>
+    22	    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    23	    <%= javascript_importmap_tags %>
+    24	  </head>
+    25	
+    26	  <body>
+    27	    <header class="topbar">
+    28	      <a class="brand" href="<%= root_path %>">Workflow Orchestrator</a>
+    29	      <nav>
+    30	        <%= link_to "Workspaces", workspaces_path, class: current_page?(workspaces_path) ? "active" : nil %>
+    31	        <% if current_workspace %>
+    32	          <%= link_to "Runs", workspace_runs_path(current_workspace), class: current_page?(workspace_runs_path(current_workspace)) ? "active" : nil %>
+    33	          <%= link_to "Workers", workspace_workers_path(current_workspace), class: current_page?(workspace_workers_path(current_workspace)) ? "active" : nil %>
+    34	          <%= link_to "Questions", workspace_questions_path(current_workspace), class: current_page?(workspace_questions_path(current_workspace)) ? "active" : nil %>
+    35	          <%= link_to "Events", workspace_events_path(current_workspace), class: current_page?(workspace_events_path(current_workspace)) ? "active" : nil %>
+    36	        <% end %>
+    37	      </nav>
+    38	    </header>
+    39	
+    40	    <main class="page">
+    41	      <% if notice %>
+    42	        <p class="flash notice"><%= notice %></p>
+    43	      <% end %>
+    44	      <% if alert %>
+    45	        <p class="flash alert"><%= alert %></p>
+    46	      <% end %>
+    47	      <% if background_job_warning.present? %>
+    48	        <p class="flash warning"><%= background_job_warning %></p>
+    49	      <% end %>
+    50	
+    51	      <%= yield %>
+    52	    </main>
+    53	  </body>
+    54	</html>
+     1	<% content_for :title, "Workspaces" %>
+     2	
+     3	<div class="toolbar">
+     4	  <h1>Workspaces</h1>
+     5	  <%= link_to "Add workspace", new_workspace_path, class: "btn primary" %>
+     6	</div>
+     7	
+     8	<div id="workspaces">
+     9	  <% if @workspaces.empty? %>
+    10	    <p class="empty">No workspaces registered yet.</p>
+    11	  <% else %>
+    12	    <% @workspaces.each do |workspace| %>
+    13	      <div class="card">
+    14	        <div class="card-title">
+    15	          <%= link_to workspace.name, workspace_runs_path(workspace) %>
+    16	          <%= link_to "Edit", edit_workspace_path(workspace), class: "btn" %>
+    17	          <%= button_to "Remove", workspace_path(workspace), method: :delete,
+    18	                class: "btn danger",
+    19	                data: { turbo_confirm: "Remove workspace #{workspace.name}? This only works when the workspace has no runs." } %>
+    20	        </div>
+    21	        <p class="muted mono"><%= workspace.root_path %></p>
+    22	      </div>
+    23	    <% end %>
+    24	  <% end %>
+    25	</div>
+     1	<% content_for :title, "#{current_workspace.name} Runs" %>
+     2	
+     3	<%= turbo_stream_from "workspace_#{current_workspace.id}_runs" %>
+     4	
+     5	<div class="toolbar">
+     6	  <h1><%= current_workspace.name %> Runs</h1>
+     7	  <%= button_to "Re-run project setup", workspace_project_setup_path(current_workspace), method: :post, class: "btn" %>
+     8	  <% if current_workspace.initialized? %>
+     9	    <%= link_to "Launch task", new_workspace_run_path(current_workspace), class: "btn primary" %>
+    10	  <% end %>
+    11	</div>
+    12	
+    13	<% unless current_workspace.initialized? %>
+    14	  <p class="muted">
+    15	    This workspace is still initializing (discovering its dev environment and protected paths) before it can
+    16	    launch a task run.
+    17	  </p>
+    18	<% end %>
+    19	
+    20	<%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
+    21	
+    22	<div id="runs">
+    23	  <% if @runs.empty? %>
+    24	    <p class="empty">No runs launched yet.</p>
+    25	  <% else %>
+    26	    <% @runs.each do |run| %>
+    27	        <div class="card">
+    28	          <div class="card-title">
+    29	            <%= link_to run.worktree_name.presence || run.run_id, workspace_run_path(current_workspace, run), class: "mono" %>
+    30	            <span class="badge <%= run.status_badge_class %>"><%= run.status_badge_label %></span>
+    31	          </div>
+    32	          <p><%= truncate(run.task, length: 140) %></p>
+    33	          <% if run.branch_name.present? %><p class="muted mono"><%= run.branch_name %></p><% end %>
+    34	          <% if run.pull_request_url.present? %><p><%= link_to "Pull request", run.pull_request_url, target: "_blank", rel: "noopener" %></p><% end %>
+    35	          <p class="muted">
+    36	            <%= run.launcher_variant %>
+    37	            &middot;
+    38	            <% if run.started_at %>started <%= time_ago_in_words(run.started_at) %> ago<% else %>not started<% end %>
+    39	            <% if run.stopped_at %> &middot; stopped <%= time_ago_in_words(run.stopped_at) %> ago<% end %>
+    40	          </p>
+    41	          <% if run.launch_queued? %>
+    42	            <p class="error-banner">Launch job has not started. This run is still queued; start `bin/jobs` or `bin/dev`.</p>
+    43	          <% end %>
+    44	        </div>
+    45	      <% end %>
+    46	  <% end %>
+    47	</div>
+     1	<% content_for :title, @run.run_id %>
+     2	<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+     3	
+     4	<%= turbo_stream_from "run_#{@run.run_id}" %>
+     5	
+     6	<div class="toolbar">
+     7	  <div class="run-title">
+     8	    <span class="eyebrow">Run <span class="mono"><%= @run.run_id %></span></span>
+     9	    <h1><%= @run.task %></h1>
+    10	    <span class="muted"><%= current_workspace.name %> &middot; <%= @run.launcher_variant %></span>
+    11	    <% if @run.managed_worktree? %>
+    12	      <p class="muted mono"><%= @run.worktree_name %> &middot; <%= @run.branch_name %></p>
+    13	      <p class="muted mono"><%= @run.target_root %></p>
+    14	      <% if @run.pull_request_url.present? %><p><%= link_to "Open pull request", @run.pull_request_url, target: "_blank", rel: "noopener" %></p><% end %>
+    15	      <% if @run.publication_error.present? %><p class="error-banner">PR publication: <%= @run.publication_error %></p><% end %>
+    16	    <% end %>
+    17	  </div>
+    18	  <div class="toolbar-actions" data-controller="chat-drawer"
+    19	       data-action="keydown.esc@window->chat-drawer#close turbo:before-morph-element@document->chat-drawer#beforeMorph input->chat-drawer#saveDraft turbo:submit-start->chat-drawer#clearDraft">
+    20	    <button type="button" class="chat-launcher" aria-label="Open project chat" title="Open project chat" data-action="chat-drawer#open">
+    21	      <svg viewBox="0 0 24 24" aria-hidden="true">
+    22	        <path d="M20 11.5a7.5 7.5 0 0 1-8 7.48 8.7 8.7 0 0 1-3.34-.9L4 20l1.4-4.18A7.5 7.5 0 1 1 20 11.5Z" />
+    23	        <path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" />
+    24	      </svg>
+    25	    </button>
+    26	    <% if @run.active? %>
+    27	      <%= button_to "Kill run", stop_workspace_run_path(current_workspace, @run), method: :post,
+    28	            class: "btn danger",
+    29	            data: { turbo_confirm: "Stop run #{@run.run_id}? This cascades to every active worker under it." } %>
+    30	    <% end %>
+    31	    <% if @run.publication_retryable? %>
+    32	      <%= button_to "Retry PR publication", retry_publication_workspace_run_path(current_workspace, @run), method: :post, class: "btn primary" %>
+    33	    <% end %>
+    34	    <%= render "workspace_chats/drawer", chat: @workspace_chat, messages: @workspace_chat_messages, run: @run %>
+    35	  </div>
+    36	</div>
+    37	
+    38	<section class="run-dashboard">
+    39	  <div class="run-overview-grid">
+    40	    <section class="panel run-now-panel <%= @run_now[:status_class] %>">
+    41	      <div class="run-now-heading">
+    42	        <span class="eyebrow">Now</span>
+    43	        <span class="badge <%= @run_now[:status_class] %>"><%= @run_now[:badge_label] %></span>
+    44	      </div>
+    45	      <h2><%= @run_now[:state] %></h2>
+    46	      <p class="run-headline"><%= @run_now[:detail] %></p>
+    47	      <p class="activity-age">Updated <%= time_ago_in_words(@run_now[:latest_activity_at]) %> ago &middot; live</p>
+    48	
+    49	      <div class="run-narrative">
+    50	        <div class="narrative-row">
+    51	          <span class="narrative-label">Why</span>
+    52	          <p><%= @run_now[:why] %></p>
+    53	        </div>
+    54	        <div class="narrative-row">
+    55	          <span class="narrative-label">Next</span>
+    56	          <p><%= @run_now[:next] %></p>
+    57	        </div>
+    58	        <div class="narrative-row <%= "requires-action" if @run_now[:operator_action_required] %>">
+    59	          <span class="narrative-label">You</span>
+    60	          <p><%= @run_now[:operator_action] %></p>
+    61	        </div>
+    62	      </div>
+    63	
+    64	      <% if @run.capacity_blocked? %>
+    65	        <% target_launcher = @run.alternate_launcher_variant %>
+    66	        <%= button_to "Switch to #{target_launcher.capitalize} & resume",
+    67	              switch_launcher_workspace_run_path(current_workspace, @run),
+    68	              params: { launcher_variant: target_launcher },
+    69	              class: "btn primary",
+    70	              data: { turbo_confirm: "Switch this paused run from #{@run.launcher_variant.capitalize} to #{target_launcher.capitalize} and resume its queued work?" } %>
+    71	      <% end %>
+    72	
+    73	      <% if @latest_tick&.dig("lastStallFinding").present? %><p class="error-banner"><%= @latest_tick["lastStallFinding"] %></p><% end %>
+    74	    </section>
+    75	
+    76	    <section class="panel activity-panel">
+    77	      <div class="panel-header">
+    78	        <div>
+    79	          <span class="eyebrow">Recent activity</span>
+    80	          <h2>How it got here</h2>
+    81	        </div>
+    82	      </div>
+    83	      <% if @activity_feed.any? %>
+    84	        <ol class="activity-feed">
+    85	          <% @activity_feed.each_with_index do |item, index| %>
+    86	            <li class="<%= item[:kind] %> <%= "current" if index.zero? %>">
+    87	              <div class="activity-copy">
+    88	                <span class="activity-actor"><%= item[:actor] %></span>
+    89	                <span><%= item[:label] %></span>
+    90	              </div>
+    91	              <time class="muted"><%= time_ago_in_words(item[:at]) %> ago</time>
+    92	            </li>
+    93	          <% end %>
+    94	        </ol>
+    95	      <% else %>
+    96	        <p class="empty">No activity has been recorded yet.</p>
+    97	      <% end %>
+    98	      <% if @run_now[:narrative_activity] %>
+    99	        <%= link_to "Inspect current worker", workspace_worker_path(current_workspace, @run_now[:narrative_activity][:worker].worker_id), class: "activity-link" %>
+   100	      <% end %>
+   101	    </section>
+   102	  </div>
+   103	
+   104	  <% if @acceptance_criteria.any? || @worker_activities.any? %>
+   105	    <section class="panel span-2 acceptance-criteria-panel">
+   106	      <div class="panel-header">
+   107	        <div>
+   108	          <h2>Acceptance criteria &amp; workers</h2>
+   109	          <p class="muted">The run's outcome contract, established on the first planner decision, with the workers dispatched toward each criterion nested underneath it.</p>
+   110	        </div>
+   111	      </div>
+   112	      <% if @acceptance_criteria.any? %>
+   113	        <%= render "acceptance_criteria", criteria: @acceptance_criteria, worker_groups: @criterion_worker_groups, run: @run, current_workspace: current_workspace %>
+   114	      <% else %>
+   115	        <p class="empty">No acceptance criteria established yet.</p>
+   116	      <% end %>
+   117	      <% unassigned_workers = @criterion_worker_groups[Orchestrator::AcceptanceCriteriaWorkers::UNASSIGNED] || [] %>
+   118	      <% if unassigned_workers.any? %>
+   119	        <div class="unassigned-workers">
+   120	          <p class="muted">Other workers <span class="mono">(not tied to a specific criterion)</span></p>
+   121	          <div class="worker-list">
+   122	            <% unassigned_workers.each do |activity| %>
+   123	              <%= render "worker_row", activity: activity, run: @run, current_workspace: current_workspace %>
+   124	            <% end %>
+   125	          </div>
+   126	        </div>
+   127	      <% end %>
+   128	    </section>
+   129	  <% end %>
+   130	
+   131	  <details class="panel secondary-panel run-usage-panel" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:usage">
+   132	    <summary>
+   133	      <span>
+   134	        <strong>Usage & planner</strong>
+   135	        <span class="muted">
+   136	          <%= pluralize(@planner_decisions.count, "planner decision") %> &middot;
+   137	          <%= number_with_delimiter(@usage_summary[:input_tokens] + @usage_summary[:output_tokens]) %> tokens &middot;
+   138	          <%= number_to_currency(@usage_summary[:total_cost_usd]) %>
+   139	        </span>
+   140	      </span>
+   141	      <span class="detail-affordance">View details</span>
+   142	    </summary>
+   143	    <div class="secondary-panel-body">
+   144	    <div class="stat-strip">
+   145	      <div class="stat-card">
+   146	        <span class="stat-label">Agent Turns</span>
+   147	        <strong><%= number_with_delimiter(@usage_summary[:agent_turn_count]) %></strong>
+   148	      </div>
+   149	      <div class="stat-card">
+   150	        <span class="stat-label">Input Tokens</span>
+   151	        <strong><%= number_with_delimiter(@usage_summary[:input_tokens]) %></strong>
+   152	        <span class="muted"><%= number_with_delimiter(@usage_summary[:cache_read_input_tokens]) %> cache reads</span>
+   153	      </div>
+   154	      <div class="stat-card">
+   155	        <span class="stat-label">Output Tokens</span>
+   156	        <strong><%= number_with_delimiter(@usage_summary[:output_tokens]) %></strong>
+   157	      </div>
+   158	      <div class="stat-card">
+   159	        <span class="stat-label">Cost</span>
+   160	        <strong><%= number_to_currency(@usage_summary[:total_cost_usd]) %></strong>
+   161	        <span class="muted"><%= @usage_summary[:models].map { |model, count| "#{model}: #{count}" }.join(", ").presence || "no completed telemetry" %></span>
+   162	      </div>
+   163	    </div>
+   164	    <section class="planner-history">
+   165	      <div class="planner-history-heading">
+   166	        <div>
+   167	          <span class="stat-label">Planner decision history</span>
+   168	          <p class="muted">One expandable item for every persisted planner decision, newest first.</p>
+   169	        </div>
+   170	        <span class="muted"><%= pluralize(@planner_decisions.count, "database row") %></span>
+   171	      </div>
+   172	      <% if @planner_decisions.any? %>
+   173	        <% total = @planner_decisions.count %>
+   174	        <% @planner_decisions.each_with_index do |decision, index| %>
+   175	          <%= render "planner_decision", decision: decision, number: total - index %>
+   176	        <% end %>
+   177	      <% else %>
+   178	        <p class="empty">No planner decision has been persisted yet.</p>
+   179	      <% end %>
+   180	    </section>
+     1	<% content_for :title, "Launch task in #{current_workspace.name}" %>
+     2	
+     3	<h1>Launch task in <%= current_workspace.name %></h1>
+     4	
+     5	<%= form_with model: @run, url: workspace_runs_path(current_workspace), local: true do |form| %>
+     6	  <div class="field">
+     7	    <%= form.label :task, "Task" %>
+     8	    <%= form.text_area :task, placeholder: "Fix the bug described in issue #42." %>
+     9	  </div>
+    10	
+    11	  <div class="field">
+    12	    <%= form.label :launcher_variant, "Launcher" %>
+    13	    <%= form.select :launcher_variant, Run::LAUNCHER_VARIANTS.map { |v| [v, v] } %>
+    14	  </div>
+    15	
+    16	  <%= form.submit "Launch", class: "btn primary" %>
+    17	  <%= link_to "Cancel", workspace_runs_path(current_workspace), class: "btn" %>
+    18	<% end %>
+     1	module ApplicationHelper
+     2	end
+     1	module RunsHelper
+     2	  def planner_decision_trigger(decision)
+     3	    request = decision.spawn_request
+     4	    return "Initial launch" if request.tags.include?("launch")
+     5	    return "Recovery request" if request.tags.any? { |tag| tag.match?(/recover|stalled|dead-end/) }
+     6	
+     7	    "#{request.asked_by} handoff"
+     8	  end
+     9	
+    10	  def planner_decision_route(decision)
+    11	    return "Failed before a decision" if decision.status == "failed"
+    12	    return "Waiting for chaperone" if decision.status == "awaiting_chaperone"
+    13	
+    14	    step = decision.decision&.dig("next_step")
+    15	    return "Run completion" if decision.status == "completed" && step.blank?
+    16	    return "Decision pending" if step.blank?
+    17	
+    18	    [ step["owner"], step["artifact"] ].compact.join(" → ")
+    19	  end
+    20	
+    21	  def planner_decision_models(decision)
+    22	    models = decision.attempts.map do |attempt|
+    23	      [ attempt.model_tier, attempt.model ].compact.join(": ")
+    24	    end
+    25	    models = decision.model_attempts.map { |attempt| [ attempt["tier"], attempt["model"] ].compact.join(": ") } if models.empty?
+    26	    models.reject(&:blank?).join(" → ").presence || "no model call"
+    27	  end
+    28	
+    29	  def planner_decision_duration(decision)
+    30	    return "not started" unless decision.started_at
+    31	
+    32	    distance_of_time_in_words(decision.started_at, decision.completed_at || Time.current)
+    33	  end
+    34	
+    35	  def planner_step_title(step)
+    36	    [ step["owner"], step["artifact"] ].compact.join(" → ").presence || "No worker step"
+    37	  end
+    38	
+    39	  def planner_decision_error_summary(decision)
+    40	    error = decision.error.to_s
+    41	    json_start = error.index("{")
+    42	    if json_start
+    43	      payload = JSON.parse(error[json_start..])
+    44	      return payload["result"] if payload["result"].present?
+    45	    end
+    46	
+    47	    error.truncate(240)
+    48	  rescue JSON::ParserError
+    49	    error.truncate(240)
+    50	  end
+    51	end
+
+exec
+/bin/zsh -lc "nl -ba app/models/run.rb | sed -n '1,180p'; nl -ba app/models/workspace.rb | sed -n '1,140p'; rg -n \"active\\?|scope :active|status.*running|launching|queued|completed|stopped|failed\" app/models app/controllers app/views | sed -n '1,220p'; bin/rails routes | rg \"workspace|run|root\"" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491
+ exited 1 in 2722ms:
+`/Users/stockn` is not writable.
+Bundler will use `/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/bundler20260722-57953-aa6x1p57953' as your home directory temporarily.
+Rails Error: Unable to access log file. Please ensure that /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491/log/development.log exists and is writable (i.e. make it writable for user and group: chmod 0664 /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491/log/development.log). The log level has been raised to WARN and the output directed to STDERR until the problem is fixed.
+/Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/application/configuration.rb:659:in 'IO.binwrite': Operation not permitted @ rb_sysopen - /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491/tmp/local_secret.txt (Errno::EPERM)
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/application/configuration.rb:659:in 'Rails::Application::Configuration#generate_local_secret'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/application/configuration.rb:530:in 'Rails::Application::Configuration#secret_key_base'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/application.rb:480:in 'Rails::Application#secret_key_base'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/application.rb:174:in 'Rails::Application#key_generator'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/globalid-1.4.0/lib/global_id/railtie.rb:26:in 'block (2 levels) in <class:Railtie>'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/activesupport-8.1.3/lib/active_support/lazy_load_hooks.rb:94:in 'block in ActiveSupport::LazyLoadHooks#execute_hook'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/activesupport-8.1.3/lib/active_support/lazy_load_hooks.rb:87:in 'ActiveSupport::LazyLoadHooks#with_execution_control'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/activesupport-8.1.3/lib/active_support/lazy_load_hooks.rb:92:in 'ActiveSupport::LazyLoadHooks#execute_hook'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/activesupport-8.1.3/lib/active_support/lazy_load_hooks.rb:78:in 'block in ActiveSupport::LazyLoadHooks#run_load_hooks'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/activesupport-8.1.3/lib/active_support/lazy_load_hooks.rb:77:in 'Array#each'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/activesupport-8.1.3/lib/active_support/lazy_load_hooks.rb:77:in 'ActiveSupport::LazyLoadHooks#run_load_hooks'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/application/finisher.rb:93:in 'block in <module:Finisher>'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/initializable.rb:24:in 'BasicObject#instance_exec'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/initializable.rb:24:in 'Rails::Initializable::Initializer#run'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/initializable.rb:103:in 'block in Rails::Initializable#run_initializers'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/tsort-0.2.0/lib/tsort.rb:231:in 'block in TSort.tsort_each'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/tsort-0.2.0/lib/tsort.rb:353:in 'block (2 levels) in TSort.each_strongly_connected_component'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/tsort-0.2.0/lib/tsort.rb:434:in 'TSort.each_strongly_connected_component_from'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/tsort-0.2.0/lib/tsort.rb:352:in 'block in TSort.each_strongly_connected_component'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/initializable.rb:59:in 'Array#each'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/initializable.rb:59:in 'Rails::Initializable::Collection#each'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/tsort-0.2.0/lib/tsort.rb:350:in 'Method#call'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/tsort-0.2.0/lib/tsort.rb:350:in 'TSort.each_strongly_connected_component'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/tsort-0.2.0/lib/tsort.rb:229:in 'TSort.tsort_each'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/tsort-0.2.0/lib/tsort.rb:208:in 'TSort#tsort_each'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/initializable.rb:102:in 'Rails::Initializable#run_initializers'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/application.rb:442:in 'Rails::Application#initialize!'
+	from /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491/config/environment.rb:5:in '<compiled>'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/4.0.0/bundled_gems.rb:60:in 'Kernel.require'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/4.0.0/bundled_gems.rb:60:in 'block (2 levels) in Kernel#replace_require'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/bootsnap-1.24.6/lib/bootsnap/load_path_cache/core_ext/kernel_require.rb:33:in 'Kernel#require'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/zeitwerk-2.8.2/lib/zeitwerk/core_ext/kernel.rb:34:in 'Kernel#require'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/application.rb:418:in 'Rails::Application#require_environment!'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/command/actions.rb:20:in 'Rails::Command::Actions#boot_application!'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/commands/routes/routes_command.rb:25:in 'Rails::Command::RoutesCommand#perform'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/thor-1.5.0/lib/thor/command.rb:28:in 'Thor::Command#run'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/thor-1.5.0/lib/thor/invocation.rb:127:in 'Thor::Invocation#invoke_command'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/command/base.rb:176:in 'Rails::Command::Base#invoke_command'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/commands/routes/routes_command.rb:18:in 'Rails::Command::RoutesCommand#invoke_command'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/thor-1.5.0/lib/thor.rb:538:in 'Thor.dispatch'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/command/base.rb:71:in 'Rails::Command::Base.perform'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/command.rb:65:in 'block in Rails::Command.invoke'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/command.rb:143:in 'Rails::Command.with_argv'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/command.rb:63:in 'Rails::Command.invoke'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/railties-8.1.3/lib/rails/commands.rb:18:in '<compiled>'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/4.0.0/bundled_gems.rb:60:in 'Kernel.require'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/4.0.0/bundled_gems.rb:60:in 'block (2 levels) in Kernel#replace_require'
+	from /Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/gems/bootsnap-1.24.6/lib/bootsnap/load_path_cache/core_ext/kernel_require.rb:33:in 'Kernel#require'
+	from bin/rails:4:in '<main>'
+
+mcp: workflow/report_failed_approach started
+mcp: workflow/report_failed_approach (completed)
+codex
+[STATUS] phase="trace-complete" evidence="config/routes.rb, ApplicationController, RunsController, Run, Workspace, application layout, runs index/show" msg="The current UI is workspace-scoped at every run boundary; the only runtime check attempted was blocked by protected tmp/log writes, so route evidence is taken from checked-in declarations and references."
+mcp: workflow/write_workflow_artifact started
+mcp: workflow/write_workflow_artifact (completed)
+mcp: workflow/read_workflow_artifact started
+mcp: workflow/read_workflow_artifact (completed)
+mcp: workflow/worker_turn started
+mcp: workflow/worker_turn (failed)
+mcp: workflow/report_failed_approach started
+mcp: workflow/report_failed_approach (completed)
+mcp: workflow/worker_turn started
+mcp: workflow/worker_turn (failed)
+mcp: workflow/worker_turn started
+mcp: workflow/worker_turn (completed)
+codex
+[DONE] Baseline documented and handed to the planner.
+
+Artifact: [workspace-run-switcher-baseline.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491/front/demo-output/agents-sdk/run-20260722-161402-b491/workspace-run-switcher-baseline.md)
+
+Confirmed boundary: shared layout navigation, `ApplicationController#require_workspace`, `RunsController#index`, and existing `Run#active` scope. No source files changed.
+tokens used
+70,701
+[DONE] Baseline documented and handed to the planner.
+
+Artifact: [workspace-run-switcher-baseline.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491/front/demo-output/agents-sdk/run-20260722-161402-b491/workspace-run-switcher-baseline.md)
+
+Confirmed boundary: shared layout navigation, `ApplicationController#require_workspace`, `RunsController#index`, and existing `Run#active` scope. No source files changed.

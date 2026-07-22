@@ -1,0 +1,3 @@
+Recorded the evidence artifact: [workspace-run-switcher-approval-blocker.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-b491/front/demo-output/agents-sdk/run-20260722-161402-b491/workspace-run-switcher-approval-blocker.md).
+
+Confirmed target: `app/views/layouts/application.html.erb`. Implementation remains blocked pending operator approval; no repository files or contracts were changed.

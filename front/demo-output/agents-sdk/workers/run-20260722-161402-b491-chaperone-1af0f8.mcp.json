@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "chaperone": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp/chaperone",
+      "headers": {
+        "Authorization": "Bearer 8ce4db9e2deb7a8c2de053153940438a9375a5daad0c9ea1cbcb01857cf389b7"
+      }
+    }
+  }
+}
