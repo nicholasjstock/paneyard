@@ -1,18 +1,18 @@
 require "rails_helper"
 
 RSpec.describe McpTools::RecordProtectedPathsTool do
-  it "declares protected source roots on the workspace, attributed to project_init" do
+  it "declares protected source globs on the workspace, attributed to project_init" do
     run, worker = create_run_and_worker(role: "project_init")
 
     response = described_class.call(
       runId: run.run_id,
-      patterns: [ ".", " " ],
+      patterns: [ "app/**", "db/migrate/**", " " ],
       server_context: { worker_id: worker.worker_id }
     )
 
     expect(response.error?).to be_falsey
     expect(response.structured_content).to be_a(Hash) # MCP structuredContent must be a JSON object, not a bare array
-    expect(run.workspace.reload.protected_path_patterns).to eq([ "." ])
+    expect(run.workspace.reload.protected_path_patterns).to eq(%w[app/** db/migrate/**])
   end
 
   it "replaces any previously declared patterns" do
@@ -20,18 +20,30 @@ RSpec.describe McpTools::RecordProtectedPathsTool do
     run.workspace.update!(protected_path_patterns: [ "old/root" ])
 
     described_class.call(
-      runId: run.run_id, patterns: [ "." ],
+      runId: run.run_id, patterns: [ "app/**" ],
       server_context: { worker_id: worker.worker_id }
     )
 
-    expect(run.workspace.reload.protected_path_patterns).to eq([ "." ])
+    expect(run.workspace.reload.protected_path_patterns).to eq([ "app/**" ])
   end
 
   it "rejects a worker that is not the project_init role" do
     run, worker = create_run_and_worker(role: "worker")
 
     response = described_class.call(
-      runId: run.run_id, patterns: [ "." ],
+      runId: run.run_id, patterns: [ "app/**" ],
+      server_context: { worker_id: worker.worker_id }
+    )
+
+    expect(response.error?).to be(true)
+    expect(run.workspace.reload.protected_path_patterns).to eq([])
+  end
+
+  it "rejects a catch-all or cache pattern" do
+    run, worker = create_run_and_worker(role: "project_init")
+
+    response = described_class.call(
+      runId: run.run_id, patterns: [ ".", "node_modules/**" ],
       server_context: { worker_id: worker.worker_id }
     )
 

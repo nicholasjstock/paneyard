@@ -18,7 +18,7 @@ class Workspace < ApplicationRecord
   end
 
   # Gates RunsController#new/#create until project_init has recorded the
-  # source surface that is protected by default.
+  # source patterns that are protected by default.
   def initialized?
     protected_path_patterns.present?
   end
@@ -37,14 +37,13 @@ class Workspace < ApplicationRecord
     end
   end
 
-  # These roots are readable by every worker but writable only by an
-  # implementation worker. "." intentionally represents the complete
-  # source worktree: source changes must not depend on a planner predicting
-  # every file a task will require.
-  def protected_write_roots
-    protected_path_patterns.select do |path|
-      candidate = Pathname(source_root).join(path).cleanpath
-      candidate.directory? && (candidate == Pathname(source_root) || candidate.to_s.start_with?("#{Pathname(source_root).expand_path}/"))
+  # These patterns are readable by every worker but writable only by an
+  # implementation worker. They deliberately describe source, configuration,
+  # and test paths, never the entire checkout: dependency caches and generated
+  # output must not become source merely because they sit beside it.
+  def protected_write_patterns
+    protected_path_patterns.select do |pattern|
+      pattern.present? && !Pathname(pattern).absolute? && !Pathname(pattern).cleanpath.to_s.start_with?("../")
     end
   end
 

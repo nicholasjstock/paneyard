@@ -12,17 +12,16 @@ RSpec.describe Workspace do
 
     expect(workspace.initialized?).to be(false)
 
-    workspace.update!(protected_path_patterns: [ "." ])
+    workspace.update!(protected_path_patterns: [ "app/**" ])
 
     expect(workspace.initialized?).to be(true)
   end
 
-  it "resolves the complete source worktree as a protected write root" do
+  it "keeps workspace-relative protected source glob patterns" do
     project_root = Dir.mktmpdir
-    FileUtils.mkdir_p(File.join(project_root, "main"))
-    workspace = Workspace.create!(name: "workspace-roots-#{SecureRandom.hex(4)}", root_path: project_root, protected_path_patterns: [ "." ])
+    workspace = Workspace.create!(name: "workspace-roots-#{SecureRandom.hex(4)}", root_path: project_root, protected_path_patterns: [ "app/**", "config/*.yml" ])
 
-    expect(workspace.protected_write_roots).to eq([ "." ])
+    expect(workspace.protected_write_patterns).to eq([ "app/**", "config/*.yml" ])
   ensure
     FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
   end

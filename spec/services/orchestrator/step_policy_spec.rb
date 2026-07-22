@@ -85,7 +85,7 @@ RSpec.describe Orchestrator::StepPolicy do
   end
 
   it "allows implementation with no planner-provided file list" do
-    @run.workspace.update!(protected_path_patterns: [ "." ])
+    @run.workspace.update!(protected_path_patterns: [ "app/**" ])
 
     step = implementation_step(allowed_paths: [])
 

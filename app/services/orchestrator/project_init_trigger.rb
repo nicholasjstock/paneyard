@@ -16,9 +16,11 @@ module Orchestrator
       state that clearly instead of leaving it to be guessed later. Call record_project_setup with your findings
       before finishing; your primary finding must use key "#{PRIMARY_ENTRY_KEY}". You may add up to 4 more findings
       for other clearly load-bearing commands (running tests, building for production) only if you find them with
-      the same evidence standard. Also call record_protected_paths exactly once with patterns=["."] to declare the
-      complete source worktree as protected by default. Read-only workers must not modify it; implementation workers
-      receive this complete protected source surface so they can make all changes genuinely required by a task without
+      the same evidence standard. Also call record_protected_paths exactly once with the workspace-relative glob list
+      that represents every maintained source, configuration, and test path in this repository. Do not use "." or a
+      catch-all glob: exclude dependency directories and caches (for example node_modules, vendor/bundle, .git), build
+      output, runtime state, logs, and generated artifacts. Read-only workers cannot modify these paths; implementation
+      workers receive the complete recorded glob list so they can make all changes genuinely required by a task without
       a planner predicting individual files. Finally, call record_test_paths exactly once
       with every existing workspace-relative directory that contains this project's maintained tests, derived from the
       repository's test command/configuration; use [] only when the project has no test directories. This lets future

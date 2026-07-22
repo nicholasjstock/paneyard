@@ -10,10 +10,11 @@
   </div>
 
   <div class="field">
-    <%= form.label :protected_path_patterns_text, "Protected source roots" %>
+    <%= form.label :protected_path_patterns_text, "Protected source path patterns" %>
     <p class="muted">
-      One workspace-relative root per line. Use <span class="mono">.</span> for the complete source worktree. These paths are
-      read-only by default and writable only by implementation workers. Proposed automatically by project setup; edit freely.
+      One workspace-relative glob per line. Include maintained source, configuration, and tests; exclude dependency caches,
+      generated output, logs, and runtime state. These paths are read-only by default and writable only by implementation workers.
+      Proposed automatically by project setup; edit freely.
     </p>
     <%= form.text_area :protected_path_patterns_text, value: @workspace.protected_path_patterns.join("\n"), rows: 10 %>
   </div>

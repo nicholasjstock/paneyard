@@ -88,7 +88,7 @@ module Orchestrator
         ":tmpdir" => "write",
         ":root" => "read",
         ":workspace_roots" => { "." => "read" }
-          .merge(allowed_paths.index_with { "write" })
+          .merge(allowed_write_roots.index_with { "write" })
           .merge(git_ignored_relative_paths.index_with { "write" })
       }
 
@@ -100,7 +100,15 @@ module Orchestrator
     end
 
     def allowed_absolute_paths
-      @allowed_absolute_paths ||= allowed_paths.map { |path| root_dir.join(path).cleanpath }
+      @allowed_absolute_paths ||= allowed_write_roots.map { |path| root_dir.join(path).cleanpath }
+    end
+
+    # Sandboxes accept concrete filesystem roots, not globs. A protected
+    # pattern such as app/**/*.rb therefore grants its non-glob prefix (app),
+    # which permits newly-created source files too while still excluding
+    # unrelated roots such as node_modules or build output.
+    def allowed_write_roots
+      @allowed_write_roots ||= allowed_paths.map { |pattern| glob_root(pattern) }.uniq
     end
 
     def cache_writable_absolute_paths
@@ -137,7 +145,7 @@ module Orchestrator
 
     def normalize_path(path)
       value = path.to_s
-      if value.blank? || Pathname(value).absolute? || value.match?(/[\*\?\[\]\{\}]/) || Pathname(value).cleanpath.to_s.start_with?("../")
+      if value.blank? || Pathname(value).absolute? || Pathname(value).cleanpath.to_s.start_with?("../")
         raise ArgumentError, "Worker policy requires workspace-relative paths: #{value.inspect}"
       end
 
@@ -168,6 +176,11 @@ module Orchestrator
           raise ArgumentError, "Worker path resolves outside target workspace: #{path}"
         end
       end
+    end
+
+    def glob_root(pattern)
+      prefix = pattern.to_s.split(/[\*\?\[\{]/, 2).first.to_s.delete_suffix("/")
+      prefix.presence || "."
     end
 
     def claude_absolute_path(path)

@@ -90,7 +90,7 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     FileUtils.mkdir_p(File.join(source_root, "quality", "checks"))
     workspace = Workspace.create!(
       name: "spawn-test-roots-#{SecureRandom.hex(4)}", root_path: project_root,
-      protected_path_patterns: [ "." ], test_path_patterns: [ "quality/checks" ]
+      protected_path_patterns: [ "app/**", "quality/checks/**" ], test_path_patterns: [ "quality/checks" ]
     )
     run = workspace.runs.create!(
       run_id: "spawn-test-roots-#{SecureRandom.hex(4)}", task: "Implement with tests", target_root: source_root,
@@ -109,7 +109,7 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
 
     Orchestrator::SpawnRequestedWorkers.call(run:)
 
-    expect(spawned[:allowed_paths]).to contain_exactly(".", "quality/checks")
+    expect(spawned[:allowed_paths]).to contain_exactly("app/**", "quality/checks/**")
   ensure
     FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
   end

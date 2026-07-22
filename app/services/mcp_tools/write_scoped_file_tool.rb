@@ -42,8 +42,9 @@ module McpTools
 
     def self.authorized_path?(worker, path)
       normalized = Pathname(path).cleanpath.to_s
-      worker.allowed_paths.any? do |root|
-        root == "." || normalized == root || normalized.start_with?("#{root}/")
+      worker.allowed_paths.any? do |pattern|
+        File.fnmatch?(pattern, normalized, File::FNM_PATHNAME) ||
+          (pattern.end_with?("/**") && normalized.start_with?("#{pattern.delete_suffix('/**')}/"))
       end
     rescue ArgumentError
       false
