@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_22_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_22_170000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -408,6 +408,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_140000) do
     t.string "name", null: false
     t.json "protected_path_patterns", default: [], null: false
     t.string "root_path", null: false
+    t.json "test_path_patterns", default: [], null: false
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_workspaces_on_name", unique: true
     t.index ["root_path"], name: "index_workspaces_on_root_path", unique: true

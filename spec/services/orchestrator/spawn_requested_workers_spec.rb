@@ -84,6 +84,36 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     assert_equal "fulfilled", request.reload.status
   end
 
+  it "adds project-init-discovered test directories to implementation worker authority" do
+    project_root = Dir.mktmpdir
+    source_root = File.join(project_root, "main")
+    FileUtils.mkdir_p(File.join(source_root, "quality", "checks"))
+    workspace = Workspace.create!(
+      name: "spawn-test-roots-#{SecureRandom.hex(4)}", root_path: project_root,
+      test_path_patterns: [ "quality/checks" ]
+    )
+    run = workspace.runs.create!(
+      run_id: "spawn-test-roots-#{SecureRandom.hex(4)}", task: "Implement with tests", target_root: source_root,
+      launcher_variant: "claude", status: "running"
+    )
+    run.spawn_requests.create!(
+      asked_by: "planner", scope: "fix.md", text: "Implement the fix.", requested_role: "worker", priority: "blocking",
+      execution_mode: "implementation", write_scope: "scoped_changes", allowed_paths: [ "app/example.rb" ]
+    )
+
+    spawned = nil
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+      spawned = kwargs
+      instance_double(Worker, worker_id: kwargs[:worker_id])
+    end
+
+    Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    expect(spawned[:allowed_paths]).to contain_exactly("app/example.rb", "quality/checks")
+  ensure
+    FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
+  end
+
   it "dispatches only one queued verifier per run, leaving later work queued" do
     workspace = Workspace.create!(name: "serial-verifiers-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(

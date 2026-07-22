@@ -88,10 +88,11 @@ module Orchestrator
         )
 
         begin
+          effective_allowed_paths = allowed_paths(request, run:)
           worker = WorkerSpawner.spawn_worker(
             run: run, role: role, nickname: nickname, reason: reason, scope: request.scope, prompt: prompt,
             worker_id: worker_id, mode: execution_mode(request), write_scope: write_scope(request),
-            allowed_paths: allowed_paths(request), model_tier: request.model_tier
+            allowed_paths: effective_allowed_paths, model_tier: request.model_tier
           )
         rescue Orchestrator::TargetPreflight::Error => e
           request.update!(
@@ -237,13 +238,17 @@ module Orchestrator
       request.write_scope.presence || request.text.to_s[/\bWrite scope: ([a-z_]+)\./i, 1]&.downcase
     end
 
-    def allowed_paths(request)
-      return Array(request.allowed_paths) if request.allowed_paths.present?
+    def allowed_paths(request, run: nil)
+      paths = if request.allowed_paths.present?
+        Array(request.allowed_paths)
+      else
+        raw = request.text.to_s[/\bAllowed repository paths: (.+?)\./i, 1]
+        raw.blank? || raw.casecmp?("none") ? [] : raw.split(",").map(&:strip)
+      end
 
-      raw = request.text.to_s[/\bAllowed repository paths: (.+?)\./i, 1]
-      return [] if raw.blank? || raw.casecmp?("none")
+      return paths unless run && execution_mode(request) == "implementation" && write_scope(request) == "scoped_changes"
 
-      raw.split(",").map(&:strip)
+      (paths + run.workspace.test_write_roots).uniq
     end
   end
 end

@@ -17,7 +17,7 @@ module McpTools
       unless worker.write_scope.in?(%w[scoped_changes tests_only])
         raise ArgumentError, "#{worker.write_scope || 'unknown'} workers cannot modify workspace files"
       end
-      raise ArgumentError, "path is not authorized for this worker: #{path}" unless worker.allowed_paths.include?(path)
+      raise ArgumentError, "path is not authorized for this worker: #{path}" unless authorized_path?(worker, path)
 
       target = authorized_target(worker.run.target_root, path)
       File.binwrite(target, content)
@@ -39,5 +39,17 @@ module McpTools
       target.to_s
     end
     private_class_method :authorized_target
+
+    def self.authorized_path?(worker, path)
+      return true if worker.allowed_paths.include?(path)
+
+      normalized = Pathname(path).cleanpath.to_s
+      worker.run.workspace.test_write_roots.any? do |root|
+        worker.allowed_paths.include?(root) && normalized.start_with?("#{root}/")
+      end
+    rescue ArgumentError
+      false
+    end
+    private_class_method :authorized_path?
   end
 end

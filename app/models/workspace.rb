@@ -31,6 +31,13 @@ class Workspace < ApplicationRecord
     Pathname(root_path).join("main").expand_path.to_s
   end
 
+  def test_write_roots
+    test_path_patterns.select do |path|
+      candidate = Pathname(source_root).join(path).cleanpath
+      candidate.directory? && candidate.to_s.start_with?("#{Pathname(source_root).expand_path}/")
+    end
+  end
+
   private
 
   def source_checkout_is_not_changed_while_runs_are_active

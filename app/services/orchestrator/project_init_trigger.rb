@@ -19,8 +19,11 @@ module Orchestrator
       the same evidence standard. Also call record_protected_paths exactly once with only genuinely high-impact
       operational files you find (credentials, production environment configuration, or deployment configuration).
       Do not include ordinary application source, views, controllers, routes, tests, schemas, or migrations: workers
-      receive exact per-step allowed paths for normal implementation work. This call is required, not optional: no
-      real task run can start on this workspace until it lands. Do not modify any files.
+      receive exact per-step allowed paths for normal implementation work. Finally, call record_test_paths exactly once
+      with every existing workspace-relative directory that contains this project's maintained tests, derived from the
+      repository's test command/configuration; use [] only when the project has no test directories. This lets future
+      implementation workers update all relevant tests without a planner guessing their layout. These calls are required,
+      not optional: no real task run can start on this workspace until they land. Do not modify any files.
     TEXT
 
     def call(run:, force: false)
