@@ -39,13 +39,29 @@ class TickRunJob < ApplicationJob
 
   def finalize_completed_run(run)
     if run.worktree_name.present?
-      return if run.publication_status.in?(%w[publishing published no_changes])
+      return if run.publication_status.in?(%w[publishing published])
 
-      run.update!(publication_status: "queued", publication_error: nil)
-      FinalizeRunPublicationJob.perform_later(run.id)
+      if run.publication_status.in?(%w[committed no_changes])
+        FinalizeRunPublicationJob.perform_later(run.id)
+      else
+        queue_committer(run)
+      end
     else
       run.update!(status: "completed", stopped_at: run.stopped_at || Time.current) unless run.status == "completed"
     end
+  end
+
+  def queue_committer(run)
+    return if Worker.active.exists?(run_id: run.run_id, role: "committer")
+    return if SpawnRequest.where(run_id: run.run_id, requested_role: "committer", status: "open").exists?
+
+    run.update!(publication_status: "commit_pending", publication_error: nil)
+    SpawnRequest.create!(
+      run_id: run.run_id, asked_by: "orchestrator", requested_role: "committer", priority: "blocking",
+      scope: "commit-#{run.worktree_name}.md", execution_mode: "diagnosis", write_scope: "source_protected",
+      text: "Review the entire run worktree and call commit_run_changes once to stage and commit every change, including the run's managed evidence artifacts. Do not call worker_turn; the commit tool records your handoff."
+    )
+    run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "A committer is reviewing and committing the complete run worktree.")
   end
 
   def clear_expired_capacity_phase(run)

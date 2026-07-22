@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::RunPublication do
-  it "records no_changes without invoking GitHub" do
+  it "records no_changes during the committer step without invoking GitHub" do
     root = Dir.mktmpdir
     workspace = Workspace.create!(name: "publication-#{SecureRandom.hex(4)}", root_path: root)
     run = workspace.runs.create!(
@@ -12,7 +12,7 @@ RSpec.describe Orchestrator::RunPublication do
     allow(described_class).to receive(:git!).with(Pathname(root), "status", "--porcelain").and_return("")
     expect(described_class).not_to receive(:create_pr)
 
-    expect(described_class.publish!(run)).to eq(:no_changes)
+    expect(described_class.commit_all!(run)).to eq(:no_changes)
     expect(run.reload.publication_status).to eq("no_changes")
   ensure
     FileUtils.remove_entry(root) if root && File.exist?(root)

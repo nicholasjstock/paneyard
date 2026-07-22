@@ -25,7 +25,8 @@ module Orchestrator
           ::McpTools::RecordProjectSetupTool,
           ::McpTools::RecordProtectedPathsTool,
           ::McpTools::ReportFailedApproachTool,
-          ::McpTools::SubmitAcceptanceVerificationTool
+          ::McpTools::SubmitAcceptanceVerificationTool,
+          ::McpTools::CommitRunChangesTool
         ]
       )
     end

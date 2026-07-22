@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe TickRunJob do
-  it "queues PR finalization instead of immediately completing a managed run" do
+  it "queues a committer instead of immediately publishing a managed run" do
     workspace = Workspace.create!(name: "tick-publish-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(
       workspace: workspace, run_id: "tick-publish-#{SecureRandom.hex(4)}", task: "Publish changes",
@@ -9,9 +9,10 @@ RSpec.describe TickRunJob do
     )
     Orchestrator::TickState.write(run_id: run.run_id, phase: "completed", tick_count: 1, last_plan_summary: "Done.", pending_spawn_keys: [], following_steps: [])
 
-    expect { TickRunJob.new.send(:tick_run, run) }.to have_enqueued_job(FinalizeRunPublicationJob).with(run.id)
+    expect { TickRunJob.new.send(:tick_run, run) }.not_to have_enqueued_job(FinalizeRunPublicationJob)
     expect(run.reload.status).to eq("running")
-    expect(run.publication_status).to eq("queued")
+    expect(run.publication_status).to eq("commit_pending")
+    expect(run.spawn_requests.find_by(requested_role: "committer")).to be_present
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
