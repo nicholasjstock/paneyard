@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_22_113000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_22_130000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -212,6 +212,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_113000) do
     t.string "branch_name"
     t.datetime "capacity_available_at"
     t.datetime "created_at", null: false
+    t.string "last_pull_request_comment_id"
     t.string "launched_by"
     t.string "launcher_variant", default: "claude", null: false
     t.string "log_path"

@@ -28,6 +28,9 @@ production: &recurring_jobs
   merge_approved_runs:
     class: MergeApprovedRunsJob
     schedule: every minute
+  resume_runs_from_pull_request_comments:
+    class: ResumeRunsFromPullRequestCommentsJob
+    schedule: every minute
 
 development:
   <<: *recurring_jobs
