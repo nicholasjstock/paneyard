@@ -6,13 +6,13 @@ module Orchestrator
     module_function
 
     def provision!(run)
-      return run if run.worktree_name.present? && Pathname(run.target_root).directory?
-
       source_root = Pathname(run.workspace.root_path).expand_path
-      validate_source!(source_root)
       name = run.worktree_name.presence || name_for(run)
       branch = "workflow/#{name}"
       worktree = source_root.parent.join(name)
+      return run if provisioned?(run, worktree)
+
+      validate_source!(source_root)
       raise Error, "Worktree path already exists: #{worktree}" if worktree.exist?
 
       git!(source_root, "fetch", "origin", "main")
@@ -23,6 +23,13 @@ module Orchestrator
         base_sha: base_sha, target_root: worktree.to_s
       )
       run
+    end
+
+    def provisioned?(run, worktree)
+      return false unless run.worktree_name.present? && run.branch_name.present? && run.source_root.present?
+      return false unless Pathname(run.target_root).expand_path == worktree.expand_path
+
+      worktree.directory?
     end
 
     def validate_source!(source_root)

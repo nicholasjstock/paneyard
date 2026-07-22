@@ -14,6 +14,10 @@ module Orchestrator
         run.update!(publication_status: "publishing", publication_error: nil, publication_started_at: Time.current)
         root = Pathname(run.target_root)
         raise Error, "Run worktree does not exist: #{root}" unless root.directory?
+        raise Error, "Run has no publication branch" if run.branch_name.blank?
+        if run.source_root.present? && root.expand_path == Pathname(run.source_root).expand_path
+          raise Error, "Refusing to publish directly from the source checkout"
+        end
         if git!(root, "status", "--porcelain").empty?
           run.update!(publication_status: "no_changes", publication_completed_at: Time.current)
           return :no_changes
@@ -25,9 +29,11 @@ module Orchestrator
         run.update!(publication_status: "published", pull_request_url: url, publication_completed_at: Time.current)
         :published
       end
-    rescue Error => error
+    rescue StandardError => error
       run.update!(publication_status: "failed", publication_error: error.message) if run.persisted?
-      raise
+      raise error if error.is_a?(Error)
+
+      raise Error, error.message
     end
 
     def existing_pr_url(root, branch)
