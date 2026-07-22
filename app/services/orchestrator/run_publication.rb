@@ -48,7 +48,7 @@ module Orchestrator
         run.update!(publication_status: "publishing", publication_error: nil)
         git!(root, "push", "-u", "origin", run.branch_name)
         url = existing_pr_url(root, run.branch_name) || create_pr(root, run)
-        run.update!(publication_status: "published", pull_request_url: url, publication_completed_at: Time.current)
+        run.update!(publication_status: "awaiting_approval", pull_request_url: url, publication_completed_at: Time.current)
         :published
       end
     rescue StandardError => error
@@ -61,6 +61,60 @@ module Orchestrator
     def existing_pr_url(root, branch)
       output, _error, status = Open3.capture3("gh", "pr", "view", branch, "--json", "url", "--jq", ".url", chdir: root.to_s)
       status.success? ? output.strip.presence : nil
+    end
+
+    def approved?(run)
+      output, _error, status = Open3.capture3("gh", "pr", "view", run.pull_request_url, "--json", "state,reviewDecision", chdir: run.target_root)
+      return false unless status.success?
+
+      details = JSON.parse(output)
+      details["state"] == "OPEN" && details["reviewDecision"] == "APPROVED"
+    rescue JSON::ParserError
+      false
+    end
+
+    def remove_evidence!(run)
+      run.with_lock do
+        root = validated_root!(run)
+        return :already_cleaned if run.publication_status == "cleanup_pushed"
+
+        evidence_paths(run, root).each { |path| git!(root, "rm", "-r", "--ignore-unmatch", "--", path) }
+        if git!(root, "status", "--porcelain").empty?
+          run.update!(publication_status: "cleanup_pushed", publication_error: nil)
+          return :nothing_to_remove
+        end
+
+        git!(root, "commit", "-m", "Remove run evidence before merge")
+        git!(root, "push", "origin", run.branch_name)
+        run.update!(publication_status: "cleanup_pushed", publication_error: nil)
+        :cleaned
+      end
+    rescue StandardError => error
+      record_failure!(run, error)
+      raise error if error.is_a?(Error)
+
+      raise Error, error.message
+    end
+
+    def merge_and_cleanup!(run)
+      run.with_lock do
+        root = validated_root!(run)
+        raise Error, "PR evidence cleanup has not completed" unless run.publication_status == "cleanup_pushed"
+
+        _output, _error, status = Open3.capture3("gh", "pr", "merge", run.pull_request_url, "--squash", "--delete-branch", chdir: root.to_s)
+        return :not_ready unless status.success?
+
+        source_root = Pathname(run.source_root)
+        git!(source_root, "worktree", "remove", root.to_s)
+        git!(source_root, "worktree", "prune")
+        run.update!(publication_status: "merged", publication_error: nil)
+        :merged
+      end
+    rescue StandardError => error
+      record_failure!(run, error)
+      raise error if error.is_a?(Error)
+
+      raise Error, error.message
     end
 
     def create_pr(root, run)
