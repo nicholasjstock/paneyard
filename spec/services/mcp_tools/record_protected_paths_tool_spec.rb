@@ -39,11 +39,11 @@ RSpec.describe McpTools::RecordProtectedPathsTool do
     expect(run.workspace.reload.protected_path_patterns).to eq([])
   end
 
-  it "rejects a catch-all or cache pattern" do
+  it "rejects a catch-all, negated, or cache pattern" do
     run, worker = create_run_and_worker(role: "project_init")
 
     response = described_class.call(
-      runId: run.run_id, patterns: [ ".", "node_modules/**" ],
+      runId: run.run_id, patterns: [ ".", "!config/*.key", "node_modules/**" ],
       server_context: { worker_id: worker.worker_id }
     )
 

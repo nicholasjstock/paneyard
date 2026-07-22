@@ -32,7 +32,7 @@ module McpTools
       raise ArgumentError, "record_protected_paths requires at least one source pattern" if patterns.empty?
 
       invalid = patterns.select do |pattern|
-        Pathname(pattern).absolute? || Pathname(pattern).cleanpath.to_s.start_with?("../") || pattern == "." || pattern == "**"
+        Pathname(pattern).absolute? || Pathname(pattern).cleanpath.to_s.start_with?("../") || pattern == "." || pattern == "**" || pattern.start_with?("!")
       end
       raise ArgumentError, "invalid protected source patterns: #{invalid.join(', ')}" if invalid.any?
 

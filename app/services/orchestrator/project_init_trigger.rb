@@ -18,7 +18,7 @@ module Orchestrator
       for other clearly load-bearing commands (running tests, building for production) only if you find them with
       the same evidence standard. Also call record_protected_paths exactly once with the workspace-relative glob list
       that represents every maintained source, configuration, and test path in this repository. Do not use "." or a
-      catch-all glob: exclude dependency directories and caches (for example node_modules, vendor/bundle, .git), build
+      catch-all glob or negated pattern: list only positive safe patterns. Exclude dependency directories and caches (for example node_modules, vendor/bundle, .git), build
       output, runtime state, logs, and generated artifacts. Read-only workers cannot modify these paths; implementation
       workers receive the complete recorded glob list so they can make all changes genuinely required by a task without
       a planner predicting individual files. Finally, call record_test_paths exactly once
