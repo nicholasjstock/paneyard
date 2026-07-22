@@ -84,13 +84,13 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     assert_equal "fulfilled", request.reload.status
   end
 
-  it "adds project-init-discovered test directories to implementation worker authority" do
+  it "grants the complete project-init-protected source surface to implementation workers" do
     project_root = Dir.mktmpdir
     source_root = File.join(project_root, "main")
     FileUtils.mkdir_p(File.join(source_root, "quality", "checks"))
     workspace = Workspace.create!(
       name: "spawn-test-roots-#{SecureRandom.hex(4)}", root_path: project_root,
-      test_path_patterns: [ "quality/checks" ]
+      protected_path_patterns: [ "." ], test_path_patterns: [ "quality/checks" ]
     )
     run = workspace.runs.create!(
       run_id: "spawn-test-roots-#{SecureRandom.hex(4)}", task: "Implement with tests", target_root: source_root,
@@ -109,7 +109,7 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
 
     Orchestrator::SpawnRequestedWorkers.call(run:)
 
-    expect(spawned[:allowed_paths]).to contain_exactly("app/example.rb", "quality/checks")
+    expect(spawned[:allowed_paths]).to contain_exactly(".", "quality/checks")
   ensure
     FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
   end

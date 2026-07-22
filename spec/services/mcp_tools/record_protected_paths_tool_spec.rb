@@ -1,37 +1,37 @@
 require "rails_helper"
 
 RSpec.describe McpTools::RecordProtectedPathsTool do
-  it "declares protected path globs on the workspace, attributed to project_init" do
+  it "declares protected source roots on the workspace, attributed to project_init" do
     run, worker = create_run_and_worker(role: "project_init")
 
     response = described_class.call(
       runId: run.run_id,
-      patterns: [ "app/controllers/**/*.rb", "db/migrate/**", " " ],
+      patterns: [ ".", " " ],
       server_context: { worker_id: worker.worker_id }
     )
 
     expect(response.error?).to be_falsey
     expect(response.structured_content).to be_a(Hash) # MCP structuredContent must be a JSON object, not a bare array
-    expect(run.workspace.reload.protected_path_patterns).to eq(%w[app/controllers/**/*.rb db/migrate/**])
+    expect(run.workspace.reload.protected_path_patterns).to eq([ "." ])
   end
 
   it "replaces any previously declared patterns" do
     run, worker = create_run_and_worker(role: "project_init")
-    run.workspace.update!(protected_path_patterns: [ "old/pattern/**" ])
+    run.workspace.update!(protected_path_patterns: [ "old/root" ])
 
     described_class.call(
-      runId: run.run_id, patterns: [ "app/controllers/**/*.rb" ],
+      runId: run.run_id, patterns: [ "." ],
       server_context: { worker_id: worker.worker_id }
     )
 
-    expect(run.workspace.reload.protected_path_patterns).to eq([ "app/controllers/**/*.rb" ])
+    expect(run.workspace.reload.protected_path_patterns).to eq([ "." ])
   end
 
   it "rejects a worker that is not the project_init role" do
     run, worker = create_run_and_worker(role: "worker")
 
     response = described_class.call(
-      runId: run.run_id, patterns: [ "app/controllers/**/*.rb" ],
+      runId: run.run_id, patterns: [ "." ],
       server_context: { worker_id: worker.worker_id }
     )
 

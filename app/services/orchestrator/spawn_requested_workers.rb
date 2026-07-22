@@ -248,7 +248,10 @@ module Orchestrator
 
       return paths unless run && execution_mode(request) == "implementation" && write_scope(request) == "scoped_changes"
 
-      (paths + run.workspace.test_write_roots).uniq
+      # A planner decides whether a worker is implementing; it must not have
+      # to foresee every production and test file the implementation needs.
+      # The complete source surface stays protected for all other worker modes.
+      (run.workspace.protected_write_roots + run.workspace.test_write_roots).uniq
     end
   end
 end

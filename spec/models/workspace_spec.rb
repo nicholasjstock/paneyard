@@ -12,9 +12,19 @@ RSpec.describe Workspace do
 
     expect(workspace.initialized?).to be(false)
 
-    workspace.update!(protected_path_patterns: [ "app/controllers/**/*.rb" ])
+    workspace.update!(protected_path_patterns: [ "." ])
 
     expect(workspace.initialized?).to be(true)
+  end
+
+  it "resolves the complete source worktree as a protected write root" do
+    project_root = Dir.mktmpdir
+    FileUtils.mkdir_p(File.join(project_root, "main"))
+    workspace = Workspace.create!(name: "workspace-roots-#{SecureRandom.hex(4)}", root_path: project_root, protected_path_patterns: [ "." ])
+
+    expect(workspace.protected_write_roots).to eq([ "." ])
+  ensure
+    FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
   end
 
   it "does not let an active run's source checkout move" do

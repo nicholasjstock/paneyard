@@ -17,9 +17,8 @@ class Workspace < ApplicationRecord
     order(:created_at).first
   end
 
-  # Gates RunsController#new/#create until project_init has recorded its
-  # workspace setup. The patterns are operational metadata; normal workers
-  # are authorized by their exact step-level allowed paths.
+  # Gates RunsController#new/#create until project_init has recorded the
+  # source surface that is protected by default.
   def initialized?
     protected_path_patterns.present?
   end
@@ -35,6 +34,17 @@ class Workspace < ApplicationRecord
     test_path_patterns.select do |path|
       candidate = Pathname(source_root).join(path).cleanpath
       candidate.directory? && candidate.to_s.start_with?("#{Pathname(source_root).expand_path}/")
+    end
+  end
+
+  # These roots are readable by every worker but writable only by an
+  # implementation worker. "." intentionally represents the complete
+  # source worktree: source changes must not depend on a planner predicting
+  # every file a task will require.
+  def protected_write_roots
+    protected_path_patterns.select do |path|
+      candidate = Pathname(source_root).join(path).cleanpath
+      candidate.directory? && (candidate == Pathname(source_root) || candidate.to_s.start_with?("#{Pathname(source_root).expand_path}/"))
     end
   end
 

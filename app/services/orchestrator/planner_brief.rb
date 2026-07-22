@@ -73,10 +73,10 @@ module Orchestrator
         Never return nextStep=null while completion_blockers remain that are still pending, in_progress, or blocked
         after applying justified acceptanceUpdates -- a criterion you just moved to ready_for_verification does not
         require a nextStep; Rails has already spawned an independent verifier for it.
-        A diagnosis step must be source_protected. An implementation step must name exact workspace-relative production file paths in
-        allowedPaths. Rails automatically grants the workspace's project-init-discovered test directories to implementation
-        workers, so do not guess or include test paths in allowedPaths. An exact production path names one file: it must not end in "/" and must not contain glob characters
-        (*, ?, [, ], {, or }). Directory paths such as "front/" and patterns such as "front/**/*.ts" are invalid.
+        A diagnosis step must be source_protected. An implementation step receives the workspace's complete protected source
+        surface automatically, including its discovered test directories. allowedPaths is optional planning context only;
+        do not rely on it for authorization or try to enumerate every file the change may need. It may contain only
+        workspace-relative paths and no glob characters (*, ?, [, ], {, or }).
         Every nextStep or followingSteps artifact must be a filename only (for example "phone-demo-baseline.md"), never
         a path such as "artifacts/phone-demo-baseline.md"; Rails places it in the managed run artifact directory.
         Use mode=recording for running a demo or collecting recording/timing artifacts, even when owner=infrastructure;

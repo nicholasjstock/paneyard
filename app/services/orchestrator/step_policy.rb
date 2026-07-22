@@ -19,8 +19,9 @@ module Orchestrator
       Orchestrator::AcceptanceCriteria.current_keys(run_id: run_id)
     end
 
-    # Remove authority that a non-writing step cannot use. This repair can
-    # only narrow access; implementation paths are never inferred here.
+    # Remove authority that a non-writing step cannot use. Implementation
+    # authority comes from the workspace's protected source roots, not from
+    # a planner attempting to predict individual files.
     def normalize_plan(next_step:, following_steps:)
       {
         next_step: normalize_step(next_step),
@@ -58,7 +59,6 @@ module Orchestrator
         validate_diagnosis!(step:, write_scope:, allowed_paths:)
       when "implementation", "infrastructure"
         raise ArgumentError, "#{mode} step requires at least one evidenceRef" if evidence_refs.empty?
-        raise ArgumentError, "#{mode} step requires exact allowedPaths" if allowed_paths.empty?
         raise ArgumentError, "#{mode} step requires writeScope=scoped_changes" unless write_scope == "scoped_changes"
       when "verification", "recording"
         raise ArgumentError, "#{mode} step must use writeScope=source_protected" unless write_scope == "source_protected"
@@ -74,7 +74,7 @@ module Orchestrator
       lines = [
         "Execution mode: #{step[:mode]}.",
         "Write scope: #{step[:write_scope]}.",
-        "Allowed repository paths: #{Array(step[:allowed_paths]).presence&.join(', ') || 'none'}.",
+        "Planner-suggested repository paths: #{Array(step[:allowed_paths]).presence&.join(', ') || 'none'}.",
         "Evidence references: #{Array(step[:evidence_refs]).presence&.join(', ') || 'none'}.",
         step[:success_check]
       ]
@@ -112,8 +112,8 @@ module Orchestrator
     end
 
     def reject_ambiguous_paths!(paths)
-      ambiguous = paths.select { |path| path.blank? || path.end_with?("/") || path.match?(/[\*\?\[\]\{\}]/) }
-      raise ArgumentError, "allowedPaths must name exact files: #{ambiguous.join(', ')}" if ambiguous.any?
+      ambiguous = paths.select { |path| path.blank? || Pathname(path).absolute? || path.match?(/[\*\?\[\]\{\}]/) || Pathname(path).cleanpath.to_s.start_with?("../") }
+      raise ArgumentError, "allowedPaths must name workspace-relative paths: #{ambiguous.join(', ')}" if ambiguous.any?
     end
 
     # ArtifactStore always places a run artifact beneath its managed output

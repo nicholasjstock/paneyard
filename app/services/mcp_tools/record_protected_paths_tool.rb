@@ -1,9 +1,9 @@
 module McpTools
   class RecordProtectedPathsTool < MCP::Tool
     tool_name "record_protected_paths"
-    description "Declare this workspace's high-impact operational path glob patterns for setup visibility. " \
-      "Normal implementation authorization is controlled by each step's exact allowed paths. Only callable by an authenticated project_init worker. " \
-      "Replaces any previously declared patterns for this workspace."
+    description "Declare this workspace's source roots that are protected by default and writable only during implementation. " \
+      "Use [\".\"] for the complete source worktree. Only callable by an authenticated project_init worker. " \
+      "Replaces any previously declared roots for this workspace."
     input_schema(
       properties: {
         runId: { type: "string" },

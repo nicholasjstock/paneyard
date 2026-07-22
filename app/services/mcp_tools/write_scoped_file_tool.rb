@@ -1,7 +1,7 @@
 module McpTools
   class WriteScopedFileTool < MCP::Tool
     tool_name "write_scoped_file"
-    description "Replace one exact planner-authorized workspace file. Unavailable to source-protected workers."
+    description "Replace one workspace file inside an implementation worker's authorized source roots. Unavailable to source-protected workers."
     input_schema(
       properties: {
         runId: { type: "string" },
@@ -41,11 +41,9 @@ module McpTools
     private_class_method :authorized_target
 
     def self.authorized_path?(worker, path)
-      return true if worker.allowed_paths.include?(path)
-
       normalized = Pathname(path).cleanpath.to_s
-      worker.run.workspace.test_write_roots.any? do |root|
-        worker.allowed_paths.include?(root) && normalized.start_with?("#{root}/")
+      worker.allowed_paths.any? do |root|
+        root == "." || normalized == root || normalized.start_with?("#{root}/")
       end
     rescue ArgumentError
       false

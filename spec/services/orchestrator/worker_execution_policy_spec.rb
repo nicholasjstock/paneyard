@@ -75,8 +75,13 @@ RSpec.describe Orchestrator::WorkerExecutionPolicy do
     end.to raise_error(ArgumentError, /source_protected workers cannot authorize/)
   end
 
-  it "rejects absolute, ambiguous, and escaping paths" do
+  it "rejects absolute, globbed, and escaping paths while allowing a source root" do
     root = Dir.mktmpdir("scoped-policy")
+
+    policy = described_class.new(
+      root_dir: root, mode: "implementation", write_scope: "scoped_changes", allowed_paths: [ "." ]
+    )
+    expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).to include(root)
 
     [ "/tmp/file", "front/**/*.ts", "../outside" ].each do |path|
       expect do

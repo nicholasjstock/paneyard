@@ -137,8 +137,8 @@ module Orchestrator
 
     def normalize_path(path)
       value = path.to_s
-      if value.blank? || Pathname(value).absolute? || value.end_with?("/") || value.match?(/[\*\?\[\]\{\}]/)
-        raise ArgumentError, "Worker policy requires exact workspace-relative files: #{value.inspect}"
+      if value.blank? || Pathname(value).absolute? || value.match?(/[\*\?\[\]\{\}]/) || Pathname(value).cleanpath.to_s.start_with?("../")
+        raise ArgumentError, "Worker policy requires workspace-relative paths: #{value.inspect}"
       end
 
       Pathname(value).cleanpath.to_s
@@ -157,7 +157,7 @@ module Orchestrator
 
       real_root = root_dir.realpath
       allowed_absolute_paths.each do |path|
-        unless path.to_s.start_with?("#{root_dir}#{File::SEPARATOR}")
+        unless path == root_dir || path.to_s.start_with?("#{root_dir}#{File::SEPARATOR}")
           raise ArgumentError, "Worker path escapes target workspace: #{path}"
         end
 

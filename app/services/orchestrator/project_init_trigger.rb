@@ -16,10 +16,10 @@ module Orchestrator
       state that clearly instead of leaving it to be guessed later. Call record_project_setup with your findings
       before finishing; your primary finding must use key "#{PRIMARY_ENTRY_KEY}". You may add up to 4 more findings
       for other clearly load-bearing commands (running tests, building for production) only if you find them with
-      the same evidence standard. Also call record_protected_paths exactly once with only genuinely high-impact
-      operational files you find (credentials, production environment configuration, or deployment configuration).
-      Do not include ordinary application source, views, controllers, routes, tests, schemas, or migrations: workers
-      receive exact per-step allowed paths for normal implementation work. Finally, call record_test_paths exactly once
+      the same evidence standard. Also call record_protected_paths exactly once with patterns=["."] to declare the
+      complete source worktree as protected by default. Read-only workers must not modify it; implementation workers
+      receive this complete protected source surface so they can make all changes genuinely required by a task without
+      a planner predicting individual files. Finally, call record_test_paths exactly once
       with every existing workspace-relative directory that contains this project's maintained tests, derived from the
       repository's test command/configuration; use [] only when the project has no test directories. This lets future
       implementation workers update all relevant tests without a planner guessing their layout. These calls are required,

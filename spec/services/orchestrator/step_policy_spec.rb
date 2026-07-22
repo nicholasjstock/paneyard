@@ -70,24 +70,24 @@ RSpec.describe Orchestrator::StepPolicy do
     assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
   end
 
-  it "rejects implementation without evidence and exact files" do
+  it "rejects implementation without evidence, even when no planner file list is supplied" do
     error = assert_raises(ArgumentError) do
       Orchestrator::StepPolicy.validate!(
         run_id: @run.run_id,
         step: {
           owner: "worker", artifact: "fix.md", success_check: "Correct the confirmed defect.",
-          mode: "implementation", write_scope: "scoped_changes", allowed_paths: [ "back/**" ], evidence_refs: []
+          mode: "implementation", write_scope: "scoped_changes", allowed_paths: [], evidence_refs: []
         }
       )
     end
 
-    assert_match(/allowedPaths must name exact files/, error.message)
+    assert_match(/requires at least one evidenceRef/, error.message)
   end
 
-  it "allows exact implementation paths even when they match workspace operational metadata" do
-    @run.workspace.update!(protected_path_patterns: [ "app/controllers/**/*.rb" ])
+  it "allows implementation with no planner-provided file list" do
+    @run.workspace.update!(protected_path_patterns: [ "." ])
 
-    step = implementation_step(allowed_paths: [ "app/controllers/sessions_controller.rb" ])
+    step = implementation_step(allowed_paths: [])
 
     assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
   end
