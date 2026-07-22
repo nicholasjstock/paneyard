@@ -39,7 +39,7 @@ RSpec.describe Orchestrator::WorkerExecutionPolicy do
     overrides = policy.codex_config_overrides.join(" ")
     expect(overrides).to include('"node_modules"="write"')
     expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).to include(File.join(root, "node_modules"))
-    expect(policy.claude_settings["permissions"]["allow"]).to include("Write(#{File.join(root, 'node_modules')})")
+    expect(policy.claude_settings["permissions"]["allow"]).to include("Write(#{File.join(root, 'node_modules')}/**)")
   ensure
     FileUtils.remove_entry(root) if root && Dir.exist?(root)
   end
@@ -83,6 +83,7 @@ RSpec.describe Orchestrator::WorkerExecutionPolicy do
       root_dir: root, mode: "implementation", write_scope: "scoped_changes", allowed_paths: [ "app/**/*.rb" ]
     )
     expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).to include(File.join(root, "app"))
+    expect(policy.claude_settings["permissions"]["allow"]).to include("Edit(#{File.join(root, "app")}/**)")
 
     [ "/tmp/file", "../outside" ].each do |path|
       expect do

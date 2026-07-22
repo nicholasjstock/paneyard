@@ -42,13 +42,13 @@ module Orchestrator
       ]
       if repository_writable?
         allowed_absolute_paths.each do |path|
-          allow_rules << "Edit(#{claude_absolute_path(path)})"
-          allow_rules << "Write(#{claude_absolute_path(path)})"
+          allow_rules << "Edit(#{claude_absolute_path(path)}/**)"
+          allow_rules << "Write(#{claude_absolute_path(path)}/**)"
         end
       end
       cache_writable_absolute_paths.each do |path|
-        allow_rules << "Edit(#{claude_absolute_path(path)})"
-        allow_rules << "Write(#{claude_absolute_path(path)})"
+        allow_rules << "Edit(#{claude_absolute_path(path)}/**)"
+        allow_rules << "Write(#{claude_absolute_path(path)}/**)"
       end
 
       {
