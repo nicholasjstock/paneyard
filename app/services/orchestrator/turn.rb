@@ -16,15 +16,22 @@ module Orchestrator
       following_steps = previous_state&.dig(:following_steps) || []
       active_worker_ids = Worker.where(run_id: run_id, status: "running").pluck(:worker_id).to_set
 
-      if (review = record_diagnosis_attempt(run_id:, nickname:, result:, evidence_outcome:, evidence_citations:))
+      if (review = record_step_attempt(run_id:, nickname:, result:, evidence_outcome:, evidence_citations:))
         next_state = (previous_state || TickState.default_state(run_id)).merge(
-          phase: "planning", last_plan_summary: "Strong chaperone is reviewing repeated diagnosis failures.",
+          phase: "planning", last_plan_summary: "Strong chaperone is reviewing repeated worker failures.",
           last_updated_at: now.utc.iso8601(3)
         )
         return { planner_request: nil, chaperone_review: { review_id: review.review_id }, next_state: next_state }
       end
 
-      if completed_result?(result) && following_steps.any?
+      run = Run.find_by!(run_id: run_id)
+      active_branch_open = run.active_branch_key.present? && !AcceptanceCriteria.branch_resolved?(run:, branch_key: run.active_branch_key)
+
+      # A completed node may only promote its next sibling after the current
+      # acceptance branch is resolved. Otherwise the planner must insert the
+      # next child of this branch (for example, measure -> repair -> verify)
+      # ahead of later verifier siblings.
+      if completed_result?(result) && following_steps.any? && !active_branch_open
         next_step, *remaining_steps = following_steps
         summary = "#{nickname} completed #{scope}. Rails promoted the next previously planned step without another planner call."
         promoted = run_planner_turn(
@@ -87,31 +94,56 @@ module Orchestrator
     end
     private_class_method :completed_result?
 
-    def record_diagnosis_attempt(run_id:, nickname:, result:, evidence_outcome:, evidence_citations:)
+    # Covers every execution mode, not only diagnosis -- a worker that
+    # correctly reports [BLOCKED]/[FAILED] via worker_turn must be exactly
+    # as visible to ChaperoneTrigger as one whose process dies outright
+    # (see WorkerReconcileJob#record_failed_attempt, which was already
+    # mode-agnostic). Diagnosis alone keeps its stricter done/evidence
+    # coupling -- see step_attempt_outcome.
+    def record_step_attempt(run_id:, nickname:, result:, evidence_outcome:, evidence_citations:)
       worker = Worker.where(run_id:, nickname:).order(created_at: :desc).first
       request = worker && SpawnRequest.find_by(fulfilled_worker_id: worker.worker_id)
-      return unless request && SpawnRequestedWorkers.execution_mode(request) == "diagnosis"
+      return unless request
 
-      outcome = if result.to_s.match?(/\A\s*\[DONE\]/i) && evidence_outcome == "confirmed"
-        "done"
-      elsif result.to_s.match?(/\A\s*\[FAILED\]/i)
-        "failed"
-      else
-        "blocked"
-      end
+      mode = SpawnRequestedWorkers.execution_mode(request).presence || "unknown"
+      outcome = step_attempt_outcome(result:, evidence_outcome:, mode:)
       lineage_key = request.lineage_key.presence || request.scope
       attempt = StepAttempt.create!(
-        run_id:, spawn_request: request, worker_id: worker.worker_id, lineage_key:, mode: "diagnosis",
+        run_id:, spawn_request: request, worker_id: worker.worker_id, lineage_key:, mode:,
         outcome:, result:, evidence_outcome:, evidence_citations:
       )
       return unless outcome.in?(%w[blocked failed])
 
       ChaperoneTrigger.call(attempt)
     end
-    private_class_method :record_diagnosis_attempt
+    private_class_method :record_step_attempt
+
+    # Diagnosis requires evidenceOutcome=confirmed before a [DONE] report
+    # counts as actually done -- DiagnosisEvidenceGate already enforces the
+    # citation discipline behind that claim. Other modes have no such
+    # evidence contract, so a bare [DONE] is trusted at face value there.
+    def step_attempt_outcome(result:, evidence_outcome:, mode:)
+      done = result.to_s.match?(/\A\s*\[DONE\]/i)
+      return "done" if done && (mode != "diagnosis" || evidence_outcome == "confirmed")
+      return "failed" if result.to_s.match?(/\A\s*\[FAILED\]/i)
+
+      "blocked"
+    end
+    private_class_method :step_attempt_outcome
 
     def run_planner_turn(run_id:, summary:, next_step:, following_steps:, now: Time.current, previous_state: nil)
       StepPolicy.validate_plan!(run_id:, next_step:, following_steps:)
+      # Single source of truth for "next_step became the active step, so
+      # record which criteria it addresses" -- covers both a live planner
+      # decision and Rails auto-promoting a previously queued followingSteps
+      # item after a [DONE] result (see run_worker_turn) without a second
+      # planner call. Only the former used to call this, which silently
+      # dropped the addressesCriteria the planner already attached to every
+      # followingSteps item, leaving auto-promoted steps invisible to
+      # AcceptanceCriteriaWorkers and to ChaperoneTrigger's criterion join.
+      run = Run.find_by!(run_id: run_id)
+      enforce_branch_progression!(run:, next_step:)
+      Orchestrator::AcceptanceCriteria.record_step!(run:, next_step: next_step)
       planner_blockers = Orchestrator::AcceptanceCriteria.planner_blockers(run_id: run_id)
       if next_step.nil? && planner_blockers.any?
         raise ArgumentError, "Cannot complete run while acceptance criteria remain pending: #{planner_blockers.join(', ')}"
@@ -171,6 +203,21 @@ module Orchestrator
 
       { jobs: jobs, next_state: next_state }
     end
+
+    def enforce_branch_progression!(run:, next_step:)
+      return unless next_step
+
+      branch_key = AcceptanceCriteria.branch_key_for_step(run:, step: next_step)
+      return unless branch_key
+
+      active_key = run.active_branch_key
+      if active_key.present? && !AcceptanceCriteria.branch_resolved?(run:, branch_key: active_key) && branch_key != active_key
+        raise ArgumentError, "Cannot leave active acceptance branch #{active_key} before it resolves"
+      end
+
+      run.update!(active_branch_key: branch_key) if active_key != branch_key
+    end
+    private_class_method :enforce_branch_progression!
 
     # A run can go dead without ever looking "stalled": a worker stops
     # (crash, or a clean exit whose worker_turn call never landed) without

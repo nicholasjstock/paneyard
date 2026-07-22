@@ -33,7 +33,8 @@ module Orchestrator
         stopped_at: @worker.stopped_at,
         sort_rank: sort_rank,
         assignment_text: @assignment&.text,
-        assignment_context: @assignment&.context
+        assignment_context: @assignment&.context,
+        assignment_lineage_key: @assignment&.lineage_key
       }
     end
 

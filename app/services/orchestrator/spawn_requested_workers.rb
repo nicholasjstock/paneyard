@@ -1,19 +1,35 @@
 module Orchestrator
   # Ports scripts/supervisor-loop.ts's spawnRequestedWorkers -- the
-  # claim-before-spawn race-avoidance loop. Must stay sequential (plain
-  # Ruby iteration, no parallelism): claiming a spawn request (marking it
-  # fulfilled) before actually spawning the worker shrinks the window in
-  # which a concurrently-running tick could still see the slot as
-  # unclaimed and spawn a duplicate for it. Parallelizing this loop would
-  # silently reintroduce the exact double-spawn race this ordering exists
-  # to prevent.
+  # claim-before-spawn race-avoidance loop. Dispatch is deliberately
+  # single-flight per run: a run may have one executor (worker, verifier,
+  # or chaperone) or one planner decision in flight, never several at once.
+  # This keeps shared target resources such as ports, files, and browsers
+  # safe until resource-aware concurrency is explicitly introduced.
   module SpawnRequestedWorkers
     module_function
 
     def call(run:)
+      # The scheduler may have overlapping ticks. Lock the run across the
+      # eligibility check and request claim so only one tick can turn an idle
+      # run into active work.
+      run.with_lock { call_locked(run: run) }
+    end
+
+    def call_locked(run:)
       run_id = run.run_id
       active_workers = Worker.where(run_id: run_id, status: "running").to_a
       current_workers = Worker.where(run_id: run_id).to_a
+
+      # A spawned executor owns the entire run until it reports completion.
+      # Do this before dismissing overlapping slots: queued work is valid,
+      # merely waiting its turn.
+      return [] if active_workers.any?
+
+      # Planners run as Rails jobs rather than Worker rows, so they need the
+      # same single-flight protection explicitly. An awaiting chaperone is
+      # intentionally excluded: its chaperone request is the one allowed
+      # successor while the planner waits for that review.
+      return [] if PlannerDecision.where(run_id: run_id, status: %w[queued running]).exists?
 
       # A currently-running worker already claims its (role, scope) slot --
       # that claim is the source of truth, not the bus's request history.
@@ -101,12 +117,13 @@ module Orchestrator
 
       spawned_workers
     end
+    private_class_method :call_locked
 
     def collect_spawn_requests(run_id:, active_workers:)
       active_keys = active_workers.map { |worker| [ worker.role, worker.scope ] }.to_set
       latest_by_key = {}
 
-      SpawnRequest.where(run_id: run_id, status: "open").each do |request|
+      SpawnRequest.where(run_id: run_id, status: "open").order(:created_at, :id).each do |request|
         next unless request.requested_role.present?
 
         key = [ request.requested_role, request.scope ]
@@ -115,7 +132,18 @@ module Orchestrator
         latest_by_key[key] = request
       end
 
-      latest_by_key.values
+      candidates = latest_by_key.values.sort_by { |request| [ request.created_at, request.id ] }
+
+      # A queued/running chaperone review is an orchestration boundary: only
+      # its chaperone may proceed, never unrelated worker requests behind it.
+      if ChaperoneReview.where(run_id: run_id, status: %w[queued running]).exists?
+        candidates.select! { |request| request.requested_role == "chaperone" }
+      end
+
+      # One request per tick (and per run) is the intentional concurrency
+      # limit. The next tick observes the resulting active worker or planner
+      # decision before considering subsequent queued work.
+      candidates.first(1)
     end
 
     def dispatch_chaperone_request(run:, request:)
@@ -160,9 +188,14 @@ module Orchestrator
         "You must begin by calling get_chaperone_state. Review the bounded small-model planner attempt and its failure using only the chaperone MCP tools. " \
           "Choose continue_small when the failure can be corrected by a bounded retry with clearer context, including invalid verification evidence, an unverified service or endpoint, or an unnecessary protected-path proposal. " \
           "Choose promote only for a genuine reasoning-capability gap. Choose stop only when no safe in-scope retry exists and a real external decision is unavoidable; never stop merely because the planner proposed unauthorized work when an in-scope alternative remains. " \
+          "When evidence identifies a concrete, fixable condition that would change the next attempt, provide revisedInstruction with the replacement instruction; otherwise leave it null. " \
           "Your summary must state the concrete next action. You must finish by calling submit_chaperone_decision exactly once; a text-only answer is a failure."
       else
-        "You must begin by calling get_chaperone_state. Review repeated diagnosis attempts using only the chaperone MCP tools. Determine semantic similarity and progress. You must finish by calling submit_chaperone_decision exactly once with continue_small, promote, or stop; a text-only answer is a failure."
+        "You must begin by calling get_chaperone_state. Review repeated diagnosis attempts using only the chaperone MCP tools. Determine semantic similarity and progress. " \
+          "Choose continue_small or promote only when the same execution envelope can succeed with a corrected instruction or stronger worker. " \
+          "When the evidence shows the envelope itself cannot solve the blocker (for example an artifact-only recording must first change an exact configuration or source file), choose stop WITH plannerTier=small or strong and one or more contextRequests. This means REPLACE the failed envelope: Rails starts one selected-tier planner that may create a new mode, owner, writable-path scope, artifact, and follow-up sequence. It does not ask the user. Choose small when the evidence makes the replacement obvious and strong only for real repair-scope uncertainty. Context requests may name only artifact, run_context, or worker_log windows; use the smallest useful windows. " \
+          "Choose stop WITHOUT plannerTier only when no safe bounded repair plan exists and a real external decision is unavoidable. " \
+          "You must finish by calling submit_chaperone_decision exactly once; a text-only answer is a failure."
       end
     end
 

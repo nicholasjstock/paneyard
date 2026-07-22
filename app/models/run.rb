@@ -92,6 +92,16 @@ class Run < ApplicationRecord
     capacity_available_at.present? && capacity_available_at > now
   end
 
+  def alternate_launcher_variant
+    (LAUNCHER_VARIANTS - [ launcher_variant ]).sole
+  end
+
+  # The root acceptance criterion whose subtree owns the next handoff.
+  # Later root siblings stay pending until this branch resolves.
+  def active_branch
+    acceptance_criteria.roots.find_by(key: active_branch_key) if active_branch_key.present?
+  end
+
   def launch_queued?(now: Time.current)
     status == "launching" && started_at.blank? && created_at <= now - LAUNCH_STALE_AFTER
   end

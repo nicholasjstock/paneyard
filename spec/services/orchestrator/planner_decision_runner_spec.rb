@@ -49,7 +49,25 @@ RSpec.describe Orchestrator::PlannerDecisionRunner do
     overrides = captured[:args].each_index.select { |i| captured[:args][i] == "-c" }.map { |i| captured[:args][i + 1] }
     assert overrides.any? { |override| override.start_with?("mcp_servers.planner_decision.url=") }
     assert_includes overrides, 'mcp_servers.planner_decision.bearer_token_env_var="PLANNER_DECISION_TOKEN"'
+    assert_includes overrides, 'mcp_servers.planner_decision.default_tools_approval_mode="approve"'
     assert captured[:env]["PLANNER_DECISION_TOKEN"].present?
+  end
+
+  it "uses Codex's small tier by default and its strong tier only for a promoted planner retry" do
+    run, request, decision = build_run_request_and_decision(launcher_variant: "codex")
+    captured = []
+    runner = lambda do |_env, *args, chdir:|
+      captured << args
+      [ "", "", fake_status(true) ]
+    end
+
+    small = Orchestrator::PlannerDecisionRunner.call(run:, request:, decision:, command_runner: runner)
+    strong = Orchestrator::PlannerDecisionRunner.call(run:, request:, decision:, model_tier: :strong, command_runner: runner)
+
+    assert_equal "gpt-5.6-luna", captured[0][captured[0].index("--model") + 1]
+    assert_equal "gpt-5.6-terra", captured[1][captured[1].index("--model") + 1]
+    assert_equal "gpt-5.6-luna", small[:model]
+    assert_equal "gpt-5.6-terra", strong[:model]
   end
 
   it "brief contains bounded current state instead of event or worker log history" do

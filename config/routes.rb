@@ -32,6 +32,7 @@ Rails.application.routes.draw do
     resources :runs, only: %i[index new create show] do
       member do
         post :stop
+        post :switch_launcher
       end
     end
 

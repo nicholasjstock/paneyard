@@ -84,6 +84,54 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     assert_equal "fulfilled", request.reload.status
   end
 
+  it "dispatches only one queued verifier per run, leaving later work queued" do
+    workspace = Workspace.create!(name: "serial-verifiers-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "serial-verifiers-#{SecureRandom.hex(4)}", task: "Verify several claims",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    first = run.spawn_requests.create!(
+      asked_by: "planner", scope: "acceptance-verify-first", lineage_key: "acceptance:first",
+      text: "Verify the first claim.", requested_role: "verifier", priority: "blocking",
+      model_tier: "small", execution_mode: "verification", write_scope: "artifact_only", allowed_paths: []
+    )
+    second = run.spawn_requests.create!(
+      asked_by: "planner", scope: "acceptance-verify-second", lineage_key: "acceptance:second",
+      text: "Verify the second claim.", requested_role: "verifier", priority: "blocking",
+      model_tier: "small", execution_mode: "verification", write_scope: "artifact_only", allowed_paths: []
+    )
+
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker).once.and_return(instance_double(Worker))
+
+    Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    assert_equal "fulfilled", first.reload.status
+    assert_equal "open", second.reload.status
+  end
+
+  it "does not dispatch a worker while a Rails planner decision is in flight" do
+    workspace = Workspace.create!(name: "serial-planner-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "serial-planner-#{SecureRandom.hex(4)}", task: "Plan before verifying",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    planner_request = run.spawn_requests.create!(
+      asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",
+      requested_role: "planner", priority: "blocking"
+    )
+    PlannerDecision.create!(run:, spawn_request: planner_request, status: "running")
+    verifier_request = run.spawn_requests.create!(
+      asked_by: "planner", scope: "acceptance-verify-outcome", lineage_key: "acceptance:outcome",
+      text: "Verify the claim.", requested_role: "verifier", priority: "blocking",
+      model_tier: "small", execution_mode: "verification", write_scope: "artifact_only", allowed_paths: []
+    )
+
+    expect(Orchestrator::WorkerSpawner).not_to receive(:spawn_worker)
+
+    assert_empty Orchestrator::SpawnRequestedWorkers.call(run:)
+    assert_equal "open", verifier_request.reload.status
+  end
+
   it "dismisses a chaperone spawn request when no matching pending review is found" do
     workspace = Workspace.create!(name: "spawn-chaperone-missing-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(

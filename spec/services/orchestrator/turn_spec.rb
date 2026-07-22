@@ -85,4 +85,28 @@ RSpec.describe Orchestrator::Turn do
 
     assert_includes error.message, "proof"
   end
+
+  it "rejects a planner handoff that leaves an unresolved active branch" do
+    workspace = Workspace.create!(name: "turn-branch-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
+    run = Run.create!(
+      workspace:, run_id: "turn-branch-#{SecureRandom.hex(4)}", task: "Keep one branch active",
+      target_root: Rails.root.to_s, launcher_variant: "codex", status: "running", active_branch_key: "baseline"
+    )
+    run.acceptance_criteria.create!(key: "baseline", status: "in_progress", content: "Baseline measured")
+    run.acceptance_criteria.create!(key: "bottlenecks", status: "pending", content: "Bottlenecks measured")
+
+    error = assert_raises(ArgumentError) do
+      Orchestrator::Turn.run_planner_turn(
+        run_id: run.run_id, summary: "Skip ahead.",
+        next_step: {
+          owner: "worker", artifact: "verify-bottlenecks.md", success_check: "Confirm bottlenecks.",
+          mode: "verification", write_scope: "artifact_only", allowed_paths: [], evidence_refs: [],
+          addresses_criteria: [ "bottlenecks" ]
+        },
+        following_steps: [], previous_state: Orchestrator::TickState.default_state(run.run_id)
+      )
+    end
+
+    assert_includes error.message, "Cannot leave active acceptance branch baseline"
+  end
 end

@@ -34,6 +34,31 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
       assert_equal "rejected", attempt.disposition
     end
 
+    it "rejects an artifact path and lets the planner repair it before any worker is dispatched" do
+      run, _request, decision = build_decision
+      invalid = decision_params(
+        summary: "Measure the baseline.",
+        next_step: step("artifacts/phone-demo-baseline.md", mode: "diagnosis")
+      )
+
+      rejected = described_class.call(decision:, params: invalid)
+
+      expect(rejected).to eq(
+        accepted: false,
+        error: 'artifact must be a filename only, without a path prefix: "artifacts/phone-demo-baseline.md"'
+      )
+      assert_equal "running", decision.reload.status
+      assert_empty run.spawn_requests.open_only.where(requested_role: "worker")
+
+      accepted = described_class.call(
+        decision:,
+        params: decision_params(summary: "Measure the baseline.", next_step: step("phone-demo-baseline.md", mode: "diagnosis"))
+      )
+
+      expect(accepted).to eq({ accepted: true })
+      assert_equal "phone-demo-baseline.md", run.spawn_requests.open_only.find_by!(requested_role: "worker").scope
+    end
+
     it "escalates to chaperone after repeated rejections on the small tier" do
       run, _request, decision = build_decision
       params = decision_params(

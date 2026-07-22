@@ -1,6 +1,65 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::ApplyChaperoneDecision do
+  describe ".call" do
+    it "replans a stopped diagnosis instead of asking the operator when a bounded fix may remain" do
+      run = create_run
+      request = run.spawn_requests.create!(
+        asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
+        priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
+        write_scope: "artifact_only", allowed_paths: []
+      )
+      attempt = StepAttempt.create!(
+        run:, spawn_request: request, worker_id: SecureRandom.uuid, lineage_key: "criterion:phone-flow",
+        mode: "recording", outcome: "blocked", result: "The exact endpoint file is front/src/config.ts."
+      )
+      review = ChaperoneReview.create!(
+        run:, lineage_key: "criterion:phone-flow", step_attempt_ids: [ attempt.attempt_id ], subject_type: "diagnosis",
+        status: "running", token_digest: SecureRandom.hex(32), expires_at: 1.hour.from_now
+      )
+
+      described_class.call(
+        review:, action: "stop", summary: "The artifact-only retry cannot change the endpoint.",
+        planner_tier: "strong",
+        context_requests: [ { source: "artifact", reference: "recording.md", question: "Why did the retry fail?", max_chars: 500 } ]
+      )
+
+      expect(UserQuestion.where(run_id: run.run_id, priority: "blocking", status: "open")).to be_empty
+      replan = SpawnRequest.find_by!(run_id: run.run_id, requested_role: "planner", asked_by: "chaperone")
+      expect(replan.context).to include("front/src/config.ts")
+      expect(replan.model_tier).to eq("strong")
+      expect(run.reload.phase).to eq("planning")
+      expect(review.reload.action).to eq("stop")
+    end
+
+    it "asks only after the one bounded repair replan for the same lineage was used" do
+      run = create_run
+      source = run.spawn_requests.create!(
+        asked_by: "planner", scope: "recording.md", text: "Record the flow.", requested_role: "infrastructure",
+        priority: "blocking", lineage_key: "criterion:phone-flow", execution_mode: "recording",
+        write_scope: "artifact_only", allowed_paths: []
+      )
+      run.spawn_requests.create!(
+        asked_by: "chaperone", scope: Orchestrator::Turn::PLANNER_FOLLOWUP_SCOPE, text: "Repair replan.",
+        requested_role: "planner", priority: "blocking", lineage_key: "criterion:phone-flow",
+        tags: %w[planner chaperone stopped_retry replan]
+      )
+      attempt = StepAttempt.create!(
+        run:, spawn_request: source, worker_id: SecureRandom.uuid, lineage_key: "criterion:phone-flow",
+        mode: "recording", outcome: "blocked", result: "The first repair did not resolve the endpoint."
+      )
+      review = ChaperoneReview.create!(
+        run:, lineage_key: "criterion:phone-flow", step_attempt_ids: [ attempt.attempt_id ], subject_type: "diagnosis",
+        status: "running", token_digest: SecureRandom.hex(32), expires_at: 1.hour.from_now
+      )
+
+      described_class.call(review:, action: "stop", summary: "The bounded repair route is exhausted.")
+
+      expect(UserQuestion.where(run_id: run.run_id, priority: "blocking", status: "open").count).to eq(1)
+      expect(run.reload.phase).to eq("blocked_on_user")
+    end
+  end
+
   describe ".handle_review_failure" do
     it "fails the awaiting planner decision and asks the operator, so it stops counting as active work" do
       run = create_run

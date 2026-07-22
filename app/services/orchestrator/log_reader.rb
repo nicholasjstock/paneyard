@@ -39,6 +39,7 @@ module Orchestrator
     def claude_usage(path)
       read_tail_lines(path, 100).to_s.each_line.to_a.reverse_each do |line|
         event = JSON.parse(line)
+        next unless event.is_a?(Hash)
         next unless event["type"] == "result"
 
         usage = event["usage"] || {}
@@ -64,6 +65,7 @@ module Orchestrator
     def claude_final_response(path)
       read_tail_lines(path, 200).to_s.each_line.to_a.reverse_each do |line|
         event = JSON.parse(line)
+        next unless event.is_a?(Hash)
         next unless event["type"] == "result"
 
         return event["result"].to_s if event["result"].present?
@@ -81,6 +83,7 @@ module Orchestrator
       updates = []
       read_tail_lines(path, tail_lines).to_s.each_line do |line|
         event = JSON.parse(line)
+        next unless event.is_a?(Hash)
         next unless event["type"] == "assistant"
 
         Array(event.dig("message", "content")).each do |block|
@@ -110,6 +113,10 @@ module Orchestrator
 
       content.each_line do |line|
         event = JSON.parse(line)
+        unless event.is_a?(Hash)
+          output << line.chomp unless line.strip.empty? || line.strip == "null"
+          next
+        end
         format_json_event(event, output, text_buffers, tool_calls)
       rescue JSON::ParserError
         output << line.chomp unless line.strip.empty?

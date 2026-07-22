@@ -43,7 +43,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:
     )
 
-    assert_includes args, "--ask-for-approval"
+    refute_includes args, "--ask-for-approval"
     assert_includes args, 'default_permissions="worker-123"'
     assert args.any? { |arg| arg.include?('"config/queue.yml"="write"') }
     refute_includes args, "--dangerously-bypass-approvals-and-sandbox"
@@ -59,11 +59,31 @@ RSpec.describe Orchestrator::WorkerSpawner do
     end.to raise_error(ArgumentError, /cannot coexist with legacy sandbox_mode/)
   end
 
-  it "Claude diagnosis starts small and only promoted work uses Sonnet" do
+  it "uses the small tier by default and only uses the strong tier after promotion" do
     assert_equal "haiku", Orchestrator::WorkerSpawner.send(:claude_model_for, "worker", mode: "diagnosis")
     assert_equal "sonnet", Orchestrator::WorkerSpawner.send(:claude_model_for, "worker", mode: "diagnosis", model_tier: "strong")
     assert_equal "haiku", Orchestrator::WorkerSpawner.send(:claude_model_for, "worker")
     assert_equal "haiku", Orchestrator::WorkerSpawner.send(:claude_model_for, "infrastructure")
+    assert_equal "gpt-5.6-luna", Orchestrator::WorkerSpawner.send(:codex_model_for)
+    assert_equal "gpt-5.6-terra", Orchestrator::WorkerSpawner.send(:codex_model_for, model_tier: "strong")
+  end
+
+  it "passes the promoted Codex model to both ordinary and chaperone workers" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "artifact_only", allowed_paths: []
+    )
+
+    ordinary_args = Orchestrator::WorkerSpawner.send(
+      :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:, model_tier: "strong"
+    )
+    chaperone_args = Orchestrator::WorkerSpawner.send(
+      :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:, model_tier: "strong",
+      mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone" }
+    )
+
+    assert_equal "gpt-5.6-terra", ordinary_args[ordinary_args.index("--model") + 1]
+    assert_equal "gpt-5.6-terra", chaperone_args[chaperone_args.index("--model") + 1]
   end
 
   it "infrastructure workers receive the generic worker contract and skill" do

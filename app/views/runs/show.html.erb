@@ -52,6 +52,15 @@
         </div>
       </div>
 
+      <% if @run.capacity_blocked? %>
+        <% target_launcher = @run.alternate_launcher_variant %>
+        <%= button_to "Switch to #{target_launcher.capitalize} & resume",
+              switch_launcher_workspace_run_path(current_workspace, @run),
+              params: { launcher_variant: target_launcher },
+              class: "btn primary",
+              data: { turbo_confirm: "Switch this paused run from #{@run.launcher_variant.capitalize} to #{target_launcher.capitalize} and resume its queued work?" } %>
+      <% end %>
+
       <% if @latest_tick&.dig("lastStallFinding").present? %><p class="error-banner"><%= @latest_tick["lastStallFinding"] %></p><% end %>
     </section>
 
@@ -83,15 +92,30 @@
     </section>
   </div>
 
-  <% if @acceptance_criteria.any? %>
+  <% if @acceptance_criteria.any? || @worker_activities.any? %>
     <section class="panel span-2 acceptance-criteria-panel">
       <div class="panel-header">
         <div>
-          <h2>Acceptance criteria</h2>
-          <p class="muted">The run's outcome contract, established on the first planner decision.</p>
+          <h2>Acceptance criteria &amp; workers</h2>
+          <p class="muted">The run's outcome contract, established on the first planner decision, with the workers dispatched toward each criterion nested underneath it.</p>
         </div>
       </div>
-      <%= render "acceptance_criteria", criteria: @acceptance_criteria %>
+      <% if @acceptance_criteria.any? %>
+        <%= render "acceptance_criteria", criteria: @acceptance_criteria, worker_groups: @criterion_worker_groups, run: @run, current_workspace: current_workspace %>
+      <% else %>
+        <p class="empty">No acceptance criteria established yet.</p>
+      <% end %>
+      <% unassigned_workers = @criterion_worker_groups[Orchestrator::AcceptanceCriteriaWorkers::UNASSIGNED] || [] %>
+      <% if unassigned_workers.any? %>
+        <div class="unassigned-workers">
+          <p class="muted">Other workers <span class="mono">(not tied to a specific criterion)</span></p>
+          <div class="worker-list">
+            <% unassigned_workers.each do |activity| %>
+              <%= render "worker_row", activity: activity, run: @run, current_workspace: current_workspace %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
     </section>
   <% end %>
 
@@ -210,77 +234,6 @@
     </details>
   </div>
 
-  <details class="panel secondary-panel worker-command-center" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:workers">
-    <summary>
-      <span><strong>Worker history</strong> <span class="muted"><%= pluralize(@worker_activities.count, "worker") %></span></span>
-      <span class="detail-affordance">View details</span>
-    </summary>
-    <div class="secondary-panel-body">
-
-    <% if @worker_activities.any? %>
-      <div class="worker-list">
-        <% @worker_activities.each do |activity| %>
-          <% worker = activity[:worker] %>
-          <details id="worker-<%= worker.worker_id %>"
-                   class="worker-row <%= activity[:display_status] %>"
-                   data-controller="accordion-state"
-                   data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
-                   data-accordion-state-key-value="run:<%= @run.run_id %>:worker:<%= worker.worker_id %>">
-            <summary>
-              <span class="worker-name"><%= worker.nickname %></span>
-              <span class="badge <%= activity[:display_status] %>"><%= activity[:status_label] %></span>
-              <span class="worker-scope mono"><%= worker.scope %></span>
-              <span class="worker-activity muted">
-                <% if activity[:last_activity_at] %>active <%= time_ago_in_words(activity[:last_activity_at]) %> ago<% else %>no activity recorded<% end %>
-              </span>
-            </summary>
-            <div class="worker-detail">
-              <div class="worker-metadata muted">
-                <span><%= worker.role %></span>
-                <% if worker.model.present? %><span><%= worker.model %></span><% end %>
-                <span>started <%= worker.started_at ? time_ago_in_words(worker.started_at) + " ago" : "unknown" %></span>
-                <% if worker.stopped_at %><span>stopped <%= time_ago_in_words(worker.stopped_at) %> ago</span><% end %>
-                <span class="mono">pid <%= worker.pid %></span>
-              </div>
-              <p><strong>Assigned:</strong> <%= worker.reason %></p>
-              <% if activity[:assignment_text].present? %>
-                <details class="worker-assignment"
-                         data-controller="accordion-state"
-                         data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
-                         data-accordion-state-key-value="run:<%= @run.run_id %>:worker:<%= worker.worker_id %>:assignment">
-                  <summary>Full instructions</summary>
-                  <pre class="log compact"><%= activity[:assignment_text] %></pre>
-                  <% if activity[:assignment_context].present? %>
-                    <p class="muted">Context</p>
-                    <pre class="log compact"><%= activity[:assignment_context] %></pre>
-                  <% end %>
-                </details>
-              <% end %>
-              <% if worker.stop_reason.present? %><p class="worker-stop-reason"><strong>Stop reason:</strong> <%= worker.stop_reason %></p><% end %>
-              <% if worker.agent_turn_count.present? %>
-                <p class="muted">
-                  <strong>Usage:</strong> <%= pluralize(worker.agent_turn_count, "turn") %> &middot;
-                  <%= number_with_delimiter(worker.input_tokens || 0) %> input / <%= number_with_delimiter(worker.output_tokens || 0) %> output tokens &middot;
-                  <%= number_to_currency(worker.total_cost_usd || 0) %>
-                </p>
-              <% end %>
-              <% if activity[:output_preview].present? %>
-                <p class="muted"><%= activity[:output_source] %></p>
-                <pre class="log compact"><%= activity[:output_preview] %></pre>
-              <% else %>
-                <p class="empty">No agent output captured yet.</p>
-              <% end %>
-              <%= link_to "Open full worker log", workspace_worker_path(current_workspace, worker.worker_id), class: "btn" %>
-            </div>
-          </details>
-        <% end %>
-      </div>
-    <% else %>
-      <p class="empty">No workers recorded for this run yet.</p>
-    <% end %>
-    </div>
-  </details>
-
   <details class="panel secondary-panel run-command-center" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:commands">
     <summary>
       <span><strong>Run commands</strong> <span class="muted"><%= pluralize(@run_commands.count, "background command") %></span></span>
@@ -291,7 +244,11 @@
     <% if @run_commands.any? %>
       <div class="run-command-list">
         <% @run_commands.each do |command| %>
-          <details id="run-command-<%= command.command_id %>" class="run-command-row <%= command.status %>">
+          <details id="run-command-<%= command.command_id %>"
+                   class="run-command-row <%= command.status %>"
+                   data-controller="accordion-state"
+                   data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
+                   data-accordion-state-key-value="run:<%= @run.run_id %>:command:<%= command.command_id %>">
             <summary>
               <span class="run-command-purpose"><%= command.purpose.presence || command.executable %></span>
               <span class="badge <%= command.status %>"><%= command.status %></span>

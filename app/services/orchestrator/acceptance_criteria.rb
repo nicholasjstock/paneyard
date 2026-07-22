@@ -133,6 +133,24 @@ module Orchestrator
       Run.find_by!(run_id:).acceptance_criteria.pluck(:key)
     end
 
+    def branch_key_for_step(run:, step:)
+      keys = Array(step[:addresses_criteria]).map(&:to_s).reject(&:blank?)
+      return if keys.empty?
+
+      roots = keys.map do |key|
+        criterion = run.acceptance_criteria.find_by!(key: key)
+        criterion = criterion.parent while criterion.parent
+        criterion.key
+      end.uniq
+      raise ArgumentError, "A handoff may not span acceptance branches: #{roots.join(', ')}" unless roots.one?
+
+      roots.first
+    end
+
+    def branch_resolved?(run:, branch_key:)
+      run.acceptance_criteria.roots.find_by!(key: branch_key).resolved?
+    end
+
     def tree(run_id:)
       Run.find_by!(run_id:).acceptance_criteria.roots.includes(:children).map { |root| criterion_json(root) }
     end

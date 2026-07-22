@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_20_170000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_21_173000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -207,6 +207,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_20_170000) do
   end
 
   create_table "runs", force: :cascade do |t|
+    t.string "active_branch_key"
     t.datetime "capacity_available_at"
     t.datetime "created_at", null: false
     t.string "launched_by"
@@ -225,6 +226,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_20_170000) do
     t.text "task", null: false
     t.datetime "updated_at", null: false
     t.integer "workspace_id", null: false
+    t.index ["active_branch_key"], name: "index_runs_on_active_branch_key"
     t.index ["capacity_available_at"], name: "index_runs_on_capacity_available_at"
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
@@ -392,7 +394,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_20_170000) do
   end
 
   add_foreign_key "acceptance_criteria", "acceptance_criteria", column: "parent_id"
-  add_foreign_key "acceptance_criterion_steps", "acceptance_criteria", column: "acceptance_criterion_id"
+  add_foreign_key "acceptance_criterion_steps", "acceptance_criteria"
   add_foreign_key "planner_decision_attempts", "planner_decisions"
   add_foreign_key "runs", "workspaces"
   add_foreign_key "workspace_chat_messages", "workspace_chats"

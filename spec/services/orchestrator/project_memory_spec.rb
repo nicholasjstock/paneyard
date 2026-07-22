@@ -24,22 +24,65 @@ RSpec.describe Orchestrator::ProjectMemory do
     assert_equal [ "Run command B." ], entries.map { |entry| entry[:content] }
   end
 
-  it "always includes the primary dev-environment fact in the brief, ahead of unrelated hazards that sort earlier alphabetically" do
+  it "always includes the primary dev-environment fact in the brief, ahead of newer unrelated hazards" do
     workspace = Workspace.create!(name: "memory-priority-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
     run = Run.create!(
       workspace: workspace, run_id: "memory-priority-run-#{SecureRandom.hex(4)}", task: "Memory test",
       target_root: workspace.root_path, launcher_variant: "codex", status: "running"
     )
-    # Seed enough known_hazard/architecture entries (all sorting before
-    # "operational_rule" alphabetically, and before "dev-environment"
-    # within operational_rule) to overflow DEFAULT_BRIEF_ENTRY_LIMIT on
-    # their own -- this is the exact shape of the real bug: alphabetically
-    # earlier, less load-bearing facts crowding out the one fact every
-    # worker actually needs to get started.
+    # Record the primary entry first (oldest), then seed more known_hazard
+    # entries than DEFAULT_BRIEF_ENTRY_LIMIT after it, so recency alone
+    # would both rank it last and push it out of a plain top-N-by-created_at
+    # brief -- this is the exact shape of the real bug: newer, less
+    # load-bearing facts crowding out the one fact every worker actually
+    # needs to get started.
+    Orchestrator::ProjectMemory.record!(
+      run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+      content: "Run bin/dev from project root.", evidence_ref: "bin/dev", recorded_by: "project_init"
+    )
     9.times do |i|
       Orchestrator::ProjectMemory.record!(
         run_id: run.run_id, entry_key: "aaa-hazard-#{i}", kind: "known_hazard",
         content: "Hazard #{i}.", evidence_ref: "hazard.md", recorded_by: "planner"
+      )
+    end
+
+    brief = Orchestrator::ProjectMemory.snapshot(run_id: run.run_id)
+
+    assert_equal "dev-environment", brief[:entries].first[:key]
+  end
+
+  it "orders the brief by recency alone, not by kind" do
+    workspace = Workspace.create!(name: "memory-kind-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
+    run = Run.create!(
+      workspace: workspace, run_id: "memory-kind-run-#{SecureRandom.hex(4)}", task: "Memory test",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running"
+    )
+    rule = Orchestrator::ProjectMemory.record!(
+      run_id: run.run_id, entry_key: "old-operational-rule", kind: "operational_rule",
+      content: "An old rule.", evidence_ref: "a.md", recorded_by: "planner"
+    )
+    rule.update!(created_at: 1.hour.ago)
+    Orchestrator::ProjectMemory.record!(
+      run_id: run.run_id, entry_key: "new-convention", kind: "convention",
+      content: "A newer convention.", evidence_ref: "b.md", recorded_by: "planner"
+    )
+
+    brief = Orchestrator::ProjectMemory.snapshot(run_id: run.run_id)
+
+    assert_equal "new-convention", brief[:entries].first[:key]
+  end
+
+  it "guarantees the primary dev-environment fact a brief slot in addition to the entry limit, not counted against it" do
+    workspace = Workspace.create!(name: "memory-primary-slot-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
+    run = Run.create!(
+      workspace: workspace, run_id: "memory-primary-slot-run-#{SecureRandom.hex(4)}", task: "Memory test",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running"
+    )
+    Orchestrator::ProjectMemory::DEFAULT_BRIEF_ENTRY_LIMIT.times do |i|
+      Orchestrator::ProjectMemory.record!(
+        run_id: run.run_id, entry_key: "rule-#{i}", kind: "operational_rule",
+        content: "Rule #{i}.", evidence_ref: "r.md", recorded_by: "planner"
       )
     end
     Orchestrator::ProjectMemory.record!(
@@ -49,27 +92,8 @@ RSpec.describe Orchestrator::ProjectMemory do
 
     brief = Orchestrator::ProjectMemory.snapshot(run_id: run.run_id)
 
+    assert_equal Orchestrator::ProjectMemory::DEFAULT_BRIEF_ENTRY_LIMIT + 1, brief[:entries].length
     assert_equal "dev-environment", brief[:entries].first[:key]
-  end
-
-  it "prioritizes operational_rule over known_hazard and architecture in the brief" do
-    workspace = Workspace.create!(name: "memory-kind-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
-    run = Run.create!(
-      workspace: workspace, run_id: "memory-kind-run-#{SecureRandom.hex(4)}", task: "Memory test",
-      target_root: workspace.root_path, launcher_variant: "codex", status: "running"
-    )
-    Orchestrator::ProjectMemory.record!(
-      run_id: run.run_id, entry_key: "aaa-architecture", kind: "architecture",
-      content: "Architecture note.", evidence_ref: "a.md", recorded_by: "planner"
-    )
-    Orchestrator::ProjectMemory.record!(
-      run_id: run.run_id, entry_key: "zzz-operational-rule", kind: "operational_rule",
-      content: "How to run tests.", evidence_ref: "b.md", recorded_by: "planner"
-    )
-
-    brief = Orchestrator::ProjectMemory.snapshot(run_id: run.run_id)
-
-    assert_equal "zzz-operational-rule", brief[:entries].first[:key]
   end
 
   it "prefers the most recently confirmed entry within the same kind" do

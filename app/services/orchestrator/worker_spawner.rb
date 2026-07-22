@@ -25,7 +25,9 @@ module Orchestrator
     module_function
 
     MASKED_API_KEY_VALUES = [ "", "[set]", "[secure]", "[redacted]" ].freeze
-    CODEX_WORKER_MODEL = "gpt-5.6-luna"
+    CODEX_SMALL_MODEL = "gpt-5.6-luna"
+    CODEX_PROMOTED_MODEL = "gpt-5.6-terra"
+    CODEX_WORKER_MODEL = CODEX_SMALL_MODEL
 
     def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil,
       write_scope: nil, allowed_paths: [], model_tier: "small", mcp_override: nil)
@@ -65,10 +67,8 @@ module Orchestrator
       driver = run.launcher_variant
       selected_model = if driver == "claude"
         claude_model_for(role, mode:, model_tier:)
-      elsif mcp_override
-        model_tier.to_s == "small" ? CODEX_WORKER_MODEL : "default"
       else
-        CODEX_WORKER_MODEL
+        codex_model_for(model_tier:) || "default"
       end
       enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
       unless mcp_override
@@ -96,7 +96,7 @@ module Orchestrator
         else
           validate_codex_permission_profile_compatibility!(root_dir)
           [ "codex", codex_args(
-            root_dir:, last_message_path:, policy:, mcp_override:
+            root_dir:, last_message_path:, policy:, model_tier:, mcp_override:
           ) ]
         end
 
@@ -231,10 +231,16 @@ module Orchestrator
       model_tier.to_s == "strong" ? "sonnet" : "haiku"
     end
 
-    def codex_args(root_dir:, last_message_path:, policy:, mcp_override: nil)
+    def codex_model_for(model_tier: "small")
+      model_tier.to_s == "strong" ? CODEX_PROMOTED_MODEL : CODEX_SMALL_MODEL
+    end
+
+    def codex_args(root_dir:, last_message_path:, policy:, model_tier: "small", mcp_override: nil)
+      model_args = [ "--model", codex_model_for(model_tier:) ]
       if mcp_override
         return [
           "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
+          *model_args,
           "-c", %(mcp_servers.chaperone.url=#{mcp_override[:url].to_json}),
           "-c", %(mcp_servers.chaperone.bearer_token_env_var="WORKFLOW_CHAPERONE_TOKEN"),
           "-c", %(mcp_servers.chaperone.default_tools_approval_mode="approve"),
@@ -250,7 +256,7 @@ module Orchestrator
       config_args = (policy.codex_config_overrides + mcp_overrides).flat_map { |override| [ "-c", override ] }
 
       [
-        "exec", "--model", CODEX_WORKER_MODEL, "--ask-for-approval", "never",
+        "exec", *model_args,
         *config_args, "-C", root_dir, "-o", last_message_path, "-"
       ]
     end

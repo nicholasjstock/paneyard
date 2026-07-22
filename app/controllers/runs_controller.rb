@@ -1,6 +1,6 @@
 class RunsController < ApplicationController
   before_action :require_workspace
-  before_action :set_run, only: %i[show stop]
+  before_action :set_run, only: %i[show stop switch_launcher]
 
   def index
     @runs = current_workspace.runs.order(created_at: :desc)
@@ -29,6 +29,8 @@ class RunsController < ApplicationController
     recent_workers = @run.workers.order(started_at: :desc).limit(12).to_a
     workers = (@run.workers.where(status: "running").to_a + recent_workers).uniq
     @worker_activities = Orchestrator::WorkerActivity.for_workers(workers)
+    @chaperone_reviews = @run.chaperone_reviews.order(created_at: :desc).to_a
+    attach_chaperone_reviews
     @active_workers = @worker_activities.select { |activity| activity[:worker].status == "running" }
     @spawn_requests = SpawnRequest.open_only.where(run_id: @run.run_id).map { |request| JSON.parse(request.to_json) }
     @blocking_questions = @run.user_questions.open_only.where(priority: "blocking").order(:asked_at).to_a
@@ -40,6 +42,7 @@ class RunsController < ApplicationController
     @artifacts = collect_artifacts
     @planner_decisions = @run.planner_decisions.includes(:spawn_request, :attempts).order(created_at: :desc).to_a
     @acceptance_criteria = @run.acceptance_criteria.roots.includes(:children).to_a
+    @criterion_worker_groups = Orchestrator::AcceptanceCriteriaWorkers.group(run_id: @run.run_id, activities: @worker_activities)
     @latest_planner_decision = @planner_decisions.first
     @usage_summary = usage_summary
     @run_now = build_run_now
@@ -52,6 +55,14 @@ class RunsController < ApplicationController
   def stop
     StopRunJob.perform_now(@run.id)
     redirect_to workspace_run_path(current_workspace, @run), notice: "Stopping #{@run.run_id}…"
+  end
+
+  def switch_launcher
+    target = params.require(:launcher_variant)
+    Orchestrator::SwitchRunLauncher.call(run: @run, launcher_variant: target)
+    redirect_to workspace_run_path(current_workspace, @run), notice: "Switched to #{target.capitalize} and resumed queued work."
+  rescue Orchestrator::SwitchRunLauncher::Ineligible, ActionController::ParameterMissing => error
+    redirect_to workspace_run_path(current_workspace, @run), alert: error.message
   end
 
   private
@@ -263,6 +274,7 @@ class RunsController < ApplicationController
   def build_activity_feed
     event_items = @timeline_events.filter_map do |event|
       next if event["type"].in?(%w[spawn_request.created spawn_request.fulfilled])
+      next unless activity_event_visible?(event)
 
       {
         actor: activity_event_actor(event), label: event["label"],
@@ -287,7 +299,29 @@ class RunsController < ApplicationController
       }
     end
 
-    (event_items.compact + worker_items + planner_items).sort_by { |item| item[:at] }.reverse.first(12)
+    chaperone_items = @chaperone_reviews.map do |review|
+      {
+        actor: "Chaperone",
+        label: chaperone_activity_label(review),
+        at: review.completed_at || review.updated_at || review.created_at,
+        kind: review.status == "failed" ? "attention" : "chaperone"
+      }
+    end
+
+    (event_items.compact + worker_items + planner_items + chaperone_items).sort_by { |item| item[:at] }.reverse.first(12)
+  end
+
+  # Routine orchestration phases are already summarized by the Now panel and
+  # planner entries. Keep this feed focused on transitions an operator needs
+  # to understand or act on.
+  def activity_event_visible?(event)
+    # A chaperone review already has one canonical activity entry below. Its
+    # worker lifecycle is implementation detail, not a second review.
+    return false if event["type"].in?(%w[worker.spawned worker.stopped]) && event.dig("payload", "role") == "chaperone"
+
+    return true unless event["type"] == "run.status"
+
+    event.dig("payload", "phase").in?(%w[blocked_on_user waiting_on_capacity failed stopped completed])
   end
 
   def activity_event_actor(event)
@@ -312,6 +346,40 @@ class RunsController < ApplicationController
     else
       "Decision queued"
     end
+  end
+
+  def attach_chaperone_reviews
+    reviews_by_lineage = @chaperone_reviews.index_by(&:lineage_key)
+    @worker_activities.each do |activity|
+      next unless activity[:worker].role == "chaperone"
+
+      activity[:chaperone_review] = reviews_by_lineage[activity[:assignment_lineage_key]]
+    end
+  end
+
+  def chaperone_activity_label(review)
+    if chaperone_replaced_envelope?(review)
+      tier = SpawnRequest.where(run_id: review.run_id, asked_by: "chaperone", requested_role: "planner", lineage_key: review.lineage_key)
+        .where("tags LIKE ?", "%stopped_retry%").order(created_at: :desc).pick(:model_tier)
+      return "Requested a #{tier || 'small'} planner to replace the failed execution envelope"
+    end
+
+    action = {
+      "continue_small" => "continued on the small model",
+      "promote" => "promoted to the stronger model",
+      "stop" => "stopped the lineage"
+    }[review.action]
+
+    return "Review failed for #{review.lineage_key}" if review.status == "failed"
+    return "Reviewing repeated failures for #{review.lineage_key}" unless action
+
+    "Reviewed #{review.lineage_key} and #{action}"
+  end
+
+  def chaperone_replaced_envelope?(review)
+    review.action == "stop" && SpawnRequest.where(
+      run_id: review.run_id, asked_by: "chaperone", requested_role: "planner", lineage_key: review.lineage_key
+    ).where("tags LIKE ?", "%stopped_retry%").exists?
   end
 
   def collect_artifacts

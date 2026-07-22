@@ -54,6 +54,7 @@ module Orchestrator
         Call it as many times as needed for outcome=needs_context (its response includes the fetched context you asked
         for); call it exactly once to finish with outcome=decision or outcome=needs_stronger_model.
         Choose at most one nextStep. Keep followingSteps ordered and limited to concrete work already justified by the evidence.
+        Rails executes acceptance work depth-first: every handoff must address one root acceptance branch (a child may address its root branch), and later branches remain pending until the active branch resolves. When a verifier rejects evidence or a worker discovers follow-up work, propose the next child in that same branch; do not jump to another criterion's verifier.
         On the initial decision, define a concise top-level acceptanceCriteria contract (parentKey=null for each) derived
         directly from the user's requested outcomes. Criteria describe observable outcomes, not implementation steps. The
         top-level contract is immutable after the first decision -- never propose new parentKey=null criteria later. At any
@@ -75,6 +76,8 @@ module Orchestrator
         A diagnosis step must be artifact_only. An implementation step must name exact workspace-relative file paths in
         allowedPaths. An exact file path names one file: it must not end in "/" and must not contain glob characters
         (*, ?, [, ], {, or }). Directory paths such as "front/" and patterns such as "front/**/*.ts" are invalid.
+        Every nextStep or followingSteps artifact must be a filename only (for example "phone-demo-baseline.md"), never
+        a path such as "artifacts/phone-demo-baseline.md"; Rails places it in the managed run artifact directory.
         Use mode=recording for running a demo or collecting recording/timing artifacts, even when owner=infrastructure;
         recording and verification must use writeScope=artifact_only and allowedPaths=[]. Use mode=infrastructure only
         when the step is authorized to modify exact infrastructure files with writeScope=scoped_changes.
@@ -83,6 +86,11 @@ module Orchestrator
         comparing timings does not verify the requested improvement.
         If the task is ambiguous and no known source contains the missing detail, choose a bounded diagnosis step that locates
         the target and measures a baseline. Do not use needs_context to search the repository or repeatedly ask for absent facts.
+        Treat a user question as a last resort. When worker evidence identifies an exact, non-protected workspace file and a
+        bounded implementation or infrastructure change can remove the blocker, choose that scoped change first, then verify it.
+        Do not ask the user merely because a prior artifact-only diagnosis could not edit the identified file; a subsequent
+        implementation step may authorize that exact path. Ask only when the next action needs a protected-path approval,
+        an external credential/resource, or a materially open-ended product decision.
         Give a step a stable lineageKey describing its objective. When retrying the same objective, preserve its lineageKey;
         change it only when the objective materially changes. Rails uses this explicit identity to detect repeated attempts.
         If one specific missing source prevents a responsible decision, return outcome=needs_context, nextStep=null,

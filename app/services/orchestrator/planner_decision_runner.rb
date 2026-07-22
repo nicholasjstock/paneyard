@@ -27,7 +27,8 @@ module Orchestrator
 
     MODEL_TIERS = %i[small strong].freeze
     CLAUDE_MODELS = { small: "haiku", strong: "sonnet" }.freeze
-    CODEX_SMALL_MODEL = WorkerSpawner::CODEX_WORKER_MODEL
+    CODEX_SMALL_MODEL = WorkerSpawner::CODEX_SMALL_MODEL
+    CODEX_PROMOTED_MODEL = WorkerSpawner::CODEX_PROMOTED_MODEL
     OUTPUT_LIMIT = 50_000
 
     def call(run:, request:, decision:, model_tier: :small, command_runner: Open3.method(:capture3))
@@ -76,18 +77,19 @@ module Orchestrator
       token = PlannerDecisionCapability.issue(decision)
       env = WorkerSpawner.build_worker_env.merge("PLANNER_DECISION_TOKEN" => token)
       Tempfile.create([ "planner-decision", ".txt" ]) do |output_file|
-        model_args = model_tier == :small ? [ "--model", CODEX_SMALL_MODEL ] : []
+        selected_model = model_tier == :strong ? CODEX_PROMOTED_MODEL : CODEX_SMALL_MODEL
         args = [
           "codex", "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
-          *model_args,
+          "--model", selected_model,
           "-c", %(mcp_servers.planner_decision.url=#{"#{WorkerSpawner.rails_mcp_url}/planner-decision".to_json}),
           "-c", 'mcp_servers.planner_decision.bearer_token_env_var="PLANNER_DECISION_TOKEN"',
+          "-c", 'mcp_servers.planner_decision.default_tools_approval_mode="approve"',
           "--output-last-message", output_file.path, "--cd", run.target_root, prompt
         ]
         stdout, stderr, status = command_runner.call(env, *args, chdir: run.target_root)
         raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: bounded_output("#{stdout}\n#{stderr}")) unless status.success?
 
-        { usage: {}, model: model_tier == :small ? CODEX_SMALL_MODEL : "default", cli_output: bounded_output(stdout) }
+        { usage: {}, model: selected_model, cli_output: bounded_output(stdout) }
       end
     end
 

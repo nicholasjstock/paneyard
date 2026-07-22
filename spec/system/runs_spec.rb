@@ -71,6 +71,22 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text("Launch job has not started.")
   end
 
+  it "offers to switch launchers and resume only while a run is waiting for capacity" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "capacity-switch", task: "Continue after capacity returns")
+    run.update!(capacity_available_at: 30.minutes.from_now)
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_button("Switch to Codex & resume")
+
+    click_button "Switch to Codex & resume"
+
+    expect(page).to have_text("Switched to Codex and resumed queued work.")
+    expect(run.reload.launcher_variant).to eq("codex")
+    expect(run.capacity_available_at).to be_nil
+  end
+
   it "renders workers, spawn requests, and tick history on the run details page" do
     workspace = create_workspace
     FileUtils.mkdir_p(File.join(workspace.root_path, "front", "demo-output", "agents-sdk", "workers"))
@@ -117,7 +133,8 @@ RSpec.describe "workspace runs", type: :system do
 
     expect(page).to have_text("Test the details page.")
     expect(page).to have_text("Work in progress")
-    expect(page).to have_text("Worker history")
+    expect(page).to have_text("Acceptance criteria & workers")
+    expect(page).to have_text("Other workers")
     expect(page).to have_text("How it got here")
     expect(page).to have_text("Artifacts")
     expect(page).to have_text("Usage & planner")
@@ -363,6 +380,57 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text(
       "Handoff rejected: diagnosis evidenceCitation not found in diagnosis.md: paraphrase"
     )
+  end
+
+  it "keeps routine orchestration phases out of recent activity while retaining blocking transitions" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "activity-filter", task: "Keep the activity feed focused")
+    BusEvent.publish(
+      "run.status", run_id: run.run_id,
+      payload: { runId: run.run_id, phase: "planning", summary: "Preparing the next step." }
+    )
+    BusEvent.publish(
+      "run.status", run_id: run.run_id,
+      payload: { runId: run.run_id, phase: "blocked_on_user", summary: "An operator decision is required." }
+    )
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).not_to have_text("Run entered planning")
+    expect(page).to have_text("Orchestrator Run entered blocked on user")
+  end
+
+  it "shows one chaperone review rather than its worker lifecycle as separate reviews" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "single-chaperone", task: "Clarify the chaperone timeline")
+    review, = ChaperoneReview.issue!(run:, lineage_key: "criterion:checkout", step_attempt_ids: [])
+    review.update!(status: "completed", action: "continue_small", completed_at: Time.current, summary: "Use the documented toolchain.")
+    worker = create_run_worker(run, nickname: "chaperone-test", status: "stopped", stop_reason: "Worker exited with status 0 before completing its handoff.")
+    worker.update!(role: "chaperone", scope: "criterion:checkout")
+    run.spawn_requests.create!(
+      request_id: SecureRandom.uuid,
+      asked_by: "chaperone",
+      requested_role: "chaperone",
+      scope: "criterion:checkout",
+      text: "Chaperone review for lineage criterion:checkout.",
+      lineage_key: "criterion:checkout",
+      status: "fulfilled",
+      priority: "blocking",
+      fulfilled_worker_id: worker.worker_id
+    )
+    BusEvent.publish("worker.spawned", run_id: run.run_id, payload: { role: "chaperone", nickname: worker.nickname })
+    BusEvent.publish("worker.stopped", run_id: run.run_id, payload: { role: "chaperone", nickname: worker.nickname })
+
+    visit workspace_run_path(workspace, run)
+
+    within(".activity-feed") do
+      expect(page).to have_text("Chaperone Reviewed criterion:checkout and continued on the small model", count: 1)
+      expect(all(".activity-actor", text: "Chaperone").count).to eq(1)
+    end
+    expect(page).to have_css(".worker-name", text: "Chaperone review", count: 1)
+    expect(page).to have_text("Decision: Continue small")
+    expect(page).not_to have_text("chaperone-test started")
+    expect(page).not_to have_text("chaperone-test stopped")
   end
 
   it "updates the run detail page live when new status and tick data arrive", :js do

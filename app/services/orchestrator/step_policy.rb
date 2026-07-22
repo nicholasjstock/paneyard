@@ -55,6 +55,7 @@ module Orchestrator
       evidence_refs = Array(step[:evidence_refs]).map(&:to_s).reject(&:blank?)
 
       raise ArgumentError, "Planner step must name an executable owner" unless EXECUTOR_OWNERS.include?(owner)
+      validate_artifact_name!(step[:artifact])
       raise ArgumentError, "Planner step must declare mode" unless MODES.include?(mode)
       raise ArgumentError, "Planner step must declare writeScope" unless WRITE_SCOPES.include?(write_scope)
       reject_ambiguous_paths!(allowed_paths)
@@ -125,6 +126,19 @@ module Orchestrator
       ambiguous = paths.select { |path| path.blank? || path.end_with?("/") || path.match?(/[\*\?\[\]\{\}]/) }
       raise ArgumentError, "allowedPaths must name exact files: #{ambiguous.join(', ')}" if ambiguous.any?
     end
+
+    # ArtifactStore always places a run artifact beneath its managed output
+    # directory. Accepting a path here would therefore be both redundant and
+    # unsafe, and would fail only after a worker had already been dispatched.
+    # Reject it during planner submission so the model receives accepted=false
+    # and can repair the same decision turn.
+    def validate_artifact_name!(artifact)
+      name = artifact.to_s
+      if name.blank? || name == "." || name == ".." || name.include?("/") || name.include?("\\") || name.include?("\0")
+        raise ArgumentError, "artifact must be a filename only, without a path prefix: #{artifact.inspect}"
+      end
+    end
+    private_class_method :validate_artifact_name!
 
     # Structural, not semantic: the step must name real, current acceptance
     # criteria keys (top-level or nested children) -- Rails never tries to

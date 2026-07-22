@@ -29,4 +29,16 @@ RSpec.describe Orchestrator::LogReader do
   ensure
     file&.close!
   end
+
+  it "ignores non-object JSON emitted in a Codex log" do
+    file = Tempfile.new("worker-log")
+    file.write("null\n")
+    file.write({ type: "assistant", message: { content: [ { type: "text", text: "[STATUS] Still working." } ] } }.to_json << "\n")
+    file.flush
+
+    expect(described_class.progress_updates(file.path)).to eq([ "Still working." ])
+    expect(described_class.format_for_display(File.read(file.path))).not_to include("null")
+  ensure
+    file&.close!
+  end
 end

@@ -9,8 +9,16 @@
           <span class="muted">evidence: <span class="mono"><%= criterion.evidence_ref %></span></span>
         <% end %>
       </div>
+      <% criterion_workers = worker_groups[criterion.id] || [] %>
+      <% if criterion_workers.any? %>
+        <div class="worker-list criterion-worker-list">
+          <% criterion_workers.each do |activity| %>
+            <%= render "worker_row", activity: activity, run: run, current_workspace: current_workspace %>
+          <% end %>
+        </div>
+      <% end %>
       <% if criterion.children.any? %>
-        <%= render "acceptance_criteria", criteria: criterion.children %>
+        <%= render "acceptance_criteria", criteria: criterion.children, worker_groups: worker_groups, run: run, current_workspace: current_workspace %>
       <% end %>
     </li>
   <% end %>
