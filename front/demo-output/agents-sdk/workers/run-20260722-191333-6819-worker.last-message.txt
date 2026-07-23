@@ -1,0 +1,8 @@
+Implemented the current-runs dropdown and cross-workspace navigation.
+
+- Added active run listing to the shared navigation.
+- Selecting a run navigates to its workspace-scoped run page.
+- Added system coverage; focused test passes.
+- Recorded details in [current-runs-dropdown.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/front/demo-output/agents-sdk/run-20260722-191333-6819/current-runs-dropdown.md).
+
+RuboCop was blocked by sandbox permissions for its global cache directory.

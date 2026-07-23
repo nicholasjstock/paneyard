@@ -1,0 +1,844 @@
+[workflow] 2026-07-22T19:17:12.859Z worker:lifecycle: spawned verifier {"worker_id":"8964325d-c2ae-4c99-ba1f-fffce10977ff","run_id":"run-20260722-191333-6819","role":"verifier","nickname":"verifier","pid":89596,"scope":"acceptance-verify-current-runs-dropdown-switches-workspaces","reason":"Bus request from planner for acceptance-verify-current-runs-dropdown-switches-workspaces.","command":"codex","status":"running","stop_reason":null}
+OpenAI Codex v0.145.0
+--------
+workdir: /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+model: gpt-5.6-luna
+provider: openai
+approval: never
+sandbox: custom permissions (network access enabled)
+reasoning effort: medium
+reasoning summaries: none
+session id: 019f8b42-b71b-7b13-b497-67f3a736ec9e
+--------
+user
+# Durable project knowledge for this workspace (evidence-backed; call get_project_memory for full detail if needed)
+
+- [operational_rule] dev-environment: Run 'bin/setup --skip-server' once to install Ruby dependencies and prepare the database. Then run 'bin/dev' to start the full development environment. bin/dev starts Puma and Solid Queue jobs process together, both exit on interrupt. It verifies bundle dependencies, pending migrations, and PORT availability (default 3000) before starting. Custom port: PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev
+- [operational_rule] tests: Run 'bundle exec rspec' to execute the full test suite.
+- [operational_rule] code-style: Run 'bin/rubocop' to check Ruby code style. This is part of the CI pipeline and uses .rubocop.yml configuration.
+- [operational_rule] ci-full: Run 'bin/ci' to execute the complete CI pipeline including setup, rubocop, bundler-audit, importmap audit, and brakeman security analysis.
+- [operational_rule] code-quality: Run 'bin/rubocop' to check Ruby code style. This is part of the CI pipeline and uses .rubocop.yml configuration.
+- [operational_rule] port-customization: To use a non-default port for development, set the PORT environment variable: `PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev`. This is useful when the default port 3000 is already in use.
+- [operational_rule] test: Run 'bundle exec rspec' to execute the full test suite.
+
+# Runtime identity (authoritative)
+
+- runId: run-20260722-191333-6819
+- workerId: 8964325d-c2ae-4c99-ba1f-fffce10977ff
+- nickname: verifier
+- role: verifier
+- scope/artifact: acceptance-verify-current-runs-dropdown-switches-workspaces
+- execution mode: verification
+- write scope: source_protected
+- authorized workspace source roots: none
+
+Rails authenticates MCP calls with this worker's private capability. Do not invent or alter identity fields.
+`worker_turn` derives nickname and scope from that capability; pass runId, role, task, and result.
+The target workspace root is `/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819`. Start repository commands with `cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819`.
+Bash is available under a launcher-enforced filesystem policy. Writes to tracked repository source are limited
+to the authorized source roots above -- source-protected workers have none. Gitignored paths (caches, build
+output, node_modules, etc.) stay writable regardless, since tooling needs them and they aren't source. Run
+bounded commands (they
+exit on their own) in the foreground through Bash so they remain inside this worker's sandbox and process
+group. Any command that is long-running by nature (a dev server, a watcher, anything that does not exit on
+its own) MUST always be started with `start_run_command` instead, even if you only need it for the rest of
+this turn -- `&`, `nohup`, and log redirection do not reliably keep a process alive even across your own
+next Bash call.
+Use `write_workflow_artifact` for the assigned artifact.
+
+name = "worker"
+description = "Generic task worker: verifies artifacts or applies a scoped fix, depending on what the current bus request/prompt actually describes."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+You are a generic worker. Your identity for this run comes entirely from your bus request/prompt, not from a fixed role name — read it first to learn whether this task is a verification pass or a scoped code fix, then apply the matching discipline below.
+
+- Use the structured message format from `.codex/agents/MESSAGING_PROTOCOL.md`.
+- Use the `workflow` MCP server to resolve context and artifacts before doing anything else.
+- Only the orchestrator manages worker lifecycle. Do not call `spawn_worker`, `list_workers`, or `stop_worker` directly.
+- When you finish, call `worker_turn` with `role="worker"`, your `nickname`, `scope`, and a result beginning with `[DONE]`, `[BLOCKED]`, or `[FAILED]`. Rails promotes an already-planned following step after `[DONE]`; otherwise it queues one bounded planner decision. No planner agent process is spawned.
+- If an unexpected failure or decision would require changing files, configuration, tests, services, or tooling outside the assigned scope, do not investigate or repair it beyond the minimum read-only evidence needed to identify it. Write the partial result to the assigned artifact, then immediately call `worker_turn` with `result` marked `[BLOCKED]`, the exact error, command, affected path, and a suggested downstream scope. The follow-up planner decides whether to create a separate task.
+- Any command that is long-running by nature -- a dev server, a watcher, anything that does not exit on its own -- MUST always be started with `start_run_command`, even if you only need it for the rest of this turn. This is not a judgment call about whether it outlives you: `&`, `nohup`, `disown`, and log redirection do not reliably keep a process alive even across your own next command. Inspect `list_run_commands` before starting a duplicate; use `read_run_command_log` with an offset instead of re-reading the whole log; call `stop_run_command` when you no longer need it, unless run-level cleanup will handle it; report the `commandId` in your artifact and `worker_turn` result.
+- Never create or spawn another worker directly. Report `[BLOCKED]` through `worker_turn`; Rails and the planner own all follow-up routing.
+- Inspect the workspace and use its native commands; do not require orchestrator-specific source configuration or assume a language, package manager, directory layout, or service port.
+- Run bounded commands (they exit on their own) in the foreground and wait for them to finish before reporting. Long-running commands (a dev server, a watcher, anything that does not exit on its own) always use `start_run_command` instead -- see above; foreground children remain owned by the worker process group and inherit the Codex permission profile, so nothing detached this way survives even your next command.
+- Do not write project memory. Report candidate durable facts with their evidence in your artifact and `worker_turn`; the planner decides whether to promote them.
+- If something you try fails, call `report_failed_approach` with what you tried and what happened before moving on -- do this every time, not only in your final report.
+- Report files changed (if any), commands run, and the verification result in your final `worker_turn` result.
+- Do not modify code, and do not route around other workers, unless the task you were actually given calls for it.
+
+## If your task is verifying or analyzing artifacts (logs, screenshots, test output, or other generated evidence)
+
+- Prefer `collect_workflow_state` to inventory available evidence. `read_workflow_artifact` returns a small initial window; request a later `offset` only when that evidence leaves a specific question unanswered.
+- Prefer the fastest evidence source that can answer the question — logs or screenshots before a full pass over generated artifacts — and fall back to a deeper pass only when cheaper evidence is insufficient.
+- Within your own turn, go progressively deeper, not in parallel: a `fast` pass answers the cheapest useful question and surfaces critical failures as early as possible; if warranted, follow with `medium` (state transitions and timing gaps), then `slow` (the most complete timeline and edge-case findings).
+- Validate the artifact before analysis. A blank, corrupted, or unreadable artifact is a failure, not a success — never claim success without positive evidence.
+- Only report success when you can cite concrete evidence (timestamps, file references, visible content) for the expected outcome.
+- If baseline validation fails, or the evidence is inconclusive and another artifact is needed, emit `[FAILED]` or `[BLOCKED]` — do not emit `[DONE]` and do not say "all checks passed" without that evidence.
+
+## If your task is a scoped code fix
+
+- Read the task's structured execution policy and `successCheck` together. Repository writes are limited to the exact files in `Allowed repository paths`; an empty list means artifact output only.
+- Treat the structured execution policy in the current task as authoritative. In `diagnosis` mode, gather evidence and report the confirmed failure boundary; do not implement an application fix. Never edit a repository path that is not listed under `Allowed repository paths`.
+- A diagnosis handoff is accepted only when `worker_turn` includes `evidenceOutcome` (`confirmed` or `blocked`) and one or more `evidenceCitations` copied verbatim from the run-scoped artifact. Use `blocked` whenever the reproduction did not reach the assigned boundary; never promote code inspection or an earlier artifact into a confirmed runtime cause.
+- When diagnosis confirms exact implementation targets or measurements, also pass `diagnosisFindings` to `worker_turn`: `targetPaths` must contain exact workspace-relative files cited in the artifact, `measurements` contain numeric `{name, value, unit}` facts, and `objective` restates the bounded run objective. Rails persists these curated facts for the next planner; keep the full evidence in the artifact.
+- Inspect and cite the actual consumer before changing a producer or response shape. Controller, OpenAPI, migration, schema, or generated-file changes require the task to include an answered operator approval reference; otherwise stop and report the proposed contract change through `worker_turn`.
+- Add or update the preferred regression test for that scope first — a frontend test, a failing request spec, an infrastructure test, or the nearest equivalent — then implement the smallest defensible fix (TDD-first).
+- Verify the fix with the scope-appropriate command (typecheck, test run, or guarded command) before reporting done.
+- If the required verification command is broken by unrelated test infrastructure (for example aliases, runners, shared configuration, or unrelated assertions), do not fix that infrastructure inside this worker. Report the scoped code result and call `worker_turn` as `[BLOCKED]`; a passing test is not permission to expand the assignment.
+- Report files changed, commands run, and verification result.
+"""
+nickname_candidates = ["worker", "task-worker"]
+
+
+name = "verifier"
+description = "Independent check of one acceptance criterion's evidence before Rails allows it to close."
+developer_instructions = """
+You were spawned to answer exactly one question: does the cited evidence for one acceptance criterion actually prove the claim, or not? You are not the worker who produced that evidence, and you must not treat its word as proof.
+
+- Never accept the candidate evidence at face value. Reproduce the underlying claim yourself: rerun the test, the build, the measurement, or the demo the criterion depends on. If the claim is about a number (a runtime, a latency, a count), it is not verified until you have personally observed that number, not read someone else's estimate of it.
+- You have shell access to inspect and run commands, but no write access to the target workspace. You cannot fix a failing claim -- only confirm or reject it. If the code needs a real change to make the claim true, that is a rejection, not something for you to patch.
+- If you cannot reproduce the claim -- including because of an environment or sandbox limitation -- reject. Do not substitute a model, an estimate, or "no errors were seen" for an actual reproduction. An honest rejection with a clear reason is always preferable to a false verification.
+- When you do verify, produce your own artifact (via `write_workflow_artifact`) documenting exactly what you ran and what you observed, and cite that artifact as your `evidenceRef` -- never the same evidence ref the criterion already carries. Rails rejects a verification that cites unchanged evidence.
+- Finish by calling `submit_acceptance_verification` exactly once with `criterionKey`, `outcome` (`verified` or `rejected`), `summary` describing exactly what you did and observed, and (for `verified`) your own fresh `evidenceRef`. A text-only answer, or ending without that call, is a failure.
+- If you get stuck before reaching a conclusion (missing tooling, an unrelated crash, ambiguous scope), report `[BLOCKED]` via `worker_turn` instead of guessing -- that routes to a bounded planner decision, same as any other worker.
+"""
+nickname_candidates = ["verifier"]
+
+
+Current task:
+Run run-20260722-191333-6819. Bus request: acceptance-verify-current-runs-dropdown-switches-workspaces. Requested by: planner. Target role: verifier. Independently verify whether this acceptance criterion is actually satisfied. Do not treat the candidate evidence as proof -- reproduce the underlying claim yourself (rerun the check, the test, or the measurement). Criterion: The UI displays current runs in a dropdown, and selecting a run switches the user to that run's workspace. Candidate evidence to investigate (not to merely re-cite): current-runs-dropdown.md. Call submit_acceptance_verification with criterionKey=current-runs-dropdown-switches-workspaces once you have an independent, conclusive answer. Write your report via write_workflow_artifact using artifactName="acceptance-verify-current-runs-dropdown-switches-workspaces". Use the shared workflow bus for blockers.
+codex
+I’m independently checking the candidate evidence and will reproduce the UI behavior before submitting a verification result. I’ll first resolve the run-scoped artifact and available acceptance context, then run the narrowest relevant test or browser check.
+mcp: workflow/get_run_context started
+mcp: workflow/get_run_context (completed)
+mcp: workflow/get_project_memory started
+mcp: workflow/get_project_memory (completed)
+mcp: workflow/collect_workflow_state started
+mcp: workflow/collect_workflow_state (completed)
+mcp: workflow/read_workflow_artifact started
+mcp: workflow/read_workflow_artifact (completed)
+exec
+/bin/zsh -lc "cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819 && git status --short && sed -n '1,180p' spec/system/workspaces_spec.rb && sed -n '1,180p' app/controllers/application_controller.rb && sed -n '1,220p' app/views/layouts/application.html.erb" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 0ms:
+ M app/assets/stylesheets/application.css
+ M app/controllers/application_controller.rb
+ M app/views/layouts/application.html.erb
+ M spec/system/workspaces_spec.rb
+?? front/demo-output/agents-sdk/run-20260722-191333-6819/
+?? front/demo-output/agents-sdk/workers/
+require "rails_helper"
+
+RSpec.describe "workspaces", type: :system do
+  it "lists current runs and switches to the selected run's workspace", js: true do
+    first_workspace = Workspace.create!(
+      name: "first-#{SecureRandom.hex(4)}", root_path: "/tmp/first-#{SecureRandom.hex(4)}",
+      protected_path_patterns: [ "app/**" ]
+    )
+    second_workspace = Workspace.create!(
+      name: "second-#{SecureRandom.hex(4)}", root_path: "/tmp/second-#{SecureRandom.hex(4)}",
+      protected_path_patterns: [ "app/**" ]
+    )
+    first_run = create_active_run(first_workspace, "first-current")
+    second_run = create_active_run(second_workspace, "second-current")
+
+    visit workspace_run_path(first_workspace, first_run)
+
+    expect(page).to have_css(
+      "#current-runs-dropdown option",
+      text: "#{first_workspace.name} · #{first_run.run_id}"
+    )
+    expect(page).to have_css(
+      "#current-runs-dropdown option",
+      text: "#{second_workspace.name} · #{second_run.run_id}"
+    )
+
+    select "#{second_workspace.name} · #{second_run.run_id}", from: "Current runs"
+
+    expect(page).to have_current_path(workspace_run_path(second_workspace, second_run))
+    expect(page).to have_text(second_run.task)
+  end
+
+  it "creates a workspace from the index flow, auto-launches its bootstrap run, and redirects into its runs" do
+    suffix = SecureRandom.hex(4)
+
+    expect do
+      visit workspaces_path
+      click_link "Add workspace"
+      fill_in "Name", with: "planner-app-#{suffix}"
+      fill_in "Root path", with: "/tmp/planner-app-#{suffix}"
+      click_button "Add workspace"
+    end.to change(Run, :count).by(1)
+
+    expect(page).to have_text("Added workspace planner-app-#{suffix}. Discovering its dev environment and protected paths…")
+    expect(page).to have_current_path(%r{/workspaces/\d+/runs})
+    expect(page).to have_text("planner-app-#{suffix} Runs")
+    expect(page).to have_no_link("Launch task")
+    expect(page).to have_text("still initializing")
+
+    workspace = Workspace.find_by!(name: "planner-app-#{suffix}")
+    run = workspace.runs.sole
+    expect(run.launched_by).to eq("workspace_init")
+    expect(run.spawn_requests.find_by(requested_role: "project_init")).to be_present
+    # No planner request either: a planner has no visibility into
+    # project_init's workspace-level findings, so queuing one here re-plans
+    # the same discovery as a redundant step instead of ever finishing --
+    # see Orchestrator::WorkspaceInit's comment.
+    expect(run.spawn_requests.find_by(requested_role: "planner")).to be_nil
+  end
+
+  it "lets an operator edit a workspace's protected path patterns" do
+    workspace = Workspace.create!(
+      name: "planner-app-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir,
+      protected_path_patterns: [ "app/controllers/**/*.rb" ]
+    )
+
+    visit workspaces_path
+    within(find(".card", text: workspace.name, match: :first)) { click_link "Edit" }
+
+    expect(page).to have_field("Protected path patterns", with: "app/controllers/**/*.rb")
+
+    fill_in "Protected path patterns", with: "app/controllers/**/*.rb\ndb/migrate/**"
+    click_button "Save"
+
+    expect(page).to have_text("Updated workspace #{workspace.name}.")
+    expect(workspace.reload.protected_path_patterns).to eq(%w[app/controllers/**/*.rb db/migrate/**])
+  end
+
+  it "shows the empty state when no workspaces exist" do
+    visit workspaces_path
+
+    expect(page).to have_text("No workspaces registered yet.")
+  end
+
+  it "refuses to delete a workspace that still owns runs" do
+    suffix = SecureRandom.hex(4)
+    workspace = Workspace.create!(name: "planner-app-#{suffix}", root_path: "/tmp/planner-app-#{suffix}")
+    Run.create!(
+      run_id: "demo-workspace-delete",
+      task: "Keep this workspace busy",
+      workspace: workspace,
+      target_root: workspace.root_path,
+      launcher_variant: "claude",
+      status: "running",
+      launched_by: "operator",
+      started_at: Time.current
+    )
+
+    visit workspaces_path
+    within(find(".card", text: workspace.name, match: :first)) do
+      click_button "Remove"
+    end
+
+    expect(page).to have_current_path(workspaces_path)
+    expect(page).to have_text("Cannot delete record because dependent runs exist")
+    expect(Workspace.exists?(workspace.id)).to be(true)
+  end
+
+  it "deletes an empty workspace from the index" do
+    suffix = SecureRandom.hex(4)
+    workspace = Workspace.create!(name: "planner-app-#{suffix}", root_path: "/tmp/planner-app-#{suffix}")
+
+    visit workspaces_path
+    within(find(".card", text: workspace.name, match: :first)) do
+      click_button "Remove"
+    end
+
+    expect(page).to have_text("Removed workspace planner-app-#{suffix}.")
+    expect(page).to have_text("No workspaces registered yet.")
+    expect(Workspace.exists?(workspace.id)).to be(false)
+  end
+
+  def create_active_run(workspace, run_id)
+    Run.create!(
+      run_id:, task: run_id, workspace:, target_root: workspace.source_root,
+      launcher_variant: "claude", status: "running", launched_by: "operator", started_at: Time.current
+    )
+  end
+end
+class ApplicationController < ActionController::Base
+  # Only allow modern browsers supporting webp images, web push, badges, import maps, CSS nesting, and CSS :has.
+  allow_browser versions: :modern unless Rails.env.test?
+
+  # Changes to the importmap will invalidate the etag for HTML responses
+  stale_when_importmap_changes
+
+  helper_method :current_workspace
+  helper_method :current_runs
+  helper_method :background_job_warning
+
+  private
+
+  # No auth in v1 (single-user local tool) -- placeholder for whoever is
+  # at the keyboard, kept as a distinct concept so it's easy to wire up
+  # real auth later without touching the rest of the launch/answer flows.
+  def current_operator
+    "operator"
+  end
+
+  def current_workspace
+    @current_workspace
+  end
+
+  def current_runs
+    @current_runs ||= Run.active.includes(:workspace).order(created_at: :desc)
+  end
+
+  def require_workspace
+    @current_workspace = Workspace.find(params[:workspace_id])
+  end
+
+  def background_job_warning
+    @background_job_warning ||= BackgroundJobHealth.warning
+  end
+end
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for(:title) || "Workflow Orchestrator" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="Workflow Orchestrator">
+    <meta name="mobile-web-app-capable" content="yes">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+
+    <%= yield :head %>
+
+    <%# Enable PWA manifest for installable apps (make sure to enable in config/routes.rb too!) %>
+    <%#= tag.link rel: "manifest", href: pwa_manifest_path(format: :json) %>
+
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon.png">
+
+    <%# Includes all stylesheet files in app/assets/stylesheets %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <a class="brand" href="<%= root_path %>">Workflow Orchestrator</a>
+      <nav>
+        <%= link_to "Workspaces", workspaces_path, class: current_page?(workspaces_path) ? "active" : nil %>
+        <% if current_workspace %>
+          <%= link_to "Runs", workspace_runs_path(current_workspace), class: current_page?(workspace_runs_path(current_workspace)) ? "active" : nil %>
+          <%= link_to "Workers", workspace_workers_path(current_workspace), class: current_page?(workspace_workers_path(current_workspace)) ? "active" : nil %>
+          <%= link_to "Questions", workspace_questions_path(current_workspace), class: current_page?(workspace_questions_path(current_workspace)) ? "active" : nil %>
+          <%= link_to "Events", workspace_events_path(current_workspace), class: current_page?(workspace_events_path(current_workspace)) ? "active" : nil %>
+        <% end %>
+        <% if current_runs.any? %>
+          <label class="current-runs-picker">
+            <span class="sr-only">Current runs</span>
+            <select id="current-runs-dropdown" aria-label="Current runs"
+                    onchange="if (this.value) window.location.href = this.value">
+              <option value="" <%= "selected" unless current_runs.any? { |run| current_page?(workspace_run_path(run.workspace, run)) } %>>Current runs</option>
+              <% current_runs.each do |run| %>
+                <option value="<%= workspace_run_path(run.workspace, run) %>"
+                        <%= "selected" if current_page?(workspace_run_path(run.workspace, run)) %>>
+                  <%= "#{run.workspace.name} · #{run.worktree_name.presence || run.run_id}" %>
+                </option>
+              <% end %>
+            </select>
+          </label>
+        <% end %>
+      </nav>
+    </header>
+
+    <main class="page">
+      <% if notice %>
+        <p class="flash notice"><%= notice %></p>
+      <% end %>
+      <% if alert %>
+        <p class="flash alert"><%= alert %></p>
+      <% end %>
+      <% if background_job_warning.present? %>
+        <p class="flash warning"><%= background_job_warning %></p>
+      <% end %>
+
+      <%= yield %>
+    </main>
+  </body>
+</html>
+
+exec
+/bin/zsh -lc 'cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819 && bundle exec rspec spec/system/workspaces_spec.rb:4' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ exited 1 in 1594ms:
+`/Users/stockn` is not writable.
+Bundler will use `/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/bundler20260722-89906-d0p2bz89906' as your home directory temporarily.
+Rails Error: Unable to access log file. Please ensure that /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/log/test.log exists and is writable (i.e. make it writable for user and group: chmod 0664 /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/log/test.log). The log level has been raised to WARN and the output directed to STDERR until the problem is fixed.
+
+An error occurred while loading ./spec/system/workspaces_spec.rb.
+Failure/Error: ActiveRecord::Migration.maintain_test_schema!
+
+ActiveRecord::StatementInvalid:
+  SQLite3::CantOpenException: unable to open database file:
+  SELECT sqlite_version(*)
+# ./spec/rails_helper.rb:33:in '<top (required)>'
+# ./spec/system/workspaces_spec.rb:1:in '<top (required)>'
+# ------------------
+# --- Caused by: ---
+# SQLite3::CantOpenException:
+#   unable to open database file:
+#   SELECT sqlite_version(*)
+#   ./spec/rails_helper.rb:33:in '<top (required)>'
+Run options:
+  include {locations: {"./spec/system/workspaces_spec.rb" => [4]}}
+  exclude {live_agent: true}
+
+
+Finished in 0.00005 seconds (files took 1.22 seconds to load)
+0 examples, 0 failures, 1 error occurred outside of examples
+
+
+codex
+The exact acceptance spec did not reach the example: Rails failed during test database initialization because the configured SQLite location is not writable in this verifier sandbox. I’m recording that failed reproduction and checking whether the test can be rerun with a temporary database/log location without changing repository files.
+mcp: workflow/report_failed_approach started
+mcp: workflow/report_failed_approach (completed)
+exec
+/bin/zsh -lc "cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819 && sed -n '1,180p' config/database.yml && sed -n '1,100p' spec/rails_helper.rb && rg -n \"DATABASE_URL|database:\" config .env* 2>/dev/null || true" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 0ms:
+# SQLite. Versions 3.8.0 and up are supported.
+#   gem install sqlite3
+#
+#   Ensure the SQLite 3 gem is defined in your Gemfile
+#   gem "sqlite3"
+#
+default: &default
+  adapter: sqlite3
+  max_connections: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  timeout: 5000
+
+development:
+  primary:
+    <<: *default
+    database: storage/development.sqlite3
+  queue:
+    <<: *default
+    database: storage/development_queue.sqlite3
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: storage/development_cable.sqlite3
+    migrations_paths: db/cable_migrate
+
+# Warning: The database defined as "test" will be erased and
+# re-generated from your development database when you run "rake".
+# Do not set this db to the same as development or production.
+test:
+  <<: *default
+  database: storage/test.sqlite3
+
+# Store production database in the storage/ directory, which by default
+# is mounted as a persistent Docker volume in config/deploy.yml.
+production:
+  primary:
+    <<: *default
+    database: storage/production.sqlite3
+  cache:
+    <<: *default
+    database: storage/production_cache.sqlite3
+    migrations_paths: db/cache_migrate
+  queue:
+    <<: *default
+    database: storage/production_queue.sqlite3
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: storage/production_cable.sqlite3
+    migrations_paths: db/cable_migrate
+# This file is copied to spec/ when you run 'rails generate rspec:install'
+require 'spec_helper'
+ENV['RAILS_ENV'] ||= 'test'
+require_relative '../config/environment'
+# Prevent database truncation if the environment is production
+abort("The Rails environment is running in production mode!") if Rails.env.production?
+# Uncomment the line below in case you have `--require rails_helper` in the `.rspec` file
+# that will avoid rails generators crashing because migrations haven't been run yet
+# return unless Rails.env.test?
+require 'rspec/rails'
+# Add additional requires below this line. Rails is not loaded until this point!
+
+# Requires supporting ruby files with custom matchers and macros, etc, in
+# spec/support/ and its subdirectories. Files matching `spec/**/*_spec.rb` are
+# run as spec files by default. This means that files in spec/support that end
+# in _spec.rb will both be required and run as specs, causing the specs to be
+# run twice. It is recommended that you do not name files matching this glob to
+# end with _spec.rb. You can configure this pattern with the --pattern
+# option on the command line or in ~/.rspec, .rspec or `.rspec-local`.
+#
+# The following line is provided for convenience purposes. It has the downside
+# of increasing the boot-up time by auto-requiring all files in the support
+# directory. Alternatively, in the individual `*_spec.rb` files, manually
+# require only the support files necessary.
+#
+Rails.root.glob('spec/support/**/*.rb').sort_by(&:to_s).each { |f| require f }
+
+# Ensures that the test database schema matches the current schema file.
+# If there are pending migrations it will invoke `db:test:prepare` to
+# recreate the test database by loading the schema.
+# If you are not using ActiveRecord, you can remove these lines.
+begin
+  ActiveRecord::Migration.maintain_test_schema!
+rescue ActiveRecord::PendingMigrationError => e
+  abort e.to_s.strip
+end
+RSpec.configure do |config|
+  # Remove this line if you're not using ActiveRecord or ActiveRecord fixtures
+  config.fixture_paths = [
+    Rails.root.join('spec/fixtures')
+  ]
+
+  # If you're not using ActiveRecord, or you'd prefer not to run each of your
+  # examples within a transaction, remove the following line or assign false
+  # instead of true.
+  config.use_transactional_fixtures = false
+
+  # You can uncomment this line to turn off ActiveRecord support entirely.
+  # config.use_active_record = false
+
+  # RSpec Rails uses metadata to mix in different behaviours to your tests,
+  # for example enabling you to call `get` and `post` in request specs. e.g.:
+  #
+  #     RSpec.describe UsersController, type: :request do
+  #       # ...
+  #     end
+  #
+  # The different available types are documented in the features, such as in
+  # https://rspec.info/features/8-0/rspec-rails
+  #
+  # You can also infer these behaviours automatically by location, e.g.
+  # /spec/models would pull in the same behaviour as `type: :model` but this
+  # behaviour is considered legacy and will be removed in a future version.
+  #
+  # To enable this behaviour uncomment the line below.
+  config.infer_spec_type_from_file_location!
+
+  config.include ActiveJob::TestHelper
+  config.include LegacyAssertionCompatibility
+
+  # Filter lines from Rails gems in backtraces.
+  config.filter_rails_from_backtrace!
+  # arbitrary gems may also be filtered via:
+  # config.filter_gems_from_backtrace("gem name")
+end
+zsh:1: no matches found: .env*
+
+exec
+/bin/zsh -lc 'cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819 && ls -ld storage log tmp && ls -l storage log/test.log 2>&1 || true && test -w storage; echo storage_writable=$? && test -w log; echo log_writable=$?' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 0ms:
+drwxr-xr-x@ 4 stockn  staff  128 Jul 22 21:15 log
+drwxr-xr-x@ 4 stockn  staff  128 Jul 22 21:16 storage
+drwxr-xr-x@ 8 stockn  staff  256 Jul 22 21:15 tmp
+-rw-r--r--@ 1 stockn  staff  142455 Jul 22 21:16 log/test.log
+
+storage:
+total 688
+-rw-r--r--@ 1 stockn  staff  352256 Jul 22 21:16 test.sqlite3
+storage_writable=1
+log_writable=1
+
+2026-07-22T19:18:06.443425Z ERROR codex_core::tools::router: error=exec_command failed for `/bin/zsh -lc "rm -rf /tmp/workflow-verifier-6819 && mkdir -p /tmp/workflow-verifier-6819 && rsync -a --exclude '.git' --exclude 'storage/*.sqlite3' --exclude 'log/*.log' /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/ /tmp/workflow-verifier-6819/ && mkdir -p /tmp/workflow-verifier-6819/storage /tmp/workflow-verifier-6819/log && cd /tmp/workflow-verifier-6819 && bundle exec rspec spec/system/workspaces_spec.rb:4"`: CreateProcess { message: "Rejected(\"`/bin/zsh -lc \\\"rm -rf /tmp/workflow-verifier-6819 && mkdir -p /tmp/workflow-verifier-6819 && rsync -a --exclude '.git' --exclude 'storage/*.sqlite3' --exclude 'log/*.log' /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/ /tmp/workflow-verifier-6819/ && mkdir -p /tmp/workflow-verifier-6819/storage /tmp/workflow-verifier-6819/log && cd /tmp/workflow-verifier-6819 && bundle exec rspec spec/system/workspaces_spec.rb:4\\\"` rejected: rm -f style commands are not permitted. Use a safer approach\")" }
+exec
+/bin/zsh -lc 'verifier_dir=$(mktemp -d /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/tmp/cache/verifier.XXXXXX) && rsync -a --exclude '"'.git' --exclude 'storage/*.sqlite3' --exclude 'log/*.log' /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/ \""'$verifier_dir/" && mkdir -p "$verifier_dir/storage" "$verifier_dir/log" && cd "$verifier_dir" && bundle exec rspec spec/system/workspaces_spec.rb:4' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ exited 1 in 8009ms:
+`/Users/stockn` is not writable.
+Bundler will use `/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/bundler20260722-89950-ksdlt789950' as your home directory temporarily.
+`/Users/stockn` is not writable.
+Bundler will use `/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/bundler20260722-89996-9fbod389996' as your home directory temporarily.
+Run options:
+  include {locations: {"./spec/system/workspaces_spec.rb" => [4]}}
+  exclude {live_agent: true}
+2026-07-22 21:18:25 INFO Selenium [:logger_info] Details on how to use and modify Selenium logger:
+  https://selenium.dev/documentation/webdriver/troubleshooting/logging
+
+2026-07-22 21:18:25 WARN Selenium [:selenium_manager] Metadata cannot be written in cache (/Users/stockn/.cache/selenium): Operation not permitted (os error 1) 
+2026-07-22 21:18:26 WARN Selenium [:selenium_manager] Metadata cannot be written in cache (/Users/stockn/.cache/selenium): Operation not permitted (os error 1) 
+F
+
+Failures:
+
+  1) workspaces lists current runs and switches to the selected run's workspace
+     Got 0 failures and 2 other errors:
+
+     1.1) Failure/Error: visit workspace_run_path(first_workspace, first_run)
+
+          Selenium::WebDriver::Error::SessionNotCreatedError:
+            session not created: Chrome instance exited. Examine ChromeDriver verbose log to determine the cause.
+          # ./spec/system/workspaces_spec.rb:16:in 'block (2 levels) in <top (required)>'
+          # ./spec/support/database_cleaning.rb:37:in 'block (2 levels) in <compiled>'
+          # ------------------
+          # --- Caused by: ---
+          # Selenium::WebDriver::Error::WebDriverError:
+          #   0   chromedriver                        0x0000000109dd36fa chromedriver + 7001850
+1   chromedriver                        0x000000010979b365 chromedriver + 480101
+2   chromedriver                        0x00000001097d94fe chromedriver + 734462
+3   chromedriver                        0x00000001097d5e1b chromedriver + 720411
+4   chromedriver                        0x000000010982557a chromedriver + 1045882
+5   chromedriver                        0x0000000109824c3c chromedriver + 1043516
+6   chromedriver                        0x00000001097e3944 chromedriver + 776516
+7   chromedriver                        0x00000001097e4711 chromedriver + 780049
+8   chromedriver                        0x0000000109d93097 chromedriver + 6738071
+9   chromedriver                        0x0000000109d97596 chromedriver + 6755734
+10  chromedriver                        0x0000000109d73b14 chromedriver + 6609684
+11  chromedriver                        0x0000000109d98012 chromedriver + 6758418
+12  chromedriver                        0x0000000109d637f0 chromedriver + 6543344
+13  chromedriver                        0x0000000109dbf7a8 chromedriver + 6920104
+14  chromedriver                        0x0000000109dbf93c chromedriver + 6920508
+15  chromedriver                        0x0000000109dd3311 chromedriver + 7000849
+16  libsystem_pthread.dylib             0x00007ff80ae9ed49 _pthread_start + 115
+17  libsystem_pthread.dylib             0x00007ff80ae9a82f thread_start + 15
+
+
+     1.2) Failure/Error: example.run
+
+          Selenium::WebDriver::Error::SessionNotCreatedError:
+            session not created: Chrome instance exited. Examine ChromeDriver verbose log to determine the cause.
+          # ./spec/support/database_cleaning.rb:37:in 'block (2 levels) in <compiled>'
+          # ------------------
+          # --- Caused by: ---
+          # Selenium::WebDriver::Error::WebDriverError:
+          #   0   chromedriver                        0x000000010af7c6fa chromedriver + 7001850
+1   chromedriver                        0x000000010a944365 chromedriver + 480101
+2   chromedriver                        0x000000010a9824fe chromedriver + 734462
+3   chromedriver                        0x000000010a97ee1b chromedriver + 720411
+4   chromedriver                        0x000000010a9ce57a chromedriver + 1045882
+5   chromedriver                        0x000000010a9cdc3c chromedriver + 1043516
+6   chromedriver                        0x000000010a98c944 chromedriver + 776516
+7   chromedriver                        0x000000010a98d711 chromedriver + 780049
+8   chromedriver                        0x000000010af3c097 chromedriver + 6738071
+9   chromedriver                        0x000000010af40596 chromedriver + 6755734
+10  chromedriver                        0x000000010af1cb14 chromedriver + 6609684
+11  chromedriver                        0x000000010af41012 chromedriver + 6758418
+12  chromedriver                        0x000000010af0c7f0 chromedriver + 6543344
+13  chromedriver                        0x000000010af687a8 chromedriver + 6920104
+14  chromedriver                        0x000000010af6893c chromedriver + 6920508
+15  chromedriver                        0x000000010af7c311 chromedriver + 7000849
+16  libsystem_pthread.dylib             0x00007ff80ae9ed49 _pthread_start + 115
+17  libsystem_pthread.dylib             0x00007ff80ae9a82f thread_start + 15
+
+
+Finished in 1.54 seconds (files took 4 seconds to load)
+1 example, 1 failure
+
+Failed examples:
+
+rspec ./spec/system/workspaces_spec.rb:4 # workspaces lists current runs and switches to the selected run's workspace
+
+
+mcp: workflow/report_failed_approach started
+mcp: workflow/report_failed_approach (completed)
+exec
+/bin/zsh -lc 'cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819 && rg -n "driven_by|selenium|chrome|Capybara|server" spec/support spec/rails_helper.rb spec/spec_helper.rb config/environments config/initializers Gemfile && git diff -- app/controllers/application_controller.rb app/views/layouts/application.html.erb spec/system/workspaces_spec.rb' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 0ms:
+Gemfile:9:# Use the Puma web server [https://github.com/puma/puma]
+Gemfile:20:# Official Ruby SDK for the Model Context Protocol -- hosts the MCP server
+Gemfile:64:  gem "selenium-webdriver"
+config/initializers/inflections.rb:1:# Be sure to restart your server when you modify this file.
+config/environments/test.rb:18:  # Configure public file server for tests with cache-control for performance.
+config/environments/test.rb:19:  config.public_file_server.headers = { "cache-control" => "public, max-age=3600" }
+spec/support/system_specs.rb:2:require "selenium/webdriver"
+spec/support/system_specs.rb:6:    return if Capybara.current_driver == :rack_test
+spec/support/system_specs.rb:14:Capybara.register_driver :headless_chrome do |app|
+spec/support/system_specs.rb:22:  Capybara::Selenium::Driver.new(app, browser: :chrome, options: options)
+spec/support/system_specs.rb:25:Capybara.server = :puma, { Silent: true }
+spec/support/system_specs.rb:29:    Capybara.reset_sessions!
+spec/support/system_specs.rb:31:    driver = RSpec.current_example.metadata[:js] ? :headless_chrome : :rack_test
+spec/support/system_specs.rb:32:    driven_by(driver)
+config/initializers/content_security_policy.rb:1:# Be sure to restart your server when you modify this file.
+config/environments/development.rb:6:  # Make code changes take effect immediately without server restart.
+config/environments/development.rb:15:  # Enable server timing.
+config/environments/development.rb:16:  config.server_timing = true
+config/environments/development.rb:23:    config.public_file_server.headers = { "cache-control" => "public, max-age=#{2.days.to_i}" }
+config/environments/development.rb:60:  # `bin/rails server` (or just `bin/dev`, which starts both).
+config/initializers/assets.rb:1:# Be sure to restart your server when you modify this file.
+config/environments/production.rb:19:  config.public_file_server.headers = { "cache-control" => "public, max-age=#{1.year.to_i}" }
+config/environments/production.rb:21:  # Enable serving of images, stylesheets, and JavaScripts from an asset server.
+config/environments/production.rb:57:  # Set this to true and configure the email server for immediate delivery to raise delivery errors.
+config/environments/production.rb:63:  # Specify outgoing SMTP server. Remember to add smtp/* credentials via bin/rails credentials:edit.
+spec/support/rails_server_harness.rb:7:  def with_test_rails_server
+spec/support/rails_server_harness.rb:9:    log_dir = Dir.mktmpdir("workflow-test-server")
+spec/support/rails_server_harness.rb:10:    log_path = File.join(log_dir, "rails-server.log")
+spec/support/rails_server_harness.rb:11:    pidfile = File.join(log_dir, "rails-server.pid")
+spec/support/rails_server_harness.rb:19:    pid = Process.spawn(env, "bin/rails", "server", "-e", "test", "-p", port.to_s,
+spec/support/rails_server_harness.rb:23:    wait_for_server!(port: port, log_path: log_path)
+spec/support/rails_server_harness.rb:38:    server = TCPServer.new("127.0.0.1", 0)
+spec/support/rails_server_harness.rb:39:    server.addr[1]
+spec/support/rails_server_harness.rb:41:    server&.close
+spec/support/rails_server_harness.rb:44:  def wait_for_server!(port:, log_path:)
+spec/support/rails_server_harness.rb:47:        return if server_up?(port)
+spec/support/rails_server_harness.rb:53:    raise "Timed out waiting for test Rails server on port #{port}.\n#{File.read(log_path)}"
+spec/support/rails_server_harness.rb:56:  def server_up?(port)
+config/initializers/filter_parameter_logging.rb:1:# Be sure to restart your server when you modify this file.
+spec/support/fake_agent_process.rb:39:      server_context: nil
+spec/support/fake_agent_process.rb:47:        server_context: nil
+spec/support/fake_agent_process.rb:54:        server_context: nil
+spec/support/fake_agent_process.rb:64:        server_context: nil
+spec/support/fake_agent_process.rb:68:        summary: "Fake verifier independently reproduced the claim.", server_context: nil
+spec/support/fake_agent_process.rb:77:        server_context: nil
+spec/support/fake_agent_process.rb:85:        server_context: nil
+spec/support/fake_agent_process.rb:94:        server_context: nil
+diff --git a/app/controllers/application_controller.rb b/app/controllers/application_controller.rb
+index 716d8e2..8978e5f 100644
+--- a/app/controllers/application_controller.rb
++++ b/app/controllers/application_controller.rb
+@@ -6,6 +6,7 @@ class ApplicationController < ActionController::Base
+   stale_when_importmap_changes
+ 
+   helper_method :current_workspace
++  helper_method :current_runs
+   helper_method :background_job_warning
+ 
+   private
+@@ -21,6 +22,10 @@ class ApplicationController < ActionController::Base
+     @current_workspace
+   end
+ 
++  def current_runs
++    @current_runs ||= Run.active.includes(:workspace).order(created_at: :desc)
++  end
++
+   def require_workspace
+     @current_workspace = Workspace.find(params[:workspace_id])
+   end
+diff --git a/app/views/layouts/application.html.erb b/app/views/layouts/application.html.erb
+index dbb3912..6747fee 100644
+--- a/app/views/layouts/application.html.erb
++++ b/app/views/layouts/application.html.erb
+@@ -34,6 +34,21 @@
+           <%= link_to "Questions", workspace_questions_path(current_workspace), class: current_page?(workspace_questions_path(current_workspace)) ? "active" : nil %>
+           <%= link_to "Events", workspace_events_path(current_workspace), class: current_page?(workspace_events_path(current_workspace)) ? "active" : nil %>
+         <% end %>
++        <% if current_runs.any? %>
++          <label class="current-runs-picker">
++            <span class="sr-only">Current runs</span>
++            <select id="current-runs-dropdown" aria-label="Current runs"
++                    onchange="if (this.value) window.location.href = this.value">
++              <option value="" <%= "selected" unless current_runs.any? { |run| current_page?(workspace_run_path(run.workspace, run)) } %>>Current runs</option>
++              <% current_runs.each do |run| %>
++                <option value="<%= workspace_run_path(run.workspace, run) %>"
++                        <%= "selected" if current_page?(workspace_run_path(run.workspace, run)) %>>
++                  <%= "#{run.workspace.name} · #{run.worktree_name.presence || run.run_id}" %>
++                </option>
++              <% end %>
++            </select>
++          </label>
++        <% end %>
+       </nav>
+     </header>
+ 
+diff --git a/spec/system/workspaces_spec.rb b/spec/system/workspaces_spec.rb
+index 7fb828c..2726fef 100644
+--- a/spec/system/workspaces_spec.rb
++++ b/spec/system/workspaces_spec.rb
+@@ -1,6 +1,35 @@
+ require "rails_helper"
+ 
+ RSpec.describe "workspaces", type: :system do
++  it "lists current runs and switches to the selected run's workspace", js: true do
++    first_workspace = Workspace.create!(
++      name: "first-#{SecureRandom.hex(4)}", root_path: "/tmp/first-#{SecureRandom.hex(4)}",
++      protected_path_patterns: [ "app/**" ]
++    )
++    second_workspace = Workspace.create!(
++      name: "second-#{SecureRandom.hex(4)}", root_path: "/tmp/second-#{SecureRandom.hex(4)}",
++      protected_path_patterns: [ "app/**" ]
++    )
++    first_run = create_active_run(first_workspace, "first-current")
++    second_run = create_active_run(second_workspace, "second-current")
++
++    visit workspace_run_path(first_workspace, first_run)
++
++    expect(page).to have_css(
++      "#current-runs-dropdown option",
++      text: "#{first_workspace.name} · #{first_run.run_id}"
++    )
++    expect(page).to have_css(
++      "#current-runs-dropdown option",
++      text: "#{second_workspace.name} · #{second_run.run_id}"
++    )
++
++    select "#{second_workspace.name} · #{second_run.run_id}", from: "Current runs"
++
++    expect(page).to have_current_path(workspace_run_path(second_workspace, second_run))
++    expect(page).to have_text(second_run.task)
++  end
++
+   it "creates a workspace from the index flow, auto-launches its bootstrap run, and redirects into its runs" do
+     suffix = SecureRandom.hex(4)
+ 
+@@ -90,4 +119,11 @@ RSpec.describe "workspaces", type: :system do
+     expect(page).to have_text("No workspaces registered yet.")
+     expect(Workspace.exists?(workspace.id)).to be(false)
+   end
++
++  def create_active_run(workspace, run_id)
++    Run.create!(
++      run_id:, task: run_id, workspace:, target_root: workspace.source_root,
++      launcher_variant: "claude", status: "running", launched_by: "operator", started_at: Time.current
++    )
++  end
+ end
+
+exec
+/bin/zsh -lc "cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819 && sed -n '1,100p' spec/support/system_specs.rb && which google-chrome || which chromium || which chromium-browser || true && git diff --check" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 0ms:
+require "turbo/system_test_helper"
+require "selenium/webdriver"
+
+module RackTestTurboBypass
+  def connect_turbo_cable_stream_sources(...)
+    return if Capybara.current_driver == :rack_test
+
+    super
+  end
+end
+
+Turbo::SystemTestHelper.prepend(RackTestTurboBypass)
+
+Capybara.register_driver :headless_chrome do |app|
+  options = Selenium::WebDriver::Chrome::Options.new
+  options.add_argument("--headless=new")
+  options.add_argument("--window-size=1400,1400")
+  options.add_argument("--disable-gpu")
+  options.add_argument("--no-sandbox")
+  options.add_argument("--disable-dev-shm-usage")
+
+  Capybara::Selenium::Driver.new(app, browser: :chrome, options: options)
+end
+
+Capybara.server = :puma, { Silent: true }
+
+RSpec.configure do |config|
+  config.before(:each, type: :system) do
+    Capybara.reset_sessions!
+
+    driver = RSpec.current_example.metadata[:js] ? :headless_chrome : :rack_test
+    driven_by(driver)
+
+    ActiveJob::Base.queue_adapter = RSpec.current_example.metadata[:live_agent] ? :inline : :test
+  end
+end
+google-chrome not found
+chromium not found
+chromium-browser not found
+
+codex
+The writable-copy rerun reached the acceptance example but failed before any assertions because no Chrome/Chromium executable is available; Selenium reported “Chrome instance exited.” Since the criterion requires an actual browser interaction, I cannot substitute static source inspection or a non-JavaScript request check as proof. I’m documenting the independent rejection now.
+mcp: workflow/write_workflow_artifact started
+mcp: workflow/write_workflow_artifact (completed)
+mcp: workflow/submit_acceptance_verification started
+mcp: workflow/submit_acceptance_verification (completed)
+mcp: workflow/worker_turn started
+mcp: workflow/worker_turn (completed)
+codex
+Independent verification rejected.
+
+The exact system spec could not run in the source workspace due SQLite permissions. A writable-copy rerun reached the test but Selenium could not launch Chrome, so no UI assertions executed. Report: `acceptance-verify-current-runs-dropdown-switches-workspaces`.
+tokens used
+44,989
+Independent verification rejected.
+
+The exact system spec could not run in the source workspace due SQLite permissions. A writable-copy rerun reached the test but Selenium could not launch Chrome, so no UI assertions executed. Report: `acceptance-verify-current-runs-dropdown-switches-workspaces`.

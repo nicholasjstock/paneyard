@@ -1,0 +1,9 @@
+Verification is blocked. The required spec ran in a writable checkout but failed before UI assertions:
+
+- `1 example, 1 failure`
+- Selenium: `Chrome instance exited`
+- Direct Chrome 150.0.7871.130 launch exited with code 134
+- No repository files changed
+- Acceptance criterion remains pending
+
+Evidence: [verification artifact]( /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/front/demo-output/agents-sdk/run-20260722-191333-6819/verify-current-runs-dropdown-after-browser-setup.md ).

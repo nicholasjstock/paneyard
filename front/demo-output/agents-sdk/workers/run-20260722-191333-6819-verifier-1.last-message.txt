@@ -1,0 +1,9 @@
+Verified successfully.
+
+Fresh browser evidence confirms:
+
+- Current runs appear in the dropdown.
+- Selecting the second run switches to its workspace.
+- System spec result: **1 example, 0 failures**.
+
+Evidence artifact: `acceptance-verify-current-runs-dropdown-switches-workspaces`

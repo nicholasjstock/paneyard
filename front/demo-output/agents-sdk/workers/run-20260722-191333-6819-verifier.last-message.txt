@@ -1,0 +1,3 @@
+Independent verification rejected.
+
+The exact system spec could not run in the source workspace due SQLite permissions. A writable-copy rerun reached the test but Selenium could not launch Chrome, so no UI assertions executed. Report: `acceptance-verify-current-runs-dropdown-switches-workspaces`.

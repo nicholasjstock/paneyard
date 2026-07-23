@@ -1,0 +1,8 @@
+Diagnosis completed and reported to the planner.
+
+- Root cause: Selenium reaches ChromeDriver, but Chrome exits immediately; no Chrome/Chromium executable is available.
+- Separate prerequisite: the protected checkout cannot create `storage/test.sqlite3` or write `log/test.log`.
+- Rerun requires a writable checkout, launchable Chrome/Chromium discoverable by Selenium, and writable Selenium Manager cache or preinstalled chromedriver.
+- No source files changed.
+
+Report: [diagnose-current-runs-dropdown-browser-verification.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/front/demo-output/agents-sdk/run-20260722-191333-6819/diagnose-current-runs-dropdown-browser-verification.md)

@@ -1,0 +1,8 @@
+[DONE] Browser runtime repaired via LaunchServices-launched Chrome.
+
+- Exact spec: `1 example, 0 failures`
+- Verified dropdown entries for both workspaces/runs
+- Verified selection, canonical workspace URL, and selected task
+- No tracked source files changed
+
+[Verification artifact](</Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/front/demo-output/agents-sdk/run-20260722-191333-6819/repair-and-verify-current-runs-dropdown-browser-runtime.md>)

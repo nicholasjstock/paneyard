@@ -1,0 +1,396 @@
+[workflow] 2026-07-23T05:04:10.405Z worker:lifecycle: spawned committer {"worker_id":"af28ef6f-b17d-4ad7-9429-15e81c74214a","run_id":"run-20260722-191333-6819","role":"committer","nickname":"committer","pid":99187,"scope":"commit-i-want-current-runs-to-be-displayed-in-a-dropdow-6819.md","reason":"Bus request from orchestrator for commit-i-want-current-runs-to-be-displayed-in-a-dropdow-6819.md.","command":"codex","status":"running","stop_reason":null}
+OpenAI Codex v0.145.0
+--------
+workdir: /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+model: gpt-5.6-luna
+provider: openai
+approval: never
+sandbox: custom permissions (network access enabled)
+reasoning effort: medium
+reasoning summaries: none
+session id: 019f8d5c-17a2-7dc1-954a-f050c798d62d
+--------
+user
+# Durable project knowledge for this workspace (evidence-backed; call get_project_memory for full detail if needed)
+
+- [operational_rule] dev-environment: Run 'bin/setup --skip-server' once to install Ruby dependencies and prepare the database. Then run 'bin/dev' to start the full development environment. bin/dev starts Puma and Solid Queue jobs process together, both exit on interrupt. It verifies bundle dependencies, pending migrations, and PORT availability (default 3000) before starting. Custom port: PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev
+- [operational_rule] tests: Run 'bundle exec rspec' to execute the full test suite.
+- [operational_rule] code-style: Run 'bin/rubocop' to check Ruby code style. This is part of the CI pipeline and uses .rubocop.yml configuration.
+- [operational_rule] ci-full: Run 'bin/ci' to execute the complete CI pipeline including setup, rubocop, bundler-audit, importmap audit, and brakeman security analysis.
+- [operational_rule] code-quality: Run 'bin/rubocop' to check Ruby code style. This is part of the CI pipeline and uses .rubocop.yml configuration.
+- [operational_rule] port-customization: To use a non-default port for development, set the PORT environment variable: `PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev`. This is useful when the default port 3000 is already in use.
+- [operational_rule] test: Run 'bundle exec rspec' to execute the full test suite.
+
+# Runtime identity (authoritative)
+
+- runId: run-20260722-191333-6819
+- workerId: af28ef6f-b17d-4ad7-9429-15e81c74214a
+- nickname: committer
+- role: committer
+- scope/artifact: commit-i-want-current-runs-to-be-displayed-in-a-dropdow-6819.md
+- execution mode: diagnosis
+- write scope: source_protected
+- authorized workspace source roots: none
+
+Rails authenticates MCP calls with this worker's private capability. Do not invent or alter identity fields.
+`worker_turn` derives nickname and scope from that capability; pass runId, role, task, and result.
+The target workspace root is `/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819`. Start repository commands with `cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819`.
+Bash is available under a launcher-enforced filesystem policy. Writes to tracked repository source are limited
+to the authorized source roots above -- source-protected workers have none. Gitignored paths (caches, build
+output, node_modules, etc.) stay writable regardless, since tooling needs them and they aren't source. Run
+bounded commands (they
+exit on their own) in the foreground through Bash so they remain inside this worker's sandbox and process
+group. Any command that is long-running by nature (a dev server, a watcher, anything that does not exit on
+its own) MUST always be started with `start_run_command` instead, even if you only need it for the rest of
+this turn -- `&`, `nohup`, and log redirection do not reliably keep a process alive even across your own
+next Bash call.
+Use `write_workflow_artifact` for the assigned artifact.
+
+name = "committer"
+description = "Terminal run committer: reviews the completed worktree and commits all changes and evidence."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
+sandbox_mode = "read-only"
+developer_instructions = """
+You are the terminal committer for a completed orchestration run. Inspect git status, the task, and available evidence so the commit is auditable. Then call commit_run_changes exactly once. That action stages and commits every worktree change, including the run's managed evidence artifacts. Do not edit files, do not run git add or git commit directly, do not call worker_turn, and do not create follow-up work. If the commit tool fails, report the exact failure in your final response.
+"""
+
+
+Current task:
+Run run-20260722-191333-6819. Bus request: commit-i-want-current-runs-to-be-displayed-in-a-dropdow-6819.md. Requested by: orchestrator. Target role: committer. Review the entire run worktree and call commit_run_changes once to stage and commit every change, including the run's managed evidence artifacts. Do not call worker_turn; the commit tool records your handoff. Write your report via write_workflow_artifact using artifactName="commit-i-want-current-runs-to-be-displayed-in-a-dropdow-6819.md". Use the shared workflow bus for blockers.
+codex
+I’ll inspect the worktree and available run evidence, then use the single authorized commit operation and record the required artifact report.
+exec
+/bin/zsh -lc 'cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819 && git status --short && git diff --stat && git log -5 --oneline --decorate' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 0ms:
+ M app/assets/stylesheets/application.css
+ M app/controllers/application_controller.rb
+ M app/views/layouts/application.html.erb
+ M spec/system/workspaces_spec.rb
+?? front/demo-output/agents-sdk/commands/
+?? front/demo-output/agents-sdk/run-20260722-191333-6819/
+?? front/demo-output/agents-sdk/workers/
+ app/assets/stylesheets/application.css    | 22 +++++++++++++++++++
+ app/controllers/application_controller.rb |  5 +++++
+ app/views/layouts/application.html.erb    | 15 +++++++++++++
+ spec/system/workspaces_spec.rb            | 36 +++++++++++++++++++++++++++++++
+ 4 files changed, 78 insertions(+)
+e002a3b (HEAD -> workflow/i-want-current-runs-to-be-displayed-in-a-dropdow-6819) Grant Claude recursive write rules
+39be10d Require positive protected source patterns
+6d012c7 Align project setup personas with source protection
+1dbc260 Authorize implementation through protected source globs
+725eb66 Protect the full source worktree by default
+
+exec
+/bin/zsh -lc 'cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819 && git diff -- app/assets/stylesheets/application.css app/controllers/application_controller.rb app/views/layouts/application.html.erb spec/system/workspaces_spec.rb && find front/demo-output/agents-sdk -type f -maxdepth 4 -print | sort | while read f; do echo "--- $f"; wc -c "$f"; done' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 259ms:
+     247 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-committer.mcp.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-committer.prompt.txt
+    4393 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-committer.prompt.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.env.json
+    1554 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.env.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.exit-status.txt
+       2 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.exit-status.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.last-message.txt
+     518 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.last-message.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.log
+   39925 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.log
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.mcp.json
+     247 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.mcp.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.prompt.txt
+   15051 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-1.prompt.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.env.json
+    1561 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.env.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.exit-status.txt
+       2 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.exit-status.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.last-message.txt
+     496 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.last-message.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.log
+   83861 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.log
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.mcp.json
+     247 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.mcp.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.prompt.txt
+   15194 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure-2.prompt.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.env.json
+    1550 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.env.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.exit-status.txt
+       2 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.exit-status.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.last-message.txt
+     535 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.last-message.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.log
+   38947 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.log
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.mcp.json
+     247 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.mcp.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.prompt.txt
+   15053 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-infrastructure.prompt.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.env.json
+    1550 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.env.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.exit-status.txt
+       2 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.exit-status.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.last-message.txt
+     281 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.last-message.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.log
+   49460 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.log
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.mcp.json
+     247 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.mcp.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.prompt.txt
+   13535 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier-1.prompt.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.env.json
+    1546 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.env.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.exit-status.txt
+       2 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.exit-status.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.last-message.txt
+     297 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.last-message.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.log
+   51809 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.log
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.mcp.json
+     247 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.mcp.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.prompt.txt
+   13499 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-verifier.prompt.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.env.json
+    1541 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.env.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.exit-status.txt
+       2 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.exit-status.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.last-message.txt
+     735 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.last-message.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.log
+   40292 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.log
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.mcp.json
+     247 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.mcp.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.prompt.txt
+   11911 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker-1.prompt.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.env.json
+    1507 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.env.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.exit-status.txt
+       2 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.exit-status.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.last-message.txt
+     534 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.last-message.txt
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.log
+  225238 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.log
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.mcp.json
+     247 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.mcp.json
+--- front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.prompt.txt
+   11282 front/demo-output/agents-sdk/workers/run-20260722-191333-6819-worker.prompt.txt
+--- front/demo-output/agents-sdk/workflow-bus.json
+    1564 front/demo-output/agents-sdk/workflow-bus.json
+
+exec
+/bin/zsh -lc 'cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819 && for f in front/demo-output/agents-sdk/run-20260722-191333-6819/*; do echo "--- $f"; sed -n '"'1,220p' \""'$f"; done' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 0ms:
+--- front/demo-output/agents-sdk/run-20260722-191333-6819/acceptance-verify-current-runs-dropdown-switches-workspaces
+# Independent acceptance verification
+
+Criterion: current-runs-dropdown-switches-workspaces
+
+Outcome: verified
+
+I independently reproduced the criterion in a fresh writable checkout at:
+`/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/tmp/cache/current-runs-verify-2qePwQ`
+
+The target checkout rerun was also attempted first:
+`bundle exec rspec spec/system/workspaces_spec.rb:4`
+It could not initialize the SQLite test database because the source-protected checkout's runtime paths are unwritable (`SQLite3::CantOpenException: unable to open database file`), so it reached 0 examples.
+
+For the independent reproduction, I copied the repository to the writable checkout and made only a temporary test-driver change in that copy: Selenium attached to the already launchable Chrome 150.0.7871.130 DevTools endpoint at `127.0.0.1:9229`. No target source files were changed.
+
+Command run:
+`export PATH=/Users/stockn/.asdf/installs/ruby/4.0.1/bin:/Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/bin:$PATH; bundle exec rspec spec/system/workspaces_spec.rb:4 --format documentation`
+
+Observed result:
+- `workspaces lists current runs and switches to the selected run's workspace`
+- 1 example, 0 failures
+- The test's assertions passed for both current-run dropdown options (both workspace names and run IDs).
+- The `select` interaction passed for the second workspace/run.
+- The selected destination URL matched `workspace_run_path(second_workspace, second_run)`.
+- The selected run task was present after navigation.
+
+This is fresh runtime evidence, independently obtained rather than copied from the candidate artifact.
+--- front/demo-output/agents-sdk/run-20260722-191333-6819/current-runs-dropdown.md
+# Current runs dropdown
+
+Implemented the shared workspace UI control for active runs.
+
+## Changes
+
+- Added `ApplicationController#current_runs`, returning non-terminal runs (`launching`, `running`, `stopping`) across all workspaces, newest first.
+- Added an accessible `#current-runs-dropdown` select to the application top navigation.
+- Each option displays the workspace name and run identifier and points to `workspace_run_path(run.workspace, run)`.
+- Selecting an option navigates with the browser to that canonical workspace-scoped run URL.
+- Added styling and a screen-reader-only label.
+- Added a JavaScript system spec covering:
+  - both current runs appearing in the dropdown;
+  - selecting a run from another workspace navigating to that run's workspace URL.
+
+## Verification
+
+- `bundle exec rspec spec/system/workspaces_spec.rb:4` — passed (1 example, 0 failures).
+- `git diff --check` — passed.
+- `bin/rubocop app/controllers/application_controller.rb spec/system/workspaces_spec.rb` and `bin/rubocop --no-server ...` could not run because the RuboCop server attempts to create its cache under `/Users/stockn/.cache/rubocop_cache`, which is outside the writable sandbox; it exits with `Operation not permitted` before linting.
+- The full `spec/system/workspaces_spec.rb` run also showed unrelated failures in existing workspace creation/edit examples (Capybara could not find the Root path / Protected path patterns fields under the current system-test environment). The new dropdown example passes independently.
+
+## Files changed
+
+- `app/controllers/application_controller.rb`
+- `app/views/layouts/application.html.erb`
+- `app/assets/stylesheets/application.css`
+- `spec/system/workspaces_spec.rb`
+--- front/demo-output/agents-sdk/run-20260722-191333-6819/diagnose-current-runs-dropdown-browser-verification.md
+# Diagnosis: current-runs dropdown browser verification
+
+## Objective
+
+Identify why the existing acceptance spec cannot reach the browser assertions, and state the concrete environment conditions required to rerun it. No application or public-contract changes were made.
+
+## Reproduction evidence
+
+From the target source-protected checkout:
+
+`bundle exec rspec spec/system/workspaces_spec.rb:4`
+
+Result:
+
+`SQLite3::CantOpenException: unable to open database file`
+
+Rails also emitted:
+
+`Rails Error: Unable to access log file. Please ensure that .../log/test.log exists and is writable`
+
+RSpec reported `0 examples, 0 failures, 1 error occurred outside of examples`. The test database is configured as `storage/test.sqlite3` in `config/database.yml`, so the checkout must permit creation/opening of `storage/` and writing `log/test.log` before the spec can reach Selenium.
+
+The prior independent verifier reran the same spec from a sandbox-writable repository copy. In that copy, the test database initialized, but the first browser action:
+
+`visit workspace_run_path(first_workspace, first_run)`
+
+failed with:
+
+`Selenium::WebDriver::Error::SessionNotCreatedError: session not created: Chrome instance exited`
+
+RSpec reported `1 example, 1 failure`; none of the dropdown or workspace-navigation assertions ran.
+
+The configured driver in `spec/support/system_specs.rb` is Selenium Chrome with `--headless=new`, `--no-sandbox`, and `--disable-dev-shm-usage`. The current environment has no executable for any of:
+
+- `google-chrome`
+- `google-chrome-stable`
+- `chromium`
+- `chromium-browser`
+
+A direct driver smoke test using Selenium WebDriver `4.45.0` reproduced the browser failure and returned `session not created: Chrome instance exited`. It also logged:
+
+`Metadata cannot be written in cache (/Users/stockn/.cache/selenium): Operation not permitted`
+
+The cache warning is secondary to the missing/unusable browser: Selenium reached chromedriver, but no Chrome session was created.
+
+## Confirmed boundary
+
+The acceptance branch stops before the first `visit` assertion because the environment cannot create a Chrome session. The UI behavior—displaying both current runs and selecting the second run to switch to its workspace—remains unverified; no browser interaction executed.
+
+## Conditions required for a rerun
+
+1. Run the existing spec from a writable repository checkout (or otherwise provide write access to the checkout's `storage/` and `log/test.log`) so Rails can create/open `storage/test.sqlite3` and write test logs.
+2. Install a launchable Chrome or Chromium browser compatible with the Selenium-managed chromedriver, and make its executable discoverable by Selenium (the existing driver does not set a custom binary path). A standard `google-chrome`, `google-chrome-stable`, `chromium`, or `chromium-browser` executable on PATH satisfies discovery.
+3. If Selenium Manager must download or refresh the driver, make `~/.cache/selenium` writable or pre-provision a compatible chromedriver. The current run logged that this cache is not writable.
+4. Rerun exactly `bundle exec rspec spec/system/workspaces_spec.rb:4`; only a run that reaches and passes the option assertions, `select`, current-path assertion, and selected-run task assertion can verify the criterion.
+
+## Files changed
+
+None.
+--- front/demo-output/agents-sdk/run-20260722-191333-6819/repair-and-verify-current-runs-dropdown-browser-runtime.md
+# Repair and verification: current-runs dropdown browser runtime
+
+## Objective
+
+Provision/select a launchable Selenium-compatible Chrome runtime and run exactly `bundle exec rspec spec/system/workspaces_spec.rb:4` from a writable checkout, with positive browser evidence.
+
+## Root cause and runtime repair
+
+The installed browser is Google Chrome 150.0.7871.130 at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`. Direct execution with `--headless=new --no-sandbox --disable-dev-shm-usage --disable-gpu` and an isolated writable profile exits with code 134 and no DOM output. This is the previously observed Selenium `SessionNotCreatedError: Chrome instance exited` boundary.
+
+The same Chrome app is launchable through macOS LaunchServices. Run-scoped command `973bd634-ac59-49eb-bffd-c7718a10f3f1` used:
+
+`/usr/bin/open -na "Google Chrome" --args --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-debugging-port=9229 --user-data-dir=/tmp/current-runs-chrome-profile`
+
+The command exited 0. Chrome exposed DevTools at `http://127.0.0.1:9229/json/version`, reporting Chrome 150.0.7871.130 and a websocket debugger URL. A direct Selenium smoke session attached to that endpoint and navigated to `data:text/html,<title>attached</title>`, printing `attached` without exit code 134.
+
+## Required system spec
+
+The exact command was run from the writable isolated checkout:
+
+`bundle exec rspec spec/system/workspaces_spec.rb:4`
+
+The isolated checkout used a runtime-only Selenium debugger-address setting to attach to the launchable Chrome endpoint; no application source or maintained test changes were made in the target checkout.
+
+Result:
+
+- 1 example, 0 failures
+- The example reached and passed both current-run dropdown option assertions:
+  - first workspace name and first run ID
+  - second workspace name and second run ID
+- The `select` interaction passed for the second workspace/run.
+- The canonical workspace-scoped URL assertion passed for `workspace_run_path(second_workspace, second_run)`.
+- The selected run task assertion passed.
+
+The passing example is `workspaces lists current runs and switches to the selected run's workspace` at `spec/system/workspaces_spec.rb:4`.
+
+## Repository impact
+
+No tracked application/configuration/test files were changed by this repair. Existing user changes in `app/assets/stylesheets/application.css`, `app/controllers/application_controller.rb`, `app/views/layouts/application.html.erb`, and `spec/system/workspaces_spec.rb` were preserved. Temporary runtime helper files were removed after verification.
+
+## Verification outcome
+
+[DONE] Browser runtime repaired for this sandbox by selecting the LaunchServices-launched Chrome instance, and the exact current-runs dropdown system spec passed with positive browser assertions.
+--- front/demo-output/agents-sdk/run-20260722-191333-6819/verify-current-runs-dropdown-after-browser-setup.md
+# Verification: current-runs dropdown after browser setup
+
+## Objective
+
+Run exactly `bundle exec rspec spec/system/workspaces_spec.rb:4` from a writable checkout with writable Rails runtime directories and Selenium cache, using a launchable Chrome/Chromium, and capture positive browser evidence for the current-runs dropdown and workspace-scoped navigation.
+
+## Environment preparation
+
+The source-protected checkout contains the candidate implementation and is not writable for Rails runtime state. I created an isolated temporary copy under `/private/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/current-runs-dropdown-rerun.XXXXXX/repo` and created writable `storage/`, `log/`, `tmp/cache/`, and `tmp/capybara/` directories. Selenium cache variables were redirected to a writable temporary cache, and `/Applications/Google Chrome.app/Contents/MacOS` was added to PATH.
+
+## Required spec result
+
+Command, run from the isolated copy:
+
+`bundle exec rspec spec/system/workspaces_spec.rb:4`
+
+Result:
+
+- Rails initialized the writable test database successfully.
+- 1 example executed, 1 failure.
+- Failure occurred at `spec/system/workspaces_spec.rb:16`, the first browser action: `visit workspace_run_path(first_workspace, first_run)`.
+- Error: `Selenium::WebDriver::Error::SessionNotCreatedError: session not created: Chrome instance exited`.
+- RSpec summary: `1 example, 1 failure`.
+- None of the dropdown option assertions, `select`, canonical workspace-scoped URL assertion, or selected-run task assertion executed.
+
+## Browser launch evidence
+
+Detected browser:
+
+`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+
+A bounded direct smoke test using the same relevant flags:
+
+`--headless=new --no-sandbox --disable-dev-shm-usage`
+
+with an isolated writable `--user-data-dir` exited with code `134` and produced no DOM output.
+
+## Outcome
+
+Blocked. Positive browser evidence was not obtained because Chrome exits during session creation. The acceptance criterion `current-runs-dropdown-switches-workspaces` remains pending; no acceptance verification was submitted as verified.
+
+## Files and commands
+
+Files changed: none.
+
+Commands run:
+
+- Read-only checkout/spec/driver and browser checks.
+- Exact `bundle exec rspec spec/system/workspaces_spec.rb:4` in the isolated writable copy.
+- Direct bounded Chrome headless smoke launch.
+
+Suggested downstream scope: environment/browser infrastructure should provide a launchable Chrome/Chromium session compatible with Selenium WebDriver 4.45.0, then rerun the exact spec.
+codex
+The worktree contains the dropdown implementation and system spec, plus the run’s managed evidence under `front/demo-output`. The latest independent acceptance artifact reports 1 example passing with positive browser assertions; earlier runtime failures are documented as superseded diagnosis. I’m proceeding with the required single commit operation, which will include all current changes.
+mcp: workflow/commit_run_changes started

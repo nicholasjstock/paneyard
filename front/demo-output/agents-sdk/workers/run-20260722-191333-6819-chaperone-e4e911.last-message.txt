@@ -1,0 +1,1 @@
+Stopped the failed verification envelope and requested a small-tier repair plan for the unavailable Chrome/WebDriver runtime, followed by a rerun of the exact system spec.

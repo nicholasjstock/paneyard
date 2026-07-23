@@ -1,0 +1,567 @@
+[workflow] 2026-07-22T19:26:16.748Z worker:lifecycle: spawned infrastructure-1 {"worker_id":"d1b2c3ad-a98e-4d5e-bd12-c48352caf0cf","run_id":"run-20260722-191333-6819","role":"infrastructure","nickname":"infrastructure-1","pid":92211,"scope":"verify-current-runs-dropdown-after-browser-setup.md","reason":"Bus request from planner for verify-current-runs-dropdown-after-browser-setup.md.","command":"codex","status":"running","stop_reason":null}
+OpenAI Codex v0.145.0
+--------
+workdir: /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+model: gpt-5.6-luna
+provider: openai
+approval: never
+sandbox: custom permissions (network access enabled)
+reasoning effort: medium
+reasoning summaries: none
+session id: 019f8b4b-039f-7563-b7f6-8dcd7473f5ca
+--------
+user
+# Durable project knowledge for this workspace (evidence-backed; call get_project_memory for full detail if needed)
+
+- [operational_rule] dev-environment: Run 'bin/setup --skip-server' once to install Ruby dependencies and prepare the database. Then run 'bin/dev' to start the full development environment. bin/dev starts Puma and Solid Queue jobs process together, both exit on interrupt. It verifies bundle dependencies, pending migrations, and PORT availability (default 3000) before starting. Custom port: PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev
+- [operational_rule] tests: Run 'bundle exec rspec' to execute the full test suite.
+- [operational_rule] code-style: Run 'bin/rubocop' to check Ruby code style. This is part of the CI pipeline and uses .rubocop.yml configuration.
+- [operational_rule] ci-full: Run 'bin/ci' to execute the complete CI pipeline including setup, rubocop, bundler-audit, importmap audit, and brakeman security analysis.
+- [operational_rule] code-quality: Run 'bin/rubocop' to check Ruby code style. This is part of the CI pipeline and uses .rubocop.yml configuration.
+- [operational_rule] port-customization: To use a non-default port for development, set the PORT environment variable: `PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev`. This is useful when the default port 3000 is already in use.
+- [operational_rule] test: Run 'bundle exec rspec' to execute the full test suite.
+
+# Runtime identity (authoritative)
+
+- runId: run-20260722-191333-6819
+- workerId: d1b2c3ad-a98e-4d5e-bd12-c48352caf0cf
+- nickname: infrastructure-1
+- role: infrastructure
+- scope/artifact: verify-current-runs-dropdown-after-browser-setup.md
+- execution mode: verification
+- write scope: source_protected
+- authorized workspace source roots: none
+
+Rails authenticates MCP calls with this worker's private capability. Do not invent or alter identity fields.
+`worker_turn` derives nickname and scope from that capability; pass runId, role, task, and result.
+The target workspace root is `/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819`. Start repository commands with `cd /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819`.
+Bash is available under a launcher-enforced filesystem policy. Writes to tracked repository source are limited
+to the authorized source roots above -- source-protected workers have none. Gitignored paths (caches, build
+output, node_modules, etc.) stay writable regardless, since tooling needs them and they aren't source. Run
+bounded commands (they
+exit on their own) in the foreground through Bash so they remain inside this worker's sandbox and process
+group. Any command that is long-running by nature (a dev server, a watcher, anything that does not exit on
+its own) MUST always be started with `start_run_command` instead, even if you only need it for the rest of
+this turn -- `&`, `nohup`, and log redirection do not reliably keep a process alive even across your own
+next Bash call.
+Use `write_workflow_artifact` for the assigned artifact.
+
+name = "worker"
+description = "Generic task worker: verifies artifacts or applies a scoped fix, depending on what the current bus request/prompt actually describes."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+You are a generic worker. Your identity for this run comes entirely from your bus request/prompt, not from a fixed role name — read it first to learn whether this task is a verification pass or a scoped code fix, then apply the matching discipline below.
+
+- Use the structured message format from `.codex/agents/MESSAGING_PROTOCOL.md`.
+- Use the `workflow` MCP server to resolve context and artifacts before doing anything else.
+- Only the orchestrator manages worker lifecycle. Do not call `spawn_worker`, `list_workers`, or `stop_worker` directly.
+- When you finish, call `worker_turn` with `role="worker"`, your `nickname`, `scope`, and a result beginning with `[DONE]`, `[BLOCKED]`, or `[FAILED]`. Rails promotes an already-planned following step after `[DONE]`; otherwise it queues one bounded planner decision. No planner agent process is spawned.
+- If an unexpected failure or decision would require changing files, configuration, tests, services, or tooling outside the assigned scope, do not investigate or repair it beyond the minimum read-only evidence needed to identify it. Write the partial result to the assigned artifact, then immediately call `worker_turn` with `result` marked `[BLOCKED]`, the exact error, command, affected path, and a suggested downstream scope. The follow-up planner decides whether to create a separate task.
+- Any command that is long-running by nature -- a dev server, a watcher, anything that does not exit on its own -- MUST always be started with `start_run_command`, even if you only need it for the rest of this turn. This is not a judgment call about whether it outlives you: `&`, `nohup`, `disown`, and log redirection do not reliably keep a process alive even across your own next command. Inspect `list_run_commands` before starting a duplicate; use `read_run_command_log` with an offset instead of re-reading the whole log; call `stop_run_command` when you no longer need it, unless run-level cleanup will handle it; report the `commandId` in your artifact and `worker_turn` result.
+- Never create or spawn another worker directly. Report `[BLOCKED]` through `worker_turn`; Rails and the planner own all follow-up routing.
+- Inspect the workspace and use its native commands; do not require orchestrator-specific source configuration or assume a language, package manager, directory layout, or service port.
+- Run bounded commands (they exit on their own) in the foreground and wait for them to finish before reporting. Long-running commands (a dev server, a watcher, anything that does not exit on its own) always use `start_run_command` instead -- see above; foreground children remain owned by the worker process group and inherit the Codex permission profile, so nothing detached this way survives even your next command.
+- Do not write project memory. Report candidate durable facts with their evidence in your artifact and `worker_turn`; the planner decides whether to promote them.
+- If something you try fails, call `report_failed_approach` with what you tried and what happened before moving on -- do this every time, not only in your final report.
+- Report files changed (if any), commands run, and the verification result in your final `worker_turn` result.
+- Do not modify code, and do not route around other workers, unless the task you were actually given calls for it.
+
+## If your task is verifying or analyzing artifacts (logs, screenshots, test output, or other generated evidence)
+
+- Prefer `collect_workflow_state` to inventory available evidence. `read_workflow_artifact` returns a small initial window; request a later `offset` only when that evidence leaves a specific question unanswered.
+- Prefer the fastest evidence source that can answer the question — logs or screenshots before a full pass over generated artifacts — and fall back to a deeper pass only when cheaper evidence is insufficient.
+- Within your own turn, go progressively deeper, not in parallel: a `fast` pass answers the cheapest useful question and surfaces critical failures as early as possible; if warranted, follow with `medium` (state transitions and timing gaps), then `slow` (the most complete timeline and edge-case findings).
+- Validate the artifact before analysis. A blank, corrupted, or unreadable artifact is a failure, not a success — never claim success without positive evidence.
+- Only report success when you can cite concrete evidence (timestamps, file references, visible content) for the expected outcome.
+- If baseline validation fails, or the evidence is inconclusive and another artifact is needed, emit `[FAILED]` or `[BLOCKED]` — do not emit `[DONE]` and do not say "all checks passed" without that evidence.
+
+## If your task is a scoped code fix
+
+- Read the task's structured execution policy and `successCheck` together. Repository writes are limited to the exact files in `Allowed repository paths`; an empty list means artifact output only.
+- Treat the structured execution policy in the current task as authoritative. In `diagnosis` mode, gather evidence and report the confirmed failure boundary; do not implement an application fix. Never edit a repository path that is not listed under `Allowed repository paths`.
+- A diagnosis handoff is accepted only when `worker_turn` includes `evidenceOutcome` (`confirmed` or `blocked`) and one or more `evidenceCitations` copied verbatim from the run-scoped artifact. Use `blocked` whenever the reproduction did not reach the assigned boundary; never promote code inspection or an earlier artifact into a confirmed runtime cause.
+- When diagnosis confirms exact implementation targets or measurements, also pass `diagnosisFindings` to `worker_turn`: `targetPaths` must contain exact workspace-relative files cited in the artifact, `measurements` contain numeric `{name, value, unit}` facts, and `objective` restates the bounded run objective. Rails persists these curated facts for the next planner; keep the full evidence in the artifact.
+- Inspect and cite the actual consumer before changing a producer or response shape. Controller, OpenAPI, migration, schema, or generated-file changes require the task to include an answered operator approval reference; otherwise stop and report the proposed contract change through `worker_turn`.
+- Add or update the preferred regression test for that scope first — a frontend test, a failing request spec, an infrastructure test, or the nearest equivalent — then implement the smallest defensible fix (TDD-first).
+- Verify the fix with the scope-appropriate command (typecheck, test run, or guarded command) before reporting done.
+- If the required verification command is broken by unrelated test infrastructure (for example aliases, runners, shared configuration, or unrelated assertions), do not fix that infrastructure inside this worker. Report the scoped code result and call `worker_turn` as `[BLOCKED]`; a passing test is not permission to expand the assignment.
+- Report files changed, commands run, and verification result.
+"""
+nickname_candidates = ["worker", "task-worker"]
+
+
+---
+name: infrastructure
+description: "Diagnose and repair runtime reliability problems in any repository: background workers, job queues, process lifetime, service connectivity, streaming logs, deployment tooling, and test or development environments. Use when work is stalled, repeatedly fails, exits unexpectedly, has missing or delayed logs, or depends on local, container, or remote services."
+---
+
+# Infrastructure
+
+Treat infrastructure work as an evidence-driven reliability investigation. Preserve user work, limit blast radius, and leave the system measurably healthier than it was.
+
+## Investigation
+
+1. State the affected operation, expected outcome, and observed failure. Identify the request, job, worker, process, service, or deployment involved.
+2. Collect the smallest useful evidence set before changing anything: current state, recent logs with timestamps, process/service ownership, configuration, and the last successful or failed transition.
+3. Separate liveness from progress. A live process may be blocked; an exited process may have completed; a queue may be healthy while a consumer is not.
+4. Trace the boundary where work stops moving: caller to queue, queue to worker, parent to child process, service to service, or producer to log stream. Check both sides of that boundary.
+5. Form a falsifiable hypothesis. Prefer a cheap, read-only check or a narrowly scoped reproduction before a fix.
+
+## Intervention
+
+- Make the smallest reversible change that tests the hypothesis. Preserve logs, artifacts, and identifiers needed for comparison.
+- Confirm process ownership and scope before stopping or restarting anything. Do not kill broad process groups, recycle shared services, clear queues, delete volumes, prune containers, or remove caches without explicit authorization and a documented recovery path.
+- Do not treat retries, polling, or longer timeouts as a fix unless evidence shows transient failure and bounded retry behavior is correct.
+- Keep diagnostic payloads bounded. Request recent, relevant records and log tails first; paginate or filter before loading histories, events, or artifacts wholesale.
+- For log visibility issues, verify every link in the delivery path: producer flushes output, collector observes new bytes, transport is connected, UI subscription is active, and the rendered view updates. Use timestamps to measure latency rather than guessing.
+
+## Verification
+
+1. Verify the original failure path, not only a command that exits successfully.
+2. Check success, failure, cancellation, and restart behavior where applicable. Confirm child processes do not outlive their owner unintentionally and intentional background work has explicit ownership.
+3. Add or update the nearest practical regression coverage, health check, or diagnostic assertion.
+4. Report the root cause or the remaining uncertainty, files/configuration changed, commands run, evidence of recovery, and any safe follow-up work.
+
+## Escalation
+
+If evidence is insufficient, report the exact missing signal and add targeted observability when safe. If the next action risks data loss, interrupts shared users, changes credentials, or modifies production state, stop and request explicit approval with the proposed command and impact.
+
+
+Current task:
+Run run-20260722-191333-6819. Bus request: verify-current-runs-dropdown-after-browser-setup.md. Requested by: planner. Target role: infrastructure. Execution mode: verification. Write scope: source_protected. Planner-suggested repository paths: none. Evidence references: current-runs-dropdown.md, diagnose-current-runs-dropdown-browser-verification.md, acceptance-verify-current-runs-dropdown-switches-workspaces-1784747943. In a writable checkout with a launchable compatible Chrome/Chromium and writable Selenium support, run the exact current-runs dropdown system acceptance spec and capture positive browser evidence that the dropdown displays current non-terminal runs, selecting a run navigates to its canonical workspace-scoped URL, and the selected workspace/run is shown; the acceptance criterion remains pending unless all UI assertions execute and pass. Context: Keep the acceptance criterion pending and rerun the exact browser acceptance spec once a writable checkout has a launchable compatible Chrome/Chromium session and writable Selenium support. The prior diagnosis identifies environment prerequisites but no exact repository change is justified.. Write your report via write_workflow_artifact using artifactName="verify-current-runs-dropdown-after-browser-setup.md". Use the shared workflow bus for blockers.
+codex
+I’m using the infrastructure skill for this verification because the task depends on browser process readiness, Selenium support, and evidence across the UI delivery path. I’ll first resolve the run-scoped artifacts and workflow protocol, then check the checkout/browser prerequisites and run the exact acceptance spec if the environment is usable.
+exec
+/bin/zsh -lc "sed -n '1,240p' .codex/skills/infrastructure/SKILL.md && sed -n '1,240p' .codex/agents/MESSAGING_PROTOCOL.md" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 0ms:
+---
+name: infrastructure
+description: "Diagnose and repair runtime reliability problems in any repository: background workers, job queues, process lifetime, service connectivity, streaming logs, deployment tooling, and test or development environments. Use when work is stalled, repeatedly fails, exits unexpectedly, has missing or delayed logs, or depends on local, container, or remote services."
+---
+
+# Infrastructure
+
+Treat infrastructure work as an evidence-driven reliability investigation. Preserve user work, limit blast radius, and leave the system measurably healthier than it was.
+
+## Investigation
+
+1. State the affected operation, expected outcome, and observed failure. Identify the request, job, worker, process, service, or deployment involved.
+2. Collect the smallest useful evidence set before changing anything: current state, recent logs with timestamps, process/service ownership, configuration, and the last successful or failed transition.
+3. Separate liveness from progress. A live process may be blocked; an exited process may have completed; a queue may be healthy while a consumer is not.
+4. Trace the boundary where work stops moving: caller to queue, queue to worker, parent to child process, service to service, or producer to log stream. Check both sides of that boundary.
+5. Form a falsifiable hypothesis. Prefer a cheap, read-only check or a narrowly scoped reproduction before a fix.
+
+## Intervention
+
+- Make the smallest reversible change that tests the hypothesis. Preserve logs, artifacts, and identifiers needed for comparison.
+- Confirm process ownership and scope before stopping or restarting anything. Do not kill broad process groups, recycle shared services, clear queues, delete volumes, prune containers, or remove caches without explicit authorization and a documented recovery path.
+- Do not treat retries, polling, or longer timeouts as a fix unless evidence shows transient failure and bounded retry behavior is correct.
+- Keep diagnostic payloads bounded. Request recent, relevant records and log tails first; paginate or filter before loading histories, events, or artifacts wholesale.
+- For log visibility issues, verify every link in the delivery path: producer flushes output, collector observes new bytes, transport is connected, UI subscription is active, and the rendered view updates. Use timestamps to measure latency rather than guessing.
+
+## Verification
+
+1. Verify the original failure path, not only a command that exits successfully.
+2. Check success, failure, cancellation, and restart behavior where applicable. Confirm child processes do not outlive their owner unintentionally and intentional background work has explicit ownership.
+3. Add or update the nearest practical regression coverage, health check, or diagnostic assertion.
+4. Report the root cause or the remaining uncertainty, files/configuration changed, commands run, evidence of recovery, and any safe follow-up work.
+
+## Escalation
+
+If evidence is insufficient, report the exact missing signal and add targeted observability when safe. If the next action risks data loss, interrupts shared users, changes credentials, or modifies production state, stop and request explicit approval with the proposed command and impact.
+# Codex Agent Messaging Protocol
+
+Codex subagents in this repo should report progress with short structured lines, not prose-heavy status dumps.
+
+Format:
+
+```text
+[TAG] key="value" key2="value2" msg="Short summary"
+```
+
+Use these tags:
+
+- `[STATUS]` for progress updates
+- `[BLOCKED]` when waiting on an external condition or another agent
+- `[FAILED]` when the task cannot recover
+- `[DONE]` when the task finishes successfully
+- `[QUESTION_TO_USER]` when a child needs a user decision
+- `[RECEIVE_MESSAGE]` when a parent records a child update
+- `[TRANSITION]` when moving between major phases
+
+Guidelines:
+
+- Keep `msg` to one short sentence.
+- Include artifact paths, timestamps, durations, and evidence paths when relevant.
+- Prefer exact values over vague descriptions.
+- Use plain prose only for the final synthesized handoff back to the parent agent.
+- Route all user-facing questions and state synthesis through the orchestrator and the shared bus.
+- Workers and orchestrators should read the bus before deciding whether they have pending work.
+- Child agents should never rely on the user noticing raw logs; surface decisions explicitly with `[QUESTION_TO_USER]`.
+- Do not emit `[DONE]` for verification if the artifact is blank, black, static, corrupted, unreadable, or otherwise unsupported by positive evidence.
+- Emit an initial `[STATUS]` within 30 seconds of starting work.
+- For any task that runs longer than 60 seconds, emit another `[STATUS]` at least every 60 seconds.
+- If a child task shows no progress or no fresh evidence for 180 seconds, emit `[BLOCKED]` instead of waiting silently.
+
+mcp: workflow/collect_workflow_state started
+mcp: workflow/collect_workflow_state (completed)
+mcp: workflow/get_run_context started
+mcp: workflow/get_run_context (completed)
+mcp: workflow/read_workflow_artifact started
+mcp: workflow/read_workflow_artifact (completed)
+mcp: workflow/read_workflow_artifact started
+mcp: workflow/read_workflow_artifact (completed)
+mcp: workflow/read_workflow_artifact started
+mcp: workflow/read_workflow_artifact (completed)
+mcp: workflow/read_workflow_artifact started
+mcp: workflow/read_workflow_artifact (completed)
+codex
+The run-scoped evidence confirms the prior boundary: Rails could be made writable in a temporary copy, but Chrome exited during Selenium session creation before the first `visit`. I’m checking the current checkout and browser/runtime state now, then I’ll make one bounded rerun in an isolated writable copy so the acceptance remains evidence-based.
+exec
+/bin/zsh -lc "git status --short && sed -n '1,180p' spec/system/workspaces_spec.rb && sed -n '1,160p' spec/support/system_specs.rb" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 0ms:
+ M app/assets/stylesheets/application.css
+ M app/controllers/application_controller.rb
+ M app/views/layouts/application.html.erb
+ M spec/system/workspaces_spec.rb
+?? front/demo-output/agents-sdk/run-20260722-191333-6819/
+?? front/demo-output/agents-sdk/workers/
+require "rails_helper"
+
+RSpec.describe "workspaces", type: :system do
+  it "lists current runs and switches to the selected run's workspace", js: true do
+    first_workspace = Workspace.create!(
+      name: "first-#{SecureRandom.hex(4)}", root_path: "/tmp/first-#{SecureRandom.hex(4)}",
+      protected_path_patterns: [ "app/**" ]
+    )
+    second_workspace = Workspace.create!(
+      name: "second-#{SecureRandom.hex(4)}", root_path: "/tmp/second-#{SecureRandom.hex(4)}",
+      protected_path_patterns: [ "app/**" ]
+    )
+    first_run = create_active_run(first_workspace, "first-current")
+    second_run = create_active_run(second_workspace, "second-current")
+
+    visit workspace_run_path(first_workspace, first_run)
+
+    expect(page).to have_css(
+      "#current-runs-dropdown option",
+      text: "#{first_workspace.name} · #{first_run.run_id}"
+    )
+    expect(page).to have_css(
+      "#current-runs-dropdown option",
+      text: "#{second_workspace.name} · #{second_run.run_id}"
+    )
+
+    select "#{second_workspace.name} · #{second_run.run_id}", from: "Current runs"
+
+    expect(page).to have_current_path(workspace_run_path(second_workspace, second_run))
+    expect(page).to have_text(second_run.task)
+  end
+
+  it "creates a workspace from the index flow, auto-launches its bootstrap run, and redirects into its runs" do
+    suffix = SecureRandom.hex(4)
+
+    expect do
+      visit workspaces_path
+      click_link "Add workspace"
+      fill_in "Name", with: "planner-app-#{suffix}"
+      fill_in "Root path", with: "/tmp/planner-app-#{suffix}"
+      click_button "Add workspace"
+    end.to change(Run, :count).by(1)
+
+    expect(page).to have_text("Added workspace planner-app-#{suffix}. Discovering its dev environment and protected paths…")
+    expect(page).to have_current_path(%r{/workspaces/\d+/runs})
+    expect(page).to have_text("planner-app-#{suffix} Runs")
+    expect(page).to have_no_link("Launch task")
+    expect(page).to have_text("still initializing")
+
+    workspace = Workspace.find_by!(name: "planner-app-#{suffix}")
+    run = workspace.runs.sole
+    expect(run.launched_by).to eq("workspace_init")
+    expect(run.spawn_requests.find_by(requested_role: "project_init")).to be_present
+    # No planner request either: a planner has no visibility into
+    # project_init's workspace-level findings, so queuing one here re-plans
+    # the same discovery as a redundant step instead of ever finishing --
+    # see Orchestrator::WorkspaceInit's comment.
+    expect(run.spawn_requests.find_by(requested_role: "planner")).to be_nil
+  end
+
+  it "lets an operator edit a workspace's protected path patterns" do
+    workspace = Workspace.create!(
+      name: "planner-app-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir,
+      protected_path_patterns: [ "app/controllers/**/*.rb" ]
+    )
+
+    visit workspaces_path
+    within(find(".card", text: workspace.name, match: :first)) { click_link "Edit" }
+
+    expect(page).to have_field("Protected path patterns", with: "app/controllers/**/*.rb")
+
+    fill_in "Protected path patterns", with: "app/controllers/**/*.rb\ndb/migrate/**"
+    click_button "Save"
+
+    expect(page).to have_text("Updated workspace #{workspace.name}.")
+    expect(workspace.reload.protected_path_patterns).to eq(%w[app/controllers/**/*.rb db/migrate/**])
+  end
+
+  it "shows the empty state when no workspaces exist" do
+    visit workspaces_path
+
+    expect(page).to have_text("No workspaces registered yet.")
+  end
+
+  it "refuses to delete a workspace that still owns runs" do
+    suffix = SecureRandom.hex(4)
+    workspace = Workspace.create!(name: "planner-app-#{suffix}", root_path: "/tmp/planner-app-#{suffix}")
+    Run.create!(
+      run_id: "demo-workspace-delete",
+      task: "Keep this workspace busy",
+      workspace: workspace,
+      target_root: workspace.root_path,
+      launcher_variant: "claude",
+      status: "running",
+      launched_by: "operator",
+      started_at: Time.current
+    )
+
+    visit workspaces_path
+    within(find(".card", text: workspace.name, match: :first)) do
+      click_button "Remove"
+    end
+
+    expect(page).to have_current_path(workspaces_path)
+    expect(page).to have_text("Cannot delete record because dependent runs exist")
+    expect(Workspace.exists?(workspace.id)).to be(true)
+  end
+
+  it "deletes an empty workspace from the index" do
+    suffix = SecureRandom.hex(4)
+    workspace = Workspace.create!(name: "planner-app-#{suffix}", root_path: "/tmp/planner-app-#{suffix}")
+
+    visit workspaces_path
+    within(find(".card", text: workspace.name, match: :first)) do
+      click_button "Remove"
+    end
+
+    expect(page).to have_text("Removed workspace planner-app-#{suffix}.")
+    expect(page).to have_text("No workspaces registered yet.")
+    expect(Workspace.exists?(workspace.id)).to be(false)
+  end
+
+  def create_active_run(workspace, run_id)
+    Run.create!(
+      run_id:, task: run_id, workspace:, target_root: workspace.source_root,
+      launcher_variant: "claude", status: "running", launched_by: "operator", started_at: Time.current
+    )
+  end
+end
+require "turbo/system_test_helper"
+require "selenium/webdriver"
+
+module RackTestTurboBypass
+  def connect_turbo_cable_stream_sources(...)
+    return if Capybara.current_driver == :rack_test
+
+    super
+  end
+end
+
+Turbo::SystemTestHelper.prepend(RackTestTurboBypass)
+
+Capybara.register_driver :headless_chrome do |app|
+  options = Selenium::WebDriver::Chrome::Options.new
+  options.add_argument("--headless=new")
+  options.add_argument("--window-size=1400,1400")
+  options.add_argument("--disable-gpu")
+  options.add_argument("--no-sandbox")
+  options.add_argument("--disable-dev-shm-usage")
+
+  Capybara::Selenium::Driver.new(app, browser: :chrome, options: options)
+end
+
+Capybara.server = :puma, { Silent: true }
+
+RSpec.configure do |config|
+  config.before(:each, type: :system) do
+    Capybara.reset_sessions!
+
+    driver = RSpec.current_example.metadata[:js] ? :headless_chrome : :rack_test
+    driven_by(driver)
+
+    ActiveJob::Base.queue_adapter = RSpec.current_example.metadata[:live_agent] ? :inline : :test
+  end
+end
+
+exec
+/bin/zsh -lc "for p in 'google-chrome' 'google-chrome-stable' 'chromium' 'chromium-browser' '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; do if command -v \""'$p" >/dev/null 2>&1; then command -v "$p"; elif [ -x "$p" ]; then echo "$p"; fi; done; ruby -v; bundle exec ruby -e '"'require \"selenium-webdriver\"; puts Selenium::WebDriver::VERSION'" in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ succeeded in 908ms:
+4.45.0
+
+exec
+/bin/zsh -lc 'tmp_dir=$(mktemp -d /private/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/current-runs-dropdown-rerun.XXXXXX)
+cp -R . "$tmp_dir/repo"
+mkdir -p "$tmp_dir/repo/storage" "$tmp_dir/repo/log" "$tmp_dir/repo/tmp/cache" "$tmp_dir/repo/tmp/capybara" "$tmp_dir/selenium-cache"
+PATH="/Applications/Google Chrome.app/Contents/MacOS:$PATH" SELENIUM_CACHE_PATH="$tmp_dir/selenium-cache" SE_CACHE_PATH="$tmp_dir/selenium-cache" XDG_CACHE_HOME="$tmp_dir/selenium-cache" bundle exec rspec spec/system/workspaces_spec.rb:4' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ exited 1 in 5847ms:
+`/Users/stockn` is not writable.
+Bundler will use `/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/bundler20260722-92588-6g5ntt92588' as your home directory temporarily.
+Rails Error: Unable to access log file. Please ensure that /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/log/test.log exists and is writable (i.e. make it writable for user and group: chmod 0664 /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/log/test.log). The log level has been raised to WARN and the output directed to STDERR until the problem is fixed.
+
+An error occurred while loading ./spec/system/workspaces_spec.rb.
+Failure/Error: ActiveRecord::Migration.maintain_test_schema!
+
+ActiveRecord::StatementInvalid:
+  SQLite3::CantOpenException: unable to open database file:
+  SELECT sqlite_version(*)
+# ./spec/rails_helper.rb:33:in '<top (required)>'
+# ./spec/system/workspaces_spec.rb:1:in '<top (required)>'
+# ------------------
+# --- Caused by: ---
+# SQLite3::CantOpenException:
+#   unable to open database file:
+#   SELECT sqlite_version(*)
+#   ./spec/rails_helper.rb:33:in '<top (required)>'
+Run options:
+  include {locations: {"./spec/system/workspaces_spec.rb" => [4]}}
+  exclude {live_agent: true}
+
+
+Finished in 0.00005 seconds (files took 1.24 seconds to load)
+0 examples, 0 failures, 1 error occurred outside of examples
+
+
+mcp: workflow/report_failed_approach started
+mcp: workflow/report_failed_approach (completed)
+exec
+/bin/zsh -lc 'tmp_dir=$(mktemp -d /private/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/current-runs-dropdown-rerun.XXXXXX)
+cp -R . "$tmp_dir/repo"
+mkdir -p "$tmp_dir/repo/storage" "$tmp_dir/repo/log" "$tmp_dir/repo/tmp/cache" "$tmp_dir/repo/tmp/capybara" "$tmp_dir/home/.cache/selenium"
+cd "$tmp_dir/repo"
+HOME="$tmp_dir/home" PATH="/Applications/Google Chrome.app/Contents/MacOS:$PATH" SELENIUM_CACHE_PATH="$tmp_dir/home/.cache/selenium" SE_CACHE_PATH="$tmp_dir/home/.cache/selenium" XDG_CACHE_HOME="$tmp_dir/home/.cache" bundle exec rspec spec/system/workspaces_spec.rb:4' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ exited 126 in 4222ms:
+No version is set for command bundle
+Consider adding one of the following versions in your config file at /private/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/current-runs-dropdown-rerun.xwETcQ/repo/.tool-versions
+ruby 4.0.1
+ruby 3.2.2
+ruby 2.7.2
+
+mcp: workflow/report_failed_approach started
+mcp: workflow/report_failed_approach (completed)
+exec
+/bin/zsh -lc 'tmp_dir=$(mktemp -d /private/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/current-runs-dropdown-rerun.XXXXXX)
+cp -R . "$tmp_dir/repo"
+mkdir -p "$tmp_dir/repo/storage" "$tmp_dir/repo/log" "$tmp_dir/repo/tmp/cache" "$tmp_dir/repo/tmp/capybara" "$tmp_dir/selenium-cache"
+cd "$tmp_dir/repo"
+PATH="/Applications/Google Chrome.app/Contents/MacOS:$PATH" SELENIUM_CACHE_PATH="$tmp_dir/selenium-cache" SE_CACHE_PATH="$tmp_dir/selenium-cache" XDG_CACHE_HOME="$tmp_dir/selenium-cache" bundle exec rspec spec/system/workspaces_spec.rb:4' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ exited 1 in 12033ms:
+`/Users/stockn` is not writable.
+Bundler will use `/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/bundler20260722-92626-fdxr5c92626' as your home directory temporarily.
+Run options:
+  include {locations: {"./spec/system/workspaces_spec.rb" => [4]}}
+  exclude {live_agent: true}
+F
+
+Failures:
+
+  1) workspaces lists current runs and switches to the selected run's workspace
+     Got 0 failures and 2 other errors:
+
+     1.1) Failure/Error: visit workspace_run_path(first_workspace, first_run)
+
+          Selenium::WebDriver::Error::SessionNotCreatedError:
+            session not created: Chrome instance exited. Examine ChromeDriver verbose log to determine the cause.
+          # ./spec/system/workspaces_spec.rb:16:in 'block (2 levels) in <top (required)>'
+          # ./spec/support/database_cleaning.rb:37:in 'block (2 levels) in <compiled>'
+          # ------------------
+          # --- Caused by: ---
+          # Selenium::WebDriver::Error::WebDriverError:
+          #   0   chromedriver                        0x00000001065b16fa chromedriver + 7001850
+1   chromedriver                        0x0000000105f79365 chromedriver + 480101
+2   chromedriver                        0x0000000105fb74fe chromedriver + 734462
+3   chromedriver                        0x0000000105fb3e1b chromedriver + 720411
+4   chromedriver                        0x000000010600357a chromedriver + 1045882
+5   chromedriver                        0x0000000106002c3c chromedriver + 1043516
+6   chromedriver                        0x0000000105fc1944 chromedriver + 776516
+7   chromedriver                        0x0000000105fc2711 chromedriver + 780049
+8   chromedriver                        0x0000000106571097 chromedriver + 6738071
+9   chromedriver                        0x0000000106575596 chromedriver + 6755734
+10  chromedriver                        0x0000000106551b14 chromedriver + 6609684
+11  chromedriver                        0x0000000106576012 chromedriver + 6758418
+12  chromedriver                        0x00000001065417f0 chromedriver + 6543344
+13  chromedriver                        0x000000010659d7a8 chromedriver + 6920104
+14  chromedriver                        0x000000010659d93c chromedriver + 6920508
+15  chromedriver                        0x00000001065b1311 chromedriver + 7000849
+16  libsystem_pthread.dylib             0x00007ff80ae9ed49 _pthread_start + 115
+17  libsystem_pthread.dylib             0x00007ff80ae9a82f thread_start + 15
+
+
+     1.2) Failure/Error: example.run
+
+          Selenium::WebDriver::Error::SessionNotCreatedError:
+            session not created: Chrome instance exited. Examine ChromeDriver verbose log to determine the cause.
+          # ./spec/support/database_cleaning.rb:37:in 'block (2 levels) in <compiled>'
+          # ------------------
+          # --- Caused by: ---
+          # Selenium::WebDriver::Error::WebDriverError:
+          #   0   chromedriver                        0x0000000106bde6fa chromedriver + 7001850
+1   chromedriver                        0x00000001065a6365 chromedriver + 480101
+2   chromedriver                        0x00000001065e44fe chromedriver + 734462
+3   chromedriver                        0x00000001065e0e1b chromedriver + 720411
+4   chromedriver                        0x000000010663057a chromedriver + 1045882
+5   chromedriver                        0x000000010662fc3c chromedriver + 1043516
+6   chromedriver                        0x00000001065ee944 chromedriver + 776516
+7   chromedriver                        0x00000001065ef711 chromedriver + 780049
+8   chromedriver                        0x0000000106b9e097 chromedriver + 6738071
+9   chromedriver                        0x0000000106ba2596 chromedriver + 6755734
+10  chromedriver                        0x0000000106b7eb14 chromedriver + 6609684
+11  chromedriver                        0x0000000106ba3012 chromedriver + 6758418
+12  chromedriver                        0x0000000106b6e7f0 chromedriver + 6543344
+13  chromedriver                        0x0000000106bca7a8 chromedriver + 6920104
+14  chromedriver                        0x0000000106bca93c chromedriver + 6920508
+15  chromedriver                        0x0000000106bde311 chromedriver + 7000849
+16  libsystem_pthread.dylib             0x00007ff80ae9ed49 _pthread_start + 115
+17  libsystem_pthread.dylib             0x00007ff80ae9a82f thread_start + 15
+
+
+Finished in 5.9 seconds (files took 1.85 seconds to load)
+1 example, 1 failure
+
+Failed examples:
+
+rspec ./spec/system/workspaces_spec.rb:4 # workspaces lists current runs and switches to the selected run's workspace
+
+
+mcp: workflow/report_failed_approach started
+mcp: workflow/report_failed_approach (completed)
+exec
+/bin/zsh -lc "chrome='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+user_dir="'$(mktemp -d /private/var/folders/m8/klqqpg3x035gd5jnd6vby_p80000gn/T/chrome-smoke.XXXXXX)
+"$chrome" --headless=new --no-sandbox --disable-dev-shm-usage --user-data-dir="$user_dir" --dump-dom about:blank' in /Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819
+ exited 134 in 0ms:
+codex
+The exact rerun now reaches Rails and executes one example, but the browser boundary is still blocked: Selenium fails at the first `visit` with `SessionNotCreatedError: Chrome instance exited`. A direct headless launch of the detected Chrome binary with the same flags also exits with code 134, so there is still no positive DOM/browser evidence and the acceptance criterion must remain pending.
+mcp: workflow/write_workflow_artifact started
+mcp: workflow/write_workflow_artifact (completed)
+mcp: workflow/worker_turn started
+mcp: workflow/worker_turn (completed)
+codex
+Verification is blocked and the acceptance criterion remains pending.
+
+- Exact spec: `1 example, 1 failure`
+- Failure: Selenium Chrome session creation; Chrome exited before assertions
+- Direct Chrome smoke test also exited code 134
+- No files changed
+
+Report: [verify-current-runs-dropdown-after-browser-setup.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/front/demo-output/agents-sdk/run-20260722-191333-6819/verify-current-runs-dropdown-after-browser-setup.md)
+tokens used
+47,459
+Verification is blocked and the acceptance criterion remains pending.
+
+- Exact spec: `1 example, 1 failure`
+- Failure: Selenium Chrome session creation; Chrome exited before assertions
+- Direct Chrome smoke test also exited code 134
+- No files changed
+
+Report: [verify-current-runs-dropdown-after-browser-setup.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/front/demo-output/agents-sdk/run-20260722-191333-6819/verify-current-runs-dropdown-after-browser-setup.md)

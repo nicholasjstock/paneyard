@@ -1,0 +1,8 @@
+Verification is blocked and the acceptance criterion remains pending.
+
+- Exact spec: `1 example, 1 failure`
+- Failure: Selenium Chrome session creation; Chrome exited before assertions
+- Direct Chrome smoke test also exited code 134
+- No files changed
+
+Report: [verify-current-runs-dropdown-after-browser-setup.md](/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/front/demo-output/agents-sdk/run-20260722-191333-6819/verify-current-runs-dropdown-after-browser-setup.md)

@@ -1,0 +1,27 @@
+# Independent acceptance verification
+
+Criterion: current-runs-dropdown-switches-workspaces
+
+Outcome: verified
+
+I independently reproduced the criterion in a fresh writable checkout at:
+`/Users/stockn/Source/workflow-orchestrator/i-want-current-runs-to-be-displayed-in-a-dropdow-6819/tmp/cache/current-runs-verify-2qePwQ`
+
+The target checkout rerun was also attempted first:
+`bundle exec rspec spec/system/workspaces_spec.rb:4`
+It could not initialize the SQLite test database because the source-protected checkout's runtime paths are unwritable (`SQLite3::CantOpenException: unable to open database file`), so it reached 0 examples.
+
+For the independent reproduction, I copied the repository to the writable checkout and made only a temporary test-driver change in that copy: Selenium attached to the already launchable Chrome 150.0.7871.130 DevTools endpoint at `127.0.0.1:9229`. No target source files were changed.
+
+Command run:
+`export PATH=/Users/stockn/.asdf/installs/ruby/4.0.1/bin:/Users/stockn/.asdf/installs/ruby/4.0.1/lib/ruby/gems/4.0.0/bin:$PATH; bundle exec rspec spec/system/workspaces_spec.rb:4 --format documentation`
+
+Observed result:
+- `workspaces lists current runs and switches to the selected run's workspace`
+- 1 example, 0 failures
+- The test's assertions passed for both current-run dropdown options (both workspace names and run IDs).
+- The `select` interaction passed for the second workspace/run.
+- The selected destination URL matched `workspace_run_path(second_workspace, second_run)`.
+- The selected run task was present after navigation.
+
+This is fresh runtime evidence, independently obtained rather than copied from the candidate artifact.
