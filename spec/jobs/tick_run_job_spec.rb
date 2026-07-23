@@ -12,7 +12,10 @@ RSpec.describe TickRunJob do
     expect { TickRunJob.new.send(:tick_run, run) }.not_to have_enqueued_job(FinalizeRunPublicationJob)
     expect(run.reload.status).to eq("running")
     expect(run.publication_status).to eq("commit_pending")
-    expect(run.spawn_requests.find_by(requested_role: "committer")).to be_present
+    request = run.spawn_requests.find_by!(requested_role: "committer")
+    expect(request.scope).to eq("run-summary.md")
+    expect(request.text).to include("chronological audit trail")
+    expect(request.text).to include("Do not run tests")
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
