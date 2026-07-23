@@ -28,7 +28,8 @@ module Orchestrator
           ::McpTools::RecordTestPathsTool,
           ::McpTools::ReportFailedApproachTool,
           ::McpTools::SubmitAcceptanceVerificationTool,
-          ::McpTools::CommitRunChangesTool
+          ::McpTools::CommitRunChangesTool,
+          ::McpTools::SelectReviewAssetsTool
         ]
       )
     end

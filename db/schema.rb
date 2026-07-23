@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_22_170000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_23_070000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -204,6 +204,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_170000) do
     t.datetime "updated_at", null: false
     t.index ["run_id", "entry_key"], name: "index_run_context_entries_on_run_id_and_entry_key", unique: true
     t.index ["run_id", "kind"], name: "index_run_context_entries_on_run_id_and_kind"
+  end
+
+  create_table "run_review_assets", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "github_url"
+    t.string "label", null: false
+    t.string "run_id", null: false
+    t.datetime "updated_at", null: false
+    t.string "workspace_path", null: false
+    t.index ["run_id", "workspace_path"], name: "index_run_review_assets_on_run_id_and_workspace_path", unique: true
   end
 
   create_table "runs", force: :cascade do |t|

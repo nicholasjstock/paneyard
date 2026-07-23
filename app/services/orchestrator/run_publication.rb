@@ -49,7 +49,8 @@ module Orchestrator
 
         run.update!(publication_status: "publishing", publication_error: nil)
         git!(root, "push", "-u", "origin", run.branch_name)
-        url = existing_pr_url(root, run.branch_name) || create_pr(root, run)
+        assets = publish_review_assets!(root, run)
+        url = existing_pr_url(root, run.branch_name) || create_pr(root, run, assets:)
         ready_pr!(root, url) if run.conversation_pr_status == "draft"
         run.update!(publication_status: "awaiting_approval", pull_request_url: url, conversation_pr_status: "ready", publication_completed_at: Time.current)
         :published
@@ -140,6 +141,7 @@ module Orchestrator
       run.with_lock do
         return :already_cleaned if run.publication_status == "cleanup_pushed"
 
+        delete_review_release!(validated_root!(run), run) if run.review_assets.any?
         run.update!(publication_status: "cleanup_pushed", publication_error: nil)
         :cleaned
       end
@@ -171,12 +173,13 @@ module Orchestrator
       raise Error, error.message
     end
 
-    def create_pr(root, run, draft: false)
+    def create_pr(root, run, draft: false, assets: [])
       body = [
         "Automated workflow run: #{run.run_id}",
         "Worktree: #{run.worktree_name}",
         "Base: #{run.base_sha}",
-        run_summary(run, root)
+        run_summary(run, root),
+        review_assets_section(assets)
       ].compact.join("\n\n")
       args = [ "gh", "pr", "create", "--base", "main", "--head", run.branch_name, "--title", run.task.to_s.truncate(120), "--body", body ]
       args << "--draft" if draft
@@ -185,6 +188,47 @@ module Orchestrator
 
       output.strip
     end
+
+    def publish_review_assets!(root, run)
+      return [] if run.review_assets.empty?
+
+      tag = "workflow-evidence-#{run.run_id}"
+      _output, error, status = Open3.capture3("gh", "release", "create", tag, "--draft", "--target", run.branch_name, "--title", "Workflow evidence #{run.run_id}", "--notes", "Review evidence for #{run.run_id}.", chdir: root.to_s)
+      raise Error, "gh release create failed: #{error}" unless status.success?
+
+      run.review_assets.find_each do |asset|
+        path = Pathname(root).join(asset.workspace_path).cleanpath
+        raise Error, "Selected review asset is missing: #{asset.workspace_path}" unless path.file?
+
+        _output, error, status = Open3.capture3("gh", "release", "upload", tag, "#{path}##{asset.label}", chdir: root.to_s)
+        raise Error, "gh release upload failed: #{error}" unless status.success?
+      end
+
+      output, error, status = Open3.capture3("gh", "release", "view", tag, "--json", "url,assets", chdir: root.to_s)
+      raise Error, "gh release view failed: #{error}" unless status.success?
+
+      details = JSON.parse(output)
+      run.review_assets.find_each do |asset|
+        url = details.fetch("assets").find { |entry| entry["name"] == File.basename(asset.workspace_path) }&.fetch("url", nil)
+        asset.update!(github_url: url)
+      end
+      run.review_assets.reload.map { |asset| { label: asset.label, url: asset.github_url } }
+    end
+    private_class_method :publish_review_assets!
+
+    def delete_review_release!(root, run)
+      tag = "workflow-evidence-#{run.run_id}"
+      _output, _error, status = Open3.capture3("gh", "release", "delete", tag, "--yes", "--cleanup-tag", chdir: root.to_s)
+      raise Error, "gh release delete failed" unless status.success?
+    end
+    private_class_method :delete_review_release!
+
+    def review_assets_section(assets)
+      return if assets.empty?
+
+      "## Review evidence\n\n" + assets.map { |asset| "- [#{asset[:label]}](#{asset[:url]})" }.join("\n")
+    end
+    private_class_method :review_assets_section
 
     def ready_pr!(root, url)
       _output, error, status = Open3.capture3("gh", "pr", "ready", url, chdir: root.to_s)
