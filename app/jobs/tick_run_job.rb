@@ -59,7 +59,7 @@ class TickRunJob < ApplicationJob
     SpawnRequest.create!(
       run_id: run.run_id, asked_by: "orchestrator", requested_role: "committer", priority: "blocking",
       scope: "commit-#{run.worktree_name}.md", execution_mode: "diagnosis", write_scope: "source_protected",
-      text: "Review the entire run worktree and call commit_run_changes once to stage and commit every change, including the run's managed evidence artifacts. Do not call worker_turn; the commit tool records your handoff."
+      text: "Review the completed run and write one concise, sanitized run-summary.md artifact for the PR reviewer: outcome, code files changed, verification performed, and any intentionally retained review artifact names. Never include secrets, tokens, prompts, raw logs, environment snapshots, MCP configs, or command output. Then call commit_run_changes once. Rails stages source changes only and uses run-summary.md as the PR description; do not call worker_turn."
     )
     run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "A committer is reviewing and committing the complete run worktree.")
   end

@@ -17,13 +17,12 @@ module Orchestrator
       run.with_lock do
         root = validated_root!(run)
         run.update!(publication_status: "committing", publication_error: nil, publication_started_at: Time.current)
-        if git!(root, "status", "--porcelain").empty?
+        stage_for_publication!(run, root)
+        if git_success?(root, "diff", "--cached", "--quiet")
           run.update!(publication_status: "no_changes", publication_completed_at: Time.current)
           return :no_changes
         end
 
-        git!(root, "add", "-A")
-        evidence_paths(run, root).each { |path| git!(root, "add", "-f", "--", path) }
         git!(root, "commit", "-m", run.task.to_s.truncate(72))
         run.update!(publication_status: "committed", publication_completed_at: Time.current)
         :committed
@@ -136,17 +135,8 @@ module Orchestrator
 
     def remove_evidence!(run)
       run.with_lock do
-        root = validated_root!(run)
         return :already_cleaned if run.publication_status == "cleanup_pushed"
 
-        evidence_paths(run, root).each { |path| git!(root, "rm", "-r", "--ignore-unmatch", "--", path) }
-        if git!(root, "status", "--porcelain").empty?
-          run.update!(publication_status: "cleanup_pushed", publication_error: nil)
-          return :nothing_to_remove
-        end
-
-        git!(root, "commit", "-m", "Remove run evidence before merge")
-        git!(root, "push", "origin", run.branch_name)
         run.update!(publication_status: "cleanup_pushed", publication_error: nil)
         :cleaned
       end
@@ -179,7 +169,12 @@ module Orchestrator
     end
 
     def create_pr(root, run, draft: false)
-      body = "Automated workflow run: #{run.run_id}\n\nWorktree: #{run.worktree_name}\nBase: #{run.base_sha}\n"
+      body = [
+        "Automated workflow run: #{run.run_id}",
+        "Worktree: #{run.worktree_name}",
+        "Base: #{run.base_sha}",
+        run_summary(run, root)
+      ].compact.join("\n\n")
       args = [ "gh", "pr", "create", "--base", "main", "--head", run.branch_name, "--title", run.task.to_s.truncate(120), "--body", body ]
       args << "--draft" if draft
       output, error, status = Open3.capture3(*args, chdir: root.to_s)
@@ -195,9 +190,8 @@ module Orchestrator
     private_class_method :ready_pr!
 
     def checkpoint_for_conversation!(run, root)
-      dirty = git!(root, "status", "--porcelain").present?
-      git!(root, "add", "-A") if dirty
-      evidence_paths(run, root).each { |path| git!(root, "add", "-f", "--", path) }
+      stage_for_publication!(run, root)
+      dirty = !git_success?(root, "diff", "--cached", "--quiet")
       message = dirty ? "Checkpoint before workflow question" : "Start workflow conversation"
       git!(root, "commit", "--allow-empty", "-m", message)
     end
@@ -231,18 +225,41 @@ module Orchestrator
     end
     private_class_method :record_failure!
 
-    def evidence_paths(run, root)
-      paths = []
-      artifact_dir = File.join(ArtifactStore.output_dir(root), ArtifactStore.sanitize_run_id(run.run_id))
-      paths << relative_path(root, artifact_dir) if Dir.exist?(artifact_dir)
-      run.workers.find_each do |worker|
-        [ worker.prompt_path, worker.log_path, worker.last_message_path, worker.exit_status_path, worker.env_path, worker.mcp_config_path ].compact.each do |path|
-          paths << relative_path(root, path) if File.exist?(path)
-        end
+    # Runtime output stays local. The committer's concise run summary becomes
+    # the PR body; raw logs, prompts, environment snapshots, MCP configs, and
+    # command output must never enter Git history.
+    def stage_for_publication!(run, root)
+      runtime_root = relative_path(root, ArtifactStore.output_dir(root))
+      git!(root, "reset", "--", runtime_root) if runtime_root.present?
+      source_paths = git_status_paths(root).reject do |path|
+        status_path = path.delete_suffix("/")
+        runtime_root.present? && (
+          status_path == runtime_root ||
+          status_path.start_with?("#{runtime_root}/") ||
+          runtime_root.start_with?("#{status_path}/")
+        )
       end
-      paths.compact.uniq
+      git!(root, "add", "--", *source_paths) if source_paths.any?
     end
-    private_class_method :evidence_paths
+    private_class_method :stage_for_publication!
+
+    def git_status_paths(root)
+      entries = git!(root, "status", "--porcelain", "-z").split("\0")
+      entries.each_with_object([]) do |entry, paths|
+        next if entry.blank?
+
+        paths << entry.byteslice(3..)
+        entries.shift if entry.start_with?("R", "C", " R", " C", "R ", "C ")
+      end
+    end
+    private_class_method :git_status_paths
+
+    def run_summary(run, root)
+      ArtifactStore.read(root, run.run_id, "run-summary.md").presence
+    rescue Errno::ENOENT
+      nil
+    end
+    private_class_method :run_summary
 
     def relative_path(root, path)
       expanded_root = root.expand_path.to_s
@@ -259,5 +276,11 @@ module Orchestrator
 
       raise Error, "git #{args.join(' ')} failed: #{error.presence || output}"
     end
+
+    def git_success?(root, *args)
+      _output, _error, status = Open3.capture3("git", "-C", root.to_s, *args)
+      status.success?
+    end
+    private_class_method :git_success?
   end
 end
