@@ -34,6 +34,21 @@
           <%= link_to "Questions", workspace_questions_path(current_workspace), class: current_page?(workspace_questions_path(current_workspace)) ? "active" : nil %>
           <%= link_to "Events", workspace_events_path(current_workspace), class: current_page?(workspace_events_path(current_workspace)) ? "active" : nil %>
         <% end %>
+        <% if current_runs.any? %>
+          <label class="current-runs-picker">
+            <span class="sr-only">Current runs</span>
+            <select id="current-runs-dropdown" aria-label="Current runs"
+                    onchange="if (this.value) window.location.href = this.value">
+              <option value="" <%= "selected" unless current_runs.any? { |run| current_page?(workspace_run_path(run.workspace, run)) } %>>Current runs</option>
+              <% current_runs.each do |run| %>
+                <option value="<%= workspace_run_path(run.workspace, run) %>"
+                        <%= "selected" if current_page?(workspace_run_path(run.workspace, run)) %>>
+                  <%= "#{run.workspace.name} · #{run.worktree_name.presence || run.run_id}" %>
+                </option>
+              <% end %>
+            </select>
+          </label>
+        <% end %>
       </nav>
     </header>
 
