@@ -33,6 +33,17 @@ RSpec.describe "terminal finalization tools" do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
+  it "accepts an explicit empty curator selection" do
+    workspace, run, curator = finalization_worker("curator", "review-assets.md")
+
+    response = McpTools::SelectReviewAssetsTool.call(runId: run.run_id, assets: [], server_context: { worker_id: curator.worker_id })
+
+    expect(tool_payload(response).fetch("assets")).to eq([])
+    expect(run.review_assets).to be_empty
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   def finalization_worker(role, scope)
     workspace = Workspace.create!(name: "finalize-tools-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(workspace:, run_id: "finalize-tools-#{SecureRandom.hex(4)}", task: "Finish a run", target_root: workspace.root_path, launcher_variant: "codex")

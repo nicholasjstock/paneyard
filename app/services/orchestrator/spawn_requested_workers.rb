@@ -226,7 +226,7 @@ module Orchestrator
         (request.requested_role.present? ? "Target role: #{request.requested_role}." : nil),
         request.text,
         (request.context.present? ? "Context: #{request.context}." : nil),
-        "Write your report via write_workflow_artifact using artifactName=\"#{request.scope}\". Use the shared workflow bus for blockers."
+        ("Write your report via write_workflow_artifact using artifactName=\"#{request.scope}\". Use the shared workflow bus for blockers." unless request.requested_role == "committer")
       ].compact.join(" ")
     end
 

@@ -4,7 +4,7 @@ module McpTools
   class SelectReviewAssetsTool < MCP::Tool
     tool_name "select_review_assets"
     description "Select reviewer-facing local files for post-push upload to the run's draft GitHub release. Only the evidence curator may call it."
-    input_schema(properties: { runId: { type: "string" }, assets: { type: "array", minItems: 1, maxItems: 20, items: { type: "object", properties: { path: { type: "string" }, label: { type: "string" } }, required: %w[path label] } } }, required: %w[runId assets])
+    input_schema(properties: { runId: { type: "string" }, assets: { type: "array", maxItems: 20, items: { type: "object", properties: { path: { type: "string" }, label: { type: "string" } }, required: %w[path label] } } }, required: %w[runId assets])
 
     def self.call(runId:, assets:, server_context:)
       worker = WorkerAuthorization.worker!(server_context:, run_id: runId)
