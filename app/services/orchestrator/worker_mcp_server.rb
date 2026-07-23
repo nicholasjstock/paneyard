@@ -3,18 +3,33 @@ module Orchestrator
     module_function
 
     def build(server_context:)
+      worker = Worker.find_by(worker_id: server_context[:worker_id])
+      tools = case worker&.role
+      when "reporter"
+        [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::GetRunAuditTool, ::McpTools::CompleteRunFinalizationTool ]
+      when "curator"
+        [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::SelectReviewAssetsTool, ::McpTools::CompleteRunFinalizationTool ]
+      when "committer"
+        [ ::McpTools::CommitRunChangesTool ]
+      else
+        ordinary_worker_tools
+      end
       MCP::Server.new(
         name: "workflow-worker",
         title: "Workflow Worker",
         version: "0.1.0",
         server_context:,
-        tools: [
+        tools:
+      )
+    end
+
+    def ordinary_worker_tools
+      [
           ::McpTools::PingTool,
           ::McpTools::CollectWorkflowStateTool,
           ::McpTools::ReadWorkflowArtifactTool,
           ::McpTools::WriteWorkflowArtifactTool,
           ::McpTools::GetRunContextTool,
-          ::McpTools::GetRunAuditTool,
           ::McpTools::WriteScopedFileTool,
           ::McpTools::WorkerTurnTool,
           ::McpTools::StartRunCommandTool,
@@ -27,11 +42,8 @@ module Orchestrator
           ::McpTools::RecordProtectedPathsTool,
           ::McpTools::RecordTestPathsTool,
           ::McpTools::ReportFailedApproachTool,
-          ::McpTools::SubmitAcceptanceVerificationTool,
-          ::McpTools::CommitRunChangesTool,
-          ::McpTools::SelectReviewAssetsTool
-        ]
-      )
+          ::McpTools::SubmitAcceptanceVerificationTool
+      ]
     end
   end
 end

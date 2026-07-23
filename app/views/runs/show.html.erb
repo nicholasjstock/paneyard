@@ -12,6 +12,16 @@
       <p class="muted mono"><%= @run.worktree_name %> &middot; <%= @run.branch_name %></p>
       <p class="muted mono"><%= @run.target_root %></p>
       <% if @run.pull_request_url.present? %><p><%= link_to "Open pull request", @run.pull_request_url, target: "_blank", rel: "noopener" %></p><% end %>
+      <% if @run.review_assets.where.not(github_url: nil).exists? %>
+        <div class="review-evidence">
+          <p class="muted">Review evidence</p>
+          <ul>
+            <% @run.review_assets.where.not(github_url: nil).find_each do |asset| %>
+              <li><%= link_to asset.label, asset.github_url, target: "_blank", rel: "noopener" %></li>
+            <% end %>
+          </ul>
+        </div>
+      <% end %>
       <% if @run.publication_error.present? %><p class="error-banner">PR publication: <%= @run.publication_error %></p><% end %>
     <% end %>
   </div>

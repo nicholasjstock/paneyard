@@ -65,6 +65,13 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end
 
+  it "states that no review evidence was uploaded without listing local artifacts" do
+    section = described_class.send(:review_assets_section, [])
+
+    expect(section).to eq("## Review evidence\n\nNo review assets were selected for upload.")
+    expect(section).not_to include("run-summary.md")
+  end
+
   def git(root, *args)
     output, error, status = Open3.capture3("git", "-C", root, *args)
     raise "git #{args.join(' ')} failed: #{error}" unless status.success?

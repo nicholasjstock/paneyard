@@ -44,7 +44,10 @@ class TickRunJob < ApplicationJob
       if run.publication_status.in?(%w[committed no_changes])
         FinalizeRunPublicationJob.perform_later(run.id)
       else
-        queue_committer(run)
+        queue_finalization_worker(run, "reporter", "run-summary.md", "Audit the persisted run with get_run_audit and write the reviewer-facing PR audit to run-summary.md. Do not run tests, select files, commit, or publish.") ||
+          queue_finalization_worker(run, "curator", "review-assets.md", "Inspect real local deliverables only. Select useful reviewer files with select_review_assets, or write that no review assets were selected. Do not audit the run, run tests, commit, or publish.") ||
+          queue_committer(run)
+        Orchestrator::SpawnRequestedWorkers.call(run: run)
       end
     else
       run.update!(status: "completed", stopped_at: run.stopped_at || Time.current) unless run.status == "completed"
@@ -58,8 +61,8 @@ class TickRunJob < ApplicationJob
     run.update!(publication_status: "commit_pending", publication_error: nil)
     SpawnRequest.create!(
       run_id: run.run_id, asked_by: "orchestrator", requested_role: "committer", priority: "blocking",
-      scope: "run-summary.md", execution_mode: "diagnosis", write_scope: "source_protected",
-      text: "First call get_run_audit to inspect the committer-only persisted timeline, worker outcomes, and bounded worker reports; then use collect_workflow_state only to locate any final verifier artifacts needed to substantiate it. Write one concise, sanitized run-summary.md artifact for the PR reviewer with: outcome; source files changed; a chronological audit trail naming each material worker role/scope and outcome; failures or blocked attempts with their concrete boundary; recovery actions; verified acceptance evidence; unresolved limitations; and names of intentionally retained review artifacts. Do not run tests, linters, browser checks, or environment probes; the committer does not re-verify completed work. Distinguish confirmed verifier evidence from checks that were not run. Never include secrets, tokens, prompts, raw logs, environment snapshots, MCP configs, or command output. Then call commit_run_changes once. Rails stages source changes only and uses run-summary.md as the PR description; do not call worker_turn."
+      scope: "commit-#{run.worktree_name}.md", execution_mode: "diagnosis", write_scope: "source_protected",
+      text: "Inspect git status and call commit_run_changes exactly once to commit source changes selected by Rails. Do not write a run summary, select review assets, run tests, inspect run audits, publish, or call worker_turn."
     )
     run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "A committer is reviewing and committing the complete run worktree.")
   end
@@ -87,6 +90,16 @@ class TickRunJob < ApplicationJob
         summary: "Capacity is available; evaluating the next handoff."
       )
     end
+  end
+
+  def queue_finalization_worker(run, role, scope, text)
+    return true if Worker.active.exists?(run_id: run.run_id, role: role) || SpawnRequest.where(run_id: run.run_id, requested_role: role, status: "open").exists?
+    return false if Worker.where(run_id: run.run_id, role: role).where.not(handoff_completed_at: nil).exists?
+
+    run.update!(publication_status: "commit_pending", publication_error: nil)
+    SpawnRequest.create!(run_id: run.run_id, asked_by: "orchestrator", requested_role: role, priority: "blocking", scope:, execution_mode: "diagnosis", write_scope: "source_protected", text:)
+    run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "#{role.humanize} is finalizing the run.")
+    true
   end
 
   def request_recovery_planner_if_dead_end(run, previous_state)

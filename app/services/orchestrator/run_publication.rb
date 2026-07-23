@@ -193,15 +193,22 @@ module Orchestrator
       return [] if run.review_assets.empty?
 
       tag = "workflow-evidence-#{run.run_id}"
-      _output, error, status = Open3.capture3("gh", "release", "create", tag, "--draft", "--target", run.branch_name, "--title", "Workflow evidence #{run.run_id}", "--notes", "Review evidence for #{run.run_id}.", chdir: root.to_s)
-      raise Error, "gh release create failed: #{error}" unless status.success?
+      unless release_exists?(root, tag)
+        _output, error, status = Open3.capture3("gh", "release", "create", tag, "--draft", "--target", run.branch_name, "--title", "Workflow evidence #{run.run_id}", "--notes", "Review evidence for #{run.run_id}.", chdir: root.to_s)
+        raise Error, "gh release create failed: #{error}" unless status.success?
+      end
+
+      output, error, status = Open3.capture3("gh", "release", "view", tag, "--json", "assets", chdir: root.to_s)
+      raise Error, "gh release view failed: #{error}" unless status.success?
+      existing_asset_names = JSON.parse(output).fetch("assets").map { |entry| entry.fetch("name") }
 
       run.review_assets.find_each do |asset|
-        path = Pathname(root).join(asset.workspace_path).cleanpath
-        raise Error, "Selected review asset is missing: #{asset.workspace_path}" unless path.file?
+        path = review_asset_path!(root, asset.workspace_path)
 
-        _output, error, status = Open3.capture3("gh", "release", "upload", tag, "#{path}##{asset.label}", chdir: root.to_s)
-        raise Error, "gh release upload failed: #{error}" unless status.success?
+        unless asset.github_url.present? || existing_asset_names.include?(File.basename(asset.workspace_path))
+          _output, error, status = Open3.capture3("gh", "release", "upload", tag, "#{path}##{asset.label}", chdir: root.to_s)
+          raise Error, "gh release upload failed: #{error}" unless status.success?
+        end
       end
 
       output, error, status = Open3.capture3("gh", "release", "view", tag, "--json", "url,assets", chdir: root.to_s)
@@ -216,6 +223,22 @@ module Orchestrator
     end
     private_class_method :publish_review_assets!
 
+    def release_exists?(root, tag)
+      _output, _error, status = Open3.capture3("gh", "release", "view", tag, chdir: root.to_s)
+      status.success?
+    end
+    private_class_method :release_exists?
+
+    def review_asset_path!(root, workspace_path)
+      path = Pathname(root).join(workspace_path).cleanpath
+      unless path.to_s.start_with?("#{Pathname(root).expand_path}/") && path.file?
+        raise Error, "Selected review asset is missing: #{workspace_path}"
+      end
+
+      path
+    end
+    private_class_method :review_asset_path!
+
     def delete_review_release!(root, run)
       tag = "workflow-evidence-#{run.run_id}"
       _output, _error, status = Open3.capture3("gh", "release", "delete", tag, "--yes", "--cleanup-tag", chdir: root.to_s)
@@ -224,7 +247,7 @@ module Orchestrator
     private_class_method :delete_review_release!
 
     def review_assets_section(assets)
-      return if assets.empty?
+      return "## Review evidence\n\nNo review assets were selected for upload." if assets.empty?
 
       "## Review evidence\n\n" + assets.map { |asset| "- [#{asset[:label]}](#{asset[:url]})" }.join("\n")
     end

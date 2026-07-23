@@ -1,12 +1,12 @@
 module McpTools
   class GetRunAuditTool < MCP::Tool
     tool_name "get_run_audit"
-    description "Read the compact persisted audit trail for a completed run. Only the terminal committer may call it."
+    description "Read the compact persisted audit trail for a completed run. Only the terminal reporter may call it."
     input_schema(properties: { runId: { type: "string" } }, required: %w[runId])
 
     def self.call(runId:, server_context:)
       worker = WorkerAuthorization.worker!(server_context:, run_id: runId)
-      raise ArgumentError, "get_run_audit requires an authenticated committer worker" unless worker.role == "committer"
+      raise ArgumentError, "get_run_audit requires an authenticated reporter worker" unless worker.role == "reporter"
 
       run = Run.find_by!(run_id: runId)
       ToolResponse.structured(
