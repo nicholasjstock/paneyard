@@ -86,6 +86,19 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
+  it "does not let a missing historical worktree raise during merge detection" do
+    workspace = Workspace.create!(name: "publication-missing-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "publication-missing-#{SecureRandom.hex(4)}", task: "Skip missing worktree",
+      target_root: File.join(workspace.root_path, "missing"), launcher_variant: "codex", worktree_name: "missing-a1b2",
+      branch_name: "workflow/missing-a1b2", pull_request_url: "https://github.com/example/repo/pull/42"
+    )
+
+    expect(described_class.merged?(run)).to be(false)
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   it "removes the exact run worktree after GitHub has merged the PR" do
     source_root = Dir.mktmpdir
     worktree_root = Dir.mktmpdir

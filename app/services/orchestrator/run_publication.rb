@@ -145,7 +145,7 @@ module Orchestrator
 
       details = JSON.parse(output)
       details["state"] == "MERGED"
-    rescue JSON::ParserError
+    rescue JSON::ParserError, Errno::ENOENT
       false
     end
 
