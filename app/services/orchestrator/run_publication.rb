@@ -119,7 +119,10 @@ module Orchestrator
     end
 
     def existing_pr_url(root, branch)
-      output, _error, status = Open3.capture3("gh", "pr", "view", branch, "--json", "url", "--jq", ".url", chdir: root.to_s)
+      output, _error, status = Open3.capture3(
+        "gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url",
+        chdir: root.to_s
+      )
       status.success? ? output.strip.presence : nil
     end
 
