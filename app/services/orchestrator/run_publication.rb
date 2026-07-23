@@ -37,6 +37,7 @@ module Orchestrator
     def publish!(run)
       return :unmanaged if run.worktree_name.blank?
       return :published if run.publication_status == "published" && run.conversation_pr_status == "ready"
+      return :published if run.publication_status == "awaiting_approval" && run.pull_request_url.present? && run.conversation_pr_status == "ready"
       return :no_changes if run.publication_status == "no_changes" && run.pull_request_url.blank?
 
       run.with_lock do
@@ -60,6 +61,17 @@ module Orchestrator
       raise error if error.is_a?(Error)
 
       raise Error, error.message
+    end
+
+    def prepare_retry!(run)
+      root = validated_root!(run)
+      if git_success?(root, "diff", "--quiet", run.base_sha, "HEAD")
+        run.update!(publication_status: "queued", publication_error: nil)
+        commit_all!(run)
+      else
+        run.update!(publication_status: "committed", publication_error: nil)
+        :committed
+      end
     end
 
     # A question is sufficient reason to establish the run's shared GitHub

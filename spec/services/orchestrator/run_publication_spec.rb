@@ -72,6 +72,20 @@ RSpec.describe Orchestrator::RunPublication do
     expect(section).not_to include("run-summary.md")
   end
 
+  it "treats an already ready PR as an idempotent publication result" do
+    workspace = Workspace.create!(name: "publication-ready-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "publication-ready-#{SecureRandom.hex(4)}", task: "Avoid duplicate publication",
+      target_root: workspace.root_path, launcher_variant: "codex", worktree_name: "ready-a1b2",
+      branch_name: "workflow/ready-a1b2", publication_status: "awaiting_approval",
+      conversation_pr_status: "ready", pull_request_url: "https://github.com/example/repo/pull/42"
+    )
+
+    expect(described_class.publish!(run)).to eq(:published)
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   def git(root, *args)
     output, error, status = Open3.capture3("git", "-C", root, *args)
     raise "git #{args.join(' ')} failed: #{error}" unless status.success?

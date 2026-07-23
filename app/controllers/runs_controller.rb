@@ -73,7 +73,8 @@ class RunsController < ApplicationController
       return
     end
 
-    @run.update!(status: "running", publication_status: "queued", publication_error: nil)
+    Orchestrator::RunPublication.prepare_retry!(@run)
+    @run.update!(status: "running")
     FinalizeRunPublicationJob.perform_later(@run.id)
     redirect_to workspace_run_path(current_workspace, @run), notice: "Retrying PR publication…"
   end
