@@ -14,6 +14,8 @@ module Orchestrator
           ::McpTools::ReadWorkflowArtifactTool,
           ::McpTools::WriteWorkflowArtifactTool,
           ::McpTools::GetRunContextTool,
+          ::McpTools::ListWorkersTool,
+          ::McpTools::ListRecentEventsTool,
           ::McpTools::WriteScopedFileTool,
           ::McpTools::WorkerTurnTool,
           ::McpTools::StartRunCommandTool,
