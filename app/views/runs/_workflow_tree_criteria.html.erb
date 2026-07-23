@@ -1,0 +1,23 @@
+<ul class="workflow-tree-criteria">
+  <% criteria.each do |criterion| %>
+    <li class="workflow-tree-node workflow-criterion-node">
+      <div class="acceptance-criterion-row">
+        <span class="workflow-tree-kind">Acceptance criterion</span>
+        <span class="badge <%= criterion.status %>"><%= criterion.status.humanize.downcase %></span>
+        <span class="mono acceptance-criterion-key"><%= criterion.key %></span>
+        <span><%= criterion.content %></span>
+      </div>
+      <% criterion_workers = worker_groups[criterion.id] || [] %>
+      <% criterion_workers.each do |activity| %>
+        <% if activity[:worker].role == "planner" %>
+          <%= render "workflow_tree", planners: [activity], criteria: criterion.children.to_a, worker_groups: worker_groups, planner_decisions: [], run: run, current_workspace: current_workspace %>
+        <% end %>
+      <% end %>
+      <% ordinary_workers = criterion_workers.reject { |activity| activity[:worker].role == "planner" } %>
+      <% if ordinary_workers.any? %><div class="worker-list criterion-worker-list"><% ordinary_workers.each do |activity| %><%= render "worker_row", activity: activity, run: run, current_workspace: current_workspace %><% end %></div><% end %>
+      <% if criterion.children.any? && criterion_workers.none? { |activity| activity[:worker].role == "planner" } %>
+        <%= render "workflow_tree_criteria", criteria: criterion.children.to_a, worker_groups: worker_groups, run: run, current_workspace: current_workspace %>
+      <% end %>
+    </li>
+  <% end %>
+</ul>
