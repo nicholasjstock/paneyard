@@ -6,6 +6,7 @@ class ApplicationController < ActionController::Base
   stale_when_importmap_changes
 
   helper_method :current_workspace
+  helper_method :current_runs
   helper_method :background_job_warning
 
   private
@@ -19,6 +20,10 @@ class ApplicationController < ActionController::Base
 
   def current_workspace
     @current_workspace
+  end
+
+  def current_runs
+    @current_runs ||= Run.active.includes(:workspace).order(created_at: :desc)
   end
 
   def require_workspace
