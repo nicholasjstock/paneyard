@@ -139,41 +139,25 @@ module Orchestrator
       status.success? ? output.strip.presence : nil
     end
 
-    def approved?(run)
-      output, _error, status = Open3.capture3("gh", "pr", "view", run.pull_request_url, "--json", "state,reviewDecision", chdir: run.target_root)
+    def merged?(run)
+      output, _error, status = Open3.capture3("gh", "pr", "view", run.pull_request_url, "--json", "state", chdir: run.target_root)
       return false unless status.success?
 
       details = JSON.parse(output)
-      details["state"] == "OPEN" && details["reviewDecision"] == "APPROVED"
+      details["state"] == "MERGED"
     rescue JSON::ParserError
       false
     end
 
-    def remove_evidence!(run)
+    def cleanup_merged_run!(run)
       run.with_lock do
-        return :already_cleaned if run.publication_status == "cleanup_pushed"
+        return :merged if run.publication_status == "merged"
 
-        delete_review_release!(validated_root!(run), run) if run.review_assets.any?
-        run.update!(publication_status: "cleanup_pushed", publication_error: nil)
-        :cleaned
-      end
-    rescue StandardError => error
-      record_failure!(run, error)
-      raise error if error.is_a?(Error)
-
-      raise Error, error.message
-    end
-
-    def merge_and_cleanup!(run)
-      run.with_lock do
         root = validated_root!(run)
-        raise Error, "PR evidence cleanup has not completed" unless run.publication_status == "cleanup_pushed"
-
-        _output, _error, status = Open3.capture3("gh", "pr", "merge", run.pull_request_url, "--squash", "--delete-branch", chdir: root.to_s)
-        return :not_ready unless status.success?
-
         source_root = Pathname(run.source_root)
-        git!(source_root, "worktree", "remove", root.to_s)
+        rebase_main_onto_origin!(source_root)
+        delete_review_release!(root, run) if run.review_assets.any?
+        git!(source_root, "worktree", "remove", "--force", root.to_s)
         git!(source_root, "worktree", "prune")
         run.update!(publication_status: "merged", publication_error: nil)
         :merged
@@ -257,6 +241,15 @@ module Orchestrator
       raise Error, "gh release delete failed" unless status.success?
     end
     private_class_method :delete_review_release!
+
+    def rebase_main_onto_origin!(source_root)
+      branch = git!(source_root, "branch", "--show-current").strip
+      raise Error, "Source checkout must be on main before cleanup; found #{branch.presence || "detached HEAD"}" unless branch == "main"
+
+      git!(source_root, "fetch", "origin", "main")
+      git!(source_root, "rebase", "origin/main")
+    end
+    private_class_method :rebase_main_onto_origin!
 
     def review_assets_section(assets)
       return "## Review evidence\n\nNo review assets were selected for upload." if assets.empty?

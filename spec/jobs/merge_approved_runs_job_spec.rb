@@ -1,29 +1,29 @@
 require "rails_helper"
 
 RSpec.describe MergeApprovedRunsJob do
-  it "cleans evidence after GitHub reports an approved review" do
+  it "does nothing while a PR is merely awaiting approval" do
     run = create_published_run(publication_status: "awaiting_approval")
-    allow(Orchestrator::RunPublication).to receive(:approved?).with(run).and_return(true)
+    allow(Orchestrator::RunPublication).to receive(:merged?).with(run).and_return(false)
 
-    expect(Orchestrator::RunPublication).to receive(:remove_evidence!).with(run)
+    expect(Orchestrator::RunPublication).not_to receive(:cleanup_merged_run!)
 
     described_class.perform_now
   end
 
-  it "also watches PRs published before approval tracking was introduced" do
+  it "cleans evidence and the worktree only after GitHub reports a merged PR" do
     run = create_published_run(publication_status: "published")
-    allow(Orchestrator::RunPublication).to receive(:approved?).with(run).and_return(true)
+    allow(Orchestrator::RunPublication).to receive(:merged?).with(run).and_return(true)
 
-    expect(Orchestrator::RunPublication).to receive(:remove_evidence!).with(run)
+    expect(Orchestrator::RunPublication).to receive(:cleanup_merged_run!).with(run)
 
     described_class.perform_now
   end
 
-  it "merges a branch whose approved evidence cleanup was already pushed" do
+  it "cleans legacy evidence-cleanup runs after their PR is manually merged" do
     run = create_published_run(publication_status: "cleanup_pushed")
+    allow(Orchestrator::RunPublication).to receive(:merged?).with(run).and_return(true)
 
-    expect(Orchestrator::RunPublication).not_to receive(:approved?)
-    expect(Orchestrator::RunPublication).to receive(:merge_and_cleanup!).with(run)
+    expect(Orchestrator::RunPublication).to receive(:cleanup_merged_run!).with(run)
 
     described_class.perform_now
   end

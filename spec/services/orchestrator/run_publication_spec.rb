@@ -86,6 +86,33 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
+  it "removes the exact run worktree after GitHub has merged the PR" do
+    source_root = Dir.mktmpdir
+    worktree_root = Dir.mktmpdir
+    FileUtils.remove_entry(worktree_root)
+    git(source_root, "init")
+    git(source_root, "config", "user.name", "Workflow Orchestrator")
+    git(source_root, "config", "user.email", "workflow@example.test")
+    File.write(File.join(source_root, "README.md"), "source\n")
+    git(source_root, "add", "README.md")
+    git(source_root, "commit", "-m", "Initial commit")
+    git(source_root, "branch", "-M", "main")
+    git(source_root, "remote", "add", "origin", source_root)
+    git(source_root, "worktree", "add", "-b", "workflow/merged-a1b2", worktree_root)
+    workspace = Workspace.create!(name: "publication-cleanup-#{SecureRandom.hex(4)}", root_path: source_root)
+    run = workspace.runs.create!(
+      run_id: "publication-cleanup-#{SecureRandom.hex(4)}", task: "Clean merged run",
+      target_root: worktree_root, source_root:, launcher_variant: "codex", worktree_name: "merged-a1b2",
+      branch_name: "workflow/merged-a1b2", publication_status: "awaiting_approval"
+    )
+
+    expect(described_class.cleanup_merged_run!(run)).to eq(:merged)
+    expect(File).not_to exist(worktree_root)
+    expect(run.reload.publication_status).to eq("merged")
+  ensure
+    FileUtils.remove_entry(source_root) if source_root && File.exist?(source_root)
+  end
+
   def git(root, *args)
     output, error, status = Open3.capture3("git", "-C", root, *args)
     raise "git #{args.join(' ')} failed: #{error}" unless status.success?
