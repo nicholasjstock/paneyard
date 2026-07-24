@@ -44,7 +44,7 @@ class PlannerDecisionJob < ApplicationJob
       status: "failed", error: error.message, completed_at: Time.current,
       cli_output: error.try(:output).presence || record.cli_output
     )
-    if error.message.match?(/session limit|rate limit|too many requests|429/i)
+    if Orchestrator::CapacityFailure.detected?(error.message)
       request = record.spawn_request
       request.update!(
         status: "open", fulfilled_by: nil, fulfilled_at: nil, fulfillment_note: nil, fulfilled_worker_id: nil
@@ -57,16 +57,7 @@ class PlannerDecisionJob < ApplicationJob
   end
 
   def block_for_capacity!(run, error)
-    retry_at = 30.minutes.from_now
-    if (match = error.message.match(/resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\(([^)]+)\)/i))
-      hour = match[1].to_i
-      minute = match[2].to_i
-      hour = (hour % 12) + (match[3]&.downcase == "pm" ? 12 : 0) if match[3].present?
-      zone = Time.find_zone(match[4]) || Time.zone
-      now = Time.current.in_time_zone(zone)
-      retry_at = zone.local(now.year, now.month, now.day, hour, minute)
-      retry_at += 1.day if retry_at <= Time.current
-    end
+    retry_at = Orchestrator::CapacityFailure.reset_at(error.message)
     run.update!(capacity_available_at: retry_at)
     run.publish_phase!(phase: "waiting_on_capacity", owner: "orchestrator", summary: "Planner capacity unavailable; retrying after #{retry_at.in_time_zone.strftime('%H:%M %Z')}.")
   end

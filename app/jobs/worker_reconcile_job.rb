@@ -28,7 +28,7 @@ class WorkerReconcileJob < ApplicationJob
         stop_reason:,
         **usage
       )
-      capacity_failure = claude_capacity_failure?(output) && worker.handoff_completed_at.blank?
+      capacity_failure = Orchestrator::CapacityFailure.detected?(output) && worker.handoff_completed_at.blank?
 
       if worker.role == "chaperone"
         handle_chaperone_worker_stop(worker) unless capacity_failure
@@ -84,6 +84,7 @@ class WorkerReconcileJob < ApplicationJob
     return "Worker stopped after completing its handoff." if worker.handoff_completed_at.present?
     return "Claude session limit reached; worker exited before completing its handoff." if output.match?(/hit your session limit/i)
     return "Claude rate limit reached; worker exited before completing its handoff." if output.match?(/rate limit|too many requests/i)
+    return "Codex usage limit reached; worker exited before completing its handoff." if output.match?(/hit your usage limit/i)
     return "Worker exited with status #{exit_code} before completing its handoff." if exit_code.present?
 
     "Process no longer running (detected by Rails reconciliation, exit status unavailable)."
@@ -108,10 +109,6 @@ class WorkerReconcileJob < ApplicationJob
     worker.run.workspace.workspace_memory_entries.current.exists?(
       entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY
     )
-  end
-
-  def claude_capacity_failure?(output)
-    output.match?(/hit your session limit|rate limit|too many requests/i)
   end
 
   def record_failed_attempt(worker, stop_reason:, output:)
@@ -202,22 +199,11 @@ class WorkerReconcileJob < ApplicationJob
     run.publish_phase!(
       phase: "waiting_on_capacity",
       owner: "orchestrator",
-      summary: "Claude capacity limit reached; retrying after #{retry_at.in_time_zone.strftime('%H:%M %Z')}."
+      summary: "#{run.launcher_variant.capitalize} capacity limit reached; retrying after #{retry_at.in_time_zone.strftime('%H:%M %Z')}."
     )
   end
 
   def capacity_reset_at(output)
-    match = output.match(/resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\(([^)]+)\)/i)
-    return 30.minutes.from_now unless match
-
-    hour = match[1].to_i
-    minute = match[2].to_i
-    meridiem = match[3]&.downcase
-    hour = (hour % 12) + (meridiem == "pm" ? 12 : 0) if meridiem.present?
-    zone = Time.find_zone(match[4]) || Time.zone
-    now = Time.current.in_time_zone(zone)
-    retry_at = zone.local(now.year, now.month, now.day, hour, minute)
-    retry_at += 1.day if retry_at <= Time.current
-    retry_at
+    Orchestrator::CapacityFailure.reset_at(output)
   end
 end

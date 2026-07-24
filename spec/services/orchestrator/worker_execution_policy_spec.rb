@@ -24,42 +24,55 @@ RSpec.describe Orchestrator::WorkerExecutionPolicy do
     expect(overrides).to include('permissions.worker.network={"enabled"=true}')
   end
 
-  it "grants write access to gitignored directories (caches) even for a source-protected worker, since write_scope protects source, not caches" do
-    root = Dir.mktmpdir("gitignore-policy")
-    system("git", "-C", root, "init", "--quiet", exception: true)
-    File.write(File.join(root, ".gitignore"), "node_modules/\n.env.local\n")
+  it "grants write access to non-source directories (caches, logs) even for a source-protected worker, since protected_patterns protects declared source, not scratch space" do
+    root = Dir.mktmpdir("scratch-policy")
     FileUtils.mkdir_p(File.join(root, "node_modules", ".vite-temp"))
-    File.write(File.join(root, "node_modules", ".vite-temp", "config.mjs"), "// scratch")
-    File.write(File.join(root, ".env.local"), "SECRET=shh")
+    FileUtils.mkdir_p(File.join(root, "app"))
+    FileUtils.mkdir_p(File.join(root, "log"))
 
     policy = described_class.new(
-      root_dir: root, mode: "verification", write_scope: "source_protected", allowed_paths: []
+      root_dir: root, mode: "verification", write_scope: "source_protected", allowed_paths: [],
+      protected_patterns: [ "app/**/*" ]
     )
 
     overrides = policy.codex_config_overrides.join(" ")
     expect(overrides).to include('"node_modules"="write"')
+    expect(overrides).to include('"log"="write"')
+    expect(overrides).not_to include('"app"="write"')
     expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).to include(File.join(root, "node_modules"))
+    expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).to include(File.join(root, "log"))
+    expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).not_to include(File.join(root, "app"))
     expect(policy.claude_settings["permissions"]["allow"]).to include("Write(#{File.join(root, 'node_modules')}/**)")
   ensure
     FileUtils.remove_entry(root) if root && Dir.exist?(root)
   end
 
-  it "excludes individual gitignored files (secrets, local state) from the cache write grant, even though they're not source either" do
-    root = Dir.mktmpdir("gitignore-policy")
-    system("git", "-C", root, "init", "--quiet", exception: true)
-    File.write(File.join(root, ".gitignore"), ".env.local\nlocal_secret.txt\n")
-    File.write(File.join(root, ".env.local"), "SECRET=shh")
-    File.write(File.join(root, "local_secret.txt"), "shh")
+  it "never grants write access to .git, even though protected_patterns can't declare it as protected" do
+    root = Dir.mktmpdir("scratch-policy")
+    FileUtils.mkdir_p(File.join(root, ".git"))
+    FileUtils.mkdir_p(File.join(root, "app"))
+
+    policy = described_class.new(
+      root_dir: root, mode: "verification", write_scope: "source_protected", allowed_paths: [],
+      protected_patterns: [ "app/**/*" ]
+    )
+
+    expect(policy.scratch_writable_relative_paths).not_to include(".git")
+    expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).not_to include(File.join(root, ".git"))
+  ensure
+    FileUtils.remove_entry(root) if root && Dir.exist?(root)
+  end
+
+  it "fails closed (nothing is scratch) when no protected_patterns are declared yet" do
+    root = Dir.mktmpdir("scratch-policy")
+    FileUtils.mkdir_p(File.join(root, "log"))
 
     policy = described_class.new(
       root_dir: root, mode: "verification", write_scope: "source_protected", allowed_paths: []
     )
 
-    expect(policy.git_ignored_relative_paths).to be_empty
+    expect(policy.scratch_writable_relative_paths).to be_empty
     expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).to eq([])
-    overrides = policy.codex_config_overrides.join(" ")
-    expect(overrides).not_to include("env.local")
-    expect(overrides).not_to include("local_secret.txt")
   ensure
     FileUtils.remove_entry(root) if root && Dir.exist?(root)
   end

@@ -19,7 +19,7 @@ RSpec.describe Orchestrator::WorkspaceChatRunner do
 
       assert_equal "The run is healthy.", result[:response]
       assert_nil result[:session_id]
-      assert_equal root, captured[:chdir]
+      assert_equal chat.workspace.source_root, captured[:chdir]
       assert_includes captured[:args], "workspace-write"
       assert_includes captured[:args], Orchestrator::WorkerSpawner::CODEX_WORKER_MODEL
       assert_includes captured[:args].join(" "), "/mcp/workspace-chat"
@@ -46,7 +46,7 @@ RSpec.describe Orchestrator::WorkspaceChatRunner do
 
       assert_equal "The run is healthy.", result[:response]
       assert_equal 12, result.dig(:usage, :input_tokens)
-      assert_equal root, captured[:chdir]
+      assert_equal chat.workspace.source_root, captured[:chdir]
       assert_equal "sonnet", captured[:args][captured[:args].index("--model") + 1]
       tools = captured[:args][captured[:args].index("--tools") + 1]
       assert_includes tools, "Bash"

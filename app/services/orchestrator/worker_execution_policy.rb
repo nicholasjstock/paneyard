@@ -1,5 +1,3 @@
-require "open3"
-
 module Orchestrator
   class WorkerExecutionPolicy
     BASE_CLAUDE_TOOLS = %w[Bash Read Grep Glob ToolSearch].freeze
@@ -7,13 +5,14 @@ module Orchestrator
 
     WRITE_SCOPES = %w[source_protected tests_only scoped_changes].freeze
 
-    attr_reader :root_dir, :mode, :write_scope, :allowed_paths, :profile_name
+    attr_reader :root_dir, :mode, :write_scope, :allowed_paths, :protected_patterns, :profile_name
 
-    def initialize(root_dir:, mode:, write_scope:, allowed_paths:, profile_name: "worker")
+    def initialize(root_dir:, mode:, write_scope:, allowed_paths:, protected_patterns: [], profile_name: "worker")
       @root_dir = Pathname(root_dir).expand_path
       @mode = mode.to_s
       @write_scope = write_scope.to_s
       @allowed_paths = Array(allowed_paths).map { |path| normalize_path(path) }.uniq
+      @protected_patterns = Array(protected_patterns).map { |path| normalize_path(path) }.uniq
       @profile_name = profile_name.to_s.gsub(/[^a-zA-Z0-9_-]/, "-")
       validate!
     end
@@ -41,14 +40,17 @@ module Orchestrator
         "mcp__workflow__*"
       ]
       if repository_writable?
-        allowed_absolute_paths.each do |path|
-          allow_rules << "Edit(#{claude_absolute_path(path)}/**)"
-          allow_rules << "Write(#{claude_absolute_path(path)}/**)"
+        allowed_write_roots.each do |root|
+          path = claude_absolute_path(root_dir.join(root))
+          suffix = literal_allowed_root?(root) ? "" : "/**"
+          allow_rules << "Edit(#{path}#{suffix})"
+          allow_rules << "Write(#{path}#{suffix})"
         end
       end
-      cache_writable_absolute_paths.each do |path|
-        allow_rules << "Edit(#{claude_absolute_path(path)}/**)"
-        allow_rules << "Write(#{claude_absolute_path(path)}/**)"
+      scratch_writable_absolute_paths.each do |path|
+        suffix = path.directory? ? "/**" : ""
+        allow_rules << "Edit(#{claude_absolute_path(path)}#{suffix})"
+        allow_rules << "Write(#{claude_absolute_path(path)}#{suffix})"
       end
 
       {
@@ -57,7 +59,7 @@ module Orchestrator
           "enabled" => true,
           "failIfUnavailable" => true,
           "allowUnsandboxedCommands" => false,
-          "filesystem" => { "allowWrite" => (allowed_absolute_paths + cache_writable_absolute_paths).map(&:to_s) }
+          "filesystem" => { "allowWrite" => (allowed_absolute_paths + scratch_writable_absolute_paths).map(&:to_s) }
         }
       }
     end
@@ -76,12 +78,9 @@ module Orchestrator
     # source is unaffected -- it stays exactly as narrow as before (:tmpdir
     # plus explicit allowed_paths). write_scope exists to protect source the
     # repo (and acceptance criteria) care about, not to forbid every write --
-    # a gitignored path is the repo's own declaration that it isn't source,
-    # so cache_writable_absolute_paths grants it regardless of write_scope.
-    # Confirmed necessary the same way: a source_protected verification worker
-    # hit EPERM writing Vite's node_modules/.vite-temp bundled-config scratch
-    # file, a real write every vitest invocation needs and no write_scope
-    # was ever meant to block.
+    # scratch_writable_relative_paths grants everything that isn't declared
+    # source regardless of write_scope (see its comment for why this replaced
+    # a git-status-based cache heuristic).
     def codex_config_overrides
       filesystem = {
         ":minimal" => "read",
@@ -89,7 +88,7 @@ module Orchestrator
         ":root" => "read",
         ":workspace_roots" => { "." => "read" }
           .merge(allowed_write_roots.index_with { "write" })
-          .merge(git_ignored_relative_paths.index_with { "write" })
+          .merge(scratch_writable_relative_paths.index_with { "write" })
       }
 
       [
@@ -111,37 +110,64 @@ module Orchestrator
       @allowed_write_roots ||= allowed_paths.map { |pattern| glob_root(pattern) }.uniq
     end
 
-    def cache_writable_absolute_paths
-      @cache_writable_absolute_paths ||= git_ignored_relative_paths.map { |path| root_dir.join(path).cleanpath }
+    # A pattern with no glob characters names one exact path (typically a
+    # single file) rather than a directory to recurse into -- `Edit(file/**)`
+    # would never match the file itself, since nothing can exist "inside" a
+    # file. A root can be reached by more than one pattern; treat it as
+    # recursive if any of them actually was a glob.
+    def literal_allowed_root?(root)
+      allowed_paths.select { |pattern| glob_root(pattern) == root }.none? { |pattern| pattern.match?(/[*?\[{]/) }
     end
 
-    # Deliberately every gitignored *directory* in the repo, not a hardcoded
-    # list of known cache directory names (node_modules/.vite-temp,
-    # __pycache__, .turbo, ...) -- that list is unenumerable across
-    # repos/toolchains (the same lesson as :root above), while .gitignore is
-    # each repo's own authoritative, already-existing declaration of what
-    # isn't source. Individual gitignored *files* are deliberately excluded:
-    # a real repo's ignore list also covers .env.local, local secrets, DB
-    # dumps, and IDE settings (confirmed against a real target repo) --
-    # exactly what "protect the source code" must still protect. Caches and
-    # build output are reliably whole directories a tool regenerates; `git
-    # ls-files --directory` reports a fully-ignored directory as one
-    # trailing-slash entry instead of every file inside it, which is the
-    # signal used here to tell the two apart.
-    def git_ignored_relative_paths
-      @git_ignored_relative_paths ||= begin
-        output, _stderr, status = Open3.capture3(
-          "git", "-C", root_dir.to_s, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"
-        )
-        return [] unless status.success?
+    def scratch_writable_absolute_paths
+      @scratch_writable_absolute_paths ||= scratch_writable_relative_paths.map { |path| root_dir.join(path).cleanpath }
+    end
 
-        output.lines.map(&:chomp).select { |line| line.end_with?("/") }.map { |line| line.delete_suffix("/") }.reject(&:blank?)
-      rescue StandardError
-        []
+    # Replaces a prior git-status-based heuristic (walk `git ls-files
+    # --others --ignored --directory` for wholesale-ignored cache dirs) that
+    # could never grant Rails' own log/tmp/storage: those directories carry a
+    # tracked .keep file precisely so they survive a fresh checkout, which
+    # means git never reports them as a fully-ignored *directory* (only
+    # individual ignored files inside them, once those files already exist)
+    # -- so a brand-new worktree's worker could never create log/test.log or
+    # open storage/test.sqlite3 in the first place. protected_patterns (the
+    # workspace's declared source/config/test globs, see
+    # Workspace#protected_write_patterns) is the authoritative, always-known
+    # answer instead: anything NOT under a protected root is scratch, whether
+    # or not a file has ever been written there yet. .git is excluded
+    # unconditionally -- protected_patterns describes source, not
+    # infrastructure, and record_protected_paths_tool's own validation
+    # actually forbids declaring .git as protected, so it must be handled
+    # here or it would otherwise fall through as "not source" and become
+    # writable.
+    def scratch_writable_relative_paths
+      @scratch_writable_relative_paths ||= begin
+        protected_roots = protected_patterns.map { |pattern| glob_root(pattern) }.uniq
+        # No declared protected patterns means we don't yet know what's
+        # source -- fail closed (nothing is scratch) rather than open.
+        protected_roots = [ "." ] if protected_roots.empty?
+        writable_complement(root_dir, protected_roots.map { |root| root_dir.join(root).cleanpath } + [ root_dir.join(".git") ])
+          .map { |path| path.relative_path_from(root_dir).to_s }
       end
     end
 
     private
+
+    # Recursively grants everything under `dir` except subtrees rooted at
+    # `protected`: a directory with nothing protected inside or above it is
+    # granted wholesale (including files/subdirectories created later, since
+    # callers turn this into a `<path>/**` rule); otherwise we descend into
+    # its existing children to carve the protected subtree back out.
+    def writable_complement(dir, protected)
+      return [] if protected.any? { |path| path == dir }
+      overlaps_protected = protected.any? do |path|
+        path.to_s.start_with?("#{dir}#{File::SEPARATOR}") || dir.to_s.start_with?("#{path}#{File::SEPARATOR}")
+      end
+      return [ dir ] unless overlaps_protected
+      return [] unless dir.directory?
+
+      dir.children.flat_map { |child| writable_complement(child, protected) }
+    end
 
     def normalize_path(path)
       value = path.to_s
