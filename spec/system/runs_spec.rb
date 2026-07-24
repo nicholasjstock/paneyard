@@ -2,7 +2,7 @@ require "rails_helper"
 
 RSpec.describe "workspace runs", type: :system do
   it "launches a run and lands on the workspace-scoped detail page" do
-    workspace = create_workspace
+    workspace = create_workspace(source_checkout: true)
 
     visit workspace_runs_path(workspace)
     click_link "Launch task"
@@ -544,10 +544,11 @@ RSpec.describe "workspace runs", type: :system do
     expect(worker.stopped_at).to be_present
   end
 
-  def create_workspace
+  def create_workspace(source_checkout: false)
     suffix = SecureRandom.hex(4)
+    root_path = source_checkout ? create_source_checkout : "/tmp/planner-#{suffix}"
     Workspace.create!(
-      name: "planner-#{suffix}", root_path: "/tmp/planner-#{suffix}",
+      name: "planner-#{suffix}", root_path: root_path,
       protected_path_patterns: [ "app/controllers/**/*.rb" ]
     )
   end
