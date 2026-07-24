@@ -82,7 +82,9 @@ class Worker < ApplicationRecord
       startedAt: started_at.iso8601(3),
       stoppedAt: stopped_at&.iso8601(3),
       handoffCompletedAt: handoff_completed_at&.iso8601(3),
-      stopReason: stop_reason
+      stopReason: stop_reason,
+      inheritedArtifacts: inherited_artifacts,
+      producedArtifacts: produced_artifacts
     }
   end
 

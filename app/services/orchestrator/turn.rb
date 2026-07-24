@@ -10,9 +10,13 @@ module Orchestrator
     # task is part of the MCP tool's input schema for API-surface
     # consistency with the other turn tools, but -- matching
     # scripts/worker-turn.ts exactly -- is never actually read here.
-    def run_worker_turn(run_id:, role:, nickname:, scope:, result:, evidence_outcome: nil, evidence_citations: [], diagnosis_findings: nil, now: Time.current, previous_state: nil)
+    def run_worker_turn(run_id:, role:, nickname:, scope:, result:, evidence_outcome: nil, evidence_citations: [], diagnosis_findings: nil, produced_artifacts: nil, now: Time.current, previous_state: nil)
       DiagnosisEvidenceGate.validate!(run_id:, nickname:, scope:, evidence_outcome:, evidence_citations:)
       StructuredDiagnosisFindings.persist!(run_id:, nickname:, scope:, findings: diagnosis_findings) if diagnosis_findings.present?
+      
+      # Validate and record produced artifacts
+      artifact_names = validate_and_record_artifacts!(run_id:, nickname:, produced_artifacts:)
+      
       following_steps = previous_state&.dig(:following_steps) || []
       active_worker_ids = Worker.where(run_id: run_id, status: "running").pluck(:worker_id).to_set
 
@@ -64,6 +68,7 @@ module Orchestrator
         context: [
           "Worker #{nickname} (role #{role}) reported this result for run #{run_id}, scope #{scope}: #{result}",
           (evidence_outcome.present? ? "Evidence outcome: #{evidence_outcome}; citations: #{Array(evidence_citations).join(', ')}." : nil),
+          (artifact_names.any? ? "Produced artifacts: #{artifact_names.join(', ')}." : nil),
           "Current followingSteps queue (JSON, decided by the previous planner_turn call): #{following_steps.to_json}"
         ].compact.join(" "),
         requested_role: "planner",
@@ -88,6 +93,47 @@ module Orchestrator
 
       { planner_request: { request_id: planner_request.request_id }, next_state: next_state }
     end
+
+    def validate_and_record_artifacts!(run_id:, nickname:, produced_artifacts:)
+      return [] unless produced_artifacts.present?
+
+      run = Run.find_by!(run_id: run_id)
+      worker = Worker.where(run_id:, nickname:).order(created_at: :desc).first
+      raise ArgumentError, "Worker not found for artifact recording: #{nickname}" unless worker
+
+      artifact_names = produced_artifacts.map { |a| a[:name] || a["name"] }
+      
+      # Validate all declared artifacts exist in the artifact store
+      missing = artifact_names.reject do |name|
+        begin
+          path = ArtifactStore.resolve_path(run.target_root, run_id, name)
+          File.file?(path)
+        rescue ArgumentError
+          false
+        end
+      end
+      
+      raise ArgumentError, "Declared artifacts do not exist: #{missing.join(', ')}" if missing.any?
+
+      # Update worker.produced_artifacts
+      worker.update_column(:produced_artifacts, artifact_names)
+      
+      # Record artifact inheritance in RunContext
+      artifact_names.each do |artifact_name|
+        Orchestrator::RunContext.upsert!(
+          run_id: run_id,
+          entry_key: "artifact_produced_#{artifact_name}_by_#{worker.worker_id}",
+          kind: "fact",
+          status: "confirmed",
+          content: "Worker #{nickname} (#{worker.worker_id}) produced artifact: #{artifact_name}",
+          evidence_ref: artifact_name,
+          created_by: "orchestrator"
+        )
+      end
+
+      artifact_names
+    end
+    private_class_method :validate_and_record_artifacts!
 
     def completed_result?(result)
       result.to_s.match?(/\A\s*\[DONE\]/i)
@@ -154,6 +200,10 @@ module Orchestrator
       # a UI that still reads "awaiting_user_feedback", so no new work may be queued
       # until the question is answered.
       has_open_blocking_question = UserQuestion.exists?(run_id: run_id, status: "open", priority: "blocking")
+
+      # Find prior worker's artifacts for inheritance
+      prior_worker_artifacts, prior_worker_id = collect_prior_worker_artifacts(run_id: run_id)
+
       jobs =
         if has_open_blocking_question
           []
@@ -161,7 +211,9 @@ module Orchestrator
           Planner.publish_planner_jobs(
             run_id: run_id,
             summary: summary,
-            plan: { summary: summary, next_step: next_step, following_steps: following_steps }
+            plan: { summary: summary, next_step: next_step, following_steps: following_steps },
+            prior_worker_artifacts: prior_worker_artifacts,
+            prior_worker_id: prior_worker_id
           )
         end
       # The planner that is submitting this decision remains registered as
@@ -203,6 +255,16 @@ module Orchestrator
 
       { jobs: jobs, next_state: next_state }
     end
+
+    def collect_prior_worker_artifacts(run_id:)
+      # Find the most recent worker who is not a planner and has stopped
+      prior_worker = Worker.where(run_id: run_id, status: "stopped").where.not(role: "planner").order(stopped_at: :desc).first
+      return [[], nil] unless prior_worker
+
+      artifacts = Array(prior_worker.produced_artifacts).compact
+      [artifacts, prior_worker.worker_id]
+    end
+    private_class_method :collect_prior_worker_artifacts
 
     def enforce_branch_progression!(run:, next_step:)
       return unless next_step

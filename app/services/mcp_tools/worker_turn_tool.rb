@@ -27,12 +27,20 @@ module McpTools
             },
             objective: { type: [ "string", "null" ] }
           }
+        },
+        producedArtifacts: {
+          type: [ "array", "null" ],
+          items: {
+            type: "object", additionalProperties: false,
+            properties: { name: { type: "string" }, description: { type: "string" } },
+            required: %w[name]
+          }
         }
       },
       required: %w[runId role result task]
     )
 
-    def self.call(runId:, role:, result:, task:, server_context:, nickname: nil, scope: nil, evidenceOutcome: nil, evidenceCitations: [], diagnosisFindings: nil)
+    def self.call(runId:, role:, result:, task:, server_context:, nickname: nil, scope: nil, evidenceOutcome: nil, evidenceCitations: [], diagnosisFindings: nil, producedArtifacts: nil)
       authenticated_worker = WorkerAuthorization.worker!(server_context:, run_id: runId)
       worker = authenticated_worker || resolve_worker!(run_id: runId, role:, nickname:, scope:)
       nickname = worker.nickname
@@ -41,7 +49,8 @@ module McpTools
       structured = Orchestrator::Turn.run_worker_turn(
         run_id: runId, role: role, nickname: nickname, scope: scope, result: result,
         evidence_outcome: evidenceOutcome, evidence_citations: evidenceCitations,
-        diagnosis_findings: diagnosisFindings&.deep_symbolize_keys, previous_state: previous_state
+        diagnosis_findings: diagnosisFindings&.deep_symbolize_keys, previous_state: previous_state,
+        produced_artifacts: producedArtifacts
       )
       Orchestrator::TickState.write(structured[:next_state])
       worker.update_column(:handoff_completed_at, Time.current)

@@ -160,7 +160,7 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
       model_tier: "small", execution_mode: "verification", write_scope: "source_protected", allowed_paths: []
     )
 
-    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker).once.and_return(instance_double(Worker))
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker).once.and_return(instance_double(Worker, worker_id: "test-worker-id"))
 
     Orchestrator::SpawnRequestedWorkers.call(run:)
 
@@ -208,5 +208,125 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
 
     assert_empty spawned
     assert_equal "dismissed", request.reload.status
+  end
+
+  it "dismisses a worker spawn request when required artifacts do not exist" do
+    workspace = Workspace.create!(name: "spawn-missing-artifacts-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "spawn-missing-artifacts-#{SecureRandom.hex(4)}", task: "Check artifact validation",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    request = run.spawn_requests.create!(
+      asked_by: "planner", scope: "next-worker.md", text: "Do work.",
+      requested_role: "worker", priority: "blocking", required_artifacts: [ "diagnosis.md", "evidence.json" ]
+    )
+
+    expect(Orchestrator::WorkerSpawner).not_to receive(:spawn_worker)
+
+    spawned = Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    assert_empty spawned
+    assert_equal "dismissed", request.reload.status
+    assert_match(/Required artifacts not found/, request.reload.dismissal_note)
+  end
+
+  it "spawns a worker when all required artifacts exist" do
+    project_root = Dir.mktmpdir
+    artifact_dir = File.join(project_root, ".workflow-orchestrator", "artifacts", "test-run")
+    FileUtils.mkdir_p(artifact_dir)
+    File.write(File.join(artifact_dir, "diagnosis.md"), "# Diagnosis\nFound the issue.")
+    File.write(File.join(artifact_dir, "evidence.json"), '{"key": "value"}')
+
+    workspace = Workspace.create!(name: "spawn-with-artifacts-#{SecureRandom.hex(4)}", root_path: project_root)
+    run = workspace.runs.create!(
+      run_id: "test-run", task: "Work with artifacts",
+      target_root: project_root, launcher_variant: "claude", status: "running"
+    )
+    request = run.spawn_requests.create!(
+      asked_by: "planner", scope: "next-worker.md", text: "Review the artifacts.",
+      requested_role: "worker", priority: "blocking",
+      required_artifacts: [ "diagnosis.md", "evidence.json" ]
+    )
+
+    spawned = nil
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+      spawned = kwargs
+      instance_double(Worker, worker_id: kwargs[:worker_id])
+    end
+
+    Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    assert_equal "fulfilled", request.reload.status
+    assert_not_nil spawned
+  ensure
+    FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
+  end
+
+  it "includes inherited artifact metadata in the worker prompt" do
+    project_root = Dir.mktmpdir
+    artifact_dir = File.join(project_root, ".workflow-orchestrator", "artifacts", "test-run-2")
+    FileUtils.mkdir_p(artifact_dir)
+    File.write(File.join(artifact_dir, "diagnosis.md"), "# Diagnosis\nAnalysis of the issue.")
+    File.write(File.join(artifact_dir, "trace.log"), "Line 1\nLine 2\nLine 3")
+
+    workspace = Workspace.create!(name: "spawn-artifact-prompt-#{SecureRandom.hex(4)}", root_path: project_root)
+    run = workspace.runs.create!(
+      run_id: "test-run-2", task: "Check prompt generation",
+      target_root: project_root, launcher_variant: "claude", status: "running"
+    )
+    request = run.spawn_requests.create!(
+      asked_by: "planner", scope: "next-worker.md", text: "Review the prior work.",
+      requested_role: "worker", priority: "blocking",
+      inherited_artifacts: [ "diagnosis.md", "trace.log" ]
+    )
+
+    spawned = nil
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+      spawned = kwargs
+      instance_double(Worker, worker_id: kwargs[:worker_id])
+    end
+
+    Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    assert_equal "fulfilled", request.reload.status
+    assert_not_nil spawned
+    prompt = spawned[:prompt]
+    assert_includes prompt, "## Inherited Artifacts"
+    assert_includes prompt, "diagnosis.md"
+    assert_includes prompt, "trace.log"
+    assert_includes prompt, "Use `read_workflow_artifact` to read these files"
+  ensure
+    FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
+  end
+
+  it "passes inherited_artifacts parameter to spawn_worker" do
+    project_root = Dir.mktmpdir
+    artifact_dir = File.join(project_root, ".workflow-orchestrator", "artifacts", "test-run-3")
+    FileUtils.mkdir_p(artifact_dir)
+    File.write(File.join(artifact_dir, "diagnosis.md"), "# Diagnosis")
+
+    workspace = Workspace.create!(name: "spawn-worker-artifacts-#{SecureRandom.hex(4)}", root_path: project_root)
+    run = workspace.runs.create!(
+      run_id: "test-run-3", task: "Check inherited_artifacts parameter",
+      target_root: project_root, launcher_variant: "claude", status: "running"
+    )
+    request = run.spawn_requests.create!(
+      asked_by: "planner", scope: "next-worker.md", text: "Do work.",
+      requested_role: "worker", priority: "blocking",
+      inherited_artifacts: [ "diagnosis.md" ]
+    )
+
+    spawned = nil
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+      spawned = kwargs
+      instance_double(Worker, worker_id: kwargs[:worker_id])
+    end
+
+    Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    assert_equal "fulfilled", request.reload.status
+    assert_equal [ "diagnosis.md" ], spawned[:inherited_artifacts]
+  ensure
+    FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
   end
 end

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "workflow": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp/worker",
+      "headers": {
+        "Authorization": "Bearer 0a32a22d54b358ea39f9305100be73daa34b9abcf06d56acd33b52bab2a8a07b"
+      }
+    }
+  }
+}
