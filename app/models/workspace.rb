@@ -30,13 +30,6 @@ class Workspace < ApplicationRecord
     Pathname(root_path).join("main").expand_path.to_s
   end
 
-  def test_write_roots
-    test_path_patterns.select do |path|
-      candidate = Pathname(source_root).join(path).cleanpath
-      candidate.directory? && candidate.to_s.start_with?("#{Pathname(source_root).expand_path}/")
-    end
-  end
-
   # These patterns are readable by every worker but writable only by an
   # implementation worker. They deliberately describe source, configuration,
   # and test paths, never the entire checkout: dependency caches and generated

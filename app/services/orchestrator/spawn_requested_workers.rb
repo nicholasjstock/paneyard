@@ -251,9 +251,10 @@ module Orchestrator
       # A planner decides whether a worker is implementing or repairing
       # infrastructure; it must not have
       # to foresee every production and test file the implementation needs.
-      # The project-init-discovered source patterns stay protected for all
-      # other worker modes and are granted wholesale only here.
-      (run.workspace.protected_write_patterns + run.workspace.test_write_roots.map { |root| "#{root}/**" }).uniq
+      # The project-init-discovered source patterns (already including test
+      # paths -- see the record_protected_paths prompt) stay protected for
+      # all other worker modes and are granted wholesale only here.
+      run.workspace.protected_write_patterns
     end
   end
 end
