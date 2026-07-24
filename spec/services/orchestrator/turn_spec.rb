@@ -28,7 +28,7 @@ RSpec.describe Orchestrator::Turn do
       previous_state: Orchestrator::TickState.default_state(run.run_id)
     )
 
-    assert_equal "blocked_on_user", result.dig(:next_state, :phase)
+    assert_equal "awaiting_user_feedback", result.dig(:next_state, :phase)
   end
 
   it "does not dispatch a new spawn request while an operator answer is open" do
@@ -61,7 +61,7 @@ RSpec.describe Orchestrator::Turn do
       previous_state: Orchestrator::TickState.default_state(run.run_id)
     )
 
-    assert_equal "blocked_on_user", result.dig(:next_state, :phase)
+    assert_equal "awaiting_user_feedback", result.dig(:next_state, :phase)
     assert_empty result[:jobs]
     assert_not SpawnRequest.exists?(run_id: run.run_id, scope: "baseline.json")
   end

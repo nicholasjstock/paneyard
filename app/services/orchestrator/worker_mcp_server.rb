@@ -40,7 +40,6 @@ module Orchestrator
           ::McpTools::GetProjectMemoryTool,
           ::McpTools::RecordProjectSetupTool,
           ::McpTools::RecordProtectedPathsTool,
-          ::McpTools::RecordTestPathsTool,
           ::McpTools::ReportFailedApproachTool,
           ::McpTools::SubmitAcceptanceVerificationTool
       ]

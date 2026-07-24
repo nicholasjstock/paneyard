@@ -21,10 +21,7 @@ module Orchestrator
       catch-all glob or negated pattern: list only positive safe patterns. Exclude dependency directories and caches (for example node_modules, vendor/bundle, .git), build
       output, runtime state, logs, and generated artifacts. Read-only workers cannot modify these paths; implementation
       workers receive the complete recorded glob list so they can make all changes genuinely required by a task without
-      a planner predicting individual files. Finally, call record_test_paths exactly once
-      with every existing workspace-relative directory that contains this project's maintained tests, derived from the
-      repository's test command/configuration; use [] only when the project has no test directories. This lets future
-      implementation workers update all relevant tests without a planner guessing their layout. These calls are required,
+      a planner predicting individual files. These calls are required,
       not optional: no real task run can start on this workspace until they land. Do not modify any files.
     TEXT
 

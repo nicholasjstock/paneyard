@@ -37,11 +37,11 @@ RSpec.describe "workspaces", type: :system do
       visit workspaces_path
       click_link "Add workspace"
       fill_in "Name", with: "planner-app-#{suffix}"
-      fill_in "Root path", with: "/tmp/planner-app-#{suffix}"
+      fill_in "Workspace root", with: "/tmp/planner-app-#{suffix}"
       click_button "Add workspace"
     end.to change(Run, :count).by(1)
 
-    expect(page).to have_text("Added workspace planner-app-#{suffix}. Discovering its dev environment and protected paths…")
+    expect(page).to have_text("Added workspace planner-app-#{suffix}. Discovering its dev environment and operational path metadata…")
     expect(page).to have_current_path(%r{/workspaces/\d+/runs})
     expect(page).to have_text("planner-app-#{suffix} Runs")
     expect(page).to have_no_link("Launch task")
@@ -67,9 +67,9 @@ RSpec.describe "workspaces", type: :system do
     visit workspaces_path
     within(find(".card", text: workspace.name, match: :first)) { click_link "Edit" }
 
-    expect(page).to have_field("Protected path patterns", with: "app/controllers/**/*.rb")
+    expect(page).to have_field("Protected source path patterns", with: "app/controllers/**/*.rb")
 
-    fill_in "Protected path patterns", with: "app/controllers/**/*.rb\ndb/migrate/**"
+    fill_in "Protected source path patterns", with: "app/controllers/**/*.rb\ndb/migrate/**"
     click_button "Save"
 
     expect(page).to have_text("Updated workspace #{workspace.name}.")

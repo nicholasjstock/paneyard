@@ -25,6 +25,9 @@ production: &recurring_jobs
   reconcile_run_commands:
     class: RunCommandReconcileJob
     schedule: every minute
+  reconcile_terminal_sessions:
+    class: TerminalSessionReconcileJob
+    schedule: every minute
   merge_approved_runs:
     class: MergeApprovedRunsJob
     schedule: every minute

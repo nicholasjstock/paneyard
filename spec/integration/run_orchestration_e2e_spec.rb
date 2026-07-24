@@ -27,6 +27,12 @@ RSpec.describe "run orchestration end to end" do
         content: "Not exercised by this spec.", evidence_ref: "n/a", recorded_by: "project_init"
       )
 
+      # This spec exercises the planner/worker/verifier loop, not worktree
+      # provisioning -- a real Orchestrator::GitWorktree.provision! would
+      # move target_root to a fresh disposable worktree elsewhere, breaking
+      # the file writes below that assume target_root stays @workspace_root.
+      allow(Orchestrator::GitWorktree).to receive(:provision!)
+
       LaunchRunJob.perform_now(run.id)
 
       expect(run.reload.status).to eq("running")

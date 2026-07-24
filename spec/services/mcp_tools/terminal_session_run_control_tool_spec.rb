@@ -1,27 +1,27 @@
 require "rails_helper"
 
-RSpec.describe McpTools::WorkspaceChatRunControlTool do
+RSpec.describe McpTools::TerminalSessionRunControlTool do
   include ActiveJob::TestHelper
 
-  it "resumes a run and queues orchestration only inside the chat workspace" do
-    own_workspace, chat = create_workspace_with_chat("own")
-    other_workspace, = create_workspace_with_chat("other")
+  it "resumes a run and queues orchestration only inside the session's workspace" do
+    own_workspace, session = create_workspace_with_session("own")
+    other_workspace, = create_workspace_with_session("other")
     run = create_run(own_workspace, "own-run")
     other_run = create_run(other_workspace, "other-run")
 
     assert_enqueued_with(job: TickRunJob) do
-      McpTools::WorkspaceChatRunControlTool.call(runId: run.run_id, action: "resume", server_context: { chat_id: chat.id })
+      McpTools::TerminalSessionRunControlTool.call(runId: run.run_id, action: "resume", server_context: { terminal_session_id: session.id })
     end
 
     assert_equal "running", run.reload.status
     assert_equal "planning", run.phase
     assert_raises(ActiveRecord::RecordNotFound) do
-      McpTools::WorkspaceChatRunControlTool.call(runId: other_run.run_id, action: "resume", server_context: { chat_id: chat.id })
+      McpTools::TerminalSessionRunControlTool.call(runId: other_run.run_id, action: "resume", server_context: { terminal_session_id: session.id })
     end
   end
 
   it "resumes a completed tick and requests recovery work instead of completing again" do
-    workspace, chat = create_workspace_with_chat("completed")
+    workspace, session = create_workspace_with_session("completed")
     run = create_run(workspace, "completed-run")
     run.update!(status: "completed", stopped_at: Time.current)
     Orchestrator::TickState.write(
@@ -30,7 +30,7 @@ RSpec.describe McpTools::WorkspaceChatRunControlTool do
     )
 
     perform_enqueued_jobs do
-      described_class.call(runId: run.run_id, action: "resume", server_context: { chat_id: chat.id })
+      described_class.call(runId: run.run_id, action: "resume", server_context: { terminal_session_id: session.id })
     end
 
     expect(run.reload.status).to eq("running")
@@ -41,9 +41,9 @@ RSpec.describe McpTools::WorkspaceChatRunControlTool do
 
   private
 
-  def create_workspace_with_chat(label)
+  def create_workspace_with_session(label)
     workspace = Workspace.create!(name: "#{label}-#{SecureRandom.hex(4)}", root_path: "/tmp/#{SecureRandom.hex(8)}")
-    [ workspace, workspace.workspace_chats.create! ]
+    [ workspace, workspace.create_terminal_session!(launcher_variant: "codex") ]
   end
 
   def create_run(workspace, run_id)

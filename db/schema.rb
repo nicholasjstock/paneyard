@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_23_070000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_24_110000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -308,6 +308,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_070000) do
     t.index ["run_id", "lineage_key"], name: "index_step_attempts_on_run_id_and_lineage_key"
   end
 
+  create_table "terminal_sessions", force: :cascade do |t|
+    t.string "cli_session_id"
+    t.integer "cols"
+    t.datetime "created_at", null: false
+    t.integer "exit_code"
+    t.string "exit_status_path"
+    t.datetime "last_attached_at"
+    t.string "launcher_variant", default: "claude", null: false
+    t.string "log_path"
+    t.integer "pid"
+    t.integer "process_group_id"
+    t.integer "rows"
+    t.integer "signal"
+    t.datetime "started_at"
+    t.string "status", default: "starting", null: false
+    t.datetime "stopped_at"
+    t.datetime "updated_at", null: false
+    t.integer "workspace_id", null: false
+    t.index ["workspace_id"], name: "index_terminal_sessions_on_workspace_id", unique: true
+  end
+
   create_table "user_questions", force: :cascade do |t|
     t.text "answer_text"
     t.datetime "answered_at"
@@ -374,28 +395,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_070000) do
     t.index ["worker_id"], name: "index_workers_on_worker_id", unique: true
   end
 
-  create_table "workspace_chat_messages", force: :cascade do |t|
-    t.text "content", null: false
-    t.datetime "created_at", null: false
-    t.string "role", null: false
-    t.string "status", default: "completed", null: false
-    t.datetime "updated_at", null: false
-    t.json "usage", default: {}, null: false
-    t.integer "workspace_chat_id", null: false
-    t.index ["workspace_chat_id"], name: "index_workspace_chat_messages_on_workspace_chat_id"
-  end
-
-  create_table "workspace_chats", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.text "last_error"
-    t.string "launcher_variant", default: "claude", null: false
-    t.string "status", default: "idle", null: false
-    t.string "title", default: "New conversation", null: false
-    t.datetime "updated_at", null: false
-    t.integer "workspace_id", null: false
-    t.index ["workspace_id"], name: "index_workspace_chats_on_workspace_id", unique: true
-  end
-
   create_table "workspace_memory_entries", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -418,7 +417,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_070000) do
     t.string "name", null: false
     t.json "protected_path_patterns", default: [], null: false
     t.string "root_path", null: false
-    t.json "test_path_patterns", default: [], null: false
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_workspaces_on_name", unique: true
     t.index ["root_path"], name: "index_workspaces_on_root_path", unique: true
@@ -428,8 +426,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_070000) do
   add_foreign_key "acceptance_criterion_steps", "acceptance_criteria"
   add_foreign_key "planner_decision_attempts", "planner_decisions"
   add_foreign_key "runs", "workspaces"
-  add_foreign_key "workspace_chat_messages", "workspace_chats"
-  add_foreign_key "workspace_chats", "workspaces"
+  add_foreign_key "terminal_sessions", "workspaces"
   add_foreign_key "workspace_memory_entries", "workspace_memory_entries", column: "supersedes_id"
   add_foreign_key "workspace_memory_entries", "workspaces"
 end

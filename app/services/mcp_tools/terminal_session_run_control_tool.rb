@@ -1,5 +1,5 @@
 module McpTools
-  class WorkspaceChatRunControlTool < MCP::Tool
+  class TerminalSessionRunControlTool < MCP::Tool
     ACTIONS = %w[stop resume tick reconcile retry_handoff].freeze
 
     tool_name "control_workspace_run"
@@ -13,8 +13,8 @@ module McpTools
     )
 
     def self.call(runId:, action:, server_context:, requestId: nil)
-      chat = server_context && WorkspaceChat.find_by(id: server_context[:chat_id])
-      workspace = chat&.workspace or raise "Workspace chat capability missing"
+      session = server_context && TerminalSession.find_by(id: server_context[:terminal_session_id])
+      workspace = session&.workspace or raise "Terminal session capability missing"
       run = workspace.runs.find_by!(run_id: runId)
       case action
       when "stop"
@@ -25,7 +25,7 @@ module McpTools
         Orchestrator::TickState.write(
           previous_state.merge(
             phase: "planning", tick_count: previous_state[:tick_count] + 1,
-            last_plan_summary: "Workspace chat resumed this run for recovery planning.",
+            last_plan_summary: "Terminal session resumed this run for recovery planning.",
             pending_spawn_keys: [], last_stall_finding: nil, last_updated_at: Time.current.iso8601(3)
           )
         )
@@ -43,7 +43,7 @@ module McpTools
           status: "open", fulfilled_by: nil, fulfilled_at: nil, fulfillment_note: nil, fulfilled_worker_id: nil
         )
         run.update!(status: "running", capacity_available_at: nil)
-        run.publish_phase!(phase: "planning", owner: "workspace_chat", summary: "Workspace chat requeued #{request.scope}.")
+        run.publish_phase!(phase: "planning", owner: "terminal_session", summary: "Terminal session requeued #{request.scope}.")
         TickRunJob.perform_later
       end
       ToolResponse.structured(runId:, action:, accepted: true)

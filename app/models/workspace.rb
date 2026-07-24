@@ -7,7 +7,7 @@
 class Workspace < ApplicationRecord
   has_many :runs, dependent: :restrict_with_error
   has_many :workspace_memory_entries, dependent: :restrict_with_error
-  has_many :workspace_chats, dependent: :destroy
+  has_one :terminal_session, dependent: :destroy
 
   validates :name, presence: true, uniqueness: true
   validates :root_path, presence: true, uniqueness: true
@@ -28,13 +28,6 @@ class Workspace < ApplicationRecord
   # this directory, never inside the source checkout.
   def source_root
     Pathname(root_path).join("main").expand_path.to_s
-  end
-
-  def test_write_roots
-    test_path_patterns.select do |path|
-      candidate = Pathname(source_root).join(path).cleanpath
-      candidate.directory? && candidate.to_s.start_with?("#{Pathname(source_root).expand_path}/")
-    end
   end
 
   # These patterns are readable by every worker but writable only by an

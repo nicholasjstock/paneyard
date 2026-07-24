@@ -5,7 +5,7 @@ module McpTools
     input_schema(
       properties: {
         runId: { type: "string" },
-        phase: { type: "string", enum: %w[starting planning waiting_on_workers stalled blocked_on_user completed] },
+        phase: { type: "string", enum: %w[starting planning waiting_on_workers stalled awaiting_user_feedback completed] },
         tickCount: { type: "integer", minimum: 0 },
         lastPlanSummary: { type: [ "string", "null" ] },
         pendingSpawnKeys: { type: "array", items: { type: "string" } },

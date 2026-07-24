@@ -2,7 +2,7 @@ require "rails_helper"
 
 RSpec.describe "orchestration failure paths" do
   it "marks the run failed when launch setup raises" do
-    run = create_run("launch-failure", status: "launching")
+    run = create_run("launch-failure", status: "launching", source_checkout: true)
     Orchestrator::ProjectMemory.record!(
       run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
       content: "Not exercised by this spec.", evidence_ref: "n/a", recorded_by: "project_init"
@@ -84,8 +84,8 @@ RSpec.describe "orchestration failure paths" do
     expect(worker.reload.status).to eq("running")
   end
 
-  def create_run(suffix, status: "running")
-    workspace_root = Dir.mktmpdir("workflow-#{suffix}")
+  def create_run(suffix, status: "running", source_checkout: false)
+    workspace_root = source_checkout ? create_source_checkout : Dir.mktmpdir("workflow-#{suffix}")
     FileUtils.mkdir_p(File.join(workspace_root, "front", "demo-output", "agents-sdk", "workers"))
     workspace = Workspace.create!(name: "planner-#{suffix}-#{SecureRandom.hex(4)}", root_path: workspace_root)
     Run.create!(

@@ -87,10 +87,9 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
   it "grants the complete project-init-protected source surface to implementation workers" do
     project_root = Dir.mktmpdir
     source_root = File.join(project_root, "main")
-    FileUtils.mkdir_p(File.join(source_root, "quality", "checks"))
     workspace = Workspace.create!(
       name: "spawn-test-roots-#{SecureRandom.hex(4)}", root_path: project_root,
-      protected_path_patterns: [ "app/**", "quality/checks/**" ], test_path_patterns: [ "quality/checks" ]
+      protected_path_patterns: [ "app/**", "quality/checks/**" ]
     )
     run = workspace.runs.create!(
       run_id: "spawn-test-roots-#{SecureRandom.hex(4)}", task: "Implement with tests", target_root: source_root,

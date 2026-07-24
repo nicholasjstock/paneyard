@@ -97,6 +97,15 @@ class Run < ApplicationRecord
     managed_worktree? && publication_status == "failed"
   end
 
+  # At most one blocking question is ever open on a run at a time -- a
+  # second one would just be noise once the operator is already the
+  # blocker, and Orchestrator::PullRequestResume relies on "the sole open
+  # blocking question" as the implicit target for a PR reply that doesn't
+  # reference one by id.
+  def open_blocking_question?
+    user_questions.open_only.where(priority: "blocking").exists?
+  end
+
   def capacity_blocked?(now: Time.current)
     capacity_available_at.present? && capacity_available_at > now
   end

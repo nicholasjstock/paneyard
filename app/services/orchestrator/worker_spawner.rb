@@ -132,19 +132,10 @@ module Orchestrator
       # the only piece of this that reaches a file path -- is validated by
       # validate_safe_path_segment! above before any path is built from it.
       stdin_read, stdin_write = IO.pipe
-      # unsetenv_others: true is required here for the same reason
-      # RunCommandRunner.start needs it (see its comment) -- otherwise
-      # Process.spawn merges worker_env onto this Rails process's own OS
-      # environment rather than replacing it, so this orchestrator's own
-      # Bundler activation (BUNDLE_GEMFILE, RUBYOPT, GEM_HOME -- set by
-      # config/boot.rb's `require "bundler/setup"`) leaks into the worker,
-      # making a `bundle exec rspec` run inside the worker's own worktree
-      # resolve gems against this app's Gemfile.lock instead of the target
-      # repo's.
       pid = Process.spawn(
         worker_env, "/bin/sh", "-c", worker_exit_wrapper, "workflow-worker-wrapper", exit_status_path, command, *args,
         chdir: driver == "claude" ? runtime_dir : root_dir,
-        pgroup: true, in: stdin_read, out: [ log_path, "a" ], err: [ log_path, "a" ], unsetenv_others: true
+        pgroup: true, in: stdin_read, out: [ log_path, "a" ], err: [ log_path, "a" ]
       )
       stdin_read.close
       stdin_write.write(enriched_prompt) if driver != "claude"
@@ -429,16 +420,37 @@ module Orchestrator
       nil
     end
 
-    # Explicit allowlist of vars the worker needs, rather than inheriting the
-    # spawning Rails process's full environment: paired with
-    # unsetenv_others: true at the Process.spawn call site, this is what
-    # keeps this app's own Bundler/Ruby activation (BUNDLE_GEMFILE, RUBYOPT,
-    # GEM_HOME, ...) from leaking into the worker.
-    INHERITED_ENV_KEYS = %w[HOME PATH SHELL USER LOGNAME TMPDIR].freeze
+    # config/boot.rb's `require "bundler/setup"` activates this orchestrator's
+    # own Gemfile by setting these vars on the Rails process's OS environment.
+    # Process.spawn merges a given env hash onto the parent's environment
+    # rather than replacing it, so without unsetting them explicitly, a
+    # worker's own `bundle exec` (e.g. running the target repo's test suite)
+    # would resolve gems against this app's Gemfile.lock instead of the
+    # target repo's. A nil value here removes the var from the child while
+    # leaving the rest of this process's environment -- including anything a
+    # test harness or deployment sets -- inherited normally (see
+    # spec/support/fake_agent_harness.rb, which depends on exactly that).
+    BUNDLER_ACTIVATION_ENV_KEYS = %w[
+      BUNDLE_GEMFILE BUNDLE_BIN_PATH BUNDLE_LOCKFILE BUNDLE_APP_CONFIG
+      BUNDLER_VERSION BUNDLER_SETUP RUBYOPT GEM_HOME GEM_PATH
+    ].freeze
+
+    # This Rails process may itself have been started from inside a Claude
+    # Code session (e.g. `bin/dev` run from a Claude Code terminal, or --
+    # as in this repo's own development -- launched by an agent's own Bash
+    # tool). Without stripping these, a spawned `claude` child inherits
+    # CLAUDE_CODE_CHILD_SESSION=1 and disables its own transcript saving,
+    # treating itself as a nested session of whatever spawned Rails.
+    # CLAUDE_CONFIG_DIR is deliberately left alone -- it points at the
+    # user's real config/credentials and spawned CLIs still need it.
+    NESTED_CLAUDE_CODE_ENV_KEYS = %w[
+      CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID
+      CLAUDE_CODE_CHILD_SESSION CLAUDE_PID CLAUDE_EFFORT AI_AGENT
+    ].freeze
 
     def build_worker_env
       codex_home = resolve_codex_home
-      worker_env = INHERITED_ENV_KEYS.index_with { |key| ENV[key] }.compact
+      worker_env = (BUNDLER_ACTIVATION_ENV_KEYS + NESTED_CLAUDE_CODE_ENV_KEYS).index_with { nil }
       worker_env["CODEX_HOME"] = codex_home if codex_home.present?
 
       api_key = ENV["OPENAI_API_KEY"]

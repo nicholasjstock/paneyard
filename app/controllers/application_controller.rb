@@ -6,6 +6,7 @@ class ApplicationController < ActionController::Base
   stale_when_importmap_changes
 
   helper_method :current_workspace
+  helper_method :current_terminal_session
   helper_method :current_runs
   helper_method :background_job_warning
 
@@ -20,6 +21,16 @@ class ApplicationController < ActionController::Base
 
   def current_workspace
     @current_workspace
+  end
+
+  # Every workspace has exactly one terminal session slot -- available from
+  # any workspace-scoped page (see the layout's launcher/drawer), not just
+  # the run screen it originally lived on.
+  def current_terminal_session
+    return unless current_workspace
+
+    @current_terminal_session ||= current_workspace.terminal_session ||
+      current_workspace.create_terminal_session!(launcher_variant: "claude")
   end
 
   def current_runs

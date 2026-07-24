@@ -10,8 +10,10 @@ RSpec.describe "workspace workers", type: :system do
 
     visit workspace_workers_path(workspace)
 
-    expect(page).to have_text("planner-alpha")
-    expect(page).to have_no_text("planner-beta")
+    within("#workers") do
+      expect(page).to have_text("planner-alpha")
+      expect(page).to have_no_text("planner-beta")
+    end
   end
 
   it "shows a worker detail page with the latest message and log content" do
