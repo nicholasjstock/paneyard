@@ -133,8 +133,11 @@ RSpec.describe "workspace runs", type: :system do
 
     expect(page).to have_text("Test the details page.")
     expect(page).to have_text("Work in progress")
-    expect(page).to have_text("Acceptance criteria & workers")
-    expect(page).to have_text("Other workers")
+    expect(page).to have_text("Workflow tree")
+    expect(page).to have_css("[data-testid='workflow-tree']")
+    expect(page).to have_no_css(".acceptance-criteria-panel")
+    expect(page).to have_no_css(".planner-history")
+    expect(page).to have_text("Other work")
     expect(page).to have_text("How it got here")
     expect(page).to have_text("Artifacts")
     expect(page).to have_text("Usage & planner")
@@ -143,6 +146,75 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text("workflow-plan.md")
     expect(page).to have_text("fix-summary.md")
     expect(page).to have_text("Final artifact line that must remain visible")
+  end
+
+  it "intermeshes a planner, its criteria, and assigned workers in one tree" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "workflow-tree", task: "Show the unified workflow hierarchy")
+    criterion = run.acceptance_criteria.create!(key: "ui-hierarchy", content: "The workflow hierarchy is visible", status: "in_progress")
+    worker = create_run_worker(run, nickname: "criterion-worker")
+    request = run.spawn_requests.create!(
+      request_id: SecureRandom.uuid, asked_by: "planner", requested_role: "worker", scope: "ui-hierarchy",
+      text: "Implement the hierarchy", status: "fulfilled", priority: "advisory", fulfilled_worker_id: worker.worker_id,
+      lineage_key: "criterion:ui-hierarchy"
+    )
+    criterion.fulfillment_steps.create!(run_id: run.run_id, lineage_key: request.lineage_key)
+
+    visit workspace_run_path(workspace, run)
+
+    expect(page).to have_css("[data-testid='workflow-tree']")
+    tree = find("[data-testid='workflow-tree']")
+    expect(tree).to have_text("Workflow planner")
+    expect(tree).to have_text("ui-hierarchy")
+    expect(tree).to have_css(".workflow-criterion-node .worker-row", text: "criterion-worker")
+    expect(tree.text.index("Workflow planner")).to be < tree.text.index("ui-hierarchy")
+  end
+
+  it "nests planner workers under their criterion in execution order without duplicating them at the root" do
+    workspace = create_workspace
+    run = create_run(workspace:, suffix: "nested-workflow-tree", task: "Show nested planner execution")
+    root_criterion = run.acceptance_criteria.create!(
+      key: "parent-work",
+      content: "The parent work is visible",
+      status: "in_progress"
+    )
+    child_criterion = run.acceptance_criteria.create!(
+      key: "nested-work",
+      content: "The nested work is visible",
+      status: "in_progress",
+      parent: root_criterion
+    )
+    nested_planner = create_run_worker(run, nickname: "nested-planner", role: "planner")
+    nested_request = run.spawn_requests.create!(
+      request_id: SecureRandom.uuid, asked_by: "planner", requested_role: "planner", scope: "parent-work",
+      text: "Plan the nested work", status: "fulfilled", priority: "blocking",
+      fulfilled_worker_id: nested_planner.worker_id, lineage_key: "criterion:parent-work"
+    )
+    root_criterion.fulfillment_steps.create!(run_id: run.run_id, lineage_key: nested_request.lineage_key)
+    child_worker = create_run_worker(run, nickname: "nested-worker")
+    child_request = run.spawn_requests.create!(
+      request_id: SecureRandom.uuid, asked_by: "nested-planner", requested_role: "worker", scope: "nested-work",
+      text: "Implement the nested work", status: "fulfilled", priority: "advisory",
+      fulfilled_worker_id: child_worker.worker_id, lineage_key: "criterion:nested-work"
+    )
+    child_criterion.fulfillment_steps.create!(run_id: run.run_id, lineage_key: child_request.lineage_key)
+
+    visit workspace_run_path(workspace, run)
+
+    trees = all("[data-testid='workflow-tree']")
+    tree = trees.first
+    tree_text = tree.text
+    expect(tree_text).to include("nested-planner", "nested-work", "nested-worker")
+    expect(tree_text.scan("nested-planner").length).to eq(1)
+    root_planners = tree.all(
+      :xpath,
+      "./li[contains(concat(' ', normalize-space(@class), ' '), ' workflow-planner-node ')]"
+    )
+    expect(root_planners.length).to eq(1)
+    expect(root_planners.first.all(".workflow-tree-label strong").first.text).to eq("Workflow planner")
+    expect(tree_text.index("parent-work")).to be < tree_text.index("nested-planner")
+    expect(tree_text.index("nested-planner")).to be < tree_text.index("nested-work")
+    expect(tree_text.index("nested-work")).to be < tree_text.index("nested-worker")
   end
 
   it "shows a run-scoped background command and can stop it from the dashboard" do
@@ -553,6 +625,20 @@ RSpec.describe "workspace runs", type: :system do
     )
   end
 
+  def create_source_checkout
+    parent = Dir.mktmpdir("workflow-system-source")
+    main = File.join(parent, "main")
+    FileUtils.mkdir_p(main)
+    system("git", "-C", main, "init", "-b", "main", out: File::NULL, err: File::NULL) || raise("could not initialize source checkout")
+    system("git", "-C", main, "config", "user.email", "system-spec@example.test")
+    system("git", "-C", main, "config", "user.name", "System Spec")
+    File.write(File.join(main, "README.md"), "isolated launch fixture\n")
+    system("git", "-C", main, "add", "README.md") || raise("could not stage source checkout")
+    system("git", "-C", main, "commit", "-m", "Initialize system spec checkout", out: File::NULL, err: File::NULL) || raise("could not commit source checkout")
+    system("git", "-C", main, "remote", "add", "origin", "https://example.test/workflow.git") || raise("could not configure source checkout remote")
+    parent
+  end
+
   def create_run(workspace:, suffix:, task:, status: "running", started_at: Time.current)
     Run.create!(
       run_id: "demo-#{suffix}-#{SecureRandom.hex(4)}",
@@ -566,11 +652,11 @@ RSpec.describe "workspace runs", type: :system do
     )
   end
 
-  def create_run_worker(run, nickname:, status: "running", stop_reason: nil, handoff_completed_at: nil)
+  def create_run_worker(run, nickname:, role: "worker", status: "running", stop_reason: nil, handoff_completed_at: nil)
     workers_dir = File.join(run.target_root, "front", "demo-output", "agents-sdk", "workers")
     run.workers.create!(
       worker_id: SecureRandom.uuid,
-      role: "worker",
+      role: role,
       nickname: nickname,
       reason: "Inspect the worker command center.",
       scope: "fix-summary.md",

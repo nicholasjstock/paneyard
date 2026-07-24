@@ -45,6 +45,10 @@ class RunsController < ApplicationController
     @planner_decisions = @run.planner_decisions.includes(:spawn_request, :attempts).order(created_at: :desc).to_a
     @acceptance_criteria = @run.acceptance_criteria.roots.includes(:children).to_a
     @criterion_worker_groups = Orchestrator::AcceptanceCriteriaWorkers.group(run_id: @run.run_id, activities: @worker_activities)
+    @planner_activities = @worker_activities.select { |activity| activity[:worker].role == "planner" }
+    @nested_planner_ids = @criterion_worker_groups.values.flatten.uniq
+      .select { |activity| activity[:worker].role == "planner" }
+      .map { |activity| activity[:worker].worker_id }
     @latest_planner_decision = @planner_decisions.first
     @usage_summary = usage_summary
     @run_now = build_run_now

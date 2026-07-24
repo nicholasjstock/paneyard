@@ -103,30 +103,21 @@
     </section>
   </div>
 
-  <% if @acceptance_criteria.any? || @worker_activities.any? %>
-    <section class="panel span-2 acceptance-criteria-panel">
+  <% if @acceptance_criteria.any? || @worker_activities.any? || @planner_decisions.any? %>
+    <section class="panel span-2 workflow-tree-panel">
       <div class="panel-header">
         <div>
-          <h2>Acceptance criteria &amp; workers</h2>
-          <p class="muted">The run's outcome contract, established on the first planner decision, with the workers dispatched toward each criterion nested underneath it.</p>
+          <h2>Workflow tree</h2>
+          <p class="muted">Planners, acceptance criteria, workers, and nested planning stay together at the point where the work occurs.</p>
         </div>
       </div>
-      <% if @acceptance_criteria.any? %>
-        <%= render "acceptance_criteria", criteria: @acceptance_criteria, worker_groups: @criterion_worker_groups, run: @run, current_workspace: current_workspace %>
-      <% else %>
-        <p class="empty">No acceptance criteria established yet.</p>
-      <% end %>
-      <% unassigned_workers = @criterion_worker_groups[Orchestrator::AcceptanceCriteriaWorkers::UNASSIGNED] || [] %>
-      <% if unassigned_workers.any? %>
-        <div class="unassigned-workers">
-          <p class="muted">Other workers <span class="mono">(not tied to a specific criterion)</span></p>
-          <div class="worker-list">
-            <% unassigned_workers.each do |activity| %>
-              <%= render "worker_row", activity: activity, run: @run, current_workspace: current_workspace %>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
+      <%= render "workflow_tree",
+        planners: @planner_activities.reject { |activity| @nested_planner_ids.include?(activity[:worker].worker_id) },
+        criteria: @acceptance_criteria,
+        worker_groups: @criterion_worker_groups,
+        planner_decisions: @planner_decisions,
+        run: @run,
+        current_workspace: current_workspace %>
     </section>
   <% end %>
 
@@ -163,23 +154,6 @@
         <span class="muted"><%= @usage_summary[:models].map { |model, count| "#{model}: #{count}" }.join(", ").presence || "no completed telemetry" %></span>
       </div>
     </div>
-    <section class="planner-history">
-      <div class="planner-history-heading">
-        <div>
-          <span class="stat-label">Planner decision history</span>
-          <p class="muted">One expandable item for every persisted planner decision, newest first.</p>
-        </div>
-        <span class="muted"><%= pluralize(@planner_decisions.count, "database row") %></span>
-      </div>
-      <% if @planner_decisions.any? %>
-        <% total = @planner_decisions.count %>
-        <% @planner_decisions.each_with_index do |decision, index| %>
-          <%= render "planner_decision", decision: decision, number: total - index %>
-        <% end %>
-      <% else %>
-        <p class="empty">No planner decision has been persisted yet.</p>
-      <% end %>
-    </section>
     </div>
   </details>
 

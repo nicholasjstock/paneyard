@@ -1,0 +1,32 @@
+<% planners = planners.presence || [{ worker: nil }] %>
+<ul class="workflow-tree" data-testid="workflow-tree">
+  <% planners.each_with_index do |planner, planner_index| %>
+    <% planner_worker = planner[:worker] %>
+    <li class="workflow-tree-node workflow-planner-node">
+      <div class="workflow-tree-label">
+        <span class="workflow-tree-kind">Planner</span>
+        <strong><%= planner_worker&.nickname || "Workflow planner" %></strong>
+        <% if planner_worker %><span class="badge <%= planner[:display_status] %>"><%= planner[:status_label] %></span><% end %>
+      </div>
+      <% if planner_index.zero? && planner_decisions.any? %>
+        <div class="workflow-planner-decisions">
+          <% planner_decisions.each_with_index do |decision, index| %>
+            <%= render "planner_decision", decision: decision, number: planner_decisions.length - index %>
+          <% end %>
+        </div>
+      <% end %>
+      <% if criteria.any? %>
+        <%= render "workflow_tree_criteria", criteria: criteria, worker_groups: worker_groups, run: run, current_workspace: current_workspace %>
+      <% else %>
+        <p class="empty">No acceptance criteria established yet.</p>
+      <% end %>
+    </li>
+  <% end %>
+  <% unassigned_workers = worker_groups[Orchestrator::AcceptanceCriteriaWorkers::UNASSIGNED] || [] %>
+  <% if unassigned_workers.any? %>
+    <li class="workflow-tree-node workflow-unassigned-node">
+      <div class="workflow-tree-label"><span class="workflow-tree-kind">Other work</span></div>
+      <div class="worker-list"><% unassigned_workers.each do |activity| %><%= render "worker_row", activity: activity, run: run, current_workspace: current_workspace %><% end %></div>
+    </li>
+  <% end %>
+</ul>
