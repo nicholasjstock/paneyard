@@ -61,6 +61,7 @@ module Orchestrator
 
       policy = WorkerExecutionPolicy.new(
         root_dir:, mode:, write_scope: write_scope.presence || "source_protected", allowed_paths:,
+        protected_patterns: run.workspace.protected_write_patterns,
         profile_name: "worker-#{worker_id.delete('-')}"
       ) unless mcp_override
 
@@ -131,10 +132,19 @@ module Orchestrator
       # the only piece of this that reaches a file path -- is validated by
       # validate_safe_path_segment! above before any path is built from it.
       stdin_read, stdin_write = IO.pipe
+      # unsetenv_others: true is required here for the same reason
+      # RunCommandRunner.start needs it (see its comment) -- otherwise
+      # Process.spawn merges worker_env onto this Rails process's own OS
+      # environment rather than replacing it, so this orchestrator's own
+      # Bundler activation (BUNDLE_GEMFILE, RUBYOPT, GEM_HOME -- set by
+      # config/boot.rb's `require "bundler/setup"`) leaks into the worker,
+      # making a `bundle exec rspec` run inside the worker's own worktree
+      # resolve gems against this app's Gemfile.lock instead of the target
+      # repo's.
       pid = Process.spawn(
         worker_env, "/bin/sh", "-c", worker_exit_wrapper, "workflow-worker-wrapper", exit_status_path, command, *args,
         chdir: driver == "claude" ? runtime_dir : root_dir,
-        pgroup: true, in: stdin_read, out: [ log_path, "a" ], err: [ log_path, "a" ]
+        pgroup: true, in: stdin_read, out: [ log_path, "a" ], err: [ log_path, "a" ], unsetenv_others: true
       )
       stdin_read.close
       stdin_write.write(enriched_prompt) if driver != "claude"
@@ -419,9 +429,16 @@ module Orchestrator
       nil
     end
 
+    # Explicit allowlist of vars the worker needs, rather than inheriting the
+    # spawning Rails process's full environment: paired with
+    # unsetenv_others: true at the Process.spawn call site, this is what
+    # keeps this app's own Bundler/Ruby activation (BUNDLE_GEMFILE, RUBYOPT,
+    # GEM_HOME, ...) from leaking into the worker.
+    INHERITED_ENV_KEYS = %w[HOME PATH SHELL USER LOGNAME TMPDIR].freeze
+
     def build_worker_env
       codex_home = resolve_codex_home
-      worker_env = { "HOME" => ENV["HOME"], "PATH" => ENV["PATH"] }
+      worker_env = INHERITED_ENV_KEYS.index_with { |key| ENV[key] }.compact
       worker_env["CODEX_HOME"] = codex_home if codex_home.present?
 
       api_key = ENV["OPENAI_API_KEY"]

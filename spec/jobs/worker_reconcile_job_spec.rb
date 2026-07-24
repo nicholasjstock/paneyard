@@ -46,6 +46,50 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "classifies a Codex usage-limit exit from the worker log and parses its absolute reset time" do
+    workspace = Workspace.create!(name: "reconcile-codex-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace: workspace,
+      run_id: "reconcile-codex-#{SecureRandom.hex(4)}",
+      task: "Test worker reconciliation",
+      target_root: workspace.root_path,
+      launcher_variant: "codex",
+      status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    reset_at = 3.days.from_now.change(hour: 19, min: 3)
+    File.write(log_path, <<~LOG)
+      ERROR: You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at #{reset_at.strftime('%b')} #{reset_at.day}th, #{reset_at.year} #{reset_at.strftime('%-I:%M %p')}.
+    LOG
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid,
+      run_id: run.run_id,
+      role: "committer",
+      nickname: "committer-test",
+      reason: "Test worker",
+      scope: "test.md",
+      status: "running",
+      pid: 999_999_998,
+      prompt_path: log_path,
+      log_path: log_path,
+      last_message_path: log_path,
+      env_path: log_path,
+      command: "codex"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    assert_equal "stopped", worker.reload.status
+    assert_equal "Codex usage limit reached; worker exited before completing its handoff.", worker.stop_reason
+    run.reload
+    assert_operator run.capacity_available_at, :>, Time.current
+    assert_in_delta reset_at, run.capacity_available_at, 1.minute
+    assert_equal "waiting_on_capacity", run.phase
+    assert run.capacity_blocked?
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "bounds stream-log diagnostics returned to planners" do
     directory = Dir.mktmpdir
     log_path = File.join(directory, "worker.log")

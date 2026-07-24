@@ -89,6 +89,25 @@ RSpec.describe PlannerDecisionJob do
     assert_equal "waiting_on_capacity", run.phase
   end
 
+  it "reopens the request and blocks the run for capacity on a Codex usage-limit failure instead of hard-failing the run" do
+    run, request, record = build_decision
+    error = Orchestrator::PlannerDecisionRunner::Error.new(
+      "Planner model failed with exit 1: ERROR: You've hit your usage limit. Upgrade to Pro " \
+      "(https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more " \
+      "credits or try again at Jul 28th, 2026 7:03 PM."
+    )
+
+    with_stubbed_runner(->(**) { raise error }) do
+      assert_raises(Orchestrator::PlannerDecisionRunner::Error) { PlannerDecisionJob.perform_now(record.id) }
+    end
+
+    assert_equal "failed", record.reload.status
+    assert_equal "open", request.reload.status
+    assert_equal "running", run.reload.status
+    assert_operator run.capacity_available_at, :>, Time.current
+    assert_equal "waiting_on_capacity", run.phase
+  end
+
   private
 
   def with_stubbed_runner(replacement)
