@@ -8,7 +8,8 @@ class UserQuestion < ApplicationRecord
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, optional: true, inverse_of: :user_questions
 
   validates :question_id, presence: true, uniqueness: true
-  validates :run_id, :asked_by, :scope, :text, presence: true
+  validates :run_id, :asked_by, :text, presence: true
+  validates :scope, presence: true, unless: :run_level_question?
   validates :priority, inclusion: { in: PRIORITIES }
   validates :status, inclusion: { in: STATUSES }
   validate :at_most_one_open_blocking_question_per_run
@@ -62,6 +63,10 @@ class UserQuestion < ApplicationRecord
   end
 
   private
+
+  def run_level_question?
+    scope.blank?
+  end
 
   # Backstop, not the primary control: every UserQuestion.create! call site
   # that opens a blocking question is expected to check Run#open_blocking_question?

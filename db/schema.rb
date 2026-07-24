@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_24_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_24_120000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -344,7 +344,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_24_110000) do
     t.string "priority", default: "advisory", null: false
     t.string "question_id", null: false
     t.string "run_id", null: false
-    t.string "scope", null: false
+    t.string "scope"
     t.string "status", default: "open", null: false
     t.json "tags", default: [], null: false
     t.text "text", null: false
