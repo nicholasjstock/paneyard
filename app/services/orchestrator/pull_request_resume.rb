@@ -18,6 +18,14 @@ module Orchestrator
       raise Error, "GitHub returned invalid PR comments: #{error.message}"
     end
 
+    # A PR comment can only resume a run by answering its one open blocking
+    # question -- never unconditionally. Every run reachable via PR comments
+    # (awaiting_user_feedback or completed-and-published) is expected to always
+    # have exactly one open blocking UserQuestion (see
+    # FinalizeRunPublicationJob#open_review_question! for the completed
+    # case, and Orchestrator::ApplyChaperoneDecision for the blocked case),
+    # so "the sole open blocking question" is a safe implicit target when
+    # the comment doesn't reference one by id.
     def resume!(run, comment)
       run.with_lock do
         return if comment.fetch("id").to_i <= run.last_pull_request_comment_id.to_i
@@ -31,32 +39,93 @@ module Orchestrator
 
         author = comment.dig("user", "login") || "unknown"
         body = comment.fetch("body")
-        answer_referenced_questions!(run, body, author)
+        answered_any, unmatched_ids = apply_comment_to_questions!(run, body, author)
+
         RunContext.upsert!(
           run_id: run.run_id, entry_key: "pr-comment-#{comment_id}", kind: "operator_decision", status: "confirmed",
           content: "Pull request comment from #{author}: #{body}", evidence_ref: comment["html_url"], created_by: "github_pr_comment"
         )
-        run.update!(status: "running", stopped_at: nil, publication_status: "resume_requested", last_pull_request_comment_id: comment_id)
-        SpawnRequest.create!(
-          run_id: run.run_id, asked_by: "github_pr_comment", requested_role: "planner", priority: "blocking",
-          scope: "workflow-plan.md", text: "A new pull request comment requests that this run continue. Incorporate the comment as the current operator instruction and plan the next bounded step.",
-          context: "GitHub comment ##{comment_id} from #{author}: #{body}", tags: %w[github pr-comment resume]
-        )
-        run.publish_phase!(phase: "planning", owner: "github", summary: "Resuming from pull request comment ##{comment_id}.")
+        run.update!(last_pull_request_comment_id: comment_id)
+
+        remaining = run.user_questions.open_only.where(priority: "blocking").order(:asked_at).to_a
+        if answered_any && remaining.empty?
+          run.update!(status: "running", stopped_at: nil, publication_status: "resume_requested")
+          SpawnRequest.create!(
+            run_id: run.run_id, asked_by: "github_pr_comment", requested_role: "planner", priority: "blocking",
+            scope: "workflow-plan.md", text: "A new pull request comment requests that this run continue. Incorporate the comment as the current operator instruction and plan the next bounded step.",
+            context: "GitHub comment ##{comment_id} from #{author}: #{body}", tags: %w[github pr-comment resume]
+          )
+          run.publish_phase!(phase: "planning", owner: "github", summary: "Resuming from pull request comment ##{comment_id}.")
+        else
+          post_reply!(run, unresolved_explanation(unmatched_ids:, remaining:))
+        end
       end
     end
 
-    def answer_referenced_questions!(run, body, author)
-      question_ids = body.to_s.scan(/\bQuestion\s+([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\s*:/i).flatten.uniq
-      return if question_ids.empty?
+    # Explicit references (`Question <uuid>: ...`) are matched against every
+    # open question, not only blocking ones -- an advisory question (see
+    # McpTools::AppendUserQuestionTool) is still answerable by id. Only
+    # open blocking questions are eligible for the implicit, no-id-given
+    # fallback: answering "the" question a comment is obviously replying to
+    # only makes sense when there is exactly one candidate.
+    def apply_comment_to_questions!(run, body, author)
+      explicit_ids = body.to_s.scan(/\bQuestion\s+([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\s*:/i).flatten.uniq
+      answered_any = false
+      unmatched_ids = []
 
-      answer = body.to_s.sub(/\A\s*(?:Question\s+[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\s*:\s*)+/i, "").strip
-      question_ids.each do |question_id|
-        question = UserQuestion.find_by(run_id: run.run_id, question_id:, status: "open")
-        question&.update!(status: "answered", answered_by: "github:#{author}", answered_at: Time.current, answer_text: answer)
+      if explicit_ids.any?
+        answer = body.to_s.sub(/\A\s*(?:Question\s+[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\s*:\s*)+/i, "").strip
+        explicit_ids.each do |question_id|
+          question = UserQuestion.find_by(run_id: run.run_id, question_id:, status: "open")
+          if question
+            question.update!(status: "answered", answered_by: "github:#{author}", answered_at: Time.current, answer_text: answer)
+            answered_any = true
+          else
+            unmatched_ids << question_id
+          end
+        end
+      else
+        # At most one open blocking question ever exists per run (see
+        # Run#open_blocking_question?), so this scope holds 0 or 1 rows in
+        # practice -- guard on .one? anyway rather than assuming that
+        # invariant holds everywhere it's supposed to.
+        open_blocking = run.user_questions.open_only.where(priority: "blocking").to_a
+        if open_blocking.one?
+          open_blocking.first.update!(status: "answered", answered_by: "github:#{author}", answered_at: Time.current, answer_text: body.to_s.strip)
+          answered_any = true
+        end
       end
+
+      [ answered_any, unmatched_ids ]
     end
-    private_class_method :answer_referenced_questions!
+    private_class_method :apply_comment_to_questions!
+
+    def unresolved_explanation(unmatched_ids:, remaining:)
+      parts = []
+      if unmatched_ids.any?
+        verb = unmatched_ids.size > 1 ? "aren't" : "isn't"
+        parts << "Question#{'s' if unmatched_ids.size > 1} #{unmatched_ids.join(', ')} #{verb} open on this run."
+      end
+
+      parts << if remaining.empty?
+        "There's no open question on this run right now, so there's nothing to resume."
+      elsif remaining.one?
+        "This run is still waiting on Question #{remaining.first.question_id}: #{remaining.first.text}"
+      else
+        list = remaining.map { |question| "- Question #{question.question_id}: #{question.text}" }.join("\n")
+        "This run has more than one open question -- reply with `Question <id>: <answer>` naming one:\n\n#{list}"
+      end
+
+      parts.join(" ")
+    end
+    private_class_method :unresolved_explanation
+
+    def post_reply!(run, body)
+      repository, number = repository_and_number(run)
+      output, error, status = Open3.capture3("gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}")
+      raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
+    end
+    private_class_method :post_reply!
 
     def repository_and_number(run)
       uri = URI.parse(run.pull_request_url)

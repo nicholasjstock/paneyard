@@ -115,7 +115,7 @@ module Orchestrator
 
           #{question.context.presence || "No additional context was supplied."}
 
-          Reply in this PR with `Question #{question.question_id}: <your answer>` to answer and resume the run. Any PR comment will resume the run; only an explicit question reference records an answer.
+          Just reply on this PR to answer and resume the run. If more than one question is open at once, reference this one explicitly with `Question #{question.question_id}: <your answer>` so it's clear which one you're answering.
         MARKDOWN
         output, error, status = Open3.capture3("gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}", chdir: root.to_s)
         raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
