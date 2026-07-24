@@ -11,6 +11,7 @@ class UserQuestion < ApplicationRecord
   validates :run_id, :asked_by, :scope, :text, presence: true
   validates :priority, inclusion: { in: PRIORITIES }
   validates :status, inclusion: { in: STATUSES }
+  validate :at_most_one_open_blocking_question_per_run
 
   before_validation :assign_question_id, on: :create
   before_validation :assign_asked_at, on: :create
@@ -61,6 +62,19 @@ class UserQuestion < ApplicationRecord
   end
 
   private
+
+  # Backstop, not the primary control: every UserQuestion.create! call site
+  # that opens a blocking question is expected to check Run#open_blocking_question?
+  # first and skip instead of creating a second one (a duplicate would just
+  # be noise once the operator is already the blocker -- see that method's
+  # comment). This catches any call site that forgets to.
+  def at_most_one_open_blocking_question_per_run
+    return unless priority == "blocking" && status == "open" && run_id.present?
+
+    scope = self.class.where(run_id: run_id, status: "open", priority: "blocking")
+    scope = scope.where.not(id: id) if persisted?
+    errors.add(:base, "run #{run_id} already has an open blocking question") if scope.exists?
+  end
 
   def assign_question_id
     self.question_id ||= SecureRandom.uuid

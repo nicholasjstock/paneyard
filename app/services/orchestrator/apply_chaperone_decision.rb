@@ -74,12 +74,14 @@ module Orchestrator
         end
 
       question_text = review.subject_type == "planner" ? planner_stop_question : diagnosis_stop_question
-      UserQuestion.create!(
-        run_id: review.run_id, asked_by: "chaperone", scope: scope.presence || "run",
-        text: "The chaperone review could not complete (it failed before reaching a decision). #{question_text}",
-        context: stop_question_context(review:, summary: review.summary), priority: "blocking",
-        tags: %w[chaperone execution_failed]
-      )
+      unless review.run.open_blocking_question?
+        UserQuestion.create!(
+          run_id: review.run_id, asked_by: "chaperone", scope: scope.presence || "run",
+          text: "The chaperone review could not complete (it failed before reaching a decision). #{question_text}",
+          context: stop_question_context(review:, summary: review.summary), priority: "blocking",
+          tags: %w[chaperone execution_failed]
+        )
+      end
       review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: review.summary)
       TickRunJob.perform_later
     end
@@ -99,12 +101,14 @@ module Orchestrator
           decision.update!(status: "failed", error: "Chaperone requested a new #{request.model_tier} planner attempt.", completed_at: Time.current)
         when "stop"
           decision.update!(status: "failed", error: "Chaperone stopped planner promotion: #{summary}", completed_at: Time.current)
-          UserQuestion.create!(
-            run_id: review.run_id, asked_by: "chaperone", scope: request.scope,
-            text: planner_stop_question,
-            context: stop_question_context(review:, summary:), priority: "blocking",
-            tags: %w[chaperone planner stopped]
-          )
+          unless review.run.open_blocking_question?
+            UserQuestion.create!(
+              run_id: review.run_id, asked_by: "chaperone", scope: request.scope,
+              text: planner_stop_question,
+              context: stop_question_context(review:, summary:), priority: "blocking",
+              tags: %w[chaperone planner stopped]
+            )
+          end
           review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: summary)
         end
         review.update!(status: "completed", action:, summary:, completed_at: Time.current)
@@ -122,12 +126,14 @@ module Orchestrator
 
     def queue_diagnosis_replan!(review:, source:, summary:, planner_tier:, context_requests:, blocker_key:)
       unless planner_tier.present?
-        UserQuestion.create!(
-          run_id: review.run_id, asked_by: "chaperone", scope: source.scope,
-          text: diagnosis_stop_question,
-          context: stop_question_context(review:, summary:), priority: "blocking",
-          tags: %w[chaperone stopped]
-        )
+        unless review.run.open_blocking_question?
+          UserQuestion.create!(
+            run_id: review.run_id, asked_by: "chaperone", scope: source.scope,
+            text: diagnosis_stop_question,
+            context: stop_question_context(review:, summary:), priority: "blocking",
+            tags: %w[chaperone stopped]
+          )
+        end
         review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: summary)
         return
       end
@@ -138,12 +144,14 @@ module Orchestrator
       raise ArgumentError, "blockerKey must be a lowercase-hyphenated slug" unless blocker_key.match?(BLOCKER_KEY_PATTERN)
 
       if bounded_replan_already_requested?(review:, blocker_key:, tier:)
-        UserQuestion.create!(
-          run_id: review.run_id, asked_by: "chaperone", scope: source.scope,
-          text: "The evidence-backed repair plan for this blocker (\"#{blocker_key}\", #{tier} tier) was already attempted for this lineage. What should the run do next?",
-          context: stop_question_context(review:, summary:), priority: "blocking",
-          tags: %w[chaperone stopped repair_replan_exhausted]
-        )
+        unless review.run.open_blocking_question?
+          UserQuestion.create!(
+            run_id: review.run_id, asked_by: "chaperone", scope: source.scope,
+            text: "The evidence-backed repair plan for this blocker (\"#{blocker_key}\", #{tier} tier) was already attempted for this lineage. What should the run do next?",
+            context: stop_question_context(review:, summary:), priority: "blocking",
+            tags: %w[chaperone stopped repair_replan_exhausted]
+          )
+        end
         review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: summary)
         return
       end
