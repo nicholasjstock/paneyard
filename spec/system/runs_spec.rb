@@ -421,13 +421,13 @@ RSpec.describe "workspace runs", type: :system do
     )
     BusEvent.publish(
       "run.status", run_id: run.run_id,
-      payload: { runId: run.run_id, phase: "blocked_on_user", summary: "An operator decision is required." }
+      payload: { runId: run.run_id, phase: "awaiting_user_feedback", summary: "An operator decision is required." }
     )
 
     visit workspace_run_path(workspace, run)
 
     expect(page).not_to have_text("Run entered planning")
-    expect(page).to have_text("Orchestrator Run entered blocked on user")
+    expect(page).to have_text("Orchestrator Run entered awaiting user feedback")
   end
 
   it "shows one chaperone review rather than its worker lifecycle as separate reviews" do

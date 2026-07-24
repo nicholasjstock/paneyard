@@ -88,7 +88,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       )
 
       expect(UserQuestion.where(run_id: run.run_id, priority: "blocking", status: "open").count).to eq(1)
-      expect(run.reload.phase).to eq("blocked_on_user")
+      expect(run.reload.phase).to eq("awaiting_user_feedback")
     end
 
     it "still asks the operator when no plannerTier is given" do
@@ -110,7 +110,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       described_class.call(review:, action: "stop", summary: "No safe bounded repair exists.")
 
       expect(UserQuestion.where(run_id: run.run_id, priority: "blocking", status: "open").count).to eq(1)
-      expect(run.reload.phase).to eq("blocked_on_user")
+      expect(run.reload.phase).to eq("awaiting_user_feedback")
     end
 
     it "allows a second replan for a genuinely different blocker in the same lineage" do
@@ -202,7 +202,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       question = UserQuestion.find_by!(run_id: run.run_id, priority: "blocking", status: "open")
       expect(question.scope).to eq("workflow-plan.md")
       expect(question.tags).to include("execution_failed")
-      expect(run.reload.phase).to eq("blocked_on_user")
+      expect(run.reload.phase).to eq("awaiting_user_feedback")
     end
 
     it "fails the reviewed step attempts when the review's subject is a diagnosis lineage" do
@@ -226,7 +226,7 @@ RSpec.describe Orchestrator::ApplyChaperoneDecision do
       expect(attempt.reload.chaperone_status).to eq("failed")
       question = UserQuestion.find_by!(run_id: run.run_id, priority: "blocking", status: "open")
       expect(question.scope).to eq("diagnosis.md")
-      expect(run.reload.phase).to eq("blocked_on_user")
+      expect(run.reload.phase).to eq("awaiting_user_feedback")
     end
 
     it "is idempotent -- a second call for the same already-reconciled review does not create a duplicate question" do

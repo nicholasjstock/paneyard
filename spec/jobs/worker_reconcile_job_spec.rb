@@ -232,7 +232,7 @@ RSpec.describe WorkerReconcileJob do
     assert_equal "failed", review.reload.status
     question = UserQuestion.find_by(run_id: run.run_id, priority: "blocking", status: "open")
     expect(question).to be_present
-    assert_equal "blocked_on_user", run.reload.phase
+    assert_equal "awaiting_user_feedback", run.reload.phase
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
@@ -355,7 +355,7 @@ RSpec.describe WorkerReconcileJob do
 
     run.reload
     assert_equal "stopped", run.status
-    assert_equal "blocked_on_user", run.phase
+    assert_equal "awaiting_user_feedback", run.phase
     refute workspace.reload.initialized?
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)

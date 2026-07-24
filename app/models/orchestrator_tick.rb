@@ -3,7 +3,7 @@
 # one immutable row per tick. "Current state" = the latest row by
 # tick_count; "history" = all rows for a run, ordered.
 class OrchestratorTick < ApplicationRecord
-  PHASES = %w[starting planning waiting_on_workers stalled blocked_on_user completed].freeze
+  PHASES = %w[starting planning waiting_on_workers stalled awaiting_user_feedback completed].freeze
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, optional: true, inverse_of: :orchestrator_ticks
 

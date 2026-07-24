@@ -352,7 +352,7 @@ class RunsController < ApplicationController
 
     return true unless event["type"] == "run.status"
 
-    event.dig("payload", "phase").in?(%w[blocked_on_user waiting_on_capacity failed stopped completed])
+    event.dig("payload", "phase").in?(%w[awaiting_user_feedback waiting_on_capacity failed stopped completed])
   end
 
   def handoff_later_completed?(event)

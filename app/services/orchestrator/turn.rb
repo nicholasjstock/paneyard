@@ -151,7 +151,7 @@ module Orchestrator
 
       # An open blocking question means the run is waiting on the user, not
       # the planner -- publishing new jobs here would dispatch workers behind
-      # a UI that still reads "blocked_on_user", so no new work may be queued
+      # a UI that still reads "awaiting_user_feedback", so no new work may be queued
       # until the question is answered.
       has_open_blocking_question = UserQuestion.exists?(run_id: run_id, status: "open", priority: "blocking")
       jobs =
@@ -176,7 +176,7 @@ module Orchestrator
       unresolved_criteria_exist = Orchestrator::AcceptanceCriteria.completion_blockers(run_id: run_id).any?
       completion_phase =
         if has_open_blocking_question
-          "blocked_on_user"
+          "awaiting_user_feedback"
         elsif next_step
           "planning"
         elsif active_executor_exists || unresolved_criteria_exist

@@ -184,7 +184,7 @@ class WorkerReconcileJob < ApplicationJob
     else
       run.update!(status: "stopped", stopped_at: Time.current)
       run.publish_phase!(
-        phase: "blocked_on_user", owner: "orchestrator",
+        phase: "awaiting_user_feedback", owner: "orchestrator",
         summary: "Dev environment recorded, but protected paths were not declared. Re-run project setup to retry."
       )
     end

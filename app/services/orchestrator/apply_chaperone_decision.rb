@@ -82,7 +82,7 @@ module Orchestrator
           tags: %w[chaperone execution_failed]
         )
       end
-      review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: review.summary)
+      review.run.publish_phase!(phase: "awaiting_user_feedback", owner: "chaperone", summary: review.summary)
       TickRunJob.perform_later
     end
 
@@ -109,7 +109,7 @@ module Orchestrator
               tags: %w[chaperone planner stopped]
             )
           end
-          review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: summary)
+          review.run.publish_phase!(phase: "awaiting_user_feedback", owner: "chaperone", summary: summary)
         end
         review.update!(status: "completed", action:, summary:, completed_at: Time.current)
       end
@@ -134,7 +134,7 @@ module Orchestrator
             tags: %w[chaperone stopped]
           )
         end
-        review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: summary)
+        review.run.publish_phase!(phase: "awaiting_user_feedback", owner: "chaperone", summary: summary)
         return
       end
 
@@ -152,7 +152,7 @@ module Orchestrator
             tags: %w[chaperone stopped repair_replan_exhausted]
           )
         end
-        review.run.publish_phase!(phase: "blocked_on_user", owner: "chaperone", summary: summary)
+        review.run.publish_phase!(phase: "awaiting_user_feedback", owner: "chaperone", summary: summary)
         return
       end
 

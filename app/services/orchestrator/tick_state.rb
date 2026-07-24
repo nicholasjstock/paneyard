@@ -118,7 +118,7 @@ module Orchestrator
       case phase
       when "waiting_on_workers", "stalled"
         "worker"
-      when "planning", "blocked_on_user", "completed", "starting"
+      when "planning", "awaiting_user_feedback", "completed", "starting"
         "orchestrator"
       else
         "orchestrator"
@@ -132,8 +132,8 @@ module Orchestrator
       case state[:phase]
       when "waiting_on_workers"
         "Waiting on active workers to report back."
-      when "blocked_on_user"
-        "Blocked on a user answer before the next handoff can be planned."
+      when "awaiting_user_feedback"
+        "Awaiting user feedback before the next handoff can be planned."
       when "completed"
         "Run completed."
       else
