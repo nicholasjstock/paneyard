@@ -242,7 +242,7 @@ module Orchestrator
       paths = if request.allowed_paths.present?
         Array(request.allowed_paths)
       else
-        raw = request.text.to_s[/\bAllowed repository paths: (.+?)\./i, 1]
+        raw = request.text.to_s[/\bPlanner-suggested repository paths: (.+?)\./i, 1]
         raw.blank? || raw.casecmp?("none") ? [] : raw.split(",").map(&:strip)
       end
 

@@ -40,7 +40,7 @@ RSpec.describe "MCP workflow integrations" do
     expect(response.structured_content[:nextState][:phase]).to eq("planning")
     expect(request.text).to include(
       "Execution mode: diagnosis",
-      "Allowed repository paths: none",
+      "Planner-suggested repository paths: none",
       "Do not implement an application fix"
     )
   end
