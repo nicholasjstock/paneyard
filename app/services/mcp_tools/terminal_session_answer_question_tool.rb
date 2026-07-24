@@ -1,5 +1,5 @@
 module McpTools
-  class WorkspaceChatAnswerQuestionTool < MCP::Tool
+  class TerminalSessionAnswerQuestionTool < MCP::Tool
     tool_name "answer_workspace_question"
     description "Answer one open operator question belonging to this workspace."
     input_schema(
@@ -8,10 +8,10 @@ module McpTools
     )
 
     def self.call(questionId:, answer:, server_context:)
-      chat = server_context && WorkspaceChat.find_by(id: server_context[:chat_id])
-      workspace = chat&.workspace or raise "Workspace chat capability missing"
+      session = server_context && TerminalSession.find_by(id: server_context[:terminal_session_id])
+      workspace = session&.workspace or raise "Terminal session capability missing"
       question = UserQuestion.joins(:run).where(runs: { workspace_id: workspace.id }).find_by!(question_id: questionId, status: "open")
-      question.update!(status: "answered", answer_text: answer, answered_by: "workspace_chat", answered_at: Time.current)
+      question.update!(status: "answered", answer_text: answer, answered_by: "terminal_session", answered_at: Time.current)
       TickRunJob.perform_later
       ToolResponse.structured(questionId:, status: "answered")
     end

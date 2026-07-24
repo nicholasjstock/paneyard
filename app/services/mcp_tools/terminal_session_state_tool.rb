@@ -1,14 +1,14 @@
 module McpTools
-  class WorkspaceChatStateTool < MCP::Tool
+  class TerminalSessionStateTool < MCP::Tool
     tool_name "get_workspace_state"
-    description "Read current runs, workers, questions, decisions, and chaperone state for this chat's workspace."
+    description "Read current runs, workers, questions, decisions, and chaperone state for this terminal session's workspace."
     input_schema(
       properties: { runId: { type: [ "string", "null" ] } }
     )
 
     def self.call(server_context:, runId: nil)
-      chat = server_context && WorkspaceChat.find_by(id: server_context[:chat_id])
-      workspace = chat&.workspace or raise "Workspace chat capability missing"
+      session = server_context && TerminalSession.find_by(id: server_context[:terminal_session_id])
+      workspace = session&.workspace or raise "Terminal session capability missing"
       runs = workspace.runs.order(created_at: :desc)
       runs = runs.where(run_id: runId) if runId.present?
       ToolResponse.structured(

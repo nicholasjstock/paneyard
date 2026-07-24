@@ -1,0 +1,22 @@
+<% content_for :title, "Terminal · #{@terminal_session.workspace.name}" %>
+<%= turbo_stream_from "terminal_session_#{@terminal_session.id}" %>
+
+<div class="terminal-page">
+  <header class="chat-header">
+    <div>
+      <p class="eyebrow">Workspace terminal</p>
+      <h1><%= @terminal_session.workspace.name %></h1>
+      <p class="muted mono"><%= @terminal_session.workspace.root_path %></p>
+    </div>
+    <span class="status-badge <%= @terminal_session.status %>"><%= @terminal_session.status %></span>
+  </header>
+
+  <div class="terminal-shell terminal-shell-page" id="terminal-session-<%= @terminal_session.id %>" data-turbo-permanent
+       data-controller="terminal-session" data-terminal-session-id-value="<%= @terminal_session.id %>"></div>
+
+  <div class="terminal-drawer-footer">
+    <span class="muted"><%= @terminal_session.launcher_variant.capitalize %> &middot; read-only across every worktree under <%= @terminal_session.workspace.root_path %>; use Bash (bin/rails runner/dbconsole) to inspect or change orchestrator state.</span>
+    <%= button_to "Restart session", workspace_terminal_session_path(@terminal_session.workspace), method: :post,
+          class: "btn primary", data: { turbo_confirm: "Restart the terminal session? Scrollback is kept, but the current process ends." } %>
+  </div>
+</div>

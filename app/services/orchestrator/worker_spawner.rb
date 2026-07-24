@@ -435,9 +435,22 @@ module Orchestrator
       BUNDLER_VERSION BUNDLER_SETUP RUBYOPT GEM_HOME GEM_PATH
     ].freeze
 
+    # This Rails process may itself have been started from inside a Claude
+    # Code session (e.g. `bin/dev` run from a Claude Code terminal, or --
+    # as in this repo's own development -- launched by an agent's own Bash
+    # tool). Without stripping these, a spawned `claude` child inherits
+    # CLAUDE_CODE_CHILD_SESSION=1 and disables its own transcript saving,
+    # treating itself as a nested session of whatever spawned Rails.
+    # CLAUDE_CONFIG_DIR is deliberately left alone -- it points at the
+    # user's real config/credentials and spawned CLIs still need it.
+    NESTED_CLAUDE_CODE_ENV_KEYS = %w[
+      CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID
+      CLAUDE_CODE_CHILD_SESSION CLAUDE_PID CLAUDE_EFFORT AI_AGENT
+    ].freeze
+
     def build_worker_env
       codex_home = resolve_codex_home
-      worker_env = BUNDLER_ACTIVATION_ENV_KEYS.index_with { nil }
+      worker_env = (BUNDLER_ACTIVATION_ENV_KEYS + NESTED_CLAUDE_CODE_ENV_KEYS).index_with { nil }
       worker_env["CODEX_HOME"] = codex_home if codex_home.present?
 
       api_key = ENV["OPENAI_API_KEY"]
