@@ -86,6 +86,62 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
+  it "fills in the real body of a PR that was opened early as a draft, exactly once" do
+    root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "publication-draft-body-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "publication-draft-body-#{SecureRandom.hex(4)}", task: "Finalize an early draft PR",
+      target_root: root, launcher_variant: "codex", worktree_name: "draft-body-a1b2",
+      branch_name: "workflow/draft-body-a1b2", publication_status: "committed",
+      conversation_pr_status: "draft", pull_request_url: "https://github.com/example/repo/pull/42"
+    )
+    Orchestrator::ArtifactStore.write(root, run.run_id, "run-summary.md", "## Result\n\nEverything verified.")
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).and_return([ "", "", status ])
+    allow(Open3).to receive(:capture3).with("gh", "pr", "list", "--head", run.branch_name, "--state", "open", "--json", "url", "--jq", ".[0].url", chdir: root)
+      .and_return([ run.pull_request_url, "", status ])
+
+    expect(described_class.publish!(run)).to eq(:published)
+
+    expect(Open3).to have_received(:capture3).with(
+      "gh", "pr", "edit", run.pull_request_url, "--body", a_string_including("Everything verified."), chdir: root
+    )
+    expect(Open3).to have_received(:capture3).with("gh", "pr", "ready", run.pull_request_url, chdir: root)
+    expect(run.reload.conversation_pr_status).to eq("ready")
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
+  it "posts a rerun's summary as a new PR comment instead of overwriting an already-ready body" do
+    root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "publication-no-clobber-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "publication-no-clobber-#{SecureRandom.hex(4)}", task: "Finalize a second time",
+      target_root: root, launcher_variant: "codex", worktree_name: "no-clobber-a1b2",
+      branch_name: "workflow/no-clobber-a1b2", publication_status: "committed",
+      conversation_pr_status: "ready", pull_request_url: "https://github.com/example/repo/pull/42"
+    )
+    Orchestrator::ArtifactStore.write(root, run.run_id, "run-summary.md", "## Result\n\nRerun addressed the feedback.")
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).and_return([ "", "", status ])
+    allow(Open3).to receive(:capture3).with("gh", "pr", "list", "--head", run.branch_name, "--state", "open", "--json", "url", "--jq", ".[0].url", chdir: root)
+      .and_return([ run.pull_request_url, "", status ])
+    allow(Open3).to receive(:capture3).with(
+      "gh", "api", "--method", "POST", "repos/example/repo/issues/42/comments", "-f",
+      a_string_matching(/\Abody=.*Rerun addressed the feedback/m), chdir: root
+    ).and_return([ { id: 99, html_url: "https://github.com/example/repo/pull/42#issuecomment-99" }.to_json, "", status ])
+
+    expect(described_class.publish!(run)).to eq(:published)
+
+    expect(Open3).to have_received(:capture3).with(
+      "gh", "api", "--method", "POST", "repos/example/repo/issues/42/comments", "-f", any_args, chdir: root
+    )
+    expect(Open3).not_to have_received(:capture3).with("gh", "pr", "edit", any_args)
+    expect(Open3).not_to have_received(:capture3).with("gh", "pr", "ready", any_args)
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
   it "does not let a missing historical worktree raise during merge detection" do
     workspace = Workspace.create!(name: "publication-missing-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(
