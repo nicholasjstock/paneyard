@@ -140,6 +140,15 @@ module Orchestrator
       if name.blank? || name == "." || name == ".." || name.include?("/") || name.include?("\\") || name.include?("\0")
         raise ArgumentError, "artifact must be a filename only, without a path prefix: #{artifact.inspect}"
       end
+      # Verification of acceptance criteria is Rails-dispatched
+      # (AcceptanceCriteria.request_verification!, retried by
+      # Orchestrator::VerifierRecovery) -- a planner cannot dispatch
+      # verifier-role work, so a step in this namespace could only ever be
+      # a worker-role stand-in that submit_acceptance_verification rejects.
+      if name.start_with?("acceptance-verify-")
+        raise ArgumentError, "the acceptance-verify- artifact namespace is reserved for Rails-dispatched " \
+          "verification; never plan verification of an acceptance criterion -- Rails re-requests it automatically"
+      end
     end
     private_class_method :validate_artifact_name!
 

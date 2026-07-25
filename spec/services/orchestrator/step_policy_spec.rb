@@ -53,6 +53,20 @@ RSpec.describe Orchestrator::StepPolicy do
     )
   end
 
+  it "reserves the acceptance-verify- artifact namespace for Rails-dispatched verification" do
+    error = assert_raises(ArgumentError) do
+      Orchestrator::StepPolicy.validate!(
+        run_id: @run.run_id,
+        step: {
+          owner: "worker", artifact: "acceptance-verify-outcome", success_check: "Verify the criterion.",
+          mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: []
+        }
+      )
+    end
+
+    assert_match(/reserved for Rails-dispatched verification/, error.message)
+  end
+
   it "rejects implementation without evidence, even when no planner file list is supplied" do
     error = assert_raises(ArgumentError) do
       Orchestrator::StepPolicy.validate!(

@@ -139,7 +139,22 @@ class WorkerReconcileJob < ApplicationJob
       outcome: "failed", result: "#{stop_reason}\n#{output}".strip,
       evidence_citations: []
     )
-    review = Orchestrator::ChaperoneTrigger.call(attempt)
+    # A failed verification attempt is recovered by Rails re-requesting a
+    # real verifier (see Orchestrator::VerifierRecovery) -- routing it to
+    # chaperone/planner recovery is structurally doomed, since a planner
+    # cannot dispatch verifier-role work. VerifierRecovery publishes its
+    # own phase; returning nil lets the caller tick immediately so the
+    # fresh verifier request dispatches. It can still hand back a
+    # ChaperoneReview (criterion no longer awaiting verification), which
+    # then follows the normal chaperone announcement below.
+    if Orchestrator::VerifierRecovery.applicable?(attempt)
+      outcome = Orchestrator::VerifierRecovery.call(attempt)
+      return nil unless outcome.is_a?(ChaperoneReview)
+
+      review = outcome
+    else
+      review = Orchestrator::ChaperoneTrigger.call(attempt)
+    end
     if review
       worker.run.publish_phase!(
         phase: "planning", owner: "chaperone",

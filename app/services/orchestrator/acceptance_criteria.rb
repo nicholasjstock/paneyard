@@ -55,12 +55,17 @@ module Orchestrator
     # names what to check, not proof the criterion holds. Only an
     # independently spawned verifier's own submit_acceptance_verification
     # call (see #verify!) can actually flip a criterion to "verified".
-    def request_verification!(run:, criterion:)
+    #
+    # Public (not private like the other internals) because this is also
+    # the only correct retry path after a verifier dies -- see
+    # Orchestrator::VerifierRecovery; a planner cannot legally re-dispatch
+    # a verifier-role step.
+    def request_verification!(run:, criterion:, context: nil)
       SpawnRequest.create!(
         run_id: run.run_id, asked_by: "planner", requested_role: "verifier",
         scope: "acceptance-verify-#{criterion.key}", lineage_key: "acceptance:#{criterion.key}",
         model_tier: "small", priority: "blocking", execution_mode: "verification",
-        write_scope: "source_protected", allowed_paths: [],
+        write_scope: "source_protected", allowed_paths: [], context:,
         text: "Independently verify whether this acceptance criterion is actually satisfied. Do not treat the " \
           "candidate evidence as proof -- reproduce the underlying claim yourself (rerun the check, the test, " \
           "or the measurement). Criterion: #{criterion.content} Candidate evidence to investigate (not to " \
@@ -68,7 +73,6 @@ module Orchestrator
           "criterionKey=#{criterion.key} once you have an independent, conclusive answer."
       )
     end
-    private_class_method :request_verification!
 
     # The only path that may set status "verified" -- called from
     # McpTools::SubmitAcceptanceVerificationTool by an authenticated

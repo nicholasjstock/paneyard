@@ -189,6 +189,39 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "recovers a dead verifier by re-requesting verification instead of chaperone/planner recovery" do
+    workspace = Workspace.create!(name: "reconcile-verifier-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-verifier-#{SecureRandom.hex(4)}", task: "Recover a dead verifier",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    criterion = AcceptanceCriterion.create!(
+      run_id: run.run_id, key: "outcome-works", content: "The outcome works.",
+      status: "ready_for_verification", evidence_ref: "Gemfile"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "verifier narrated success but never submitted\n")
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "verifier", nickname: "verifier",
+      reason: "Verify.", scope: "acceptance-verify-#{criterion.key}", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+    run.spawn_requests.create!(
+      asked_by: "planner", requested_role: "verifier", scope: worker.scope,
+      lineage_key: "acceptance:#{criterion.key}", status: "fulfilled", fulfilled_worker_id: worker.worker_id,
+      text: "Verify it.", priority: "blocking", execution_mode: "verification"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    expect(worker.reload.status).to eq("stopped")
+    fresh = run.spawn_requests.where(requested_role: "verifier", status: "open").sole
+    expect(fresh.scope).to eq("acceptance-verify-#{criterion.key}")
+    expect(ChaperoneReview.where(run_id: run.run_id)).to be_empty
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "captures codex's own session id from the session_meta line for later resume" do
     workspace = Workspace.create!(name: "reconcile-codex-session-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(
