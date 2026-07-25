@@ -113,6 +113,12 @@ class TickRunJob < ApplicationJob
     # reaching a decision) would otherwise leave this stale and let recovery
     # dispatch new work behind a question the operator hasn't answered yet.
     return if UserQuestion.exists?(run_id: run.run_id, status: "open", priority: "blocking")
+    # A criterion stuck awaiting verification with nothing in flight is
+    # re-armed with a fresh verifier request rather than handed to a
+    # recovery planner, which cannot legally dispatch verifier-role work
+    # (StepPolicy::PLANNER_STEP_OWNERS). Covers verifier deaths that never
+    # record a StepAttempt, e.g. one killed by a capacity limit.
+    return if Orchestrator::VerifierRecovery.requeue_stalled_verification!(run)
 
     finding = Orchestrator::Turn.build_dead_end_finding(
       run_id: run.run_id,

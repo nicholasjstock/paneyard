@@ -162,6 +162,112 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "persists cost/usage for a chaperone worker, not just ordinary workers" do
+    workspace = Workspace.create!(name: "reconcile-chaperone-cost-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-chaperone-cost-#{SecureRandom.hex(4)}", task: "Track chaperone cost",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, <<~LOG)
+      {"type":"result","model":"claude-sonnet-5","num_turns":4,"total_cost_usd":0.35,"result":"Decision submitted: continue_small.","usage":{"input_tokens":100,"output_tokens":200,"cache_read_input_tokens":300,"cache_creation_input_tokens":400}}
+    LOG
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "chaperone", nickname: "chaperone-cost-test",
+      reason: "Chaperone review.", scope: "diagnose-it", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    worker.reload
+    assert_equal "stopped", worker.status
+    assert_equal 0.35, worker.total_cost_usd
+    assert_equal 200, worker.output_tokens
+    assert_equal "Decision submitted: continue_small.\n", File.read(worker.last_message_path)
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
+  it "recovers a dead verifier by re-requesting verification instead of chaperone/planner recovery" do
+    workspace = Workspace.create!(name: "reconcile-verifier-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-verifier-#{SecureRandom.hex(4)}", task: "Recover a dead verifier",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    criterion = AcceptanceCriterion.create!(
+      run_id: run.run_id, key: "outcome-works", content: "The outcome works.",
+      status: "ready_for_verification", evidence_ref: "Gemfile"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, "verifier narrated success but never submitted\n")
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "verifier", nickname: "verifier",
+      reason: "Verify.", scope: "acceptance-verify-#{criterion.key}", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+    run.spawn_requests.create!(
+      asked_by: "planner", requested_role: "verifier", scope: worker.scope,
+      lineage_key: "acceptance:#{criterion.key}", status: "fulfilled", fulfilled_worker_id: worker.worker_id,
+      text: "Verify it.", priority: "blocking", execution_mode: "verification"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    expect(worker.reload.status).to eq("stopped")
+    fresh = run.spawn_requests.where(requested_role: "verifier", status: "open").sole
+    expect(fresh.scope).to eq("acceptance-verify-#{criterion.key}")
+    expect(ChaperoneReview.where(run_id: run.run_id)).to be_empty
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
+  it "captures codex's own session id from the session_meta line for later resume" do
+    workspace = Workspace.create!(name: "reconcile-codex-session-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-codex-session-#{SecureRandom.hex(4)}", task: "Capture codex session id",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, <<~LOG)
+      {"type":"session_meta","payload":{"session_id":"019f199c-ef95-7b70-a232-5e73b4beb30e"}}
+      {"type":"agent_message","text":"working"}
+    LOG
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "worker", nickname: "worker-codex-session",
+      reason: "Do it.", scope: "task.md", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "codex"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    expect(worker.reload.cli_session_id).to eq("019f199c-ef95-7b70-a232-5e73b4beb30e")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
+  it "does not overwrite an already-captured codex session id" do
+    workspace = Workspace.create!(name: "reconcile-codex-session-kept-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-codex-session-kept-#{SecureRandom.hex(4)}", task: "Keep prior session id",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, { type: "session_meta", payload: { session_id: "a-different-id" } }.to_json << "\n")
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "worker", nickname: "worker-codex-kept",
+      reason: "Do it.", scope: "task.md", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "codex",
+      cli_session_id: "already-set"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    expect(worker.reload.cli_session_id).to eq("already-set")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "records a normal stop for a chaperone worker that died after submitting its decision" do
     workspace = Workspace.create!(name: "reconcile-chaperone-done-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(

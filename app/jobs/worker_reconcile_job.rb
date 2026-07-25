@@ -19,6 +19,7 @@ class WorkerReconcileJob < ApplicationJob
       exit_code = read_exit_code(worker.exit_status_path)
       output = Orchestrator::LogReader.read_tail_lines(worker.log_path, 12).to_s
       usage = Orchestrator::LogReader.claude_usage(worker.log_path)
+      persist_codex_cli_session_id(worker)
       persist_claude_final_response(worker)
       stop_reason = worker.stop_reason.presence || stop_reason_for(worker, exit_code, output)
       worker.update!(
@@ -66,6 +67,22 @@ class WorkerReconcileJob < ApplicationJob
     nil
   end
 
+  # Codex never receives an incoming session id (unlike claude, which mints
+  # one up front at spawn time -- see Orchestrator::WorkerSpawner) so it can
+  # only be captured after the fact, from the worker's own log, once it's
+  # actually run. update_column rather than folding into the update! a few
+  # lines below deliberately keeps this independent of that call's own
+  # attribute set.
+  def persist_codex_cli_session_id(worker)
+    return unless worker.command == "codex"
+    return if worker.cli_session_id.present?
+
+    session_id = Orchestrator::LogReader.codex_session_id(worker.log_path)
+    worker.update_column(:cli_session_id, session_id) if session_id.present?
+  rescue Errno::ENOENT, Errno::EACCES
+    nil
+  end
+
   def persist_claude_final_response(worker)
     return unless worker.command == "claude"
 
@@ -82,9 +99,8 @@ class WorkerReconcileJob < ApplicationJob
     return "Worker exited successfully after completing its handoff." if worker.handoff_completed_at.present? && exit_code == 0
     return "Worker exited with status #{exit_code} after completing its handoff." if worker.handoff_completed_at.present? && exit_code.present?
     return "Worker stopped after completing its handoff." if worker.handoff_completed_at.present?
-    return "Claude session limit reached; worker exited before completing its handoff." if output.match?(/hit your session limit/i)
-    return "Claude rate limit reached; worker exited before completing its handoff." if output.match?(/rate limit|too many requests/i)
-    return "Codex usage limit reached; worker exited before completing its handoff." if output.match?(/hit your usage limit/i)
+    capacity_message = Orchestrator::CapacityFailure.stop_reason_message(output)
+    return capacity_message if capacity_message
     return "Worker exited with status #{exit_code} before completing its handoff." if exit_code.present?
 
     "Process no longer running (detected by Rails reconciliation, exit status unavailable)."
@@ -123,7 +139,22 @@ class WorkerReconcileJob < ApplicationJob
       outcome: "failed", result: "#{stop_reason}\n#{output}".strip,
       evidence_citations: []
     )
-    review = Orchestrator::ChaperoneTrigger.call(attempt)
+    # A failed verification attempt is recovered by Rails re-requesting a
+    # real verifier (see Orchestrator::VerifierRecovery) -- routing it to
+    # chaperone/planner recovery is structurally doomed, since a planner
+    # cannot dispatch verifier-role work. VerifierRecovery publishes its
+    # own phase; returning nil lets the caller tick immediately so the
+    # fresh verifier request dispatches. It can still hand back a
+    # ChaperoneReview (criterion no longer awaiting verification), which
+    # then follows the normal chaperone announcement below.
+    if Orchestrator::VerifierRecovery.applicable?(attempt)
+      outcome = Orchestrator::VerifierRecovery.call(attempt)
+      return nil unless outcome.is_a?(ChaperoneReview)
+
+      review = outcome
+    else
+      review = Orchestrator::ChaperoneTrigger.call(attempt)
+    end
     if review
       worker.run.publish_phase!(
         phase: "planning", owner: "chaperone",
