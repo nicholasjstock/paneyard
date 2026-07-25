@@ -20,14 +20,14 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
     it "returns the rejection as data instead of escalating on the first policy-invalid plan" do
       run, _request, decision = build_decision
       params = decision_params(
-        summary: "Diagnose it.",
-        next_step: step("diagnosis.md", mode: "diagnosis", success_check: "Fix the bug directly.")
+        summary: "Implement it.",
+        next_step: step("fix.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [])
       )
 
       result = described_class.call(decision:, params:)
 
       expect(result[:accepted]).to be(false)
-      expect(result[:error]).to eq("diagnosis step cannot also request implementation")
+      expect(result[:error]).to eq("nextStep: implementation step requires at least one evidenceRef")
       assert_equal "running", decision.reload.status
       assert_empty run.chaperone_reviews
       attempt = decision.attempts.sole
@@ -45,7 +45,7 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
 
       expect(rejected).to eq(
         accepted: false,
-        error: 'artifact must be a filename only, without a path prefix: "artifacts/phone-demo-baseline.md"'
+        error: 'nextStep: artifact must be a filename only, without a path prefix: "artifacts/phone-demo-baseline.md"'
       )
       assert_equal "running", decision.reload.status
       assert_empty run.spawn_requests.open_only.where(requested_role: "worker")
@@ -62,8 +62,8 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
     it "escalates to chaperone after repeated rejections on the small tier" do
       run, _request, decision = build_decision
       params = decision_params(
-        summary: "Diagnose it.",
-        next_step: step("diagnosis.md", mode: "diagnosis", success_check: "Fix the bug directly.")
+        summary: "Implement it.",
+        next_step: step("fix.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [])
       )
 
       results = Array.new(described_class::MAX_REJECTED_DECISION_ATTEMPTS) { described_class.call(decision:, params: params.deep_dup) }
@@ -79,8 +79,8 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
       run, request, decision = build_decision
       request.update!(model_tier: "strong")
       params = decision_params(
-        summary: "Diagnose it.",
-        next_step: step("diagnosis.md", mode: "diagnosis", success_check: "Fix the bug directly.")
+        summary: "Implement it.",
+        next_step: step("fix.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [])
       )
 
       results = Array.new(described_class::MAX_REJECTED_DECISION_ATTEMPTS) { described_class.call(decision:, params: params.deep_dup) }
