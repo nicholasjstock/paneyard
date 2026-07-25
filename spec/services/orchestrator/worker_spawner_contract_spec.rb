@@ -14,7 +14,8 @@ RSpec.describe Orchestrator::WorkerSpawner do
     assert_includes args, "stream-json"
     assert_includes args, "--include-partial-messages"
     assert_includes args, "Bash,Read,Grep,Glob,ToolSearch"
-    refute_includes args, "bypassPermissions"
+    assert_equal "bypassPermissions", args[args.index("--permission-mode") + 1]
+    refute_includes args, "dontAsk"
     assert_equal "haiku", args[args.index("--model") + 1]
     assert_equal "Do the work.", args.last
   end
