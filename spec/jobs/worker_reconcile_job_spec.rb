@@ -162,6 +162,33 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "persists cost/usage for a chaperone worker, not just ordinary workers" do
+    workspace = Workspace.create!(name: "reconcile-chaperone-cost-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-chaperone-cost-#{SecureRandom.hex(4)}", task: "Track chaperone cost",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, <<~LOG)
+      {"type":"result","model":"claude-sonnet-5","num_turns":4,"total_cost_usd":0.35,"result":"Decision submitted: continue_small.","usage":{"input_tokens":100,"output_tokens":200,"cache_read_input_tokens":300,"cache_creation_input_tokens":400}}
+    LOG
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "chaperone", nickname: "chaperone-cost-test",
+      reason: "Chaperone review.", scope: "diagnose-it", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "claude"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    worker.reload
+    assert_equal "stopped", worker.status
+    assert_equal 0.35, worker.total_cost_usd
+    assert_equal 200, worker.output_tokens
+    assert_equal "Decision submitted: continue_small.\n", File.read(worker.last_message_path)
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "records a normal stop for a chaperone worker that died after submitting its decision" do
     workspace = Workspace.create!(name: "reconcile-chaperone-done-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(

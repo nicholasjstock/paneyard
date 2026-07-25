@@ -199,6 +199,13 @@ module Orchestrator
     def claude_args(prompt, role: "worker", mode: nil, mcp_config_path:, settings_path:, target_root:, policy:,
       model_tier: "small", mcp_override: nil)
       if mcp_override
+        # Without an explicit --output-format, --print defaults to plain
+        # text -- not the structured JSON stream Orchestrator::LogReader.
+        # claude_usage/claude_final_response (and therefore
+        # WorkerReconcileJob's cost/usage persistence) already know how to
+        # parse for every other claude worker. Matching that format here is
+        # the only change needed: chaperone cost was never actually free,
+        # it just was never captured.
         return [
           "--model", claude_model_for(role, mode:, model_tier:),
           "--print",
@@ -206,6 +213,9 @@ module Orchestrator
           "--strict-mcp-config",
           "--allowedTools", mcp_override[:allowed_tools].map { |name| "mcp__chaperone__#{name}" }.join(","),
           "--no-session-persistence",
+          "--output-format", "stream-json",
+          "--include-partial-messages",
+          "--verbose",
           "--", prompt
         ]
       end

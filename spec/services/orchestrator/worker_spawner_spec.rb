@@ -153,7 +153,11 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(worker.command).to eq("claude")
       expect(worker.model).to eq("sonnet")
       expect(worker.args).to include("--print", "--strict-mcp-config")
-      expect(worker.args).not_to include("--tools", "--settings", "--output-format")
+      expect(worker.args).not_to include("--tools", "--settings")
+      # Chaperone cost/usage went untracked before this: without an
+      # explicit --output-format, --print defaults to plain text, not the
+      # structured stream WorkerReconcileJob's cost persistence can parse.
+      expect(worker.args).to include("--output-format", "stream-json")
       allowed_tools_index = worker.args.index("--allowedTools")
       expect(worker.args[allowed_tools_index + 1]).to eq(
         "mcp__chaperone__get_chaperone_state,mcp__chaperone__read_chaperone_artifact,mcp__chaperone__submit_chaperone_decision"
