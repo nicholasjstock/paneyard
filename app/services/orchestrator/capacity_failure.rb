@@ -9,8 +9,28 @@ module Orchestrator
   module CapacityFailure
     module_function
 
+    # The single source of truth for what counts as a capacity failure and
+    # how to describe it. detected? (the pause-the-run gate) and
+    # stop_reason_message (WorkerReconcileJob's human-readable stop_reason)
+    # used to independently re-derive overlapping regexes -- they've now
+    # both drawn from this one list since, so the gate and the message can
+    # no longer silently drift out of sync with each other or with a future
+    # wording change in either CLI's own output.
+    SIGNALS = [
+      [ /hit your session limit/i, "Claude session limit reached" ],
+      [ /hit your usage limit/i, "Codex usage limit reached" ],
+      [ /rate limit|too many requests|429/i, "Claude rate limit reached" ]
+    ].freeze
+
     def detected?(output)
-      output.match?(/hit your session limit|rate limit|too many requests|429|hit your usage limit/i)
+      SIGNALS.any? { |pattern, _label| output.match?(pattern) }
+    end
+
+    def stop_reason_message(output)
+      _pattern, label = SIGNALS.find { |pattern, _label| output.match?(pattern) }
+      return nil unless label
+
+      "#{label}; worker exited before completing its handoff."
     end
 
     def reset_at(output)

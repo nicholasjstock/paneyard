@@ -82,9 +82,8 @@ class WorkerReconcileJob < ApplicationJob
     return "Worker exited successfully after completing its handoff." if worker.handoff_completed_at.present? && exit_code == 0
     return "Worker exited with status #{exit_code} after completing its handoff." if worker.handoff_completed_at.present? && exit_code.present?
     return "Worker stopped after completing its handoff." if worker.handoff_completed_at.present?
-    return "Claude session limit reached; worker exited before completing its handoff." if output.match?(/hit your session limit/i)
-    return "Claude rate limit reached; worker exited before completing its handoff." if output.match?(/rate limit|too many requests/i)
-    return "Codex usage limit reached; worker exited before completing its handoff." if output.match?(/hit your usage limit/i)
+    capacity_message = Orchestrator::CapacityFailure.stop_reason_message(output)
+    return capacity_message if capacity_message
     return "Worker exited with status #{exit_code} before completing its handoff." if exit_code.present?
 
     "Process no longer running (detected by Rails reconciliation, exit status unavailable)."
