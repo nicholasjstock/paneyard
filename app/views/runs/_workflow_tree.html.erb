@@ -1,5 +1,12 @@
 <% planners = planners.presence || [{ worker: nil }] %>
+<% questions = questions.presence || [] %>
+<% run_level_questions = questions.select { |q| q.priority == "blocking" && q.scope.blank? } %>
 <ul class="workflow-tree" data-testid="workflow-tree">
+  <% if run_level_questions.any? %>
+    <% run_level_questions.each do |question| %>
+      <%= render "workflow_question_node", question: question, run: run %>
+    <% end %>
+  <% end %>
   <% planners.each_with_index do |planner, planner_index| %>
     <% planner_worker = planner[:worker] %>
     <li class="workflow-tree-node workflow-planner-node">
@@ -16,7 +23,7 @@
         </div>
       <% end %>
       <% if criteria.any? %>
-        <%= render "workflow_tree_criteria", criteria: criteria, worker_groups: worker_groups, run: run, current_workspace: current_workspace %>
+        <%= render "workflow_tree_criteria", criteria: criteria, worker_groups: worker_groups, run: run, current_workspace: current_workspace, questions: questions %>
       <% else %>
         <p class="empty">No acceptance criteria established yet.</p>
       <% end %>
@@ -26,7 +33,7 @@
   <% if unassigned_workers.any? %>
     <li class="workflow-tree-node workflow-unassigned-node">
       <div class="workflow-tree-label"><span class="workflow-tree-kind">Other work</span></div>
-      <div class="worker-list"><% unassigned_workers.each do |activity| %><%= render "worker_row", activity: activity, run: run, current_workspace: current_workspace %><% end %></div>
+      <div class="worker-list"><% unassigned_workers.each do |activity| %><%= render "worker_row", activity: activity, run: run, current_workspace: current_workspace, questions: questions %><% end %></div>
     </li>
   <% end %>
 </ul>

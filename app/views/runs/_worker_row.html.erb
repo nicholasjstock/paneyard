@@ -1,6 +1,8 @@
 <% worker = activity[:worker] %>
 <% chaperone_review = activity[:chaperone_review] %>
 <% is_chaperone = worker.role == "chaperone" %>
+<% questions = questions.presence || [] %>
+<% worker_questions = questions.select { |q| q.scope == worker.nickname || q.scope == worker.worker_id } %>
 <details id="worker-<%= worker.worker_id %>"
          class="worker-row <%= activity[:display_status] %>"
          data-controller="accordion-state"
@@ -14,8 +16,18 @@
     <span class="worker-activity muted">
       <% if activity[:last_activity_at] %>active <%= time_ago_in_words(activity[:last_activity_at]) %> ago<% else %>no activity recorded<% end %>
     </span>
+    <% if worker_questions.any? %><span class="badge advisory">questions</span><% end %>
   </summary>
   <div class="worker-detail">
+    <% if worker_questions.any? %>
+      <div class="worker-questions">
+        <ul class="workflow-tree-questions">
+          <% worker_questions.each do |question| %>
+            <%= render "workflow_question_node", question: question, run: run %>
+          <% end %>
+        </ul>
+      </div>
+    <% end %>
     <div class="worker-metadata muted">
       <span><%= worker.role %></span>
       <% if worker.model.present? %><span><%= worker.model %></span><% end %>

@@ -1,3 +1,4 @@
+<% questions = questions.presence || [] %>
 <ul class="workflow-tree-criteria">
   <% criteria.each do |criterion| %>
     <li class="workflow-tree-node workflow-criterion-node">
@@ -7,16 +8,24 @@
         <span class="mono acceptance-criterion-key"><%= criterion.key %></span>
         <span><%= criterion.content %></span>
       </div>
+      <% criterion_questions = questions.select { |q| q.scope == criterion.key } %>
+      <% if criterion_questions.any? %>
+        <ul class="workflow-tree-questions">
+          <% criterion_questions.each do |question| %>
+            <%= render "workflow_question_node", question: question, run: run %>
+          <% end %>
+        </ul>
+      <% end %>
       <% criterion_workers = worker_groups[criterion.id] || [] %>
       <% criterion_workers.each do |activity| %>
         <% if activity[:worker].role == "planner" %>
-          <%= render "workflow_tree", planners: [activity], criteria: criterion.children.to_a, worker_groups: worker_groups, planner_decisions: [], run: run, current_workspace: current_workspace %>
+          <%= render "workflow_tree", planners: [activity], criteria: criterion.children.to_a, worker_groups: worker_groups, planner_decisions: [], questions: questions, run: run, current_workspace: current_workspace %>
         <% end %>
       <% end %>
       <% ordinary_workers = criterion_workers.reject { |activity| activity[:worker].role == "planner" } %>
-      <% if ordinary_workers.any? %><div class="worker-list criterion-worker-list"><% ordinary_workers.each do |activity| %><%= render "worker_row", activity: activity, run: run, current_workspace: current_workspace %><% end %></div><% end %>
+      <% if ordinary_workers.any? %><div class="worker-list criterion-worker-list"><% ordinary_workers.each do |activity| %><%= render "worker_row", activity: activity, run: run, current_workspace: current_workspace, questions: questions %><% end %></div><% end %>
       <% if criterion.children.any? && criterion_workers.none? { |activity| activity[:worker].role == "planner" } %>
-        <%= render "workflow_tree_criteria", criteria: criterion.children.to_a, worker_groups: worker_groups, run: run, current_workspace: current_workspace %>
+        <%= render "workflow_tree_criteria", criteria: criterion.children.to_a, worker_groups: worker_groups, questions: questions, run: run, current_workspace: current_workspace %>
       <% end %>
     </li>
   <% end %>
