@@ -20,12 +20,22 @@ module Orchestrator
       following_steps = previous_state&.dig(:following_steps) || []
       active_worker_ids = Worker.where(run_id: run_id, status: "running").pluck(:worker_id).to_set
 
-      if (review = record_step_attempt(run_id:, nickname:, result:, evidence_outcome:, evidence_citations:))
+      if (intervention = record_step_attempt(run_id:, nickname:, result:, evidence_outcome:, evidence_citations:))
+        # Either a chaperone now owns the failure, or VerifierRecovery has
+        # already re-requested/escalated verification -- in both cases the
+        # worker's own follow-up planner request must NOT be created, or a
+        # planner would race the recovery with a step it cannot legally
+        # express (verifier-role work).
+        summary = intervention.is_a?(ChaperoneReview) ?
+          "Strong chaperone is reviewing repeated worker failures." :
+          "Rails re-dispatched independent verification after a failed verifier attempt."
         next_state = (previous_state || TickState.default_state(run_id)).merge(
-          phase: "planning", last_plan_summary: "Strong chaperone is reviewing repeated worker failures.",
+          phase: "planning", last_plan_summary: summary,
           last_updated_at: now.utc.iso8601(3)
         )
-        return { planner_request: nil, chaperone_review: { review_id: review.review_id }, next_state: next_state }
+        response = { planner_request: nil, next_state: next_state }
+        response[:chaperone_review] = { review_id: intervention.review_id } if intervention.is_a?(ChaperoneReview)
+        return response
       end
 
       run = Run.find_by!(run_id: run_id)
@@ -159,6 +169,13 @@ module Orchestrator
         outcome:, result:, evidence_outcome:, evidence_citations:
       )
       return unless outcome.in?(%w[blocked failed])
+
+      # Verification lineages recover through VerifierRecovery (which
+      # re-requests a real verifier or escalates to the operator), never
+      # through the chaperone/planner path -- a planner cannot legally
+      # dispatch verifier-role work, so that road always dead-ends in a
+      # role-mismatch rejection.
+      return VerifierRecovery.call(attempt) if VerifierRecovery.applicable?(attempt)
 
       ChaperoneTrigger.call(attempt)
     end

@@ -208,7 +208,12 @@ module Orchestrator
     def claude_args(policy:, root_dir:, mcp_config_path:, settings_path:, cli_session_id:, resume:)
       [
         "--model", CLAUDE_MODEL,
-        "--permission-mode", "dontAsk",
+        # See the identical comment in Orchestrator::WorkerSpawner.claude_args
+        # -- "dontAsk" silently denies actions the CLI's own safety
+        # classifier flags as needing confirmation, with no human present
+        # to actually confirm them. bypassPermissions defers to the sandbox
+        # settings below as the real boundary instead.
+        "--permission-mode", "bypassPermissions",
         "--tools", policy.claude_tools,
         "--settings", settings_path,
         "--setting-sources", "",

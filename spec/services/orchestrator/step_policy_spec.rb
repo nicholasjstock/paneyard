@@ -53,21 +53,18 @@ RSpec.describe Orchestrator::StepPolicy do
     )
   end
 
-  it "rejects a diagnosis step that also requests implementation" do
+  it "reserves the acceptance-verify- artifact namespace for Rails-dispatched verification" do
     error = assert_raises(ArgumentError) do
       Orchestrator::StepPolicy.validate!(
         run_id: @run.run_id,
-        step: diagnosis_step(success_check: "Reproduce the response, then implement the smallest fix.")
+        step: {
+          owner: "worker", artifact: "acceptance-verify-outcome", success_check: "Verify the criterion.",
+          mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: []
+        }
       )
     end
 
-    assert_equal "diagnosis step cannot also request implementation", error.message
-  end
-
-  it "allows a diagnosis step to explicitly prohibit changes" do
-    step = diagnosis_step(success_check: "Reproduce the boundary. Do not change application code or public contracts.")
-
-    assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
+    assert_match(/reserved for Rails-dispatched verification/, error.message)
   end
 
   it "rejects implementation without evidence, even when no planner file list is supplied" do
@@ -125,6 +122,40 @@ RSpec.describe Orchestrator::StepPolicy do
     step = diagnosis_step(addresses_criteria: [ "outcome-sub" ])
 
     assert_equal step, Orchestrator::StepPolicy.validate!(run_id: @run.run_id, step:)
+  end
+
+  describe ".validate_plan!" do
+    it "reports every violation across nextStep and followingSteps in one error, not just the first" do
+      bad_next_step = implementation_step(allowed_paths: []).merge(evidence_refs: [])
+      bad_following_step = { owner: "orchestrator", artifact: "x.md", success_check: "y", mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: [] }
+
+      error = assert_raises(ArgumentError) do
+        Orchestrator::StepPolicy.validate_plan!(
+          run_id: @run.run_id, next_step: bad_next_step, following_steps: [ bad_following_step ]
+        )
+      end
+
+      assert_match(/nextStep:.*requires at least one evidenceRef/, error.message)
+      assert_match(/followingSteps\[0\]:.*must name an executable owner/, error.message)
+    end
+
+    it "does not raise when every step in the plan is valid" do
+      next_step = implementation_step(allowed_paths: [])
+      Orchestrator::StepPolicy.validate_plan!(run_id: @run.run_id, next_step:, following_steps: [ diagnosis_step ])
+    end
+
+    it "surfaces a later followingSteps violation even when an earlier one was already fixed" do
+      valid_step = diagnosis_step
+      bad_step = implementation_step(allowed_paths: []).merge(evidence_refs: [])
+
+      error = assert_raises(ArgumentError) do
+        Orchestrator::StepPolicy.validate_plan!(
+          run_id: @run.run_id, next_step: nil, following_steps: [ valid_step, bad_step ]
+        )
+      end
+
+      assert_match(/followingSteps\[1\]:.*requires at least one evidenceRef/, error.message)
+    end
   end
 
   private
