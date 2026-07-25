@@ -391,6 +391,12 @@ module Orchestrator
 
         Rails authenticates MCP calls with this worker's private capability. Do not invent or alter identity fields.
         `worker_turn` derives nickname and scope from that capability; pass runId, role, task, and result.
+        The workflow bus tools are MCP tools registered under the `mcp__workflow__` prefix (e.g.
+        `mcp__workflow__worker_turn`, `mcp__workflow__write_workflow_artifact`). If they are not directly
+        callable, they are deferred: load them FIRST with ToolSearch using their full prefixed names (e.g.
+        query `select:mcp__workflow__worker_turn`) -- bare, unprefixed names will not match. Never state or
+        imply that you called a tool you did not actually invoke; if a required tool cannot be loaded or
+        called, say exactly that in your final message instead of narrating a call that never happened.
         The target workspace root is `#{target_root}`. Start repository commands with `cd #{Shellwords.escape(target_root)}`.
         Bash is available under a launcher-enforced filesystem policy. Writes to tracked repository source are limited
         to the authorized source roots above -- source-protected workers have none. Gitignored paths (caches, build
