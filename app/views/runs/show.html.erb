@@ -6,7 +6,12 @@
 <div class="toolbar">
   <div class="run-title">
     <span class="eyebrow">Run <span class="mono"><%= @run.run_id %></span></span>
-    <h1><%= @run.task %></h1>
+    <% if @run.branch_name.present? %>
+      <h1><span class="mono"><%= @run.branch_name %></span></h1>
+      <% if @run.task.present? %><p class="muted">Task: <%= truncate(@run.task, length: 200) %></p><% end %>
+    <% else %>
+      <h1><%= @run.task %></h1>
+    <% end %>
     <span class="muted"><%= current_workspace.name %> &middot; <%= @run.launcher_variant %></span>
     <% if @run.managed_worktree? %>
       <p class="muted mono"><%= @run.worktree_name %> &middot; <%= @run.branch_name %></p>
