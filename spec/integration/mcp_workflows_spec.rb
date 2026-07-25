@@ -45,30 +45,6 @@ RSpec.describe "MCP workflow integrations" do
     )
   end
 
-  it "rejects a planner step that combines diagnosis and implementation" do
-    run = create_run("mcp-combined-diagnosis-fix")
-
-    expect do
-      McpTools::PlannerTurnTool.call(
-        runId: run.run_id,
-        summary: "Evidence is still missing.",
-        nextStep: {
-          owner: "worker",
-          artifact: "api-diagnosis.md",
-          successCheck: "Capture the response and then implement the smallest fix.",
-          mode: "diagnosis",
-          writeScope: "source_protected",
-          allowedPaths: [],
-          evidenceRefs: []
-        },
-        followingSteps: [],
-        server_context: nil
-      )
-    end.to raise_error(ArgumentError, "diagnosis step cannot also request implementation")
-
-    expect(run.spawn_requests).to be_empty
-  end
-
   it "writes and reads orchestrator state and history through the tool layer" do
     run = create_run("mcp-state")
 

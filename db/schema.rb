@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_24_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_25_090000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -361,6 +361,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_24_110000) do
     t.bigint "cache_creation_input_tokens"
     t.bigint "cache_read_input_tokens"
     t.string "capability_token_digest"
+    t.string "cli_session_id"
     t.string "command", null: false
     t.datetime "created_at", null: false
     t.string "env_path", null: false
@@ -370,6 +371,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_24_110000) do
     t.datetime "handoff_completed_at"
     t.bigint "input_tokens"
     t.string "last_message_path", null: false
+    t.string "lineage_key"
     t.string "log_path", null: false
     t.datetime "log_updated_at"
     t.string "mcp_config_path"
@@ -391,6 +393,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_24_110000) do
     t.string "worker_id", null: false
     t.string "write_scope"
     t.index ["capability_token_digest"], name: "index_workers_on_capability_token_digest", unique: true
+    t.index ["run_id", "lineage_key", "role"], name: "index_workers_on_run_id_and_lineage_key_and_role"
     t.index ["run_id", "status"], name: "index_workers_on_run_id_and_status"
     t.index ["worker_id"], name: "index_workers_on_worker_id", unique: true
   end
