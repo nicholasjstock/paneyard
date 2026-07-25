@@ -92,7 +92,7 @@ module Orchestrator
           worker = WorkerSpawner.spawn_worker(
             run: run, role: role, nickname: nickname, reason: reason, scope: request.scope, prompt: prompt,
             worker_id: worker_id, mode: execution_mode(request), write_scope: write_scope(request),
-            allowed_paths: effective_allowed_paths, model_tier: request.model_tier
+            allowed_paths: effective_allowed_paths, model_tier: request.model_tier, lineage_key: request.lineage_key
           )
         rescue Orchestrator::TargetPreflight::Error => e
           request.update!(

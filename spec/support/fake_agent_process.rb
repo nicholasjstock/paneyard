@@ -28,6 +28,7 @@ module FakeAgentProcess
     scope = task[/Bus request: (\S+)\. Requested by:/, 1] || "workflow-plan.md"
 
     worker = find_worker(run_id: run_id, role: role)
+    emit_codex_session_meta(worker) if worker && ENV["WORKFLOW_FAKE_AGENT_VARIANT"] == "codex"
     append_log(worker.log_path, "[fake-agent] starting role=#{role} run_id=#{run_id} scope=#{scope}") if worker
     File.write(worker.last_message_path, "fake #{role} handled #{scope}\n") if worker
 
@@ -134,6 +135,14 @@ module FakeAgentProcess
         sleep 0.05
       end
     end
+  end
+
+  # Stands in for real codex's own first-emitted JSONL line (confirmed
+  # against a real historical codex rollout file) so specs exercising
+  # Orchestrator::LogReader.codex_session_id / WorkerReconcileJob's session
+  # capture have something real to parse, without a live codex binary.
+  def emit_codex_session_meta(worker)
+    append_log(worker.log_path, { type: "session_meta", payload: { session_id: SecureRandom.uuid } }.to_json)
   end
 
   def append_log(path, line)

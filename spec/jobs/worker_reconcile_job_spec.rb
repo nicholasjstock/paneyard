@@ -189,6 +189,52 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "captures codex's own session id from the session_meta line for later resume" do
+    workspace = Workspace.create!(name: "reconcile-codex-session-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-codex-session-#{SecureRandom.hex(4)}", task: "Capture codex session id",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, <<~LOG)
+      {"type":"session_meta","payload":{"session_id":"019f199c-ef95-7b70-a232-5e73b4beb30e"}}
+      {"type":"agent_message","text":"working"}
+    LOG
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "worker", nickname: "worker-codex-session",
+      reason: "Do it.", scope: "task.md", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "codex"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    expect(worker.reload.cli_session_id).to eq("019f199c-ef95-7b70-a232-5e73b4beb30e")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
+  it "does not overwrite an already-captured codex session id" do
+    workspace = Workspace.create!(name: "reconcile-codex-session-kept-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "reconcile-codex-session-kept-#{SecureRandom.hex(4)}", task: "Keep prior session id",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running"
+    )
+    log_path = File.join(workspace.root_path, "worker.log")
+    File.write(log_path, { type: "session_meta", payload: { session_id: "a-different-id" } }.to_json << "\n")
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "worker", nickname: "worker-codex-kept",
+      reason: "Do it.", scope: "task.md", status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "codex",
+      cli_session_id: "already-set"
+    )
+
+    WorkerReconcileJob.perform_now
+
+    expect(worker.reload.cli_session_id).to eq("already-set")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "records a normal stop for a chaperone worker that died after submitting its decision" do
     workspace = Workspace.create!(name: "reconcile-chaperone-done-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(

@@ -203,6 +203,90 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(JSON.parse(File.read(worker.env_path)).fetch("WORKFLOW_CHAPERONE_TOKEN")).to eq("[set]")
       expect(stdin_write.string).to include("get_chaperone_state")
     end
+
+    it "resumes the run's most recent same-role session, even across different steps" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-resume")
+      workspace = Workspace.create!(name: "resume-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Implement the feature",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(11_111, 22_222)
+      allow(Process).to receive(:detach)
+
+      first = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "worker", reason: "Phase 1.", scope: "phase-1.md",
+        prompt: "Implement phase 1.", lineage_key: "phase-1-lineage"
+      )
+      expect(first.cli_session_id).to be_present
+      expect(first.lineage_key).to eq("phase-1-lineage")
+
+      second = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "worker-1", reason: "Phase 2.", scope: "phase-2.md",
+        prompt: "Implement phase 2.", lineage_key: "phase-2-lineage"
+      )
+
+      expect(second.args).to include("--resume", first.cli_session_id)
+      expect(second.args).not_to include("--session-id")
+      expect(second.cli_session_id).to eq(first.cli_session_id)
+    end
+
+    it "never resumes across a role change even when the lineage_key is identical" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-role-boundary")
+      workspace = Workspace.create!(name: "role-boundary-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Implement then verify",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(11_112, 22_223)
+      allow(Process).to receive(:detach)
+
+      implementer = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "worker", reason: "Implement.", scope: "impl.md",
+        prompt: "Implement it.", lineage_key: "shared-lineage"
+      )
+
+      verifier = described_class.spawn_worker(
+        run: run, role: "verifier", nickname: "verifier", reason: "Verify.", scope: "impl.md",
+        prompt: "Verify it independently.", lineage_key: "shared-lineage"
+      )
+
+      expect(verifier.args).not_to include("--resume")
+      expect(verifier.args).not_to include(implementer.cli_session_id)
+      expect(verifier.cli_session_id).not_to eq(implementer.cli_session_id)
+    end
+
+    it "chaperone spawns never resume, regardless of lineage_key" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-chaperone-resume")
+      workspace = Workspace.create!(name: "chaperone-resume-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Implement then chaperone-review",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(11_113, 22_224)
+      allow(Process).to receive(:detach)
+
+      described_class.spawn_worker(
+        run: run, role: "worker", nickname: "worker", reason: "Implement.", scope: "impl.md",
+        prompt: "Implement it.", lineage_key: "shared-lineage"
+      )
+
+      chaperone = described_class.spawn_worker(
+        run: run, role: "chaperone", nickname: "chaperone", reason: "Review.", scope: "impl.md",
+        prompt: "Review it.", model_tier: "strong", lineage_key: "shared-lineage",
+        mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone", token: "tok", allowed_tools: [] }
+      )
+
+      expect(chaperone.args).to include("--no-session-persistence")
+      expect(chaperone.args).not_to include("--resume")
+      expect(chaperone.cli_session_id).to be_nil
+    end
   end
 
   describe ".stop_worker" do

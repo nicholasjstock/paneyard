@@ -30,7 +30,7 @@ module Orchestrator
     CODEX_WORKER_MODEL = CODEX_SMALL_MODEL
 
     def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil,
-      write_scope: nil, allowed_paths: [], model_tier: "small", mcp_override: nil)
+      write_scope: nil, allowed_paths: [], model_tier: "small", mcp_override: nil, lineage_key: nil)
       raise ArgumentError, "Planner processes were removed; queue a PlannerDecisionJob instead" if role == "planner"
 
       # nickname flows straight into file paths under workers_dir below --
@@ -88,16 +88,36 @@ module Orchestrator
         write_worker_mcp_config(mcp_config_path, capability_token)
         write_claude_settings(claude_settings_path, policy) if driver == "claude"
       end
+      # A resumed session picks up wherever its predecessor's conversation
+      # left off (same codebase understanding, same discovered context) --
+      # scoped to (run, role) so it can never cross a role boundary (see
+      # prior_worker_for_resume) and never applies to a chaperone/mcp_override
+      # spawn, which always gets a fully fresh, non-persisted session.
+      resume_from = prior_worker_for_resume(run_id: run.run_id, role:) unless mcp_override
+      resume_session_id = resume_from&.cli_session_id
+      cli_session_id =
+        if mcp_override
+          nil
+        elsif driver == "claude"
+          resume_session_id || SecureRandom.uuid
+        else
+          # codex mints its own session id; a fresh spawn's id is unknown
+          # until WorkerReconcileJob captures it from the log after the
+          # process exits (see Orchestrator::LogReader.codex_session_id).
+          resume_session_id
+        end
+
       command, args =
         if driver == "claude"
           [ "claude", claude_args(
             enriched_prompt, role:, mode:, mcp_config_path:, settings_path: claude_settings_path,
-            target_root: root_dir, policy:, model_tier:, mcp_override:
+            target_root: root_dir, policy:, model_tier:, mcp_override:,
+            cli_session_id:, resume_session_id:
           ) ]
         else
           validate_codex_permission_profile_compatibility!(root_dir)
           [ "codex", codex_args(
-            root_dir:, last_message_path:, policy:, model_tier:, mcp_override:
+            root_dir:, last_message_path:, policy:, model_tier:, mcp_override:, resume_session_id:
           ) ]
         end
 
@@ -121,7 +141,7 @@ module Orchestrator
         worker_id:, role:, nickname:, reason:, scope:, status: "launching", pid: 0,
         prompt_path:, log_path:, last_message_path:, exit_status_path:, env_path:, mcp_config_path:,
         command:, args: [], model: selected_model, capability_token_digest:, execution_mode: mode,
-        write_scope:, allowed_paths: Array(allowed_paths)
+        write_scope:, allowed_paths: Array(allowed_paths), lineage_key:, cli_session_id:
       )
 
       # Brakeman flags this as command injection because command/args/paths
@@ -153,6 +173,26 @@ module Orchestrator
     rescue => error
       worker&.update!(status: "stopped", stopped_at: Time.current, stop_reason: "Worker failed to launch: #{error.message}")
       raise
+    end
+
+    # One CLI session per (run, role): every same-role spawn resumes the
+    # most recent same-role session in the run, so a later worker inherits
+    # its predecessors' codebase understanding instead of re-exploring from
+    # scratch (~80-90k cache-creation tokens per cold start, observed).
+    # Dispatch is single-flight per run (see SpawnRequestedWorkers), so
+    # same-role sessions are never resumed concurrently. The role predicate
+    # is the reliability boundary and lives here, not in caller convention:
+    # a role transition (worker -> verifier -> committer, or into
+    # chaperone) always gets a fresh session -- a verifier must never
+    # inherit the implementer's own reasoning trail. Accepted trade-off:
+    # within one role, a confused worker's context now carries into the
+    # next attempt; the chaperone remains the backstop for a session that
+    # has genuinely gone bad.
+    def prior_worker_for_resume(run_id:, role:)
+      Worker.where(run_id:, role:)
+        .where.not(cli_session_id: nil)
+        .order(created_at: :desc)
+        .first
     end
 
     def stop_worker(worker:, reason:)
@@ -197,7 +237,7 @@ module Orchestrator
     # YAML front matter in .claude/agents/*.md as model configuration. Keep
     # cost routing here at the actual CLI boundary instead.
     def claude_args(prompt, role: "worker", mode: nil, mcp_config_path:, settings_path:, target_root:, policy:,
-      model_tier: "small", mcp_override: nil)
+      model_tier: "small", mcp_override: nil, cli_session_id: nil, resume_session_id: nil)
       if mcp_override
         # Without an explicit --output-format, --print defaults to plain
         # text -- not the structured JSON stream Orchestrator::LogReader.
@@ -240,7 +280,7 @@ module Orchestrator
         "--mcp-config", mcp_config_path,
         "--strict-mcp-config",
         "--disable-slash-commands",
-        "--no-session-persistence",
+        *(resume_session_id ? [ "--resume", resume_session_id ] : [ "--session-id", cli_session_id ]),
         "--output-format", "stream-json",
         "--include-partial-messages",
         "--verbose",
@@ -256,7 +296,7 @@ module Orchestrator
       model_tier.to_s == "strong" ? CODEX_PROMOTED_MODEL : CODEX_SMALL_MODEL
     end
 
-    def codex_args(root_dir:, last_message_path:, policy:, model_tier: "small", mcp_override: nil)
+    def codex_args(root_dir:, last_message_path:, policy:, model_tier: "small", mcp_override: nil, resume_session_id: nil)
       model_args = [ "--model", codex_model_for(model_tier:) ]
       if mcp_override
         return [
@@ -276,10 +316,16 @@ module Orchestrator
       ]
       config_args = (policy.codex_config_overrides + mcp_overrides).flat_map { |override| [ "-c", override ] }
 
-      [
-        "exec", *model_args,
-        *config_args, "-C", root_dir, "-o", last_message_path, "-"
-      ]
+      # --json is what makes the session_meta line (containing codex's own
+      # generated session id) actually appear in the captured worker log --
+      # see Orchestrator::LogReader.codex_session_id. `codex exec resume`
+      # does not accept -C/--add-dir (confirmed against `codex exec resume
+      # --help`); the resumed session keeps whatever cwd it started with.
+      if resume_session_id
+        [ "exec", "resume", resume_session_id, *model_args, "--json", *config_args, "-o", last_message_path, "-" ]
+      else
+        [ "exec", *model_args, "--json", *config_args, "-C", root_dir, "-o", last_message_path, "-" ]
+      end
     end
 
     # Codex permission profiles and the legacy sandbox_mode setting are

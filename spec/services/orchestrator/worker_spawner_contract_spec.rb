@@ -87,6 +87,123 @@ RSpec.describe Orchestrator::WorkerSpawner do
     assert_equal "gpt-5.6-terra", chaperone_args[chaperone_args.index("--model") + 1]
   end
 
+  it "claude workers mint a fresh --session-id and drop --no-session-persistence" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
+    )
+    args = Orchestrator::WorkerSpawner.send(
+      :claude_args, "Do the work.", role: "worker", mcp_config_path: "/tmp/mcp.json",
+      settings_path: "/tmp/settings.json", target_root: root, policy:, cli_session_id: "fresh-id"
+    )
+
+    assert_equal "fresh-id", args[args.index("--session-id") + 1]
+    refute_includes args, "--resume"
+    refute_includes args, "--no-session-persistence"
+  end
+
+  it "claude workers resume a prior session instead of minting a fresh one" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
+    )
+    args = Orchestrator::WorkerSpawner.send(
+      :claude_args, "Do the work.", role: "worker", mcp_config_path: "/tmp/mcp.json",
+      settings_path: "/tmp/settings.json", target_root: root, policy:,
+      cli_session_id: "fresh-id", resume_session_id: "prior-id"
+    )
+
+    assert_equal "prior-id", args[args.index("--resume") + 1]
+    refute_includes args, "--session-id"
+  end
+
+  it "chaperone claude spawns never resume, even if a resume_session_id is passed" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
+    )
+    args = Orchestrator::WorkerSpawner.send(
+      :claude_args, "Review this.", role: "chaperone", mcp_config_path: "/tmp/mcp.json",
+      settings_path: "/tmp/settings.json", target_root: root, policy:,
+      resume_session_id: "prior-id", mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone", allowed_tools: [] }
+    )
+
+    assert_includes args, "--no-session-persistence"
+    refute_includes args, "--resume"
+    refute_includes args, "prior-id"
+  end
+
+  it "codex workers add --json (needed to capture session_meta) and no resume subcommand on a fresh spawn" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
+    )
+    args = Orchestrator::WorkerSpawner.send(
+      :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:
+    )
+
+    assert_includes args, "--json"
+    refute_includes args, "resume"
+    assert_equal root, args[args.index("-C") + 1]
+  end
+
+  it "codex workers resume via the exec resume subcommand, without -C (unsupported by codex exec resume)" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
+    )
+    args = Orchestrator::WorkerSpawner.send(
+      :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:, resume_session_id: "prior-id"
+    )
+
+    assert_equal [ "exec", "resume", "prior-id" ], args.first(3)
+    assert_includes args, "--json"
+    refute_includes args, "-C"
+  end
+
+  it "chaperone codex spawns never resume, even if a resume_session_id is passed" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
+    )
+    args = Orchestrator::WorkerSpawner.send(
+      :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:,
+      resume_session_id: "prior-id", mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone" }
+    )
+
+    assert_includes args, "--ephemeral"
+    refute_includes args, "resume"
+    refute_includes args, "prior-id"
+  end
+
+  describe ".prior_worker_for_resume" do
+    it "returns the most recent same-role session in the run, never another role or run" do
+      run = create_run
+      other_run = create_run
+      run.workers.create!(worker_attrs(role: "worker", lineage_key: "lineage-a", cli_session_id: "older-id"))
+      newest = run.workers.create!(worker_attrs(role: "worker", lineage_key: "lineage-b", cli_session_id: "newest-id"))
+      run.workers.create!(worker_attrs(role: "verifier", lineage_key: "lineage-a", cli_session_id: "wrong-role"))
+      other_run.workers.create!(worker_attrs(role: "worker", lineage_key: "lineage-a", cli_session_id: "wrong-run"))
+
+      found = Orchestrator::WorkerSpawner.send(
+        :prior_worker_for_resume, run_id: run.run_id, role: "worker"
+      )
+
+      assert_equal newest.id, found.id
+    end
+
+    it "ignores a prior worker with no captured cli_session_id yet" do
+      run = create_run
+      run.workers.create!(worker_attrs(role: "worker", lineage_key: "lineage-a", cli_session_id: nil))
+
+      found = Orchestrator::WorkerSpawner.send(
+        :prior_worker_for_resume, run_id: run.run_id, role: "worker"
+      )
+
+      assert_nil found
+    end
+  end
+
   it "infrastructure workers receive the generic worker contract and skill" do
     assert_equal Rails.root.join(".claude", "skills", "infrastructure", "SKILL.md"),
       Orchestrator::WorkerSpawner.send(:infrastructure_skill_path, "claude")
@@ -105,5 +222,24 @@ RSpec.describe Orchestrator::WorkerSpawner do
     assert_includes prompt, "Current task:\nDiagnose the outage."
     assert_includes codex_prompt, "call `worker_turn`"
     assert_includes codex_prompt, "evidence-driven reliability investigation"
+  end
+
+  def create_run
+    root = Dir.mktmpdir("worker-spawner-contract")
+    workspace = Workspace.create!(name: "worker-spawner-contract-#{SecureRandom.hex(4)}", root_path: root)
+    workspace.runs.create!(
+      run_id: "worker-spawner-contract-#{SecureRandom.hex(4)}", task: "Exercise resume lookup",
+      target_root: root, launcher_variant: "claude", status: "running"
+    )
+  end
+
+  def worker_attrs(role:, lineage_key:, cli_session_id:)
+    id = SecureRandom.uuid
+    {
+      worker_id: id, role:, nickname: "worker-#{id}", reason: "test", scope: "test.md", status: "stopped",
+      pid: 1, prompt_path: "/tmp/#{id}.prompt", log_path: "/tmp/#{id}.log",
+      last_message_path: "/tmp/#{id}.last", env_path: "/tmp/#{id}.env", command: "claude",
+      lineage_key:, cli_session_id:
+    }
   end
 end

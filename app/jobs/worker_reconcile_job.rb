@@ -19,6 +19,7 @@ class WorkerReconcileJob < ApplicationJob
       exit_code = read_exit_code(worker.exit_status_path)
       output = Orchestrator::LogReader.read_tail_lines(worker.log_path, 12).to_s
       usage = Orchestrator::LogReader.claude_usage(worker.log_path)
+      persist_codex_cli_session_id(worker)
       persist_claude_final_response(worker)
       stop_reason = worker.stop_reason.presence || stop_reason_for(worker, exit_code, output)
       worker.update!(
@@ -63,6 +64,22 @@ class WorkerReconcileJob < ApplicationJob
     value = File.read(path).strip
     Integer(value, 10) if value.match?(/\A\d+\z/)
   rescue Errno::ENOENT, Errno::EACCES, ArgumentError
+    nil
+  end
+
+  # Codex never receives an incoming session id (unlike claude, which mints
+  # one up front at spawn time -- see Orchestrator::WorkerSpawner) so it can
+  # only be captured after the fact, from the worker's own log, once it's
+  # actually run. update_column rather than folding into the update! a few
+  # lines below deliberately keeps this independent of that call's own
+  # attribute set.
+  def persist_codex_cli_session_id(worker)
+    return unless worker.command == "codex"
+    return if worker.cli_session_id.present?
+
+    session_id = Orchestrator::LogReader.codex_session_id(worker.log_path)
+    worker.update_column(:cli_session_id, session_id) if session_id.present?
+  rescue Errno::ENOENT, Errno::EACCES
     nil
   end
 
