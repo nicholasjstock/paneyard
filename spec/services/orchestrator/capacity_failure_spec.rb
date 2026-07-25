@@ -14,6 +14,24 @@ RSpec.describe Orchestrator::CapacityFailure do
     expect(described_class.detected?("NoMethodError: undefined method 'foo'")).to be false
   end
 
+  describe ".stop_reason_message" do
+    it "labels each capacity signal distinctly, from the same list detected? uses" do
+      expect(described_class.stop_reason_message("hit your session limit")).to eq(
+        "Claude session limit reached; worker exited before completing its handoff."
+      )
+      expect(described_class.stop_reason_message("hit your usage limit")).to eq(
+        "Codex usage limit reached; worker exited before completing its handoff."
+      )
+      expect(described_class.stop_reason_message("429 Too Many Requests")).to eq(
+        "Claude rate limit reached; worker exited before completing its handoff."
+      )
+    end
+
+    it "returns nil for an unrelated failure" do
+      expect(described_class.stop_reason_message("NoMethodError: undefined method 'foo'")).to be_nil
+    end
+  end
+
   it "parses Claude's wall-clock reset time" do
     reset_at = described_class.reset_at("hit your session limit · resets 5pm (Europe/Paris)")
     expect(reset_at.in_time_zone("Europe/Paris").hour).to eq(17)

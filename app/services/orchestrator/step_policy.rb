@@ -6,13 +6,35 @@ module Orchestrator
     WRITE_SCOPES = %w[source_protected tests_only scoped_changes].freeze
     EXECUTOR_OWNERS = %w[worker infrastructure planner].freeze
     PLANNER_STEP_OWNERS = %w[worker infrastructure].freeze
-    IMPLEMENTATION_LANGUAGE = /\b(implement|fix|patch|modify|edit|change|land|ship)\b/i
-    NEGATED_IMPLEMENTATION_LANGUAGE = /\b(do not|don't|never)\b(?:\s+\w+){0,3}\s+(implement|fix|patch|modify|edit|change|land|ship)\b/i
 
+    # Collects every violation across the whole plan instead of raising on
+    # the first one found. validate! itself stays fail-fast per step (see
+    # its own callers/specs) -- this is specifically about not making a
+    # planner discover a followingSteps[2] problem only after fixing
+    # nextStep, then discover a followingSteps[0] problem only after fixing
+    # that, one hidden violation revealed per round trip. Reported back
+    # through PlannerDecisionSubmission's bounded self-correction (see
+    # MAX_REJECTED_DECISION_ATTEMPTS), so seeing everything wrong at once
+    # directly cuts how many rejected attempts a plan needs to converge.
     def validate_plan!(run_id:, next_step:, following_steps:, acceptance_criteria_keys: nil)
       keys = acceptance_criteria_keys || current_acceptance_criteria_keys(run_id)
-      validate!(run_id: run_id, step: next_step, acceptance_criteria_keys: keys) if next_step
-      Array(following_steps).each { |step| validate!(run_id: run_id, step: step, acceptance_criteria_keys: keys) }
+      errors = []
+
+      if next_step
+        begin
+          validate!(run_id: run_id, step: next_step, acceptance_criteria_keys: keys)
+        rescue ArgumentError => error
+          errors << "nextStep: #{error.message}"
+        end
+      end
+
+      Array(following_steps).each_with_index do |step, index|
+        validate!(run_id: run_id, step: step, acceptance_criteria_keys: keys)
+      rescue ArgumentError => error
+        errors << "followingSteps[#{index}]: #{error.message}"
+      end
+
+      raise ArgumentError, errors.join(" | ") if errors.any?
     end
 
     def current_acceptance_criteria_keys(run_id)
@@ -56,7 +78,7 @@ module Orchestrator
 
       case mode
       when "diagnosis"
-        validate_diagnosis!(step:, write_scope:, allowed_paths:)
+        validate_diagnosis!(write_scope:, allowed_paths:)
       when "implementation", "infrastructure"
         raise ArgumentError, "#{mode} step requires at least one evidenceRef" if evidence_refs.empty?
         raise ArgumentError, "#{mode} step requires writeScope=scoped_changes" unless write_scope == "scoped_changes"
@@ -85,10 +107,7 @@ module Orchestrator
       lines.join(" ")
     end
 
-    def validate_diagnosis!(step:, write_scope:, allowed_paths:)
-      if diagnosis_requests_implementation?(step[:success_check].to_s)
-        raise ArgumentError, "diagnosis step cannot also request implementation"
-      end
+    def validate_diagnosis!(write_scope:, allowed_paths:)
       unless write_scope.in?(%w[source_protected tests_only])
         raise ArgumentError, "diagnosis step must use source_protected or tests_only write scope"
       end
@@ -99,11 +118,6 @@ module Orchestrator
 
       invalid = allowed_paths.reject { |path| diagnostic_path?(path) }
       raise ArgumentError, "diagnosis may write only test or diagnostic paths: #{invalid.join(', ')}" if invalid.any?
-    end
-
-    def diagnosis_requests_implementation?(success_check)
-      success_check.match?(IMPLEMENTATION_LANGUAGE) &&
-        !success_check.match?(NEGATED_IMPLEMENTATION_LANGUAGE)
     end
 
     def diagnostic_path?(path)
@@ -125,6 +139,15 @@ module Orchestrator
       name = artifact.to_s
       if name.blank? || name == "." || name == ".." || name.include?("/") || name.include?("\\") || name.include?("\0")
         raise ArgumentError, "artifact must be a filename only, without a path prefix: #{artifact.inspect}"
+      end
+      # Verification of acceptance criteria is Rails-dispatched
+      # (AcceptanceCriteria.request_verification!, retried by
+      # Orchestrator::VerifierRecovery) -- a planner cannot dispatch
+      # verifier-role work, so a step in this namespace could only ever be
+      # a worker-role stand-in that submit_acceptance_verification rejects.
+      if name.start_with?("acceptance-verify-")
+        raise ArgumentError, "the acceptance-verify- artifact namespace is reserved for Rails-dispatched " \
+          "verification; never plan verification of an acceptance criterion -- Rails re-requests it automatically"
       end
     end
     private_class_method :validate_artifact_name!
