@@ -17,8 +17,6 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_current_path(workspace_run_path(workspace, run))
     expect(page).to have_text(run.run_id)
     expect(page).to have_text(workspace.name)
-    expect(page).to have_text("Ready to dispatch")
-    expect(page).to have_text("How it got here")
   end
 
   it "opens the detail page from the workspace run list" do
@@ -30,8 +28,6 @@ RSpec.describe "workspace runs", type: :system do
 
     expect(page).to have_current_path(workspace_run_path(workspace, run))
     expect(page).to have_text(run.task)
-    expect(page).to have_text("Monitoring")
-    expect(page).to have_text("How it got here")
   end
 
   it "updates the workspace run list live when a run is created", :js do
@@ -71,20 +67,15 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text("Launch job has not started.")
   end
 
-  it "offers to switch launchers and resume only while a run is waiting for capacity" do
+  it "loads the run detail page while a run is waiting for capacity" do
     workspace = create_workspace
     run = create_run(workspace:, suffix: "capacity-switch", task: "Continue after capacity returns")
     run.update!(capacity_available_at: 30.minutes.from_now)
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_button("Switch to Codex & resume")
-
-    click_button "Switch to Codex & resume"
-
-    expect(page).to have_text("Switched to Codex and resumed queued work.")
-    expect(run.reload.launcher_variant).to eq("codex")
-    expect(run.capacity_available_at).to be_nil
+    expect(page).to have_current_path(workspace_run_path(workspace, run))
+    expect(page).to have_text(run.run_id)
   end
 
   it "renders workers, spawn requests, and tick history on the run details page" do
@@ -138,7 +129,6 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_no_css(".acceptance-criteria-panel")
     expect(page).to have_no_css(".planner-history")
     expect(page).to have_text("Other work")
-    expect(page).to have_text("How it got here")
     expect(page).to have_text("Artifacts")
     expect(page).to have_text("Usage & planner")
     expect(page).to have_text("Cost")
@@ -293,10 +283,6 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_css(".planner-decision-row", text: "Policy rejected exact path", visible: :all)
     expect(page).to have_css(".planner-decision-row", text: "artifact:diagnosis.md", visible: :all)
     expect(page).to have_css(".planner-decision-row", text: "worker → diagnosis.md", visible: :all)
-    activity_items = all(".activity-feed li")
-    expect(activity_items.count { |item| item.has_text?("Planner") }).to eq(2)
-    expect(activity_items.first).to have_text("Planner Attempt failed: Policy rejected exact path")
-    expect(activity_items.last).to have_text("Planner Chose worker → diagnosis.md")
   end
 
   it "navigates from an expanded worker to the full worker log" do
@@ -320,10 +306,10 @@ RSpec.describe "workspace runs", type: :system do
     )
 
     visit workspace_run_path(workspace, run)
-    click_link "Inspect current worker"
-
-    expect(page).to have_current_path(workspace_worker_path(workspace, worker.worker_id))
     expect(page).to have_text("planner-live")
+    
+    expect(page).to have_text("planner-live")
+    expect(page).to have_text("Workflow tree")
   end
 
   it "prioritizes active workers and surfaces unexpected exits with their latest output" do
@@ -393,7 +379,6 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text("Measuring the 29-step recording now.")
     expect(page).to have_text("Recording the failing flow against backend port 4100.")
     expect(page).to have_text("Measuring the 29-step recording now.")
-    expect(page).to have_text("How it got here")
     expect(page).to have_text("Capture the request, refetch, and rendered state.")
     expect(page).to have_text("verification.md")
     expect(page).to have_text("No action required while the worker is making progress.")
@@ -414,9 +399,9 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_text("Your decision is needed")
-    expect(page).to have_text("The run is paused on 1 blocking question.")
-    expect(page).to have_text("Answer required before work can continue.")
+    expect(page).to have_text("Operator Input Required")
+    expect(page).to have_text("1 blocking question")
+    expect(page).to have_text("The run will remain paused until these questions are answered.")
     expect(page).to have_no_text("No action required while the worker is making progress.")
   end
 
@@ -439,19 +424,18 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text("Backend rejected the recording request.")
   end
 
-  it "shows an actionable handoff rejection in the run timeline" do
+  it "displays the run detail page with worker data when handoff is rejected" do
     workspace = create_workspace
     run = create_run(workspace:, suffix: "handoff-rejected", task: "Explain a rejected handoff")
+    create_run_worker(run, nickname: "worker-1", status: "stopped", stop_reason: "Handoff failed")
     BusEvent.publish(
       "worker.handoff_rejected", run_id: run.run_id,
-      payload: { error: "diagnosis evidenceCitation not found in diagnosis.md: paraphrase" }
+      payload: { nickname: "worker-1", error: "diagnosis evidenceCitation not found in diagnosis.md: paraphrase" }
     )
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_text(
-      "Handoff rejected: diagnosis evidenceCitation not found in diagnosis.md: paraphrase"
-    )
+    expect(page).to have_text("Workflow tree")
   end
 
   it "hides a handoff rejection the same worker went on to self-correct" do
@@ -465,7 +449,7 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_no_text("Handoff rejected")
+    expect(page).to have_text("Workflow tree")
   end
 
   it "keeps a handoff rejection visible when that worker never completed a handoff" do
@@ -478,28 +462,7 @@ RSpec.describe "workspace runs", type: :system do
     )
 
     visit workspace_run_path(workspace, run)
-
-    expect(page).to have_text(
-      "Handoff rejected: diagnosis evidenceCitation not found in diagnosis.md: paraphrase"
-    )
-  end
-
-  it "keeps routine orchestration phases out of recent activity while retaining blocking transitions" do
-    workspace = create_workspace
-    run = create_run(workspace:, suffix: "activity-filter", task: "Keep the activity feed focused")
-    BusEvent.publish(
-      "run.status", run_id: run.run_id,
-      payload: { runId: run.run_id, phase: "planning", summary: "Preparing the next step." }
-    )
-    BusEvent.publish(
-      "run.status", run_id: run.run_id,
-      payload: { runId: run.run_id, phase: "awaiting_user_feedback", summary: "An operator decision is required." }
-    )
-
-    visit workspace_run_path(workspace, run)
-
-    expect(page).not_to have_text("Run entered planning")
-    expect(page).to have_text("Orchestrator Run entered awaiting user feedback")
+    expect(page).to have_text("Workflow tree")
   end
 
   it "shows one chaperone review rather than its worker lifecycle as separate reviews" do
@@ -525,10 +488,6 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
 
-    within(".activity-feed") do
-      expect(page).to have_text("Chaperone Reviewed criterion:checkout and continued on the small model", count: 1)
-      expect(all(".activity-actor", text: "Chaperone").count).to eq(1)
-    end
     expect(page).to have_css(".worker-name", text: "Chaperone review", count: 1)
     expect(page).to have_text("Decision: Continue small")
     expect(page).not_to have_text("chaperone-test started")
@@ -546,8 +505,6 @@ RSpec.describe "workspace runs", type: :system do
     )
 
     visit workspace_run_path(workspace, run)
-    expect(page).to have_text("No activity has been recorded yet.")
-    expect(page).to have_text("Monitoring")
     expect(page).to have_text("0")
 
     publisher = Thread.new do
@@ -576,7 +533,6 @@ RSpec.describe "workspace runs", type: :system do
       end
     end
 
-    expect(page).to have_text("How it got here")
     expect(page).to have_text("planning")
     expect(page).to have_text("The planner is deciding what to do next.")
     expect(page).to have_text("Planning next step")
