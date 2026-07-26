@@ -1,4 +1,5 @@
 require "shellwords"
+require "tmpdir"
 
 module Orchestrator
   # Ports scripts/workflow-worker-spawn.ts's spawnWorkerProcess -- forks a
@@ -117,7 +118,11 @@ module Orchestrator
       # claude, since codex spawns chdir into root_dir instead (see below).
       runtime_dir = Rails.root.join("tmp", "workers", cli_session_id || worker_id).to_s
       FileUtils.mkdir_p(runtime_dir)
-      cache_dir = File.join(runtime_dir, "cache")
+      # XDG_CACHE_HOME is a cross-tool cache-location standard. Use a unique
+      # directory beneath the OS temporary root: every worker sandbox grants
+      # that root write access, unlike a user home directory or a target
+      # repository. This is deliberately not a repo-specific RuboCop setting.
+      cache_dir = File.join(Dir.tmpdir, "workflow-worker-cache", worker_id)
       FileUtils.mkdir_p(cache_dir)
 
       command, args =
@@ -142,9 +147,9 @@ module Orchestrator
         "WORKFLOW_WORKER_SCOPE" => scope,
         "WORKFLOW_WORKER_TOKEN" => capability_token,
         "WORKFLOW_CHAPERONE_TOKEN" => mcp_override&.dig(:token),
-        # RuboCop's server initializes its cache before it reads command-line
-        # options. Keep that cache under the worker's writable runtime root
-        # instead of the sandboxed user's ~/.cache.
+        # Tools such as RuboCop initialize caches before reading command-line
+        # options. Keep disposable caches out of the sandboxed user's
+        # ~/.cache and the target repository.
         "XDG_CACHE_HOME" => cache_dir
       )
 
