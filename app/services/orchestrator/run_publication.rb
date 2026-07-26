@@ -39,16 +39,19 @@ module Orchestrator
       raise Error, error.message
     end
 
-    # Validated against the worktree's real, current git status so a worker
-    # can only request exclusion of a path that is actually part of the
-    # pending diff -- it cannot name arbitrary or fictional paths. The
+    # A worker can request an untracked pending path, or a path that is
+    # already tracked despite matching .gitignore (the latter is the common
+    # "old test log committed by mistake" case). This is only a request: the
+    # terminal committer reviews it before Rails changes the index. The
     # unique index on (run_id, path) means re-requesting the same path is a
     # no-op rather than a way to pile up duplicate requests.
     MAX_PENDING_GIT_CHANGE_REQUESTS = 20
 
     def request_git_change!(run:, requested_by_worker_id:, path:, reason:)
       root = validated_root!(run)
-      raise Error, "Path is not part of this run's pending changes: #{path}" unless git_status_paths(root).include?(path)
+      unless requestable_git_change_path?(root, path)
+        raise Error, "Path is not part of this run's pending changes or a tracked ignored artifact: #{path}"
+      end
 
       if run.git_change_requests.pending.count >= MAX_PENDING_GIT_CHANGE_REQUESTS
         raise Error, "Too many pending git change requests for this run (max #{MAX_PENDING_GIT_CHANGE_REQUESTS})"
@@ -56,6 +59,14 @@ module Orchestrator
 
       run.git_change_requests.create!(requested_by_worker_id:, path:, reason:, status: "requested")
     end
+
+    def requestable_git_change_path?(root, path)
+      return true if git_status_paths(root).include?(path)
+
+      git_success?(root, "ls-files", "--error-unmatch", "--", path) &&
+        git_success?(root, "check-ignore", "-q", "--", path)
+    end
+    private_class_method :requestable_git_change_path?
 
     def resolve_git_change_requests!(run, exclude_paths)
       run.git_change_requests.pending.find_each do |request|
@@ -391,6 +402,13 @@ module Orchestrator
     def stage_for_publication!(run, root, exclude_paths: [])
       runtime_root = relative_path(root, ArtifactStore.output_dir(root))
       git!(root, "reset", "--", runtime_root) if runtime_root.present?
+      exclude_paths.each do |path|
+        # An approved removal can name a stale path that is still in the
+        # index but absent from the working tree. `git add` cannot remove
+        # that path, so the Rails-owned finalizer performs the index update
+        # before staging the remaining source changes.
+        git!(root, "rm", "--cached", "--ignore-unmatch", "--", path)
+      end
       source_paths = git_status_paths(root).reject do |path|
         status_path = path.delete_suffix("/")
         exclude_paths.include?(status_path) ||

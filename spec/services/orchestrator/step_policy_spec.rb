@@ -81,6 +81,17 @@ RSpec.describe Orchestrator::StepPolicy do
     assert_match(/requires at least one evidenceRef/, error.message)
   end
 
+  it "rejects a planned worker step that directs Git metadata changes" do
+    error = assert_raises(ArgumentError) do
+      Orchestrator::StepPolicy.validate!(
+        run_id: @run.run_id,
+        step: implementation_step(allowed_paths: []).merge(success_check: "Run git rm --cached on the stale log.")
+      )
+    end
+
+    assert_match(/cannot direct Git metadata work/, error.message)
+  end
+
   it "allows implementation with no planner-provided file list" do
     @run.workspace.update!(protected_path_patterns: [ "app/**" ])
 

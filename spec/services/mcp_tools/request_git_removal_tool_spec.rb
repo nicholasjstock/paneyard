@@ -29,6 +29,24 @@ RSpec.describe McpTools::RequestGitRemovalTool do
     expect(run.git_change_requests).to be_empty
   end
 
+  it "accepts a tracked ignored artifact that is absent from git status" do
+    run, worker = create_run_and_worker
+    git(run.target_root, "init")
+    File.write(File.join(run.target_root, ".gitignore"), "*.log\n")
+    File.write(File.join(run.target_root, "stale.log"), "leftover\n")
+    git(run.target_root, "add", ".gitignore")
+    git(run.target_root, "add", "-f", "stale.log")
+    File.delete(File.join(run.target_root, "stale.log"))
+
+    response = described_class.call(
+      runId: run.run_id, path: "stale.log", reason: "old test output",
+      server_context: { worker_id: worker.worker_id }
+    )
+
+    expect(response.error?).to be_falsey
+    expect(run.git_change_requests.sole.path).to eq("stale.log")
+  end
+
   it "rejects an unauthenticated caller" do
     run, = create_run_and_worker
 

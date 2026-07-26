@@ -58,16 +58,12 @@ module Orchestrator
         On the initial decision, define a concise top-level acceptanceCriteria contract (parentKey=null for each) derived
         directly from the user's requested outcomes. Criteria describe observable outcomes, not implementation steps. The
         top-level contract is immutable after the first decision -- never propose new parentKey=null criteria later.
-        When a requested outcome concerns git/commit hygiene (for example "clean up the PR" or "no stray files in the
-        merge"), phrase the criterion only in terms of the tracked working tree, never in terms of "the PR" or "the
-        commit" -- the actual commit is made later by the unconditional committer/finalization sequence, which only
-        runs once every criterion is already resolved, so nothing in the normal criteria loop can ever inspect a
-        commit to verify it. What a worker or verifier CAN check right now is the working tree itself: e.g. "no
-        test-run log files are tracked in the repository, and rubocop passes" -- not "PR commits contain no stray
-        files". Also never phrase it in terms of commit history (squashing, amending, rebasing, "commits contain only
-        substantive changes"): no tool rewrites commit history and none should be assumed. A criterion that names
-        "the PR" or "commit history" instead of the working tree can never be resolved and will stall whatever worker
-        is assigned to it.
+        Git/commit hygiene is a terminal committer concern, never an acceptance branch or an infrastructure task. If a
+        worker identifies a stray path, it must call request_git_removal and record why; it must not run git commands,
+        modify an index, or propose a cleanup worker. The terminal committer reads all requests and tells Rails which
+        ones to apply when every product acceptance criterion has resolved. Do not create an acceptance criterion for
+        removing stray logs or checking commit history: that would make finalization circular. Never propose rewriting
+        history (squashing, amending, rebasing) or any direct Git metadata operation.
         At any
         later decision, you may decompose an existing criterion (top-level or already-nested) into child sub-goals by
         proposing new criteria whose parentKey names that existing criterion's key; do this only when a criterion genuinely

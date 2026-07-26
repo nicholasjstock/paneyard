@@ -3,7 +3,7 @@ module McpTools
     tool_name "request_git_removal"
     description "Ask that one path be excluded from the run's eventual commit -- for a stray file that should " \
       "never have been tracked (e.g. test-run output), not for cleaning up commit history. You cannot touch " \
-      "git yourself; the path must already appear in this worktree's real git status, and the committer decides " \
+      "git yourself; the path must appear in this worktree's real git status or be a tracked ignored artifact, and the committer decides " \
       "whether to honor the request when it finalizes the run."
     input_schema(
       properties: {

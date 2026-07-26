@@ -85,6 +85,35 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end
 
+  it "removes an approved tracked ignored artifact even when it no longer appears in git status" do
+    root = Dir.mktmpdir
+    git(root, "init")
+    git(root, "config", "user.name", "Workflow Orchestrator")
+    git(root, "config", "user.email", "workflow@example.test")
+    File.write(File.join(root, ".gitignore"), "*.log\n")
+    File.write(File.join(root, "stale.log"), "old output\n")
+    git(root, "add", ".gitignore")
+    git(root, "add", "-f", "stale.log")
+    git(root, "commit", "-m", "Initial commit")
+    File.delete(File.join(root, "stale.log"))
+    workspace = Workspace.create!(name: "publication-stale-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "publication-stale-#{SecureRandom.hex(4)}", task: "Remove stale artifact", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "stale-a1b2", branch_name: "workflow/stale-a1b2"
+    )
+
+    request = described_class.request_git_change!(
+      run: run, requested_by_worker_id: "worker-1", path: "stale.log", reason: "ignored runtime output"
+    )
+
+    expect(described_class.commit_all!(run, exclude_paths: [ "stale.log" ])).to eq(:committed)
+    expect(git(root, "ls-files")).not_to include("stale.log")
+    expect(git(root, "show", "--format=", "--name-only", "HEAD")).to include("stale.log")
+    expect(request.reload.status).to eq("applied")
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
   it "caps the number of pending git change requests per run" do
     root = Dir.mktmpdir
     git(root, "init")

@@ -75,6 +75,7 @@ module Orchestrator
       raise ArgumentError, "Planner step must declare mode" unless MODES.include?(mode)
       raise ArgumentError, "Planner step must declare writeScope" unless WRITE_SCOPES.include?(write_scope)
       reject_ambiguous_paths!(allowed_paths)
+      reject_direct_git_metadata_work!(step)
 
       case mode
       when "diagnosis"
@@ -104,8 +105,17 @@ module Orchestrator
         lines << "This is an evidence-gathering task. Do not implement an application fix or change a public contract. Report the confirmed boundary back to the planner."
         lines << "Before worker_turn, write the artifact and pass evidenceOutcome=confirmed or blocked plus evidenceCitations copied verbatim from that artifact. Use blocked when the reproduction did not reach the target boundary."
       end
+      lines << "Git hygiene is deferred work: if you find a stray path, call request_git_removal. Never run Git metadata commands (including git rm, reset, commit, rebase, or index changes); the terminal committer reviews requests and Rails applies its decision."
       lines.join(" ")
     end
+
+    def reject_direct_git_metadata_work!(step)
+      instruction = step.values_at(:success_check, :scope, :reason, :text).compact.join(" ")
+      return unless instruction.match?(/\bgit\s+(?:rm|reset|commit|rebase|amend|update-index|filter-repo)\b/i)
+
+      raise ArgumentError, "Planner steps cannot direct Git metadata work; use request_git_removal and leave the decision to the terminal committer"
+    end
+    private_class_method :reject_direct_git_metadata_work!
 
     def validate_diagnosis!(write_scope:, allowed_paths:)
       unless write_scope.in?(%w[source_protected tests_only])
