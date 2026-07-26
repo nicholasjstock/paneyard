@@ -53,8 +53,8 @@
       </nav>
     </header>
 
-    <% if current_workspace && !current_page?(workspace_terminal_session_path(current_workspace)) %>
-      <%= render "shared/terminal_launcher" %>
+    <% if current_workspace %>
+      <%= render "shared/admin_chat_launcher" %>
     <% end %>
 
     <main class="page">

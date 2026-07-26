@@ -1,16 +1,14 @@
-# Rails-owned bookkeeping for a workspace's interactive claude/codex terminal
+# Rails-owned bookkeeping for a workspace's plain interactive shell
 # session. The tracked pid is a PTY-attached process group leader spawned by
 # Orchestrator::TerminalSessionRunner -- see that module for spawn/reattach/
-# resume/stop. Unlike WorkspaceChat's one-shot turns, the transcript lives in
-# log_path (raw pty scrollback), not in per-turn DB rows.
+# resume/stop. The transcript lives in log_path (raw pty scrollback), not in
+# per-turn DB rows.
 class TerminalSession < ApplicationRecord
-  LAUNCHER_VARIANTS = %w[claude codex].freeze
   STATUSES = %w[starting running exited].freeze
   ACTIVE_STATUSES = %w[starting running].freeze
 
   belongs_to :workspace
 
-  validates :launcher_variant, inclusion: { in: LAUNCHER_VARIANTS }
   validates :status, inclusion: { in: STATUSES }
   validates :workspace_id, uniqueness: true
 

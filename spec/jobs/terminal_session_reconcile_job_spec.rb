@@ -12,6 +12,6 @@ RSpec.describe TerminalSessionReconcileJob do
 
   def create_session(status:)
     workspace = Workspace.create!(name: "terminal-reconcile-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
-    workspace.create_terminal_session!(launcher_variant: "claude", status:)
+    workspace.create_terminal_session!(status:)
   end
 end

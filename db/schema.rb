@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_26_091910) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_26_171354) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -325,13 +325,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_091910) do
   end
 
   create_table "terminal_sessions", force: :cascade do |t|
-    t.string "cli_session_id"
     t.integer "cols"
     t.datetime "created_at", null: false
     t.integer "exit_code"
     t.string "exit_status_path"
     t.datetime "last_attached_at"
-    t.string "launcher_variant", default: "claude", null: false
     t.string "log_path"
     t.integer "pid"
     t.integer "process_group_id"
@@ -417,6 +415,39 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_091910) do
     t.index ["worker_id"], name: "index_workers_on_worker_id", unique: true
   end
 
+  create_table "workspace_admin_chat_messages", force: :cascade do |t|
+    t.text "content", default: "", null: false
+    t.datetime "created_at", null: false
+    t.text "error_message"
+    t.json "events", default: [], null: false
+    t.integer "pid"
+    t.integer "process_group_id"
+    t.string "provider"
+    t.string "role", null: false
+    t.string "status", default: "queued", null: false
+    t.string "turn_id"
+    t.datetime "updated_at", null: false
+    t.json "usage", default: {}, null: false
+    t.integer "workspace_admin_chat_id", null: false
+    t.index ["turn_id"], name: "index_workspace_admin_chat_messages_on_turn_id"
+    t.index ["workspace_admin_chat_id"], name: "index_workspace_admin_chat_messages_on_workspace_admin_chat_id"
+  end
+
+  create_table "workspace_admin_chats", force: :cascade do |t|
+    t.string "active_provider", default: "claude", null: false
+    t.string "active_turn_id"
+    t.string "claude_model"
+    t.string "claude_session_id"
+    t.string "codex_model"
+    t.string "codex_session_id"
+    t.datetime "created_at", null: false
+    t.text "last_error"
+    t.string "status", default: "idle", null: false
+    t.datetime "updated_at", null: false
+    t.integer "workspace_id", null: false
+    t.index ["workspace_id"], name: "index_workspace_admin_chats_on_workspace_id", unique: true
+  end
+
   create_table "workspace_memory_entries", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -449,6 +480,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_091910) do
   add_foreign_key "planner_decision_attempts", "planner_decisions"
   add_foreign_key "runs", "workspaces"
   add_foreign_key "terminal_sessions", "workspaces"
+  add_foreign_key "workspace_admin_chat_messages", "workspace_admin_chats"
+  add_foreign_key "workspace_admin_chats", "workspaces"
   add_foreign_key "workspace_memory_entries", "workspace_memory_entries", column: "supersedes_id"
   add_foreign_key "workspace_memory_entries", "workspaces"
 end

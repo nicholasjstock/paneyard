@@ -7,6 +7,7 @@ class ApplicationController < ActionController::Base
 
   helper_method :current_workspace
   helper_method :current_terminal_session
+  helper_method :current_workspace_admin_chat
   helper_method :current_runs
   helper_method :background_job_warning
 
@@ -30,7 +31,17 @@ class ApplicationController < ActionController::Base
     return unless current_workspace
 
     @current_terminal_session ||= current_workspace.terminal_session ||
-      current_workspace.create_terminal_session!(launcher_variant: "claude")
+      current_workspace.create_terminal_session!
+  end
+
+  # Every workspace has exactly one admin-chat slot, same one-per-workspace
+  # shape as current_terminal_session -- available from any workspace-scoped
+  # page once the layout links to it.
+  def current_workspace_admin_chat
+    return unless current_workspace
+
+    @current_workspace_admin_chat ||= current_workspace.workspace_admin_chat ||
+      current_workspace.create_workspace_admin_chat!
   end
 
   def current_runs

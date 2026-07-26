@@ -1,0 +1,26 @@
+<%= turbo_stream_from "workspace_admin_chat_#{chat.id}" %>
+
+<div class="chat-backdrop" data-action="click->admin-chat-drawer#close"></div>
+<aside class="chat-drawer" role="dialog" aria-modal="true" aria-label="Admin chat" data-admin-chat-drawer-target="panel">
+  <div class="chat-drawer-shell">
+    <header class="chat-drawer-header">
+      <div>
+        <span class="eyebrow">Admin chat &middot; <%= chat.active_provider.capitalize %></span>
+        <strong><%= chat.workspace.name %></strong>
+      </div>
+      <button type="button" class="chat-close" aria-label="Close chat" data-action="admin-chat-drawer#close">×</button>
+    </header>
+
+    <%= render "workspace_admin_chats/settings", chat: %>
+
+    <section class="chat-drawer-thread" data-admin-chat-drawer-target="thread" aria-live="polite">
+      <%= render "workspace_admin_chats/thread", chat: %>
+    </section>
+
+    <% if chat.last_error.present? %>
+      <div class="chat-drawer-error"><strong>Turn failed:</strong> <%= chat.last_error %></div>
+    <% end %>
+
+    <%= render "workspace_admin_chats/composer", chat:, drawer: true %>
+  </div>
+</aside>

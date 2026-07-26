@@ -12,7 +12,7 @@ class TerminalSessionsController < ApplicationController
   def create
     session = current_terminal_session
     Orchestrator::TerminalSessionRunner.stop(session, reason: "Restarted by operator") if session.active?
-    session.update!(cli_session_id: nil, launcher_variant: launcher_variant_param || session.launcher_variant, status: "starting")
+    session.update!(status: "starting")
     Orchestrator::TerminalSessionRunner.start(session)
     redirect_back fallback_location: workspace_terminal_session_path(current_workspace), notice: "Starting terminal session…"
   end
@@ -21,11 +21,5 @@ class TerminalSessionsController < ApplicationController
     session = current_terminal_session
     Orchestrator::TerminalSessionRunner.stop(session, reason: "Stopped by operator") if session.active?
     redirect_back fallback_location: workspace_terminal_session_path(current_workspace), notice: "Terminal session stopped."
-  end
-
-  private
-
-  def launcher_variant_param
-    params[:launcher_variant].presence_in(TerminalSession::LAUNCHER_VARIANTS)
   end
 end

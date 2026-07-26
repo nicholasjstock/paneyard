@@ -2,7 +2,8 @@ require "rails_helper"
 
 RSpec.describe TerminalSessionChannel, type: :channel do
   it "streams replayed scrollback and resumes a not-live session on subscribe" do
-    session = create_session(cli_session_id: "prior-id")
+    session = create_session
+
     allow(Orchestrator::TerminalSessionRunner).to receive(:live?).with(session).and_return(false)
     allow(Orchestrator::TerminalSessionRunner).to receive(:replay).with(session).and_return("prior scrollback")
     allow(Orchestrator::TerminalSessionRunner).to receive(:resume).with(session)
@@ -15,19 +16,8 @@ RSpec.describe TerminalSessionChannel, type: :channel do
     expect(Orchestrator::TerminalSessionRunner).to have_received(:resume).with(session)
   end
 
-  it "starts a brand-new session (no prior cli_session_id) instead of resuming" do
-    session = create_session(cli_session_id: nil)
-    allow(Orchestrator::TerminalSessionRunner).to receive(:live?).with(session).and_return(false)
-    allow(Orchestrator::TerminalSessionRunner).to receive(:replay).with(session).and_return("")
-    allow(Orchestrator::TerminalSessionRunner).to receive(:start).with(session)
-
-    subscribe(id: session.id)
-
-    expect(Orchestrator::TerminalSessionRunner).to have_received(:start).with(session)
-  end
-
-  it "does not resume or start when the session is already live in this process" do
-    session = create_session(cli_session_id: "prior-id")
+  it "does not resume when the session is already live in this process" do
+    session = create_session
     allow(Orchestrator::TerminalSessionRunner).to receive(:live?).with(session).and_return(true)
     allow(Orchestrator::TerminalSessionRunner).to receive(:replay).with(session).and_return("")
     allow(Orchestrator::TerminalSessionRunner).to receive(:resume)
@@ -44,7 +34,7 @@ RSpec.describe TerminalSessionChannel, type: :channel do
   end
 
   it "forwards input and resize messages to the runner" do
-    session = create_session(cli_session_id: "prior-id")
+    session = create_session
     allow(Orchestrator::TerminalSessionRunner).to receive(:live?).with(session).and_return(true)
     allow(Orchestrator::TerminalSessionRunner).to receive(:replay).with(session).and_return("")
     subscribe(id: session.id)
@@ -56,8 +46,8 @@ RSpec.describe TerminalSessionChannel, type: :channel do
     perform :receive, "type" => "resize", "cols" => 80, "rows" => 24
   end
 
-  def create_session(cli_session_id:)
+  def create_session
     workspace = Workspace.create!(name: "terminal-channel-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
-    workspace.create_terminal_session!(launcher_variant: "claude", status: cli_session_id ? "exited" : "starting", cli_session_id:)
+    workspace.create_terminal_session!(status: "starting")
   end
 end

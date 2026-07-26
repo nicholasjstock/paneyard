@@ -14,7 +14,7 @@
          data-controller="terminal-session" data-terminal-session-id-value="<%= session.id %>"></div>
 
     <div class="terminal-drawer-footer">
-      <span class="muted"><%= session.launcher_variant.capitalize %> &middot; scoped read-only to <%= session.workspace.root_path %></span>
+      <span class="muted">Shell &middot; scoped to <%= session.workspace.root_path %></span>
       <%= button_to "Restart", workspace_terminal_session_path(session.workspace), method: :post,
             class: "btn", data: { turbo_confirm: "Restart the terminal session? Scrollback is kept, but the current process ends." } %>
     </div>

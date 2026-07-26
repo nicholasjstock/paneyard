@@ -10,7 +10,6 @@ Rails.application.routes.draw do
   # HTTP, hosted inside this already-running process rather than spawned
   # fresh per worker like the old scripts/workflow-mcp-server.ts did.
   mount Orchestrator::ChaperoneMcpEndpoint.new => "/mcp/chaperone"
-  mount Orchestrator::TerminalSessionMcpEndpoint.new => "/mcp/terminal-session"
   mount Orchestrator::WorkerMcpEndpoint.new => "/mcp/worker"
   mount Orchestrator::PlannerDecisionMcpEndpoint.new => "/mcp/planner-decision"
   mcp_transport = MCP::Server::Transports::StreamableHTTPTransport.new(Orchestrator::McpServer.build)
@@ -29,6 +28,12 @@ Rails.application.routes.draw do
     resource :project_setup, only: %i[create]
 
     resource :terminal_session, controller: "terminal_sessions", only: %i[show create destroy]
+
+    resource :workspace_admin_chat, controller: "workspace_admin_chats", only: %i[update] do
+      post :cancel
+      post :reset
+    end
+    resources :workspace_admin_chat_messages, controller: "workspace_admin_chat_messages", only: %i[create]
     resources :runs, only: %i[index new create show] do
       member do
         post :stop

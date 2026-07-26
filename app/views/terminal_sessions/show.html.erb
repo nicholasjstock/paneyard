@@ -15,7 +15,7 @@
        data-controller="terminal-session" data-terminal-session-id-value="<%= @terminal_session.id %>"></div>
 
   <div class="terminal-drawer-footer">
-    <span class="muted"><%= @terminal_session.launcher_variant.capitalize %> &middot; read-only across every worktree under <%= @terminal_session.workspace.root_path %>; use Bash (bin/rails runner/dbconsole) to inspect or change orchestrator state.</span>
+    <span class="muted">Shell &middot; opens under <%= @terminal_session.workspace.root_path %></span>
     <%= button_to "Restart session", workspace_terminal_session_path(@terminal_session.workspace), method: :post,
           class: "btn primary", data: { turbo_confirm: "Restart the terminal session? Scrollback is kept, but the current process ends." } %>
   </div>

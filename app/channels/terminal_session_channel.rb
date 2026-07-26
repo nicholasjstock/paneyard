@@ -30,10 +30,6 @@ class TerminalSessionChannel < ApplicationCable::Channel
   def ensure_streaming(session)
     return if Orchestrator::TerminalSessionRunner.live?(session)
 
-    if session.cli_session_id.present?
-      Orchestrator::TerminalSessionRunner.resume(session)
-    else
-      Orchestrator::TerminalSessionRunner.start(session)
-    end
+    Orchestrator::TerminalSessionRunner.resume(session)
   end
 end

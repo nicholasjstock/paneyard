@@ -10,6 +10,9 @@
   <% end %>
 </div>
 
+<%# Kept for manual debugging/interactive use alongside the admin chat -- see shared/_terminal_launcher.html.erb. %>
+<%= render "shared/terminal_launcher" %>
+
 <% unless current_workspace.initialized? %>
   <p class="muted">
     This workspace is still initializing (discovering its dev environment and operational path metadata) before it can
