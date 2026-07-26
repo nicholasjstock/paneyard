@@ -52,6 +52,7 @@ class RunCommand < ApplicationRecord
       workingDirectory: working_directory,
       environment: environment.to_h.keys,
       purpose: purpose,
+      port: port,
       pid: pid,
       processGroupId: process_group_id,
       status: status,

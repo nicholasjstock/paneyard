@@ -2,7 +2,11 @@ module McpTools
   class WorkerTurnTool < MCP::Tool
     tool_name "worker_turn"
     description "Report one worker result. A [DONE] result deterministically promotes the head of followingSteps; " \
-      "otherwise it queues one bounded Rails-owned planner decision. It never spawns a planner process."
+      "otherwise it queues one bounded Rails-owned planner decision. It never spawns a planner process. If your " \
+      "change added or altered a human-visible state, pass clickPath (starting page, what to click, which seeded " \
+      "record to look for) -- this is persisted regardless of outcome and is the only reliable way for that " \
+      "information to reach the run's terminal reporter; putting it in `result` text is not sufficient, since a " \
+      "preplanned followingSteps promotion never re-reads that text."
     input_schema(
       properties: {
         runId: { type: "string" },
@@ -11,6 +15,7 @@ module McpTools
         scope: { type: "string" },
         result: { type: "string" },
         task: { type: "string" },
+        clickPath: { type: "string" },
         evidenceOutcome: { type: [ "string", "null" ], enum: [ *Orchestrator::DiagnosisEvidenceGate::OUTCOMES, nil ] },
         evidenceCitations: { type: "array", items: { type: "string" } },
         diagnosisFindings: {
@@ -32,11 +37,18 @@ module McpTools
       required: %w[runId role result task]
     )
 
-    def self.call(runId:, role:, result:, task:, server_context:, nickname: nil, scope: nil, evidenceOutcome: nil, evidenceCitations: [], diagnosisFindings: nil)
+    def self.call(runId:, role:, result:, task:, server_context:, nickname: nil, scope: nil, evidenceOutcome: nil, evidenceCitations: [], diagnosisFindings: nil, clickPath: nil)
       authenticated_worker = WorkerAuthorization.worker!(server_context:, run_id: runId)
       worker = authenticated_worker || resolve_worker!(run_id: runId, role:, nickname:, scope:)
       nickname = worker.nickname
       scope = worker.scope
+      # Persisted directly on the worker row, independent of whichever
+      # branch Turn.run_worker_turn takes below -- a [DONE] result with a
+      # preplanned followingSteps queue promotes the next step without ever
+      # recording the free-text result anywhere the reporter can read it
+      # later (see Turn.run_worker_turn's fast path), so this cannot ride
+      # along inside `result` and still reach get_run_audit reliably.
+      worker.update!(click_path: clickPath) if clickPath.present?
       previous_state = Orchestrator::TickState.latest(runId)
       structured = Orchestrator::Turn.run_worker_turn(
         run_id: runId, role: role, nickname: nickname, scope: scope, result: result,

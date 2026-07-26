@@ -1,4 +1,5 @@
 require "pathname"
+require "open3"
 
 module Orchestrator
   # Rails-owned lifecycle for a run-scoped background command: spawns a
@@ -89,7 +90,8 @@ module Orchestrator
       return command if command.pid.blank?
 
       if process_alive?(command.pid) && owns_process?(command)
-        command.touch(:last_checked_at)
+        detected_port = command.port || detect_listening_port(command)
+        command.update!(last_checked_at: Time.current, port: detected_port)
         return command
       end
 
@@ -211,6 +213,29 @@ module Orchestrator
       Process.getpgid(command.pid) == command.process_group_id
     rescue Errno::ESRCH
       false
+    end
+
+    # Best-effort: asks the OS what TCP port (if any) this command's process
+    # group is actually listening on, rather than trusting a caller-reported
+    # value -- the command may run under a process manager (foreman, an
+    # npm script) that picks its own child pid and port. Silently returns
+    # nil if lsof is unavailable or nothing is listening yet; reconcile!
+    # retries this on every subsequent poll until a port appears.
+    def detect_listening_port(command)
+      return nil if command.process_group_id.blank?
+
+      output, _error, status = Open3.capture3(
+        "lsof", "-a", "-g", command.process_group_id.to_s, "-i", "-sTCP:LISTEN", "-n", "-P"
+      )
+      return nil unless status.success?
+
+      output.each_line.drop(1).each do |line|
+        match = line.match(/:(\d+)\s+\(LISTEN\)/)
+        return Integer(match[1], 10) if match
+      end
+      nil
+    rescue Errno::ENOENT
+      nil
     end
 
     # Shell $? for a signal-terminated child is conventionally 128+signal.

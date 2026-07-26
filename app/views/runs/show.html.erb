@@ -195,6 +195,10 @@
                 <p class="empty">No output captured yet.</p>
               <% end %>
               <% if command.active? %>
+                <% if command.port.present? %>
+                  <button type="button" class="btn"
+                          onclick="window.open(window.location.protocol + '//' + window.location.hostname + ':<%= command.port %>', '_blank', 'noopener')">Open</button>
+                <% end %>
                 <%= button_to "Stop", stop_workspace_run_command_path(current_workspace, command.command_id), method: :post, class: "btn", data: { turbo_confirm: "Stop #{command.executable}?" } %>
               <% end %>
             </div>

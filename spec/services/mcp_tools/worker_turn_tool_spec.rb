@@ -50,6 +50,27 @@ RSpec.describe McpTools::WorkerTurnTool do
     expect(other.reload.handoff_completed_at).to be_nil
   end
 
+  it "persists clickPath on the worker row itself, independent of the DONE/BLOCKED branch taken afterward" do
+    root = Dir.mktmpdir("worker-turn-click-path")
+    workspace = Workspace.create!(name: "worker-turn-click-path-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "worker-turn-click-path-#{SecureRandom.hex(4)}", task: "Add a dropdown",
+      target_root: root, launcher_variant: "claude", status: "running"
+    )
+    worker = create_worker(run, "worker-click-path", "fix-summary.md")
+
+    described_class.call(
+      runId: run.run_id, role: "worker", nickname: worker.nickname, scope: worker.scope,
+      task: "Add a dropdown", result: "[DONE] Added the dropdown.",
+      clickPath: "Open the workspace, click the current-runs dropdown, select the long-title entry.",
+      server_context: { worker_id: worker.worker_id }
+    )
+
+    expect(worker.reload.click_path).to eq(
+      "Open the workspace, click the current-runs dropdown, select the long-title entry."
+    )
+  end
+
   def create_worker(run, nickname, scope)
     run.workers.create!(
       worker_id: SecureRandom.uuid, role: "worker", nickname:, reason: "Verify it.", scope:,
