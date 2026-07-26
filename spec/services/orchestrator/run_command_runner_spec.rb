@@ -30,6 +30,30 @@ RSpec.describe Orchestrator::RunCommandRunner do
     expect(File.read(command.log_path)).to include("hello-run-command")
   end
 
+  it "detects the actual listening port from OS process state, not a caller-reported value" do
+    run = create_run
+    port_file = File.join(run.target_root, "bound-port.txt")
+    script = <<~RUBY
+      require "socket"
+      server = TCPServer.new("127.0.0.1", 0)
+      File.write(#{port_file.inspect}, server.addr[1].to_s)
+      sleep 30
+    RUBY
+
+    command = described_class.start(
+      run: run, requested_by_worker_id: "worker-1", executable: "ruby", arguments: [ "-e", script ]
+    )
+
+    wait_until { File.exist?(port_file) }
+    bound_port = File.read(port_file).to_i
+
+    wait_until { described_class.reconcile!(command.reload).port.present? }
+
+    expect(command.reload.port).to eq(bound_port)
+  ensure
+    described_class.stop(command: command, reason: "spec cleanup") if command
+  end
+
   it "marks a process lost when it disappears without a recoverable exit status" do
     run = create_run
     command = described_class.start(run: run, requested_by_worker_id: "worker-1", executable: "/bin/sleep", arguments: [ "5" ])

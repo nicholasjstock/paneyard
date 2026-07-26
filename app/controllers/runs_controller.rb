@@ -36,6 +36,7 @@ class RunsController < ApplicationController
     @active_workers = @worker_activities.select { |activity| activity[:worker].status == "running" }
     @spawn_requests = SpawnRequest.open_only.where(run_id: @run.run_id).map { |request| JSON.parse(request.to_json) }
     @blocking_questions = @run.user_questions.open_only.where(priority: "blocking").order(:asked_at).to_a
+    @all_user_questions = @run.user_questions.where(status: "open").order(:asked_at).to_a
     ticks = OrchestratorTick.for_run(@run.run_id).order(tick_count: :desc).limit(8).to_a.reverse
     @latest_tick = ticks.last && JSON.parse(ticks.last.to_json)
     @following_steps = Array(@latest_tick&.dig("followingSteps"))

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_25_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_26_090000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -179,6 +179,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_25_090000) do
     t.datetime "last_checked_at"
     t.string "log_path"
     t.integer "pid"
+    t.integer "port"
     t.integer "process_group_id"
     t.text "purpose"
     t.string "requested_by_worker_id"
@@ -347,7 +348,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_25_090000) do
     t.string "priority", default: "advisory", null: false
     t.string "question_id", null: false
     t.string "run_id", null: false
-    t.string "scope", null: false
+    t.string "scope"
     t.string "status", default: "open", null: false
     t.json "tags", default: [], null: false
     t.text "text", null: false
@@ -365,6 +366,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_25_090000) do
     t.bigint "cache_read_input_tokens"
     t.string "capability_token_digest"
     t.string "cli_session_id"
+    t.text "click_path"
     t.string "command", null: false
     t.datetime "created_at", null: false
     t.string "env_path", null: false

@@ -4,7 +4,9 @@ module McpTools
     description "Start a run-scoped background command that keeps running after this worker finishes or is " \
       "replaced. Rails owns the process. Use this for anything that must still be running after your turn " \
       "(a server, a watcher) -- foreground Bash, '&', and $WORKER_LOG_PATH redirection do not survive this " \
-      "worker's process group being torn down."
+      "worker's process group being torn down. If it opens a listening port (a dev server, a preview), Rails " \
+      "detects that automatically and the run screen renders an Open button once it's observed -- nothing to " \
+      "report for that here."
     input_schema(
       properties: {
         runId: { type: "string" },

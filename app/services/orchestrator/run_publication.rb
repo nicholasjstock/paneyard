@@ -51,8 +51,30 @@ module Orchestrator
         run.update!(publication_status: "publishing", publication_error: nil)
         git!(root, "push", "-u", "origin", run.branch_name)
         assets = publish_review_assets!(root, run)
-        url = existing_pr_url(root, run.branch_name) || create_pr(root, run, assets:)
-        ready_pr!(root, url) if run.conversation_pr_status == "draft"
+        url = existing_pr_url(root, run.branch_name)
+        if url
+          # conversation_pr_status only reads "draft" for a PR that
+          # ensure_conversation_pr! opened early (e.g. for a blocking
+          # question) and that has never been finalized since -- its body
+          # is still the placeholder create_pr wrote with no run summary
+          # and no review assets, because that's the only time this branch
+          # runs. Once flipped to "ready" below, a later publish! for the
+          # same run (e.g. the operator replies on the PR asking for a
+          # rerun, and the run does more work and finishes again) posts the
+          # fresh summary as a new comment instead of overwriting the body:
+          # the body is the run's one settled description, while a rerun's
+          # outcome is new information that belongs in the PR's timeline
+          # alongside the comment that triggered it, not silently replacing
+          # what was there.
+          if run.conversation_pr_status == "draft"
+            update_pr_body!(root, url, build_pr_body(run, root, assets:))
+            ready_pr!(root, url)
+          else
+            post_rerun_summary_comment!(root, url, run, assets:)
+          end
+        else
+          url = create_pr(root, run, assets:)
+        end
         run.update!(publication_status: "awaiting_approval", pull_request_url: url, conversation_pr_status: "ready", publication_completed_at: Time.current)
         :published
       end
@@ -107,7 +129,6 @@ module Orchestrator
         run = question.run
         url = ensure_conversation_pr!(run)
         root = validated_root!(run)
-        repository, number = repository_and_number(url)
         body = <<~MARKDOWN
           ## Workflow question #{question.question_id}
 
@@ -117,10 +138,7 @@ module Orchestrator
 
           Just reply on this PR to answer and resume the run. If more than one question is open at once, reference this one explicitly with `Question #{question.question_id}: <your answer>` so it's clear which one you're answering.
         MARKDOWN
-        output, error, status = Open3.capture3("gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}", chdir: root.to_s)
-        raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
-
-        comment = JSON.parse(output)
+        comment = post_pr_comment!(root, url, body)
         question.update!(github_comment_id: comment.fetch("id").to_s, github_comment_url: comment["html_url"], github_published_at: Time.current, github_publication_error: nil)
         :published
       end
@@ -169,21 +187,58 @@ module Orchestrator
       raise Error, error.message
     end
 
-    def create_pr(root, run, draft: false, assets: [])
-      body = [
+    def build_pr_body(run, root, assets: [])
+      [
         "Automated workflow run: #{run.run_id}",
         "Worktree: #{run.worktree_name}",
         "Base: #{run.base_sha}",
         run_summary(run, root),
         review_assets_section(assets)
       ].compact.join("\n\n")
-      args = [ "gh", "pr", "create", "--base", "main", "--head", run.branch_name, "--title", run.task.to_s.truncate(120), "--body", body ]
+    end
+    private_class_method :build_pr_body
+
+    def create_pr(root, run, draft: false, assets: [])
+      args = [
+        "gh", "pr", "create", "--base", "main", "--head", run.branch_name,
+        "--title", run.task.to_s.truncate(120), "--body", build_pr_body(run, root, assets:)
+      ]
       args << "--draft" if draft
       output, error, status = Open3.capture3(*args, chdir: root.to_s)
       raise Error, "gh pr create failed: #{error.presence || output}" unless status.success?
 
       output.strip
     end
+
+    def update_pr_body!(root, url, body)
+      _output, error, status = Open3.capture3("gh", "pr", "edit", url, "--body", body, chdir: root.to_s)
+      raise Error, "gh pr edit failed: #{error}" unless status.success?
+    end
+    private_class_method :update_pr_body!
+
+    def post_pr_comment!(root, url, body)
+      repository, number = repository_and_number(url)
+      output, error, status = Open3.capture3("gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}", chdir: root.to_s)
+      raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
+
+      JSON.parse(output)
+    end
+    private_class_method :post_pr_comment!
+
+    # A rerun's outcome is new information appended to the PR's timeline,
+    # not a replacement for the body's settled description -- see the
+    # comment at this method's call site in publish!.
+    def post_rerun_summary_comment!(root, url, run, assets: [])
+      body = <<~MARKDOWN
+        ## Run finished again
+
+        #{run_summary(run, root) || "No summary was recorded for this pass."}
+
+        #{review_assets_section(assets)}
+      MARKDOWN
+      post_pr_comment!(root, url, body)
+    end
+    private_class_method :post_rerun_summary_comment!
 
     def publish_review_assets!(root, run)
       return [] if run.review_assets.empty?

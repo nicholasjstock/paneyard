@@ -100,6 +100,7 @@ class Worker < ApplicationRecord
       stoppedAt: stopped_at&.iso8601(3),
       exitCode: exit_code,
       stopReason: stop_reason,
+      clickPath: click_path,
       model: model,
       executionMode: execution_mode,
       writeScope: write_scope,
