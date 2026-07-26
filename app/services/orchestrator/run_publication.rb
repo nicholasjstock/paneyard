@@ -80,6 +80,7 @@ module Orchestrator
       return :published if run.publication_status == "published" && run.conversation_pr_status == "ready"
       return :published if run.publication_status == "awaiting_approval" && run.pull_request_url.present? && run.conversation_pr_status == "ready"
       return :no_changes if run.publication_status == "no_changes" && run.pull_request_url.blank?
+      return :merge_conflict if run.publication_status == "merge_conflict"
 
       run.with_lock do
         return :published if run.reload.publication_status == "published"

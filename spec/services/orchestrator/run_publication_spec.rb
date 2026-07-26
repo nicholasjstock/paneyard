@@ -200,6 +200,19 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
+  it "treats an already-queued merge conflict as an idempotent publication result" do
+    workspace = Workspace.create!(name: "publication-conflict-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "publication-conflict-#{SecureRandom.hex(4)}", task: "Resolve conflict", target_root: workspace.root_path,
+      launcher_variant: "codex", worktree_name: "conflict-a1b2", branch_name: "workflow/conflict-a1b2",
+      publication_status: "merge_conflict"
+    )
+
+    expect(described_class.publish!(run)).to eq(:merge_conflict)
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   it "fills in the real body of a PR that was opened early as a draft, exactly once" do
     root = Dir.mktmpdir
     workspace = Workspace.create!(name: "publication-draft-body-#{SecureRandom.hex(4)}", root_path: root)

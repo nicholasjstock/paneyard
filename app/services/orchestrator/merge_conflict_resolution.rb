@@ -5,13 +5,13 @@ module Orchestrator
     SCOPE = "merge-conflict-resolution.md"
 
     def queue_worker!(run)
+      run.update!(status: "running", publication_status: "merge_conflict", stopped_at: nil)
       return if Worker.active.where(run_id: run.run_id, role: "worker").exists?
       return if SpawnRequest.where(run_id: run.run_id, scope: SCOPE, status: "open").exists?
 
       paths = RunPublication.merge_conflict_paths(run)
       raise RunPublication::Error, "Git reported a rebase conflict but named no source paths" if paths.empty?
 
-      run.update!(status: "running", publication_status: "merge_conflict")
       SpawnRequest.create!(
         run_id: run.run_id, asked_by: "orchestrator", requested_role: "worker", priority: "blocking",
         scope: SCOPE, execution_mode: "implementation", write_scope: "scoped_changes", allowed_paths: paths,
