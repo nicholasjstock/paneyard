@@ -92,6 +92,7 @@
       </div>
       <%= render "workflow_tree",
         planners: @planner_activities.reject { |activity| @nested_planner_ids.include?(activity[:worker].worker_id) },
+        planner_entries: @planner_entries,
         criteria: @acceptance_criteria,
         worker_groups: @criterion_worker_groups,
         planner_decisions: @planner_decisions,

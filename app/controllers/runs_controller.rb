@@ -50,6 +50,8 @@ class RunsController < ApplicationController
     @nested_planner_ids = @criterion_worker_groups.values.flatten.uniq
       .select { |activity| activity[:worker].role == "planner" }
       .map { |activity| activity[:worker].worker_id }
+    root_planner_activities = @planner_activities.reject { |activity| @nested_planner_ids.include?(activity[:worker].worker_id) }
+    @planner_entries = Orchestrator::WorkerActivity.for_planner_entries(root_planner_activities, @planner_decisions)
     @latest_planner_decision = @planner_decisions.first
     @usage_summary = usage_summary
     @run_now = build_run_now
