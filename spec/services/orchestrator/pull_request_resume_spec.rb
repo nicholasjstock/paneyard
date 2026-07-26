@@ -81,6 +81,21 @@ RSpec.describe Orchestrator::PullRequestResume do
     )
   end
 
+  it "advances past its own unresolved-reply comment so it cannot poll and reply to itself" do
+    workspace = Workspace.create!(name: "pr-self-reply-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "pr-self-reply-#{SecureRandom.hex(4)}", task: "Ignore system reply", target_root: workspace.root_path,
+      launcher_variant: "codex", status: "completed", worktree_name: "self-reply-a1b2", branch_name: "workflow/self-reply-a1b2",
+      pull_request_url: "https://github.com/example/repo/pull/42", publication_status: "awaiting_approval"
+    )
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).and_return([ { id: 999 }.to_json, "", status ])
+
+    described_class.resume!(run, { "id" => 130, "body" => "Continue without an open question.", "user" => { "login" => "reviewer" } })
+
+    expect(run.reload.last_pull_request_comment_id).to eq("999")
+  end
+
   it "does not resume when an explicitly referenced question id is not open, and names the real open question" do
     workspace = Workspace.create!(name: "pr-mismatch-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(

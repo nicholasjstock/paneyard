@@ -46,12 +46,16 @@ module Orchestrator
     # the comment doesn't reference one by id.
     def resume!(run, comment)
       run.with_lock do
-        return if comment.fetch("id").to_i <= run.last_pull_request_comment_id.to_i
+        if comment.fetch("id").to_i <= run.last_pull_request_comment_id.to_i
+          Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment.fetch('id')} outcome=already_processed")
+          return
+        end
         raise Error, "Cannot resume a merged run" if run.publication_status == "merged"
 
         comment_id = comment.fetch("id").to_s
         if UserQuestion.exists?(run_id: run.run_id, github_comment_id: comment_id)
           run.update!(last_pull_request_comment_id: comment_id)
+          Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=system_question_skipped")
           return
         end
 
@@ -74,8 +78,14 @@ module Orchestrator
             context: "GitHub comment ##{comment_id} from #{author}: #{body}", tags: %w[github pr-comment resume]
           )
           run.publish_phase!(phase: "planning", owner: "github", summary: "Resuming from pull request comment ##{comment_id}.")
+          Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=resumed")
         else
-          post_reply!(run, unresolved_explanation(unmatched_ids:, remaining:))
+          reply_comment_id = post_reply!(run, unresolved_explanation(unmatched_ids:, remaining:))
+          run.update!(last_pull_request_comment_id: [ comment_id.to_i, reply_comment_id.to_i ].max.to_s)
+          Rails.logger.info(
+            "PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=unresolved " \
+            "remaining_questions=#{remaining.size} reply_comment=#{reply_comment_id}"
+          )
         end
       end
     end
@@ -142,6 +152,10 @@ module Orchestrator
       repository, number = repository_and_number(run)
       output, error, status = Open3.capture3("gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}")
       raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
+
+      JSON.parse(output).fetch("id").to_s
+    rescue JSON::ParserError, KeyError => error
+      raise Error, "GitHub returned an invalid posted comment: #{error.message}"
     end
     private_class_method :post_reply!
 
