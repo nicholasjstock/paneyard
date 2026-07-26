@@ -9,7 +9,11 @@ module Orchestrator
     # The committer worker deliberately requests this action after reviewing
     # the whole worktree. Rails performs the Git metadata write because the
     # worker sandbox must never receive broad access to .git internals.
-    def commit_all!(run)
+    # exclude_paths is the committer's own reconciled decision about which
+    # pending GitChangeRequests to honor -- see request_git_change! and
+    # resolve_git_change_requests!; Rails applies exactly that list and
+    # nothing more.
+    def commit_all!(run, exclude_paths: [])
       return :unmanaged if run.worktree_name.blank?
       return :committed if run.publication_status == "committed"
       return :no_changes if run.publication_status == "no_changes"
@@ -17,7 +21,8 @@ module Orchestrator
       run.with_lock do
         root = validated_root!(run)
         run.update!(publication_status: "committing", publication_error: nil, publication_started_at: Time.current)
-        stage_for_publication!(run, root)
+        stage_for_publication!(run, root, exclude_paths:)
+        resolve_git_change_requests!(run, exclude_paths)
         if git_success?(root, "diff", "--cached", "--quiet")
           run.update!(publication_status: "no_changes", publication_completed_at: Time.current)
           return :no_changes
@@ -33,6 +38,31 @@ module Orchestrator
 
       raise Error, error.message
     end
+
+    # Validated against the worktree's real, current git status so a worker
+    # can only request exclusion of a path that is actually part of the
+    # pending diff -- it cannot name arbitrary or fictional paths. The
+    # unique index on (run_id, path) means re-requesting the same path is a
+    # no-op rather than a way to pile up duplicate requests.
+    MAX_PENDING_GIT_CHANGE_REQUESTS = 20
+
+    def request_git_change!(run:, requested_by_worker_id:, path:, reason:)
+      root = validated_root!(run)
+      raise Error, "Path is not part of this run's pending changes: #{path}" unless git_status_paths(root).include?(path)
+
+      if run.git_change_requests.pending.count >= MAX_PENDING_GIT_CHANGE_REQUESTS
+        raise Error, "Too many pending git change requests for this run (max #{MAX_PENDING_GIT_CHANGE_REQUESTS})"
+      end
+
+      run.git_change_requests.create!(requested_by_worker_id:, path:, reason:, status: "requested")
+    end
+
+    def resolve_git_change_requests!(run, exclude_paths)
+      run.git_change_requests.pending.find_each do |request|
+        request.update!(status: exclude_paths.include?(request.path) ? "applied" : "dismissed")
+      end
+    end
+    private_class_method :resolve_git_change_requests!
 
     def publish!(run)
       return :unmanaged if run.worktree_name.blank?
@@ -358,16 +388,17 @@ module Orchestrator
     # Runtime output stays local. The committer's concise run summary becomes
     # the PR body; raw logs, prompts, environment snapshots, MCP configs, and
     # command output must never enter Git history.
-    def stage_for_publication!(run, root)
+    def stage_for_publication!(run, root, exclude_paths: [])
       runtime_root = relative_path(root, ArtifactStore.output_dir(root))
       git!(root, "reset", "--", runtime_root) if runtime_root.present?
       source_paths = git_status_paths(root).reject do |path|
         status_path = path.delete_suffix("/")
-        runtime_root.present? && (
-          status_path == runtime_root ||
-          status_path.start_with?("#{runtime_root}/") ||
-          runtime_root.start_with?("#{status_path}/")
-        )
+        exclude_paths.include?(status_path) ||
+          (runtime_root.present? && (
+            status_path == runtime_root ||
+            status_path.start_with?("#{runtime_root}/") ||
+            runtime_root.start_with?("#{status_path}/")
+          ))
       end
       git!(root, "add", "--", *source_paths) if source_paths.any?
     end

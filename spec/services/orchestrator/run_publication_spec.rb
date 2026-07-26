@@ -27,6 +27,91 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end
 
+  it "excludes a committer-approved git change request from the commit and resolves requested paths" do
+    root = Dir.mktmpdir
+    git(root, "init")
+    git(root, "config", "user.name", "Workflow Orchestrator")
+    git(root, "config", "user.email", "workflow@example.test")
+    File.write(File.join(root, "existing.txt"), "before\n")
+    git(root, "add", "existing.txt")
+    git(root, "commit", "-m", "Initial commit")
+    workspace = Workspace.create!(name: "publication-exclude-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "publication-exclude-#{SecureRandom.hex(4)}", task: "Exclude a stray file", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "exclude-a1b2",
+      branch_name: "workflow/exclude-a1b2"
+    )
+    File.write(File.join(root, "existing.txt"), "after\n")
+    File.write(File.join(root, "stray.log"), "leftover test output\n")
+
+    excluded = described_class.request_git_change!(
+      run: run, requested_by_worker_id: "worker-1", path: "stray.log", reason: "leftover test-run output"
+    )
+    ignored = described_class.request_git_change!(
+      run: run, requested_by_worker_id: "worker-1", path: "existing.txt", reason: "not actually excluded"
+    )
+
+    expect(described_class.commit_all!(run, exclude_paths: [ "stray.log" ])).to eq(:committed)
+    expect(git(root, "show", "--format=", "--name-only", "HEAD")).to include("existing.txt")
+    expect(git(root, "ls-files")).not_to include("stray.log")
+    expect(git(root, "status", "--porcelain")).to include("stray.log")
+    expect(excluded.reload.status).to eq("applied")
+    expect(ignored.reload.status).to eq("dismissed")
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
+  it "rejects a git change request for a path that is not part of the worktree's real git status" do
+    root = Dir.mktmpdir
+    git(root, "init")
+    git(root, "config", "user.name", "Workflow Orchestrator")
+    git(root, "config", "user.email", "workflow@example.test")
+    File.write(File.join(root, "existing.txt"), "before\n")
+    git(root, "add", "existing.txt")
+    git(root, "commit", "-m", "Initial commit")
+    workspace = Workspace.create!(name: "publication-fictional-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "publication-fictional-#{SecureRandom.hex(4)}", task: "Reject a fictional path", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "fictional-a1b2",
+      branch_name: "workflow/fictional-a1b2"
+    )
+
+    expect do
+      described_class.request_git_change!(
+        run: run, requested_by_worker_id: "worker-1", path: "does-not-exist.txt", reason: "made up"
+      )
+    end.to raise_error(Orchestrator::RunPublication::Error, /not part of this run's pending changes/)
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
+  it "caps the number of pending git change requests per run" do
+    root = Dir.mktmpdir
+    git(root, "init")
+    git(root, "config", "user.name", "Workflow Orchestrator")
+    git(root, "config", "user.email", "workflow@example.test")
+    File.write(File.join(root, "existing.txt"), "before\n")
+    git(root, "add", "existing.txt")
+    git(root, "commit", "-m", "Initial commit")
+    workspace = Workspace.create!(name: "publication-cap-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "publication-cap-#{SecureRandom.hex(4)}", task: "Cap requests", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "cap-a1b2",
+      branch_name: "workflow/cap-a1b2"
+    )
+    described_class::MAX_PENDING_GIT_CHANGE_REQUESTS.times do |i|
+      File.write(File.join(root, "stray-#{i}.log"), "junk\n")
+      described_class.request_git_change!(run: run, requested_by_worker_id: "worker-1", path: "stray-#{i}.log", reason: "junk")
+    end
+    File.write(File.join(root, "one-too-many.log"), "junk\n")
+
+    expect do
+      described_class.request_git_change!(run: run, requested_by_worker_id: "worker-1", path: "one-too-many.log", reason: "junk")
+    end.to raise_error(Orchestrator::RunPublication::Error, /Too many pending git change requests/)
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
   it "refuses to publish from the source checkout" do
     root = Dir.mktmpdir
     workspace = Workspace.create!(name: "publication-source-#{SecureRandom.hex(4)}", root_path: root)

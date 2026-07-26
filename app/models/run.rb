@@ -35,6 +35,7 @@ class Run < ApplicationRecord
   has_many :chaperone_reviews, foreign_key: :run_id, primary_key: :run_id, dependent: :destroy
   has_many :run_commands, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :review_assets, class_name: "RunReviewAsset", foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
+  has_many :git_change_requests, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
 
   validates :run_id, presence: true, uniqueness: true
   validates :task, presence: true
