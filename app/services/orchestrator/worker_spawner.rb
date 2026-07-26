@@ -117,6 +117,8 @@ module Orchestrator
       # claude, since codex spawns chdir into root_dir instead (see below).
       runtime_dir = Rails.root.join("tmp", "workers", cli_session_id || worker_id).to_s
       FileUtils.mkdir_p(runtime_dir)
+      cache_dir = File.join(runtime_dir, "cache")
+      FileUtils.mkdir_p(cache_dir)
 
       command, args =
         if driver == "claude"
@@ -139,7 +141,11 @@ module Orchestrator
         "WORKFLOW_WORKER_NICKNAME" => nickname,
         "WORKFLOW_WORKER_SCOPE" => scope,
         "WORKFLOW_WORKER_TOKEN" => capability_token,
-        "WORKFLOW_CHAPERONE_TOKEN" => mcp_override&.dig(:token)
+        "WORKFLOW_CHAPERONE_TOKEN" => mcp_override&.dig(:token),
+        # RuboCop's server initializes its cache before it reads command-line
+        # options. Keep that cache under the worker's writable runtime root
+        # instead of the sandboxed user's ~/.cache.
+        "XDG_CACHE_HOME" => cache_dir
       )
 
       File.write(prompt_path, enriched_prompt)
@@ -592,6 +598,7 @@ module Orchestrator
         USER: resolved.call("USER"),
         LOGNAME: resolved.call("LOGNAME"),
         TMPDIR: resolved.call("TMPDIR"),
+        XDG_CACHE_HOME: resolved.call("XDG_CACHE_HOME"),
         WORKER_LOG_PATH: resolved.call("WORKER_LOG_PATH"),
         WORKFLOW_RUN_ID: resolved.call("WORKFLOW_RUN_ID"),
         WORKFLOW_WORKER_ID: resolved.call("WORKFLOW_WORKER_ID"),

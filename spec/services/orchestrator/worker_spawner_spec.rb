@@ -66,6 +66,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(worker.args).to include("--model", "gpt-5.6-luna")
       expect(worker.args).not_to include("--ask-for-approval")
       expect(JSON.parse(File.read(worker.env_path)).fetch("WORKER_LOG_PATH")).to eq(worker.log_path)
+      expect(JSON.parse(File.read(worker.env_path)).fetch("XDG_CACHE_HOME")).to start_with(Rails.root.join("tmp", "workers").to_s)
       expect(File.read(worker.prompt_path)).to include('name = "worker"')
       expect(File.read(worker.prompt_path)).to include("Current task:\nVerify the issue and report back.")
     end
