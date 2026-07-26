@@ -114,6 +114,45 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end
 
+  it "stages related source edits before continuing a resolved rebase" do
+    root = Dir.mktmpdir
+    git(root, "init")
+    git(root, "config", "user.name", "Workflow Orchestrator")
+    git(root, "config", "user.email", "workflow@example.test")
+    File.write(File.join(root, "base.txt"), "base\n")
+    File.write(File.join(root, "related_spec.rb"), "old\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Initial commit")
+    git(root, "branch", "-M", "main")
+    remote = Dir.mktmpdir
+    git(remote, "init", "--bare")
+    git(root, "remote", "add", "origin", remote)
+    git(root, "push", "-u", "origin", "main")
+    git(root, "checkout", "-b", "workflow/conflict")
+    File.write(File.join(root, "base.txt"), "branch\n")
+    git(root, "commit", "-am", "Branch change")
+    git(root, "checkout", "main")
+    File.write(File.join(root, "base.txt"), "main\n")
+    git(root, "commit", "-am", "Main change")
+    git(root, "push", "origin", "main")
+    git(root, "checkout", "workflow/conflict")
+    workspace = Workspace.create!(name: "publication-continue-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "publication-continue-#{SecureRandom.hex(4)}", task: "Continue rebase", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "continue-a1b2", branch_name: "workflow/conflict"
+    )
+    allow(Open3).to receive(:capture3).and_call_original
+    expect(described_class.rebase_onto_main!(run)).to eq(:conflicted)
+    File.write(File.join(root, "base.txt"), "resolved\n")
+    File.write(File.join(root, "related_spec.rb"), "updated\n")
+
+    expect(described_class.continue_rebase_onto_main!(run, paths: [ "base.txt" ])).to eq(:rebased)
+    expect(git(root, "show", "--format=", "--name-only", "HEAD")).to include("related_spec.rb")
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+    FileUtils.remove_entry(remote) if remote && File.exist?(remote)
+  end
+
   it "caps the number of pending git change requests per run" do
     root = Dir.mktmpdir
     git(root, "init")

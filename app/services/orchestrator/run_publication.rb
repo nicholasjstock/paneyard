@@ -151,7 +151,12 @@ module Orchestrator
       raise Error, "No merge-conflict rebase is in progress" unless rebase_in_progress?(root)
       raise Error, "Merge-conflict worker left conflict markers behind" if conflict_markers?(root, paths)
 
-      git!(root, "add", "--", *paths)
+      # A conflict repair can require a related protected-source update (for
+      # example, adapting a regression spec to the merged behavior), not only
+      # the files Git initially marked unmerged. Stage the managed source set
+      # exactly as the terminal committer would, while keeping runtime output
+      # out of the rebase commit.
+      stage_for_publication!(run, root)
       output, error, status = Open3.capture3({ "GIT_EDITOR" => "true" }, "git", "-C", root.to_s, "rebase", "--continue")
       return :rebased if status.success?
 
