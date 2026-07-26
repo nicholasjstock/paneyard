@@ -42,7 +42,26 @@
   </div>
 </div>
 
-<% if @run.capacity_blocked? && @active_workers.empty? %>
+<% if @blocking_questions.any? %>
+  <% question = @blocking_questions.first %>
+  <section class="panel run-now-panel blocking" data-testid="run-state-header">
+    <div class="panel-header">
+      <div>
+        <h2>Question needs your answer</h2>
+        <p class="muted"><%= pluralize(@blocking_questions.count, "blocking question") %> must be answered before work can continue.</p>
+      </div>
+      <span class="badge blocking">action required</span>
+    </div>
+    <p><%= question.text %></p>
+    <% if question.github_comment_url.present? %>
+      <%= link_to "Answer on GitHub", question.github_comment_url, target: "_blank", rel: "noopener", class: "btn primary" %>
+    <% elsif @run.pull_request_url.present? %>
+      <%= link_to "Open pull request to answer", @run.pull_request_url, target: "_blank", rel: "noopener", class: "btn primary" %>
+    <% else %>
+      <p class="muted">A draft pull request is being created so you can answer this question.</p>
+    <% end %>
+  </section>
+<% elsif @run.capacity_blocked? && @active_workers.empty? %>
   <% target_launcher = @run.alternate_launcher_variant %>
   <section class="panel run-now-panel planning">
     <div class="panel-header">

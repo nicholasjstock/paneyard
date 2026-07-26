@@ -395,6 +395,10 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
 
+    within("[data-testid='run-state-header']") do
+      expect(page).to have_text("Question needs your answer")
+      expect(page).to have_text("Which reproduction path should we take?")
+    end
     expect(page).to have_text("Operator Input Required")
     expect(page).to have_text("1 blocking question")
     expect(page).to have_text("The run will remain paused until these questions are answered.")
