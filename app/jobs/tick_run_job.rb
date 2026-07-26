@@ -18,6 +18,7 @@ class TickRunJob < ApplicationJob
 
   def tick_run(run)
     if run.publication_status == "merge_conflict"
+      Orchestrator::SpawnRequestedWorkers.call(run: run)
       Orchestrator::MergeConflictResolution.continue_if_ready!(run)
       return
     end

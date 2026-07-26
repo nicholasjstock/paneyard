@@ -1,6 +1,29 @@
 require "rails_helper"
 
 RSpec.describe TickRunJob do
+  it "dispatches an open merge-conflict worker request before waiting for its handoff" do
+    workspace = Workspace.create!(name: "tick-merge-conflict-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace:, run_id: "tick-merge-conflict-#{SecureRandom.hex(4)}", task: "Resolve conflicts",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running", publication_status: "merge_conflict"
+    )
+    request = SpawnRequest.create!(
+      run_id: run.run_id, asked_by: "orchestrator", requested_role: "worker", priority: "blocking",
+      scope: "merge-conflict-resolution.md", text: "Resolve the conflicts.", execution_mode: "implementation",
+      write_scope: "scoped_changes", allowed_paths: [ "app/example.rb" ]
+    )
+    allow(Orchestrator::SpawnRequestedWorkers).to receive(:call)
+    allow(Orchestrator::MergeConflictResolution).to receive(:continue_if_ready!)
+
+    TickRunJob.new.send(:tick_run, run)
+
+    expect(Orchestrator::SpawnRequestedWorkers).to have_received(:call).with(run: run)
+    expect(Orchestrator::MergeConflictResolution).to have_received(:continue_if_ready!).with(run)
+    expect(request.reload.status).to eq("open")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   it "queues a reporter before the curator and committer for a managed run" do
     workspace = Workspace.create!(name: "tick-publish-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(
