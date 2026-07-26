@@ -272,6 +272,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_091910) do
 
   create_table "spawn_requests", force: :cascade do |t|
     t.json "allowed_paths", default: [], null: false
+    t.json "artifact_inheritance_chain", default: [], null: false
     t.datetime "asked_at", null: false
     t.string "asked_by", null: false
     t.text "context"
@@ -285,11 +286,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_091910) do
     t.string "fulfilled_by"
     t.string "fulfilled_worker_id"
     t.text "fulfillment_note"
+    t.json "inherited_artifacts", default: [], null: false
     t.string "lineage_key"
     t.string "model_tier", default: "small", null: false
     t.string "priority", default: "advisory", null: false
     t.string "request_id", null: false
     t.string "requested_role", null: false
+    t.json "required_artifacts", default: [], null: false
     t.string "run_id", null: false
     t.string "scope", null: false
     t.string "status", default: "open", null: false
@@ -383,6 +386,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_091910) do
     t.integer "exit_code"
     t.string "exit_status_path"
     t.datetime "handoff_completed_at"
+    t.json "inherited_artifacts", default: [], null: false
     t.bigint "input_tokens"
     t.string "last_message_path", null: false
     t.string "lineage_key"
@@ -393,6 +397,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_091910) do
     t.string "nickname", null: false
     t.bigint "output_tokens"
     t.integer "pid", null: false
+    t.json "produced_artifacts", default: [], null: false
     t.string "prompt_path", null: false
     t.text "reason", null: false
     t.string "role", null: false

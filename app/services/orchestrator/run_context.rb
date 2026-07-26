@@ -23,6 +23,7 @@ module Orchestrator
     def snapshot(run_id:, entry_keys: nil)
       entries = RunContextEntry.where(run_id: run_id).order(:kind, :entry_key)
       selected_entries = select_entries(entries.to_a, entry_keys)
+      artifact_metadata = collect_artifact_metadata(run_id)
 
       {
         run_id: run_id,
@@ -30,6 +31,7 @@ module Orchestrator
         entries: selected_entries,
         available_entry_keys: entries.limit(AVAILABLE_KEY_LIMIT).pluck(:entry_key),
         available_entry_count: entries.count,
+        artifacts: artifact_metadata,
         retrieval_hint: "Request entryKeys for full details only when a specific fact, decision, or evidence reference is needed."
       }
     end
@@ -60,6 +62,58 @@ module Orchestrator
       end
       raise ArgumentError, "Verified acceptance evidence does not exist: #{evidence_ref}" unless workspace_evidence || artifact_evidence
     end
+
+    def collect_artifact_metadata(run_id)
+      run = Run.find_by(run_id: run_id)
+      return [] unless run
+
+      all_names = ArtifactStore.names(run.target_root, run_id)
+      metadata_result = ArtifactStore.collect(run.target_root, run_id, all_names)
+
+      build_artifact_info(run_id, metadata_result[:artifacts])
+    end
+    private_class_method :collect_artifact_metadata
+
+    def build_artifact_info(run_id, artifacts_metadata)
+      workers_by_artifact = build_producer_map(run_id)
+
+      artifacts_metadata.map do |metadata|
+        info = {
+          name: metadata[:name],
+          exists: metadata[:exists],
+          sizeBytes: metadata[:size_bytes],
+          updatedAt: metadata[:updated_at]
+        }
+
+        producer = workers_by_artifact[metadata[:name]]
+        info[:producedBy] = producer if producer
+
+        info[:inherited] = is_inherited?(run_id, metadata[:name])
+
+        info
+      end
+    end
+    private_class_method :build_artifact_info
+
+    def build_producer_map(run_id)
+      map = {}
+      Worker.where(run_id: run_id, status: "stopped").each do |worker|
+        next unless worker.produced_artifacts.is_a?(Array)
+
+        worker.produced_artifacts.each do |artifact_name|
+          map[artifact_name] = worker.worker_id
+        end
+      end
+      map
+    end
+    private_class_method :build_producer_map
+
+    def is_inherited?(run_id, artifact_name)
+      Worker.where(run_id: run_id, status: "stopped")
+        .where("inherited_artifacts LIKE ?", "%\"#{artifact_name}\"%")
+        .exists?
+    end
+    private_class_method :is_inherited?
 
     def select_entries(entries, entry_keys)
       if entry_keys.present?

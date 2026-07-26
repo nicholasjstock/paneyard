@@ -65,7 +65,7 @@ module Orchestrator
 
     # active_worker_ids -- used to tell a stale fulfilled recovery request
     # apart from one that's still in flight.
-    def publish_planner_jobs(run_id:, summary:, plan:, active_worker_ids: Set.new)
+    def publish_planner_jobs(run_id:, summary:, plan:, active_worker_ids: Set.new, prior_worker_artifacts: [], prior_worker_id: nil)
       step = plan[:next_step]
       return [] if step.nil?
 
@@ -94,6 +94,15 @@ module Orchestrator
         return [ { step: step, request_id: existing_request.request_id } ]
       end
 
+      # Determine which artifacts to inherit based on the next step's role
+      inherited_artifacts = determine_inherited_artifacts(
+        prior_artifacts: prior_worker_artifacts,
+        next_step_owner: step[:owner]
+      )
+
+      # Build artifact inheritance chain for auditing
+      artifact_inheritance_chain = prior_worker_id.present? ? [prior_worker_id] : []
+
       request = SpawnRequest.create!(
         run_id: run_id,
         asked_by: "planner",
@@ -107,9 +116,18 @@ module Orchestrator
         evidence_refs: Array(step[:evidence_refs]),
         lineage_key: step[:lineage_key].presence || step[:artifact],
         priority: "blocking",
-        tags: [ step[:owner], step[:artifact], "planner-job" ]
+        tags: [ step[:owner], step[:artifact], "planner-job" ],
+        inherited_artifacts: inherited_artifacts,
+        artifact_inheritance_chain: artifact_inheritance_chain
       )
       [ { step: step, request_id: request.request_id } ]
     end
+
+    def determine_inherited_artifacts(prior_artifacts:, next_step_owner:)
+      # For now, inherit all artifacts from the prior worker for the next worker
+      # This can be refined in the future to be more selective based on step type
+      Array(prior_artifacts).compact
+    end
+    private_class_method :determine_inherited_artifacts
   end
 end

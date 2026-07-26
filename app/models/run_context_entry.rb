@@ -1,5 +1,5 @@
 class RunContextEntry < ApplicationRecord
-  KINDS = %w[fact constraint rejected_approach operator_decision].freeze
+  KINDS = %w[fact constraint rejected_approach operator_decision artifact_inheritance_graph].freeze
   STATUSES = %w[pending confirmed verified waived rejected superseded].freeze
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, optional: true, inverse_of: :run_context_entries

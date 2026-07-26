@@ -30,7 +30,8 @@ module Orchestrator
     CODEX_WORKER_MODEL = CODEX_SMALL_MODEL
 
     def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil,
-      write_scope: nil, allowed_paths: [], model_tier: "small", mcp_override: nil, lineage_key: nil)
+      write_scope: nil, allowed_paths: [], model_tier: "small", mcp_override: nil, inherited_artifacts: [],
+      lineage_key: nil)
       raise ArgumentError, "Planner processes were removed; queue a PlannerDecisionJob instead" if role == "planner"
 
       # nickname flows straight into file paths under workers_dir below --
@@ -151,7 +152,8 @@ module Orchestrator
         worker_id:, role:, nickname:, reason:, scope:, status: "launching", pid: 0,
         prompt_path:, log_path:, last_message_path:, exit_status_path:, env_path:, mcp_config_path:,
         command:, args: [], model: selected_model, capability_token_digest:, execution_mode: mode,
-        write_scope:, allowed_paths: Array(allowed_paths), lineage_key:, cli_session_id:
+        write_scope:, allowed_paths: Array(allowed_paths), inherited_artifacts: Array(inherited_artifacts),
+        lineage_key:, cli_session_id:
       )
 
       # Brakeman flags this as command injection because command/args/paths

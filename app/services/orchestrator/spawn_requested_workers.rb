@@ -74,9 +74,19 @@ module Orchestrator
           next
         end
 
+        # Validate required artifacts exist before spawning
+        artifact_validation = validate_required_artifacts(run:, request:)
+        if artifact_validation.is_a?(String)
+          request.update!(
+            status: "dismissed", dismissed_by: "artifact_validation",
+            dismissal_note: artifact_validation
+          )
+          next
+        end
+
         nickname = build_unique_nickname(build_worker_nickname(role), current_workers + spawned_workers)
         reason = "Bus request from #{request.asked_by} for #{request.scope}."
-        prompt = build_requested_worker_prompt(run_id: run_id, request: request)
+        prompt = build_requested_worker_prompt(run_id: run_id, request: request, run: run)
         worker_id = SecureRandom.uuid
 
         # Claim the (role, scope) slot before actually spawning the
@@ -92,7 +102,8 @@ module Orchestrator
           worker = WorkerSpawner.spawn_worker(
             run: run, role: role, nickname: nickname, reason: reason, scope: request.scope, prompt: prompt,
             worker_id: worker_id, mode: execution_mode(request), write_scope: write_scope(request),
-            allowed_paths: effective_allowed_paths, model_tier: request.model_tier, lineage_key: request.lineage_key
+            allowed_paths: effective_allowed_paths, model_tier: request.model_tier, lineage_key: request.lineage_key,
+            inherited_artifacts: request.inherited_artifacts || []
           )
         rescue Orchestrator::TargetPreflight::Error => e
           request.update!(
@@ -145,6 +156,19 @@ module Orchestrator
       # limit. The next tick observes the resulting active worker or planner
       # decision before considering subsequent queued work.
       candidates.first(1)
+    end
+
+    def validate_required_artifacts(run:, request:)
+      required = Array(request.required_artifacts)
+      return true if required.empty?
+
+      artifact_store = ArtifactStore
+      available = artifact_store.names(run.target_root, run.run_id)
+
+      missing = required - available
+      return true if missing.empty?
+
+      "Required artifacts not found: #{missing.join(', ')}"
     end
 
     def dispatch_chaperone_request(run:, request:)
@@ -218,7 +242,30 @@ module Orchestrator
       "#{base_nickname}-#{suffix}"
     end
 
-    def build_requested_worker_prompt(run_id:, request:)
+    def build_inherited_artifacts_section(run:, request:)
+      inherited = Array(request.inherited_artifacts)
+      return nil if inherited.empty?
+
+      artifacts = ArtifactStore.collect(run.target_root, run.run_id, inherited)[:artifacts]
+      existing_artifacts = artifacts.select { |a| a[:exists] }
+      return nil if existing_artifacts.empty?
+
+      artifact_lines = existing_artifacts.map do |artifact|
+        size_kb = (artifact[:size_bytes].to_f / 1024).round(1)
+        "- `#{artifact[:name]}` (#{size_kb} KB, #{artifact[:updated_at]})"
+      end
+
+      artifact_section = "## Inherited Artifacts\n\n"
+      artifact_section += "The following artifacts from prior workers are available for your review:\n\n"
+      artifact_section += artifact_lines.join("\n") + "\n\n"
+      artifact_section += "Use `read_workflow_artifact` to read these files. All inherited artifacts are read-only."
+
+      artifact_section
+    end
+
+    def build_requested_worker_prompt(run_id:, request:, run:)
+      artifact_section = build_inherited_artifacts_section(run: run, request: request)
+
       [
         "Run #{run_id}.",
         "Bus request: #{request.scope}.",
@@ -226,6 +273,7 @@ module Orchestrator
         (request.requested_role.present? ? "Target role: #{request.requested_role}." : nil),
         request.text,
         (request.context.present? ? "Context: #{request.context}." : nil),
+        artifact_section,
         ("Write your report via write_workflow_artifact using artifactName=\"#{request.scope}\". Use the shared workflow bus for blockers." unless request.requested_role == "committer")
       ].compact.join(" ")
     end

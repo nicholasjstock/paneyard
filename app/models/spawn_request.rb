@@ -48,7 +48,10 @@ class SpawnRequest < ApplicationRecord
       dismissedBy: dismissed_by,
       dismissedAt: dismissed_at&.iso8601(3),
       dismissalNote: dismissal_note,
-      tags: tags
+      tags: tags,
+      requiredArtifacts: required_artifacts,
+      inheritedArtifacts: inherited_artifacts,
+      artifactInheritanceChain: artifact_inheritance_chain
     }
   end
 
