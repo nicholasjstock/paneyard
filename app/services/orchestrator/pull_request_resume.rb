@@ -6,10 +6,21 @@ module Orchestrator
     class Error < StandardError; end
     module_function
 
+    # Logged at info on every poll (not just failures): this job silently
+    # produced zero new comments for ~10 consecutive one-minute polls twice
+    # in one session despite a real, unprocessed reply already sitting on
+    # the PR, and no exception was ever raised -- gh api reported success
+    # each time. Without a record of what gh actually returned on each
+    # poll, that gap is unreproducible after the fact. Keep this until a
+    # recurrence is caught with these fields and the actual cause found.
     def comments_after(run)
       repository, number = repository_and_number(run)
       endpoint = "repos/#{repository}/issues/#{number}/comments?per_page=100"
       output, error, status = Open3.capture3("gh", "api", endpoint)
+      Rails.logger.info(
+        "PullRequestResume.comments_after run=#{run.run_id} last_comment_id=#{run.last_pull_request_comment_id.inspect} " \
+        "gh_exit=#{status.exitstatus} gh_stderr=#{error.presence.inspect} raw_comment_ids=#{safe_comment_ids(output)}"
+      )
       raise Error, "gh api comments failed: #{error}" unless status.success?
 
       comments = JSON.parse(output)
@@ -17,6 +28,13 @@ module Orchestrator
     rescue JSON::ParserError => error
       raise Error, "GitHub returned invalid PR comments: #{error.message}"
     end
+
+    def safe_comment_ids(output)
+      JSON.parse(output).map { |comment| comment["id"] }
+    rescue JSON::ParserError
+      "<unparsable>"
+    end
+    private_class_method :safe_comment_ids
 
     # A PR comment can only resume a run by answering its one open blocking
     # question -- never unconditionally. Every run reachable via PR comments

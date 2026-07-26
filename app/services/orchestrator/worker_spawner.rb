@@ -56,8 +56,6 @@ module Orchestrator
       env_path = File.join(workers_dir, "#{file_basename}.env.json")
       mcp_config_path = File.join(workers_dir, "#{file_basename}.mcp.json")
       claude_settings_path = File.join(workers_dir, "#{file_basename}.claude-settings.json")
-      runtime_dir = Rails.root.join("tmp", "workers", worker_id).to_s
-      FileUtils.mkdir_p(runtime_dir)
 
       policy = WorkerExecutionPolicy.new(
         root_dir:, mode:, write_scope: write_scope.presence || "source_protected", allowed_paths:,
@@ -106,6 +104,18 @@ module Orchestrator
           # process exits (see Orchestrator::LogReader.codex_session_id).
           resume_session_id
         end
+
+      # Keyed on cli_session_id, not worker_id: Claude Code's own session
+      # storage is scoped to the working directory a session was created
+      # in, so a --resume from a different (fresh, per-spawn) directory
+      # can never find it -- this is what produced "No conversation found
+      # with session ID" on every resumed spawn, 100% reproducing and
+      # cascading forever since every subsequent same-role worker resumed
+      # the same now-marked-dead session. cli_session_id is always present
+      # for claude (freshly minted or resumed); this only matters for
+      # claude, since codex spawns chdir into root_dir instead (see below).
+      runtime_dir = Rails.root.join("tmp", "workers", cli_session_id || worker_id).to_s
+      FileUtils.mkdir_p(runtime_dir)
 
       command, args =
         if driver == "claude"
@@ -186,11 +196,33 @@ module Orchestrator
     # chaperone) always gets a fresh session -- a verifier must never
     # inherit the implementer's own reasoning trail. Accepted trade-off:
     # within one role, a confused worker's context now carries into the
-    # next attempt; the chaperone remains the backstop for a session that
-    # has genuinely gone bad.
+    # next attempt.
+    #
+    # Excludes a worker whose CLI session never actually got established
+    # server-side (claude's own "No conversation found with session ID"
+    # immediate crash, num_turns=0) -- without this, the next same-role
+    # spawn would --resume that exact dead session, crash identically, and
+    # every spawn after that would keep inheriting the same broken id
+    # forever. A worker still actively running is kept as a valid candidate
+    # even though its agent_turn_count isn't captured yet (only populated
+    # on reconciliation) -- but a worker that has already stopped and still
+    # has no agent_turn_count is NOT given that same pass: it was stopped
+    # (crashed, or killed by StopRunJob, which sets status directly and
+    # never runs WorkerReconcileJob's usage-parsing) without ever proving
+    # its session established, which is exactly as untrustworthy as a
+    # known-zero session -- confirmed against a real run where the
+    # *original* session-minting worker had been manually killed after
+    # already erroring, sat at agent_turn_count=nil forever, and kept
+    # getting selected as a "valid" resume source under the older, looser
+    # NULL-tolerant version of this filter. Falls back further in history,
+    # or to a brand-new session (see cli_session_id ||= SecureRandom.uuid
+    # below) if nothing usable remains -- the chaperone backstop mentioned
+    # above only diagnoses a session that has genuinely gone bad; it was
+    # never what breaks the dead session out of rotation.
     def prior_worker_for_resume(run_id:, role:)
       Worker.where(run_id:, role:)
         .where.not(cli_session_id: nil)
+        .where("status = ? OR (agent_turn_count IS NOT NULL AND agent_turn_count > 0)", "running")
         .order(created_at: :desc)
         .first
     end

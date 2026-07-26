@@ -233,13 +233,13 @@ RSpec.describe Orchestrator::WorkerSpawner do
     )
   end
 
-  def worker_attrs(role:, lineage_key:, cli_session_id:)
+  def worker_attrs(role:, lineage_key:, cli_session_id:, agent_turn_count: 10)
     id = SecureRandom.uuid
     {
       worker_id: id, role:, nickname: "worker-#{id}", reason: "test", scope: "test.md", status: "stopped",
       pid: 1, prompt_path: "/tmp/#{id}.prompt", log_path: "/tmp/#{id}.log",
       last_message_path: "/tmp/#{id}.last", env_path: "/tmp/#{id}.env", command: "claude",
-      lineage_key:, cli_session_id:
+      lineage_key:, cli_session_id:, agent_turn_count: cli_session_id.nil? ? nil : agent_turn_count
     }
   end
 end

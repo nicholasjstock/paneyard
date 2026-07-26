@@ -19,7 +19,14 @@ module Orchestrator
     SIGNALS = [
       [ /hit your session limit/i, "Claude session limit reached" ],
       [ /hit your usage limit/i, "Codex usage limit reached" ],
-      [ /rate limit|too many requests|429/i, "Claude rate limit reached" ]
+      # \b429\b, not a bare substring: log output is full of UUIDs (session
+      # ids, worker ids) and a bare "429" matches any of them that happen to
+      # contain that digit sequence (e.g. a session id containing "...4295...")
+      # -- confirmed as a real false positive that parked a run in
+      # waiting_on_capacity after a chaperone that had actually completed
+      # successfully. \b429\b only matches an isolated token, which a UUID's
+      # unbroken hex run never produces.
+      [ /rate limit|too many requests|\b429\b/i, "Claude rate limit reached" ]
     ].freeze
 
     def detected?(output)

@@ -14,6 +14,10 @@ RSpec.describe Orchestrator::CapacityFailure do
     expect(described_class.detected?("NoMethodError: undefined method 'foo'")).to be false
   end
 
+  it "does not mistake a UUID containing the digits 429 for an HTTP 429 response" do
+    expect(described_class.detected?(%({"session_id":"5f5a995b-e26e-4295-a0f3-dff2e9887c8d","subtype":"success"}))).to be false
+  end
+
   describe ".stop_reason_message" do
     it "labels each capacity signal distinctly, from the same list detected? uses" do
       expect(described_class.stop_reason_message("hit your session limit")).to eq(

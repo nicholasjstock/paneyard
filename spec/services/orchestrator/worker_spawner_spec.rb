@@ -213,7 +213,11 @@ RSpec.describe Orchestrator::WorkerSpawner do
         launched_by: "operator", started_at: Time.current
       )
 
-      allow(Process).to receive(:spawn).and_return(11_111, 22_222)
+      spawn_calls = []
+      allow(Process).to receive(:spawn) do |*args, **kwargs|
+        spawn_calls << kwargs
+        spawn_calls.length == 1 ? 11_111 : 22_222
+      end
       allow(Process).to receive(:detach)
 
       first = described_class.spawn_worker(
@@ -231,6 +235,104 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(second.args).to include("--resume", first.cli_session_id)
       expect(second.args).not_to include("--session-id")
       expect(second.cli_session_id).to eq(first.cli_session_id)
+      # The actual bug this regression-tests: Claude Code's own session
+      # storage is scoped to cwd, so a --resume must run from the exact
+      # same directory the session was originally created in, not a fresh
+      # one per spawn -- otherwise the CLI reports "No conversation found"
+      # even though the session id is correct.
+      expect(spawn_calls[1][:chdir]).to eq(spawn_calls[0][:chdir])
+    end
+
+    it "prior_worker_for_resume skips a same-role session that crashed with zero turns, falling back further in history" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-dead-session")
+      workspace = Workspace.create!(name: "dead-session-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Implement the feature",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+      good_session = SecureRandom.uuid
+      dead_session = SecureRandom.uuid
+      create_stopped_worker(run, "worker", cli_session_id: good_session, agent_turn_count: 34, created_at: 2.minutes.ago)
+      # Simulates claude's own "No conversation found with session ID" crash --
+      # the resume target's own working directory mismatch (the actual bug
+      # fixed alongside this) means the CLI never re-establishes the
+      # session, so num_turns comes back 0. Without this filter,
+      # prior_worker_for_resume would keep selecting this dead session
+      # forever, since every subsequent resume attempt also inherits it.
+      create_stopped_worker(run, "worker", cli_session_id: dead_session, agent_turn_count: 0, created_at: 1.minute.ago)
+
+      selected = described_class.prior_worker_for_resume(run_id: run.run_id, role: "worker")
+
+      expect(selected.cli_session_id).to eq(good_session)
+    end
+
+    it "prior_worker_for_resume skips a stopped worker with no recorded turns, even when it minted the session" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-unreconciled-session")
+      workspace = Workspace.create!(name: "unreconciled-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Implement the feature",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+      # StopRunJob (a manual "Kill run") sets status directly and never runs
+      # WorkerReconcileJob's usage-parsing, so a worker killed this way sits
+      # at agent_turn_count=nil forever -- indistinguishable from "still
+      # running" under a NULL-tolerant filter, but this one is stopped and
+      # never proved its session established. Confirmed against a real run
+      # where exactly this worker kept getting selected as a resume source.
+      nickname = "worker-#{SecureRandom.hex(4)}"
+      run.workers.create!(
+        worker_id: SecureRandom.uuid, role: "worker", nickname:, reason: "test", scope: "artifact.md",
+        status: "stopped", pid: 12_345, command: "claude", args: [],
+        prompt_path: Rails.root.join("tmp/#{nickname}.prompt").to_s,
+        log_path: Rails.root.join("tmp/#{nickname}.log").to_s,
+        last_message_path: Rails.root.join("tmp/#{nickname}.last").to_s,
+        env_path: Rails.root.join("tmp/#{nickname}.env").to_s,
+        cli_session_id: SecureRandom.uuid, agent_turn_count: nil
+      )
+
+      selected = described_class.prior_worker_for_resume(run_id: run.run_id, role: "worker")
+
+      expect(selected).to be_nil
+    end
+
+    it "prior_worker_for_resume still accepts a currently running worker whose usage isn't reconciled yet" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-running-session")
+      workspace = Workspace.create!(name: "running-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Implement the feature",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+      nickname = "worker-#{SecureRandom.hex(4)}"
+      running_session = SecureRandom.uuid
+      run.workers.create!(
+        worker_id: SecureRandom.uuid, role: "worker", nickname:, reason: "test", scope: "artifact.md",
+        status: "running", pid: 12_345, command: "claude", args: [],
+        prompt_path: Rails.root.join("tmp/#{nickname}.prompt").to_s,
+        log_path: Rails.root.join("tmp/#{nickname}.log").to_s,
+        last_message_path: Rails.root.join("tmp/#{nickname}.last").to_s,
+        env_path: Rails.root.join("tmp/#{nickname}.env").to_s,
+        cli_session_id: running_session, agent_turn_count: nil
+      )
+
+      selected = described_class.prior_worker_for_resume(run_id: run.run_id, role: "worker")
+
+      expect(selected.cli_session_id).to eq(running_session)
+    end
+
+    def create_stopped_worker(run, role, cli_session_id:, agent_turn_count:, created_at:)
+      nickname = "worker-#{SecureRandom.hex(4)}"
+      run.workers.create!(
+        worker_id: SecureRandom.uuid, role:, nickname:, reason: "test", scope: "artifact.md",
+        status: "stopped", pid: 12_345, command: "claude", args: [],
+        prompt_path: Rails.root.join("tmp/#{nickname}.prompt").to_s,
+        log_path: Rails.root.join("tmp/#{nickname}.log").to_s,
+        last_message_path: Rails.root.join("tmp/#{nickname}.last").to_s,
+        env_path: Rails.root.join("tmp/#{nickname}.env").to_s,
+        cli_session_id:, agent_turn_count:, created_at:
+      )
     end
 
     it "never resumes across a role change even when the lineage_key is identical" do
