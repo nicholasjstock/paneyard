@@ -103,11 +103,11 @@ RSpec.describe Orchestrator::WorkerActivity do
       text: "Choose the next step.", status: "fulfilled", priority: "blocking"
     )
     decision = worker.run.planner_decisions.create!(spawn_request: request, status: "completed")
-    worker_activity = described_class.for_workers([worker])
+    worker_activity = described_class.for_workers([ worker ])
 
-    entries = described_class.for_planner_entries(worker_activity, [decision])
+    entries = described_class.for_planner_entries(worker_activity, [ decision ])
 
-    expect(entries.map { |entry| entry[:entry_type] }).to eq([:planner_decision, :worker])
+    expect(entries.map { |entry| entry[:entry_type] }).to eq([ :planner_decision, :worker ])
     expect(entries.first).to include(role: "planner", worker: nil, decision: decision, at: decision.created_at)
   end
 
@@ -125,9 +125,9 @@ RSpec.describe Orchestrator::WorkerActivity do
     )
     newer_decision = worker.run.planner_decisions.create!(spawn_request: newer_request, status: "completed", created_at: 1.minute.ago)
 
-    entries = described_class.for_planner_entries(described_class.for_workers([worker]), [older_decision, newer_decision])
+    entries = described_class.for_planner_entries(described_class.for_workers([ worker ]), [ older_decision, newer_decision ])
 
-    expect(entries.map { |entry| entry[:entry_type] }).to eq([:planner_decision, :planner_decision, :worker])
-    expect(entries.map { |entry| entry[:decision] }).to eq([newer_decision, older_decision, nil])
+    expect(entries.map { |entry| entry[:entry_type] }).to eq([ :planner_decision, :planner_decision, :worker ])
+    expect(entries.map { |entry| entry[:decision] }).to eq([ newer_decision, older_decision, nil ])
   end
 end
