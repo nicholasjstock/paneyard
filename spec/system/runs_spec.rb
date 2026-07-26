@@ -309,7 +309,7 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
     expect(page).to have_text("planner-live")
-    
+
     expect(page).to have_text("planner-live")
     expect(page).to have_text("Workflow tree")
   end
