@@ -3,11 +3,13 @@ require "active_support/core_ext/integer/time"
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
 
-  # Code is not reloaded between requests.
-  config.enable_reloading = false
-
-  # Eager load code on boot for better performance and memory savings (ignored by Rake tasks).
-  config.eager_load = true
+  # Deployed production stays eager-loaded. `bin/production` is the local
+  # long-running process against the real database, so it opts into reloads
+  # to pick up source fixes between requests and recurring jobs without a
+  # manual restart.
+  local_hot_reload = ENV["WORKFLOW_HOT_RELOAD"] == "1"
+  config.enable_reloading = local_hot_reload
+  config.eager_load = !local_hot_reload
 
   # Full error reports are disabled.
   config.consider_all_requests_local = false

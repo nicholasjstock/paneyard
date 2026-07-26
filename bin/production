@@ -28,8 +28,12 @@ rescue Errno::EADDRINUSE
 end
 
 pids = [
-  Process.spawn({ "RAILS_ENV" => "production" }, "./bin/rails", "server", *ARGV),
-  Process.spawn({ "RAILS_ENV" => "production" }, "./bin/jobs")
+  # This command is the local long-running production-data environment, not
+  # a deployed web process. Keep its process model production-like while
+  # allowing Rails to reload application code between requests/jobs so a
+  # source fix does not require remembering to restart this pane.
+  Process.spawn({ "RAILS_ENV" => "production", "WORKFLOW_HOT_RELOAD" => "1" }, "./bin/rails", "server", *ARGV),
+  Process.spawn({ "RAILS_ENV" => "production", "WORKFLOW_HOT_RELOAD" => "1" }, "./bin/jobs")
 ]
 
 stopping = false
