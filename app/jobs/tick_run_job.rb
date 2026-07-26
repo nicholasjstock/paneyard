@@ -62,7 +62,9 @@ class TickRunJob < ApplicationJob
     SpawnRequest.create!(
       run_id: run.run_id, asked_by: "orchestrator", requested_role: "committer", priority: "blocking",
       scope: "commit-#{run.worktree_name}.md", execution_mode: "diagnosis", write_scope: "source_protected",
-      text: "Inspect git status and call commit_run_changes exactly once to commit source changes selected by Rails. Do not write a run summary, select review assets, run tests, inspect run audits, publish, or call worker_turn."
+      text: "Inspect git status, call list_git_change_requests and reconcile what workers asked to exclude, then call " \
+        "commit_run_changes exactly once with excludePaths set to whichever of those you decide to honor. Do not " \
+        "write a run summary, select review assets, run tests, inspect run audits, publish, or call worker_turn."
     )
     run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "A committer is reviewing and committing the complete run worktree.")
   end

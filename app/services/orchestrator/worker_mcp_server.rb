@@ -10,7 +10,7 @@ module Orchestrator
       when "curator"
         [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::SelectReviewAssetsTool, ::McpTools::CompleteRunFinalizationTool ]
       when "committer"
-        [ ::McpTools::CommitRunChangesTool ]
+        [ ::McpTools::CommitRunChangesTool, ::McpTools::ListGitChangeRequestsTool ]
       else
         ordinary_worker_tools
       end
@@ -41,7 +41,8 @@ module Orchestrator
           ::McpTools::RecordProjectSetupTool,
           ::McpTools::RecordProtectedPathsTool,
           ::McpTools::ReportFailedApproachTool,
-          ::McpTools::SubmitAcceptanceVerificationTool
+          ::McpTools::SubmitAcceptanceVerificationTool,
+          ::McpTools::RequestGitRemovalTool
       ]
     end
   end

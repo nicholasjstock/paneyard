@@ -57,7 +57,13 @@ module Orchestrator
         Rails executes acceptance work depth-first: every handoff must address one root acceptance branch (a child may address its root branch), and later branches remain pending until the active branch resolves. When a verifier rejects evidence or a worker discovers follow-up work, propose the next child in that same branch; do not jump to another criterion's verifier.
         On the initial decision, define a concise top-level acceptanceCriteria contract (parentKey=null for each) derived
         directly from the user's requested outcomes. Criteria describe observable outcomes, not implementation steps. The
-        top-level contract is immutable after the first decision -- never propose new parentKey=null criteria later. At any
+        top-level contract is immutable after the first decision -- never propose new parentKey=null criteria later.
+        When a requested outcome concerns git/commit hygiene (for example "clean up the PR" or "no stray files in the
+        merge"), phrase the criterion only in terms of what request_git_removal and the committer's reconciliation can
+        actually deliver -- specific stray paths excluded from the commit -- never in terms of commit history (squashing,
+        amending, rebasing, "commits contain only substantive changes"). No tool rewrites commit history and none should
+        be assumed; a criterion worded that way can never be resolved and will stall whatever worker is assigned to it.
+        At any
         later decision, you may decompose an existing criterion (top-level or already-nested) into child sub-goals by
         proposing new criteria whose parentKey names that existing criterion's key; do this only when a criterion genuinely
         needs breaking down to be addressable. A criterion with children resolves only once every child resolves; its own
