@@ -185,10 +185,12 @@ module Orchestrator
       raise
     end
 
-    # One CLI session per (run, role, launcher): every same-role spawn resumes the
-    # most recent same-role session in the run, so a later worker inherits
-    # its predecessors' codebase understanding instead of re-exploring from
-    # scratch (~80-90k cache-creation tokens per cold start, observed).
+    # One CLI session per (run, role): every same-role spawn resumes the
+    # most recent completed same-role session in the run, so a later worker
+    # inherits its predecessor's codebase understanding instead of
+    # re-exploring from scratch (~80-90k cache-creation tokens per cold start,
+    # observed). A worker that never completed its handoff has no valid
+    # conversation to resume and must fall through to a fresh session.
     # Dispatch is single-flight per run (see SpawnRequestedWorkers), so
     # same-role sessions are never resumed concurrently. The role predicate
     # is the reliability boundary and lives here, not in caller convention:
@@ -219,10 +221,15 @@ module Orchestrator
     # below) if nothing usable remains -- the chaperone backstop mentioned
     # above only diagnoses a session that has genuinely gone bad; it was
     # never what breaks the dead session out of rotation.
-    def prior_worker_for_resume(run_id:, role:, driver:)
+    def prior_worker_for_resume(run_id:, role:, driver: "claude")
       Worker.where(run_id:, role:, command: driver)
         .where.not(cli_session_id: nil)
-        .where("status = ? OR (agent_turn_count IS NOT NULL AND agent_turn_count > 0)", "running")
+        # A session id can be captured before the first worker_turn. Such a
+        # predecessor may have exited before its CLI conversation existed.
+        # An actively running predecessor remains eligible before its handoff
+        # is reconciled; stopped predecessors must have completed their handoff
+        # so a crashed or manually stopped session cannot rotate forever.
+        .where("status = ? OR handoff_completed_at IS NOT NULL", "running")
         .order(created_at: :desc)
         .first
     end

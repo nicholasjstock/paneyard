@@ -180,8 +180,12 @@ RSpec.describe Orchestrator::WorkerSpawner do
     it "returns the most recent same-role session in the run, never another role or run" do
       run = create_run
       other_run = create_run
-      run.workers.create!(worker_attrs(role: "worker", lineage_key: "lineage-a", cli_session_id: "older-id"))
-      newest = run.workers.create!(worker_attrs(role: "worker", lineage_key: "lineage-b", cli_session_id: "newest-id"))
+      run.workers.create!(worker_attrs(
+        role: "worker", lineage_key: "lineage-a", cli_session_id: "older-id", handoff_completed_at: Time.current
+      ))
+      newest = run.workers.create!(worker_attrs(
+        role: "worker", lineage_key: "lineage-b", cli_session_id: "newest-id", handoff_completed_at: Time.current
+      ))
       run.workers.create!(worker_attrs(role: "verifier", lineage_key: "lineage-a", cli_session_id: "wrong-role"))
       other_run.workers.create!(worker_attrs(role: "worker", lineage_key: "lineage-a", cli_session_id: "wrong-run"))
 
@@ -190,6 +194,36 @@ RSpec.describe Orchestrator::WorkerSpawner do
       )
 
       assert_equal newest.id, found.id
+    end
+
+    it "ignores a stale same-role session that never completed its handoff" do
+      run = create_run
+      completed = run.workers.create!(worker_attrs(
+        role: "worker", lineage_key: "lineage-a", cli_session_id: "completed-id",
+        handoff_completed_at: Time.current
+      ))
+      run.workers.create!(worker_attrs(
+        role: "worker", lineage_key: "lineage-b", cli_session_id: "stale-id", handoff_completed_at: nil
+      ))
+
+      found = Orchestrator::WorkerSpawner.send(
+        :prior_worker_for_resume, run_id: run.run_id, role: "worker"
+      )
+
+      assert_equal completed.id, found.id
+    end
+
+    it "returns no resume candidate when every same-role session is stale" do
+      run = create_run
+      run.workers.create!(worker_attrs(
+        role: "worker", lineage_key: "lineage-a", cli_session_id: "stale-id", handoff_completed_at: nil
+      ))
+
+      found = Orchestrator::WorkerSpawner.send(
+        :prior_worker_for_resume, run_id: run.run_id, role: "worker"
+      )
+
+      assert_nil found
     end
 
     it "ignores a prior worker with no captured cli_session_id yet" do
@@ -245,13 +279,14 @@ RSpec.describe Orchestrator::WorkerSpawner do
     )
   end
 
-  def worker_attrs(role:, lineage_key:, cli_session_id:, agent_turn_count: 10, command: "claude")
+  def worker_attrs(role:, lineage_key:, cli_session_id:, agent_turn_count: 10, command: "claude", handoff_completed_at: nil)
     id = SecureRandom.uuid
     {
       worker_id: id, role:, nickname: "worker-#{id}", reason: "test", scope: "test.md", status: "stopped",
       pid: 1, prompt_path: "/tmp/#{id}.prompt", log_path: "/tmp/#{id}.log",
       last_message_path: "/tmp/#{id}.last", env_path: "/tmp/#{id}.env", command:,
-      lineage_key:, cli_session_id:, agent_turn_count: cli_session_id.nil? ? nil : agent_turn_count
+      lineage_key:, cli_session_id:, agent_turn_count: cli_session_id.nil? ? nil : agent_turn_count,
+      handoff_completed_at:
     }
   end
 end

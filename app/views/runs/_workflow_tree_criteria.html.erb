@@ -19,7 +19,7 @@
       <% criterion_workers = worker_groups[criterion.id] || [] %>
       <% criterion_workers.each do |activity| %>
         <% if activity[:worker].role == "planner" %>
-          <%= render "workflow_tree", planners: [activity], criteria: criterion.children.to_a, worker_groups: worker_groups, planner_decisions: [], questions: questions, run: run, current_workspace: current_workspace %>
+          <%= render "workflow_tree", planners: [activity], planner_entries: [activity], criteria: criterion.children.to_a, worker_groups: worker_groups, planner_decisions: [], questions: questions, run: run, current_workspace: current_workspace %>
         <% end %>
       <% end %>
       <% ordinary_workers = criterion_workers.reject { |activity| activity[:worker].role == "planner" } %>

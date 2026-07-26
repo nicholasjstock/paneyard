@@ -8,8 +8,30 @@ module Orchestrator
 
     def self.for_workers(workers)
       assignments = SpawnRequest.where(fulfilled_worker_id: workers.map(&:worker_id)).index_by(&:fulfilled_worker_id)
-      workers.map { |worker| new(worker, assignment: assignments[worker.worker_id]).as_json }
-        .sort_by { |activity| [ activity[:sort_rank], -(activity[:started_at]&.to_i || 0) ] }
+      workers.map { |worker| new(worker, assignment: assignments[worker.worker_id]).as_json.merge(entry_type: :worker) }
+        .sort_by { |activity| activity_sort_key(activity) }
+    end
+
+    def self.for_planner_entries(planner_activities, decisions)
+      (planner_activities + decisions.map { |decision| planner_decision_entry(decision) }).sort_by do |entry|
+        activity_sort_key(entry)
+      end
+    end
+
+    def self.activity_sort_key(entry)
+      -(entry[:at]&.to_f || 0)
+    end
+    private_class_method :activity_sort_key
+
+    def self.planner_decision_entry(decision)
+      {
+        entry_type: :planner_decision,
+        role: "planner",
+        worker: nil,
+        decision: decision,
+        at: decision.created_at,
+        last_activity_at: decision.created_at
+      }
     end
 
     def initialize(worker, assignment: nil)
@@ -20,6 +42,7 @@ module Orchestrator
     def as_json
       {
         worker: @worker,
+        role: @worker.role,
         display_status: display_status,
         status_label: status_label,
         attention_needed: attention_needed?,
@@ -28,6 +51,7 @@ module Orchestrator
         output_source: output_source,
         progress_updates: progress_updates,
         latest_progress: progress_updates.last,
+        at: last_activity_at,
         log_available: File.file?(@worker.log_path),
         started_at: @worker.started_at,
         stopped_at: @worker.stopped_at,

@@ -82,13 +82,52 @@ RSpec.describe Orchestrator::WorkerActivity do
     expect(activity[:assignment_text]).to be_nil
   end
 
-  it "sorts active workers before attention and quiet stopped history" do
+  it "sorts workers by descending activity time regardless of status" do
     running = create_worker
     attention = create_worker(status: "stopped", stop_reason: "Process no longer running.")
     stopped = create_worker(status: "stopped", stop_reason: "Manually stopped from ops hub")
+    now = Time.current
+    running.update_columns(started_at: now - 10.minutes)
+    attention.update_columns(started_at: now - 1.minute, stopped_at: now - 30.seconds)
+    stopped.update_columns(started_at: now - 20.minutes, stopped_at: now - 2.minutes)
 
     activities = described_class.for_workers([ stopped, attention, running ])
 
-    expect(activities.map { |activity| activity[:display_status] }).to eq(%w[running attention stopped])
+    expect(activities.map { |activity| activity[:worker] }).to eq([ attention, stopped, running ])
+  end
+
+  it "normalizes planner decisions into the worker activity entry shape" do
+    worker = create_worker
+    request = worker.run.spawn_requests.create!(
+      asked_by: "operator", requested_role: "worker", scope: "next.md",
+      text: "Choose the next step.", status: "fulfilled", priority: "blocking"
+    )
+    decision = worker.run.planner_decisions.create!(spawn_request: request, status: "completed")
+    worker_activity = described_class.for_workers([worker])
+
+    entries = described_class.for_planner_entries(worker_activity, [decision])
+
+    expect(entries.map { |entry| entry[:entry_type] }).to eq([:planner_decision, :worker])
+    expect(entries.first).to include(role: "planner", worker: nil, decision: decision, at: decision.created_at)
+  end
+
+  it "sorts planner decisions and planner activities by descending activity time" do
+    worker = create_worker
+    worker.update_columns(started_at: 10.minutes.ago)
+    request = worker.run.spawn_requests.create!(
+      asked_by: "operator", requested_role: "worker", scope: "next.md",
+      text: "Choose the next step.", status: "fulfilled", priority: "blocking"
+    )
+    older_decision = worker.run.planner_decisions.create!(spawn_request: request, status: "completed", created_at: 5.minutes.ago)
+    newer_request = worker.run.spawn_requests.create!(
+      asked_by: "operator", requested_role: "worker", scope: "newer.md",
+      text: "Choose the newer next step.", status: "fulfilled", priority: "blocking"
+    )
+    newer_decision = worker.run.planner_decisions.create!(spawn_request: newer_request, status: "completed", created_at: 1.minute.ago)
+
+    entries = described_class.for_planner_entries(described_class.for_workers([worker]), [older_decision, newer_decision])
+
+    expect(entries.map { |entry| entry[:entry_type] }).to eq([:planner_decision, :planner_decision, :worker])
+    expect(entries.map { |entry| entry[:decision] }).to eq([newer_decision, older_decision, nil])
   end
 end

@@ -253,7 +253,10 @@ RSpec.describe Orchestrator::WorkerSpawner do
       )
       good_session = SecureRandom.uuid
       dead_session = SecureRandom.uuid
-      create_stopped_worker(run, "worker", cli_session_id: good_session, agent_turn_count: 34, created_at: 2.minutes.ago)
+      create_stopped_worker(
+        run, "worker", cli_session_id: good_session, agent_turn_count: 34,
+        handoff_completed_at: 2.minutes.ago, created_at: 2.minutes.ago
+      )
       # Simulates claude's own "No conversation found with session ID" crash --
       # the resume target's own working directory mismatch (the actual bug
       # fixed alongside this) means the CLI never re-establishes the
@@ -322,7 +325,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(selected.cli_session_id).to eq(running_session)
     end
 
-    def create_stopped_worker(run, role, cli_session_id:, agent_turn_count:, created_at:)
+    def create_stopped_worker(run, role, cli_session_id:, agent_turn_count:, handoff_completed_at: nil, created_at:)
       nickname = "worker-#{SecureRandom.hex(4)}"
       run.workers.create!(
         worker_id: SecureRandom.uuid, role:, nickname:, reason: "test", scope: "artifact.md",
@@ -331,7 +334,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
         log_path: Rails.root.join("tmp/#{nickname}.log").to_s,
         last_message_path: Rails.root.join("tmp/#{nickname}.last").to_s,
         env_path: Rails.root.join("tmp/#{nickname}.env").to_s,
-        cli_session_id:, agent_turn_count:, created_at:
+        cli_session_id:, agent_turn_count:, handoff_completed_at:, created_at:
       )
     end
 

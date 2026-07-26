@@ -1,4 +1,5 @@
-<% planners = planners.presence || [{ worker: nil }] %>
+<% planners = planners.presence || [{ worker: nil, entry_type: :worker }] %>
+<% planner_entries = planner_entries.presence || planners %>
 <% questions = questions.presence || [] %>
 <% run_level_questions = questions.select { |q| q.priority == "blocking" && q.scope.blank? } %>
 <ul class="workflow-tree" data-testid="workflow-tree">
@@ -15,10 +16,12 @@
         <strong><%= planner_worker&.nickname || "Workflow planner" %></strong>
         <% if planner_worker %><span class="badge <%= planner[:display_status] %>"><%= planner[:status_label] %></span><% end %>
       </div>
-      <% if planner_index.zero? && planner_decisions.any? %>
+      <% if planner_index.zero? && planner_entries.any? %>
         <div class="workflow-planner-decisions">
-          <% planner_decisions.each_with_index do |decision, index| %>
-            <%= render "planner_decision", decision: decision, number: planner_decisions.length - index %>
+          <% planner_entries.each_with_index do |entry, index| %>
+            <% if entry[:entry_type].to_sym == :planner_decision %>
+              <%= render "planner_decision", decision: entry[:decision], number: planner_decisions.length - planner_decisions.index(entry[:decision]) %>
+            <% end %>
           <% end %>
         </div>
       <% end %>
