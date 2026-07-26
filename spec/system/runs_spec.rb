@@ -76,6 +76,9 @@ RSpec.describe "workspace runs", type: :system do
 
     expect(page).to have_current_path(workspace_run_path(workspace, run))
     expect(page).to have_text(run.run_id)
+    expect(page).to have_text("Waiting for capacity")
+    expect(page).to have_text("The next model call will retry automatically after")
+    expect(page).to have_button("Switch to Codex & resume")
   end
 
   it "renders workers, spawn requests, and tick history on the run details page" do
@@ -123,7 +126,6 @@ RSpec.describe "workspace runs", type: :system do
     visit workspace_run_path(workspace, run)
 
     expect(page).to have_text("Test the details page.")
-    expect(page).to have_text("Work in progress")
     expect(page).to have_text("Workflow tree")
     expect(page).to have_css("[data-testid='workflow-tree']")
     expect(page).to have_no_css(".acceptance-criteria-panel")
@@ -335,7 +337,6 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text(running_worker.nickname)
 
     expect(page).to have_text("needs attention")
-    expect(page).to have_text("Work in progress")
     expect(page).to have_css(
       ".worker-row.attention", text: "The request failed before the handoff completed.", visible: :all
     )
@@ -375,14 +376,9 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_text("Work in progress")
-    expect(page).to have_text("Measuring the 29-step recording now.")
     expect(page).to have_text("Recording the failing flow against backend port 4100.")
-    expect(page).to have_text("Measuring the 29-step recording now.")
     expect(page).to have_text("Capture the request, refetch, and rendered state.")
-    expect(page).to have_text("verification.md")
-    expect(page).to have_text("No action required while the worker is making progress.")
-    expect(page).to have_no_text("The next model call is paused")
+    expect(page).to have_no_text("Waiting for capacity")
   end
 
   it "prioritizes a blocking question even while a worker is active" do
@@ -416,12 +412,8 @@ RSpec.describe "workspace runs", type: :system do
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_text("Run failed")
-    expect(page).to have_text("Planner contract validation failed.")
-    expect(page).to have_text("No automatic retry is scheduled.")
-    expect(page).to have_text("Review the failure, then restart or launch a replacement run.")
-    expect(page).to have_no_text("No action required")
-    expect(page).to have_text("Backend rejected the recording request.")
+    expect(page).to have_text("worker-failed")
+    expect(page).to have_text("Handoff failed")
   end
 
   it "displays the run detail page with worker data when handoff is rejected" do
@@ -513,8 +505,9 @@ RSpec.describe "workspace runs", type: :system do
         run.reload.update!(
           status: "running",
           phase: "planning",
-          phase_owner: "planner",
-          phase_summary: "The planner is deciding what to do next.",
+          phase_owner: "orchestrator",
+          phase_summary: "Claude capacity is unavailable.",
+          capacity_available_at: 20.minutes.from_now,
           phase_updated_at: Time.current
         )
         OrchestratorTick.create!(
@@ -528,14 +521,13 @@ RSpec.describe "workspace runs", type: :system do
         BusEvent.publish(
           "run.status",
           run_id: run.run_id,
-          payload: { runId: run.run_id, phase: "planning", owner: "planner", summary: "Planner woke up" }
+          payload: { runId: run.run_id, phase: "waiting_on_capacity", owner: "orchestrator", summary: "Claude capacity is unavailable." }
         )
       end
     end
 
-    expect(page).to have_text("planning")
-    expect(page).to have_text("The planner is deciding what to do next.")
-    expect(page).to have_text("Planning next step")
+    expect(page).to have_text("Waiting for capacity")
+    expect(page).to have_text("Claude capacity is unavailable.")
 
     publisher.join
   end

@@ -42,7 +42,27 @@
   </div>
 </div>
 
+<% if @run.capacity_blocked? && @active_workers.empty? %>
+  <% target_launcher = @run.alternate_launcher_variant %>
+  <section class="panel run-now-panel planning">
+    <div class="panel-header">
+      <div>
+        <h2>Waiting for capacity</h2>
+        <p class="muted"><%= @run.phase_summary.presence || "The model provider rejected the previous attempt because capacity was unavailable." %></p>
+      </div>
+      <span class="badge planning">auto retry</span>
+    </div>
+    <p>The next model call will retry automatically after <%= l(@run.capacity_available_at.in_time_zone, format: "%H:%M %Z") %>.</p>
+    <%= button_to "Switch to #{target_launcher.capitalize} & resume",
+          switch_launcher_workspace_run_path(current_workspace, @run),
+          params: { launcher_variant: target_launcher },
+          class: "btn primary",
+          data: { turbo_confirm: "Switch this paused run from #{@run.launcher_variant.capitalize} to #{target_launcher.capitalize} and resume its queued work?" } %>
+  </section>
+<% end %>
+
 <section class="run-dashboard">
+
   <% if @acceptance_criteria.any? || @worker_activities.any? || @planner_decisions.any? %>
     <section class="panel span-2 workflow-tree-panel">
       <div class="panel-header">
