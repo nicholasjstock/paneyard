@@ -90,7 +90,9 @@ module Orchestrator
         end
 
         run.update!(publication_status: "publishing", publication_error: nil)
-        git!(root, "push", "-u", "origin", run.branch_name)
+        return :merge_conflict if rebase_onto_main!(run, root:) == :conflicted
+
+        git!(root, "push", "--force-with-lease", "-u", "origin", run.branch_name)
         assets = publish_review_assets!(root, run)
         url = existing_pr_url(root, run.branch_name)
         if url
@@ -124,6 +126,45 @@ module Orchestrator
       raise error if error.is_a?(Error)
 
       raise Error, error.message
+    end
+
+    # Rails, rather than a sandboxed worker, owns Git history operations.
+    # A clean rebase makes the PR genuinely reviewable; a conflicted rebase
+    # leaves only source files for a normal implementation worker to repair.
+    def rebase_onto_main!(run, root: nil)
+      root ||= validated_root!(run)
+      git!(root, "fetch", "origin", "main")
+      _output, error, status = Open3.capture3("git", "-C", root.to_s, "rebase", "origin/main")
+      return :rebased if status.success?
+
+      if rebase_in_progress?(root)
+        run.update!(publication_status: "merge_conflict", publication_error: error.presence || "Rebase onto main has conflicts")
+        return :conflicted
+      end
+
+      raise Error, "git rebase origin/main failed: #{error}"
+    end
+
+    def continue_rebase_onto_main!(run, paths:)
+      root = validated_root!(run)
+      raise Error, "No merge-conflict rebase is in progress" unless rebase_in_progress?(root)
+      raise Error, "Merge-conflict worker left conflict markers behind" if conflict_markers?(root, paths)
+
+      git!(root, "add", "--", *paths)
+      output, error, status = Open3.capture3({ "GIT_EDITOR" => "true" }, "git", "-C", root.to_s, "rebase", "--continue")
+      return :rebased if status.success?
+
+      if rebase_in_progress?(root)
+        run.update!(publication_status: "merge_conflict", publication_error: error.presence || output.presence || "Rebase has further conflicts")
+        return :conflicted
+      end
+
+      raise Error, "git rebase --continue failed: #{error.presence || output}"
+    end
+
+    def merge_conflict_paths(run)
+      root = validated_root!(run)
+      git!(root, "diff", "--name-only", "--diff-filter=U").lines.map(&:strip).reject(&:blank?)
     end
 
     def prepare_retry!(run)
@@ -421,6 +462,23 @@ module Orchestrator
       git!(root, "add", "--", *source_paths) if source_paths.any?
     end
     private_class_method :stage_for_publication!
+
+    def rebase_in_progress?(root)
+      git_dir = git!(root, "rev-parse", "--git-dir").strip
+      git_dir = Pathname(root).join(git_dir) unless Pathname(git_dir).absolute?
+      File.directory?(Pathname(git_dir).join("rebase-merge")) || File.directory?(Pathname(git_dir).join("rebase-apply"))
+    end
+    private_class_method :rebase_in_progress?
+
+    def conflict_markers?(root, paths)
+      return false if paths.empty?
+
+      _output, _error, status = Open3.capture3(
+        "git", "-C", root.to_s, "grep", "-nE", "^(<<<<<<<|=======|>>>>>>>)", "--", *paths
+      )
+      status.success?
+    end
+    private_class_method :conflict_markers?
 
     def git_status_paths(root)
       entries = git!(root, "status", "--porcelain", "-z").split("\0")

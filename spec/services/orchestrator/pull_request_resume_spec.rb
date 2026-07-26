@@ -36,6 +36,23 @@ RSpec.describe Orchestrator::PullRequestResume do
       .not_to change(SpawnRequest, :count)
   end
 
+  it "turns a reviewer request to fix merge conflicts into Rails-owned reconciliation" do
+    workspace = Workspace.create!(name: "pr-merge-conflict-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "pr-merge-conflict-#{SecureRandom.hex(4)}", task: "Resolve conflict", target_root: workspace.root_path,
+      launcher_variant: "codex", status: "completed", worktree_name: "merge-conflict-a1b2", branch_name: "workflow/merge-conflict-a1b2",
+      pull_request_url: "https://github.com/example/repo/pull/42", publication_status: "awaiting_approval"
+    )
+    UserQuestion.create!(run_id: run.run_id, asked_by: "orchestrator", scope: "pull_request_review", priority: "blocking", text: "Ready for review.")
+    allow(FinalizeRunPublicationJob).to receive(:perform_later)
+
+    described_class.resume!(run, { "id" => 124, "body" => "Please fix the merge conflicts.", "user" => { "login" => "reviewer" } })
+
+    expect(run.reload).to have_attributes(status: "running", publication_status: "committed")
+    expect(FinalizeRunPublicationJob).to have_received(:perform_later).with(run.id)
+    expect(run.spawn_requests).to be_empty
+  end
+
   it "answers only explicitly referenced questions and does not resume while another stays open" do
     workspace = Workspace.create!(name: "pr-question-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(

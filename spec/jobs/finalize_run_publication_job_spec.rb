@@ -47,4 +47,20 @@ RSpec.describe FinalizeRunPublicationJob do
     expect(run.reload.status).to eq("completed")
     expect(run.user_questions).to be_empty
   end
+
+  it "queues a source worker instead of declaring a conflicted branch ready for review" do
+    workspace = Workspace.create!(name: "finalize-merge-conflict-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "finalize-merge-conflict-#{SecureRandom.hex(4)}", task: "Resolve merge conflict", target_root: workspace.root_path,
+      launcher_variant: "codex", status: "completed", worktree_name: "merge-conflict-a1b2", branch_name: "workflow/merge-conflict-a1b2"
+    )
+    allow(Orchestrator::RunPublication).to receive(:publish!).and_return(:merge_conflict)
+    allow(Orchestrator::MergeConflictResolution).to receive(:queue_worker!)
+
+    FinalizeRunPublicationJob.perform_now(run.id)
+
+    expect(Orchestrator::MergeConflictResolution).to have_received(:queue_worker!).with(run)
+    expect(run.reload.status).to eq("completed")
+    expect(run.user_questions).to be_empty
+  end
 end

@@ -17,6 +17,11 @@ class TickRunJob < ApplicationJob
   private
 
   def tick_run(run)
+    if run.publication_status == "merge_conflict"
+      Orchestrator::MergeConflictResolution.continue_if_ready!(run)
+      return
+    end
+
     if run.capacity_blocked?
       run.publish_phase!(
         phase: "waiting_on_capacity",

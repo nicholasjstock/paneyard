@@ -5,6 +5,10 @@ class FinalizeRunPublicationJob < ApplicationJob
     run = Run.find(id)
     result = Orchestrator::RunPublication.publish!(run)
     return if result == :unmanaged
+    if result == :merge_conflict
+      Orchestrator::MergeConflictResolution.queue_worker!(run)
+      return
+    end
     run.update!(status: "completed", stopped_at: run.stopped_at || Time.current)
     summary = if result == :no_changes
       "Run completed with no source changes; no PR was created."

@@ -71,14 +71,21 @@ module Orchestrator
 
         remaining = run.user_questions.open_only.where(priority: "blocking").order(:asked_at).to_a
         if answered_any && remaining.empty?
-          run.update!(status: "running", stopped_at: nil, publication_status: "resume_requested")
-          SpawnRequest.create!(
-            run_id: run.run_id, asked_by: "github_pr_comment", requested_role: "planner", priority: "blocking",
-            scope: "workflow-plan.md", text: "A new pull request comment requests that this run continue. Incorporate the comment as the current operator instruction and plan the next bounded step.",
-            context: "GitHub comment ##{comment_id} from #{author}: #{body}", tags: %w[github pr-comment resume]
-          )
-          run.publish_phase!(phase: "planning", owner: "github", summary: "Resuming from pull request comment ##{comment_id}.")
-          Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=resumed")
+          if merge_conflict_repair_requested?(body)
+            run.update!(status: "running", stopped_at: nil, publication_status: "committed")
+            FinalizeRunPublicationJob.perform_later(run.id)
+            run.publish_phase!(phase: "reconciling_with_main", owner: "github", summary: "Reconciling the branch with main after pull request comment ##{comment_id}.")
+            Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=merge_conflict_repair")
+          else
+            run.update!(status: "running", stopped_at: nil, publication_status: "resume_requested")
+            SpawnRequest.create!(
+              run_id: run.run_id, asked_by: "github_pr_comment", requested_role: "planner", priority: "blocking",
+              scope: "workflow-plan.md", text: "A new pull request comment requests that this run continue. Incorporate the comment as the current operator instruction and plan the next bounded step.",
+              context: "GitHub comment ##{comment_id} from #{author}: #{body}", tags: %w[github pr-comment resume]
+            )
+            run.publish_phase!(phase: "planning", owner: "github", summary: "Resuming from pull request comment ##{comment_id}.")
+            Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=resumed")
+          end
         else
           reply_comment_id = post_reply!(run, unresolved_explanation(unmatched_ids:, remaining:))
           run.update!(last_pull_request_comment_id: [ comment_id.to_i, reply_comment_id.to_i ].max.to_s)
@@ -89,6 +96,11 @@ module Orchestrator
         end
       end
     end
+
+    def merge_conflict_repair_requested?(body)
+      body.to_s.match?(/\b(?:fix|resolve)\b[^\n]*\bmerge\s+conflicts?\b|\bmerge\s+conflicts?\b[^\n]*\b(?:fix|resolve)\b/i)
+    end
+    private_class_method :merge_conflict_repair_requested?
 
     # Explicit references (`Question <uuid>: ...`) are matched against every
     # open question, not only blocking ones -- an advisory question (see
