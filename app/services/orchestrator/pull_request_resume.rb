@@ -98,7 +98,7 @@ module Orchestrator
     end
 
     def merge_conflict_repair_requested?(body)
-      body.to_s.match?(/\b(?:fix|resolve)\b[^\n]*\bmerge\s+conflicts?\b|\bmerge\s+conflicts?\b[^\n]*\b(?:fix|resolve)\b/i)
+      body.to_s.strip.casecmp?("fix the merge conflicts")
     end
     private_class_method :merge_conflict_repair_requested?
 
