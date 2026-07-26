@@ -186,7 +186,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       other_run.workers.create!(worker_attrs(role: "worker", lineage_key: "lineage-a", cli_session_id: "wrong-run"))
 
       found = Orchestrator::WorkerSpawner.send(
-        :prior_worker_for_resume, run_id: run.run_id, role: "worker"
+        :prior_worker_for_resume, run_id: run.run_id, role: "worker", driver: "claude"
       )
 
       assert_equal newest.id, found.id
@@ -197,7 +197,19 @@ RSpec.describe Orchestrator::WorkerSpawner do
       run.workers.create!(worker_attrs(role: "worker", lineage_key: "lineage-a", cli_session_id: nil))
 
       found = Orchestrator::WorkerSpawner.send(
-        :prior_worker_for_resume, run_id: run.run_id, role: "worker"
+        :prior_worker_for_resume, run_id: run.run_id, role: "worker", driver: "claude"
+      )
+
+      assert_nil found
+    end
+
+    it "never resumes a Claude session from a Codex worker, even for the same run and role" do
+      run = create_run
+      run.workers.create!(worker_attrs(
+        role: "worker", lineage_key: "lineage-a", cli_session_id: "claude-session", command: "claude"
+      ))
+      found = Orchestrator::WorkerSpawner.send(
+        :prior_worker_for_resume, run_id: run.run_id, role: "worker", driver: "codex"
       )
 
       assert_nil found
@@ -233,12 +245,12 @@ RSpec.describe Orchestrator::WorkerSpawner do
     )
   end
 
-  def worker_attrs(role:, lineage_key:, cli_session_id:, agent_turn_count: 10)
+  def worker_attrs(role:, lineage_key:, cli_session_id:, agent_turn_count: 10, command: "claude")
     id = SecureRandom.uuid
     {
       worker_id: id, role:, nickname: "worker-#{id}", reason: "test", scope: "test.md", status: "stopped",
       pid: 1, prompt_path: "/tmp/#{id}.prompt", log_path: "/tmp/#{id}.log",
-      last_message_path: "/tmp/#{id}.last", env_path: "/tmp/#{id}.env", command: "claude",
+      last_message_path: "/tmp/#{id}.last", env_path: "/tmp/#{id}.env", command:,
       lineage_key:, cli_session_id:, agent_turn_count: cli_session_id.nil? ? nil : agent_turn_count
     }
   end

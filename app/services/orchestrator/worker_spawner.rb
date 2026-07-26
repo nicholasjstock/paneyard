@@ -88,10 +88,10 @@ module Orchestrator
       end
       # A resumed session picks up wherever its predecessor's conversation
       # left off (same codebase understanding, same discovered context) --
-      # scoped to (run, role) so it can never cross a role boundary (see
-      # prior_worker_for_resume) and never applies to a chaperone/mcp_override
+      # scoped to (run, role, launcher) so it can never cross a role or CLI
+      # boundary (see prior_worker_for_resume) and never applies to a chaperone/mcp_override
       # spawn, which always gets a fully fresh, non-persisted session.
-      resume_from = prior_worker_for_resume(run_id: run.run_id, role:) unless mcp_override
+      resume_from = prior_worker_for_resume(run_id: run.run_id, role:, driver:) unless mcp_override
       resume_session_id = resume_from&.cli_session_id
       cli_session_id =
         if mcp_override
@@ -185,7 +185,7 @@ module Orchestrator
       raise
     end
 
-    # One CLI session per (run, role): every same-role spawn resumes the
+    # One CLI session per (run, role, launcher): every same-role spawn resumes the
     # most recent same-role session in the run, so a later worker inherits
     # its predecessors' codebase understanding instead of re-exploring from
     # scratch (~80-90k cache-creation tokens per cold start, observed).
@@ -219,8 +219,8 @@ module Orchestrator
     # below) if nothing usable remains -- the chaperone backstop mentioned
     # above only diagnoses a session that has genuinely gone bad; it was
     # never what breaks the dead session out of rotation.
-    def prior_worker_for_resume(run_id:, role:)
-      Worker.where(run_id:, role:)
+    def prior_worker_for_resume(run_id:, role:, driver:)
+      Worker.where(run_id:, role:, command: driver)
         .where.not(cli_session_id: nil)
         .where("status = ? OR (agent_turn_count IS NOT NULL AND agent_turn_count > 0)", "running")
         .order(created_at: :desc)

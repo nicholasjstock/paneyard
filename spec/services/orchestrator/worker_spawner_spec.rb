@@ -262,7 +262,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       # forever, since every subsequent resume attempt also inherits it.
       create_stopped_worker(run, "worker", cli_session_id: dead_session, agent_turn_count: 0, created_at: 1.minute.ago)
 
-      selected = described_class.prior_worker_for_resume(run_id: run.run_id, role: "worker")
+      selected = described_class.prior_worker_for_resume(run_id: run.run_id, role: "worker", driver: "claude")
 
       expect(selected.cli_session_id).to eq(good_session)
     end
@@ -292,7 +292,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
         cli_session_id: SecureRandom.uuid, agent_turn_count: nil
       )
 
-      selected = described_class.prior_worker_for_resume(run_id: run.run_id, role: "worker")
+      selected = described_class.prior_worker_for_resume(run_id: run.run_id, role: "worker", driver: "claude")
 
       expect(selected).to be_nil
     end
@@ -317,7 +317,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
         cli_session_id: running_session, agent_turn_count: nil
       )
 
-      selected = described_class.prior_worker_for_resume(run_id: run.run_id, role: "worker")
+      selected = described_class.prior_worker_for_resume(run_id: run.run_id, role: "worker", driver: "claude")
 
       expect(selected.cli_session_id).to eq(running_session)
     end
