@@ -1,45 +1,47 @@
-# Codex Multi-Agent Workflow
+# Codex Agent Roster
 
-This project uses Codex `multi_agent` workers with a deterministic supervisor/orchestrator loop and a bus-led fan-out model:
+Rails owns orchestration, planning, retries, and process dispatch — see [AGENTS.md](../../AGENTS.md) and [CLAUDE.md](../../CLAUDE.md) at the repo root for the authoritative description of that model. This directory holds the persona prompts (as Codex `developer_instructions` TOML) for every process Rails can spawn as a Codex subagent. There is deliberately no `orchestrator.toml` or `planner.toml`: planning is a bounded, stateless decision function (`PlannerDecisionJob`), run as one tools-disabled structured model call, not a spawned Codex process — and "orchestrator" is Rails' own dispatch logic (`TickRunJob` + `Orchestrator::SpawnRequestedWorkers`), not a subagent either.
 
-- `orchestrator` is deterministic loop logic in `scripts/orchestrator-turn.ts`; it coordinates record -> verify -> fix -> re-record loops and uses the shared bus as the state ledger.
-- Rails owns handoff state; when a new decision is required it requests one bounded structured model response from a compact evidence projection.
-- `worker` is the single generic task executor: it records demos, runs evidence-based verification passes, or applies a scoped fix, whichever the planner's step/prompt describes, after planner gives the work order.
-- Execution is strictly sequential: at most one `worker` instance runs per run at a time, per the planner's `nextStep`/`followingSteps` decision. There is no dependency graph because there is only ever one thing in flight.
-- Keep `multi_agent` enabled so Codex can still fan out its own built-in `explorer`/`worker` subagents for read-only research or bounded edits within a single agent's own turn — this is separate from the workflow's sequential step execution.
+> Claude note: the parallel Claude-native personas live in [`.claude/agents`](../../.claude/agents/README.md), sharing the same `workflow` MCP server (registered in [`.mcp.json`](../../.mcp.json)) and the same bus/worker/artifact state, so runs from either CLI path are interchangeable mid-run.
 
-The supervisor calls the orchestrator logic directly in-process. Do not route orchestration through repo CLI wrappers or a standalone LLM orchestrator prompt.
-Normal worker completions are Rails-owned: `worker_turn` promotes the next validated `followingSteps` item after `[DONE]`. Blocked, failed, exhausted, or unplanned outcomes queue one bounded, tools-disabled structured planner decision; no planner OS process is spawned.
+Keep `multi_agent` enabled so Codex can still fan out its own built-in subagents for read-only research or bounded edits within a single agent's own turn — that's a Codex implementation detail local to one turn, separate from the sequential role dispatch described below.
+
+## Roles
+
+At most one worker is active per run at a time — Rails dispatches strictly sequentially (see `Orchestrator::SpawnRequestedWorkers`), so there is no dependency graph to manage, only ever one thing in flight.
+
+| Role | File | Spawned when |
+|------|------|---------------|
+| `worker` | [worker.toml](./worker.toml) | A generic bus request: run a workspace operation, verify/analyze evidence, or apply a scoped fix. What it actually does comes from the task prompt, not a fixed identity. |
+| `infrastructure` | *(worker.toml + the infrastructure skill)* | Same worker contract, layered with the repository-owned reliability workflow for fixing runtime/environment/tooling problems. |
+| `verifier` | [verifier.toml](./verifier.toml) | An independent, fresh reproduction of one acceptance criterion's evidence before Rails allows it to close. |
+| `project_init` | [project_init.toml](./project_init.toml) | Once per workspace: discovers how to start the local dev environment and which source paths are protected. |
+| `chaperone` | [chaperone.toml](./chaperone.toml) | A repeated failure under the same lineage escalates to a strong-model review that decides `continue_small`, `promote`, or `stop`. |
+| `reporter` | [reporter.toml](./reporter.toml) | Run finalization, stage 1: audits persisted run history and writes the reviewer-facing `run-summary.md`. |
+| `curator` | [curator.toml](./curator.toml) | Run finalization, stage 2: selects real local deliverables for upload as review evidence via `select_review_assets`. |
+| `demo` | [demo.toml](./demo.toml) | Run finalization, stage 3: starts (or reuses) the workspace's dev/demo server via `start_run_command` and reports a `clickPath` so a reviewer can see the change running. |
+| `committer` | [committer.toml](./committer.toml) | Run finalization, stage 4 (terminal): commits source changes only, once reporter and curator have completed. |
+
+`reporter` → `curator` → `demo` → `committer` run strictly in sequence (`app/jobs/tick_run_job.rb#finalize_completed_run`); each is granted only its own narrow MCP tool slice by `Orchestrator::WorkerMcpServer`, enforced both by the tool list and by a role check inside each tool. `reporter`/`curator`/`committer`/`demo` run with `sandbox_mode = "read-only"` in their TOML except `demo`, which needs `"workspace-write"` since its entire job is starting a process.
+
+Planning itself has no agent file or nickname: a worker's `[DONE]`/`[BLOCKED]`/`[FAILED]` result either promotes an already-planned `followingSteps` item directly, or queues one bounded `PlannerDecisionJob` call — never a spawned Codex process.
 
 ## Running Nicknames
 
-When subagents are running, look for these role-based nicknames:
+When subagents are running, look for these role-based nicknames (see `build_worker_nickname` in `app/services/orchestrator/spawn_requested_workers.rb`):
 
-| Agent | Nickname to look for |
+| Role | Nickname to look for |
 |---|---|
-| `orchestrator` | `orchestrator` or `workflow-orchestrator` |
-| `worker` | `worker` (or `worker-2`, `worker-3`, ... for concurrent instances) |
-
-When the orchestrator needs to re-ask an active worker through the bus, target the matching nickname for the role above instead of inventing a new recipient.
-Workers report completion via `worker_turn`, which requests a follow-up planner via the bus (spawned by the supervisor) with the result and the current `followingSteps` queue as context — this is the primary reporting mechanism, not ad hoc bus writes.
-
-When the orchestrator needs a handoff plan or worker request payload, invoke `planner` first and then publish the result to the bus.
-When `list_open_spawn_requests` reveals a new open request, spawn the requested role immediately instead of waiting for the next handoff cycle.
-Do not stop after publishing planner jobs; the orchestrator should fan out the matching workers in the same turn.
-
-Use built-in `explorer` subagents for read-only codebase questions and built-in `worker` subagents for bounded edits.
-Keep write sets disjoint and verify before reporting success.
+| `worker` | `worker` (or `worker-2`, `worker-3`, ... for concurrent instances across runs) |
+| any other role | the role name itself (`reporter`, `curator`, `demo`, `committer`, `verifier`, `chaperone`, `project_init`, `infrastructure`), suffixed `-1`, `-2`, ... only if a name collision occurs |
 
 ## Workflow Notes
 
 - Use structured updates from [MESSAGING_PROTOCOL.md](./MESSAGING_PROTOCOL.md).
-- The deterministic orchestrator logic is responsible for publishing only the worker roles required for the current phase; the supervisor performs the actual spawns.
-- Treat `multi_agent` as the default execution model for this repo's orchestration tasks.
-- Any recording task must go through the `record-demo` skill and `bin/record_demo`.
-- All user questions and unresolved blockers should be aggregated on the shared bus, with the orchestrator owning the lifecycle and pulling from that state rather than waiting on a separate manager role.
-- When a worker needs a missing role, it should call `append_spawn_request` with the `requestedRole` so the supervisor can spawn it directly.
+- Rails (`TickRunJob` + `Orchestrator::SpawnRequestedWorkers`) is the only thing that spawns processes; no agent spawns another agent directly.
+- A worker never manages its own lifecycle (no `spawn_worker`/`stop_worker`); it reports via `worker_turn` and Rails decides what happens next. `worker_turn` requests a follow-up planner decision via the bus (a Rails job, not a spawned process) with the reported result and the current `followingSteps` queue as context.
+- If a worker needs a missing downstream role, it raises `[BLOCKED]` through `worker_turn` (or, mid-task, asks for help) rather than acting outside its assigned scope — Rails and the bounded planner own all follow-up routing.
+- Finalization roles (`reporter`/`curator`/`demo`/`committer`) never call each other's tools — `Orchestrator::WorkerMcpServer` and each tool's own role guard enforce that independently.
 - Treat verification as streaming work within a single worker turn: run a fast pass first, using the cheapest evidence source that can answer the question, then deeper passes if needed, before reporting via `worker_turn`.
-- After a fix, re-run the recorder and verifier rather than reporting success from the code diff alone.
-- Long-running work must heartbeat. A recorder or verifier that goes silent should become `BLOCKED`, not invisible.
-- If the orchestrator sees a stalled child, or a run that's gone dead (no active workers, no open requests, never marked completed — e.g. a worker that stopped without finishing its handoff), it should call `planner` with that context before choosing the next handoff.
-- When the orchestrator needs to inspect workers and plan the next move in one turn, use `run_orchestrator_turn`.
+- Long-running work must heartbeat. A worker that goes silent should become `BLOCKED`, not invisible.
+- Any command that doesn't exit on its own (a dev server, a watcher) must be started with `start_run_command`, never backgrounded directly — Rails detects a listening port automatically from OS process state.

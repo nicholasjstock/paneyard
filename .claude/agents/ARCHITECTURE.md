@@ -1,137 +1,93 @@
 # Multi-Agent Workflow Architecture
 
-## Current Deployment: Demo Video Production
-
-This orchestration pattern (supervisor → orchestrator → planner → workers, a shared bus, and MCP-managed worker lifecycle) is a reusable workflow shape, not something specific to video recording. The concrete deployment configured today produces the Simple Retail Planner product demo video using a single generic `@worker` role: it records, verifies, and applies scoped fixes, whichever the current bus request/prompt describes. A different deployment could swap in different worker prompts for a different task while keeping the same supervisor/orchestrator/bus machinery.
-
 ## System Overview
 
-Three agents work together in a hierarchy, plus deterministic orchestrator loop logic:
+Rails owns orchestration state, planning, retries, and process dispatch (see [AGENTS.md](../../AGENTS.md) and [CLAUDE.md](../../CLAUDE.md)). There is no supervisor loop, no planner agent process, and no fixed set of workers running in parallel — a run has at most one active worker (or one bounded planner decision, or one chaperone review) at a time. What lives in this directory is the persona prompt layered onto whichever subagent process Rails decides to spawn next.
 
-> Codex note: the parallel Codex-native setup lives in [`.codex/agents`](../../.codex/agents/README.md). Both Claude and Codex share the same `workflow` MCP server (registered at repo root in `.mcp.json` for Claude), so the bus, worker state, and artifacts are visible across both CLI paths.
-
-```
-┌────────────────────────────────────────────────────────┐
-│                  USER                                  │
-└──────────────────────────┬─────────────────────────────┘
-                           │
-                           ↓
-┌────────────────────────────────────────────────────────┐
-│          @supervisor (LOOP OWNER)                      │
-│    Run orchestrator turns, spawn workers, iterate      │
-└───┬──────────────┬─────────────────────────────────────┘
-    │              │
-  ┌─↓──┐      ┌────↓──────┐
-  │    │      │            │
-  ↓    ↓      ↓            ↓
- ┌──────────┐
- │ @worker  │  ... exactly one at a time — execution is
- │(EXECUTOR)│      strictly sequential, per the planner's
- └────┬─────┘      nextStep/followingSteps decision
-      │
-      └─→ @planner (implicit)
-          called when stuck
-          ↑
-          └──── called by supervisor's
-               orchestrator turns
-```
-
-Not shown above: each worker instance also calls `worker_turn` (a deterministic MCP tool, not a subagent) when it finishes — this requests a follow-up @planner via a bus spawn request (reusing an existing one if it's open, or fulfilled by a planner that's still active — a stopped fulfillment is stale and gets a fresh request instead, so a later, separate problem always gets its own planner), handing it the result and the current `followingSteps` queue as context. The supervisor is what actually spawns that planner, on its next tick — `worker_turn` never spawns a process itself. This happens independent of the `@planner (implicit)` stuck-help path shown here.
-
-## The Complete Loop
+> Codex note: the parallel Codex-native setup lives in [`.codex/agents`](../../.codex/agents/README.md). Both Claude and Codex share the same `workflow` MCP server (`.mcp.json`), so the bus, worker state, and artifacts are visible across both CLI paths within the same run.
 
 ```
-User Request
+┌──────────────────────────────────────────────────────────┐
+│                         USER                              │
+└───────────────────────────┬────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────┐
+│  TickRunJob (recurring Rails job)                         │
+│  - executor + liveness observer, not a second planner     │
+│  - detects stalls / dead ends, requests recovery planning │
+│  - drives Orchestrator::SpawnRequestedWorkers each tick    │
+└───┬─────────────────────┬─────────────────────┬───────────┘
+    │                     │                     │
+    ↓                     ↓                     ↓
+ spawn one           run one bounded        dispatch a
+ Worker subagent     PlannerDecisionJob      chaperone review
+ (worker/verifier/   (tools disabled,        (repeated failure
+ infrastructure/     structured output       under one lineage)
+ project_init/       only -- no OS
+ reporter/curator/   process spawned)
+ demo/committer)
+```
+
+Execution is strictly sequential: `Orchestrator::SpawnRequestedWorkers.call_locked` (`app/services/orchestrator/spawn_requested_workers.rb`) refuses to spawn anything while a worker is already `running` for the run, or while a `PlannerDecision` is `queued`/`running`, or (except for its own reviewer) while a `ChaperoneReview` is open.
+
+## The Run Lifecycle
+
+```
+worker executes its assigned task
     ↓
-Record → Verify → Implement → Record → Verify → Report
-    ↑                                               ↓
-    └───────────────── Iterate if needed ─────────┘
+worker_turn: [DONE] | [BLOCKED] | [FAILED]
+    ↓
+[DONE] + a validated followingSteps queue → Rails promotes the next step directly (no planner call)
+otherwise                                  → Rails queues one bounded PlannerDecisionJob
+    ↓
+planner_turn: nextStep (+ followingSteps) | needs_context | needs_stronger_model
+    ↓
+Rails dispatches nextStep, resolves needs_context and reruns, or reruns on the stronger tier
+    ↓
+... repeats until the run's following-steps queue and acceptance criteria are satisfied ...
+    ↓
+run reaches phase "completed" → finalization pipeline (below)
 ```
 
-## Agent Responsibilities
+## Planning: a bounded decision function, not an agent
 
-### Level 0/2: Execution (single generic role)
-**@worker** (Executor)
-- **Responsibility:** Whatever the current bus request/prompt describes — recording a demo, verifying/analyzing artifacts, or applying an isolated scoped fix (frontend, backend, infra, or otherwise). The write scope for a fix task (e.g. `front/**`, `back/**`) comes from the task's prompt, not from a fixed identity.
-- **Called by:** the supervisor, spawned for whichever single `nextStep` the current planner instance just decided
-- **Inputs:** Recording parameters, a video/artifact file path plus expected flow, or a verifier finding plus write scope — depending on the task
-- **Outputs:** Video file path, analysis report, or fix diff plus verification result — depending on the task
-- **Calls:** @planner when stuck (syntax errors, diagnostic help, unclear state); reports every completion via `worker_turn`, which requests a follow-up @planner via the bus (spawned by the supervisor) to decide what happens next
+A planner turn is not a spawned process — it is one `PlannerDecisionJob` run with tools disabled, built from a compact brief (`Orchestrator::PlannerBrief`) and validated/persisted by `Orchestrator::Turn`. Every turn returns exactly one of:
 
-### Level 1: Workflow Control
-**Orchestrator** (deterministic loop logic, not a separate agent)
-- **Responsibility:** Detect trouble — it never decides real work itself. Two distinct conditions count as trouble: (1) a worker still running but idle past the stall threshold, or (2) the run has gone dead — no active workers, no open spawn requests, and it was never marked `completed` (this catches a worker that stopped, crashed or not, without ever completing its `worker_turn` handoff — invisible to (1) since there's no running worker left to check). Either condition is suppressed while a `blocking` user question is already open for the run — a prior recovery @planner already escalated it, so re-detecting the same still-idle state must not spawn another @planner to redundantly re-investigate something already awaiting a human answer.
-- **Inputs:** Execution request from the user, current bus/worker state
-- **Outputs:** Nothing, on a normal tick (a true no-op) or while blocked on an open user question; on a stall or dead end with no open question, a spawn request for a recovery @planner
-- **Calls:** Nothing directly — publishes a spawn request that the supervisor turns into a spawn
-- **When to call @planner:** When a worker has stalled (gone idle past the stall threshold), or when the run has gone dead with no active workers or open requests and no completion marker — but only if no blocking user question is already open for the run.
+- `nextStep` (+ `followingSteps`) — the single next unit of work, queued for direct promotion after that worker's `[DONE]`.
+- `needs_context` — one `contextRequest` (`source`, `reference`, `question`, `offset`, `maxChars`); Rails resolves it and reruns with accumulated context. An identical repeated request is rejected since it cannot add information.
+- `needs_stronger_model` — Rails reruns the same decision on the stronger tier with unchanged context; the promotion is recorded.
 
-### Level 3: Planning (Implicit)
-**@planner** (Helper)
-- **Responsibility:** Decide the single next step (`nextStep`) plus the queue for later (`followingSteps`), and publish that decision to the bus — never execute it. This is the only place real work gets decided; execution is strictly sequential, one step in flight at a time, so there is no dependency graph to manage.
-- **Inputs:** Current bus/worker state, the reporting worker's result (or, for stall recovery, the stall finding), and the `followingSteps` queue handed down from the previous planner invocation
-- **Outputs:** A `planner_turn` call (`nextStep`, possibly `null`, plus `followingSteps`) or an `append_user_question` call — always exactly one of these per turn
-- **Calls:** No one (it is only consulted when needed)
+Planning always starts on the smaller model tier. See [AGENTS.md](../../AGENTS.md)'s Planner Context Protocol section for the exact contract, and `app/jobs/planner_decision_job.rb` / `app/services/orchestrator/{planner_brief,planner_context_resolver,planner_decision_runner,turn}.rb` for the implementation.
 
-## Communication Flows
+## Recovery and the chaperone
 
-### Happy Path
+`TickRunJob` detects two conditions worth escalating: a worker stalled (running but idle past threshold), or a dead-ended run (no active worker, no open request, never marked `completed`). Either publishes a spawn request for a recovery planner decision — suppressed while a `blocking` `UserQuestion` is already open, so the same stall is never re-escalated twice.
+
+Repeated unsuccessful attempts under one stable `lineageKey` trigger a **chaperone** (`chaperone.md`, `sonnet`): a strong-model review confined to the capability-scoped `/mcp/chaperone` endpoint (`Orchestrator::ChaperoneMcpServer` — curated state, bounded artifact reads, and a single `submit_chaperone_decision` call). It decides `continue_small`, `promote`, or `stop`; it never gets arbitrary SQL, filesystem, or shell access.
+
+## Finalization pipeline
+
+Once a run reaches `phase: "completed"`, `TickRunJob#finalize_completed_run` queues four terminal roles strictly in sequence, each with its own narrow MCP tool slice (`Orchestrator::WorkerMcpServer`) and its own role check inside the tools it's allowed to call:
+
 ```
-User: @supervisor run the full workflow
-
-@supervisor (iteration 1):
-  1. Call orchestrator → plan
-  2. Orchestrator decides: spawn @worker (recording task)
-  3. Spawn @worker
-     ✅ Returns: video file
-  
-  4. Call orchestrator → re-plan
-  5. Orchestrator decides: spawn @worker (verification task)
-  6. Spawn @worker
-     ✅ Returns: analysis report
-  
-  7. Call orchestrator → re-plan
-  8. Orchestrator decides: run complete
-  
-@supervisor reports final result to user
+run completed
+  → reporter   (get_run_audit, write run-summary.md)               → complete_run_finalization
+  → curator    (select_review_assets, write review-assets.md)      → complete_run_finalization
+  → demo       (start_run_command, write demo-notes.md,             → complete_run_finalization
+                report clickPath)
+  → committer  (list_git_change_requests, commit_run_changes)       -- terminal, no handoff call
+  → Rails pushes the branch, creates a draft evidence release,
+    uploads curator's selected assets, opens the PR with the
+    reporter's summary and the demo role's clickPath
+  → approval → Rails deletes the draft release, merges, removes the worktree
 ```
 
-### Error Recovery Path
-```
-User: @supervisor run the full workflow
-
-@supervisor (iteration 1):
-  1. Call orchestrator → plan
-  2. Orchestrator decides: spawn @worker (recording task)
-  3. Spawn @worker
-     ❌ Returns: esbuild compilation error
-
-@worker:
-  → Call @planner for recovery plan
-
-@supervisor (iteration 2):
-  4. Call orchestrator → re-plan (sees stalled worker)
-  5. Orchestrator decides: spawn @worker (scoped fix task, front/** scope)
-  6. Spawn @worker
-     ✅ Fix applied
-  
-  7. Call orchestrator → re-plan
-  8. Orchestrator decides: re-spawn @worker (recording task)
-  9. Spawn @worker
-     ✅ Returns: video file
-  
-  10. Continue iterating until complete
-```
+Reporter and curator are read-only and must explicitly call `complete_run_finalization` after writing their assigned artifact; committer only commits and never calls it. Any `run_commands` process the demo role starts (or any other worker leaves running) is stopped automatically once the run reaches a terminal status (`Run#stop_active_run_commands`) — no manual cleanup step is needed.
 
 ## Coordination Rules
 
-- **@supervisor** owns the main workflow loop and iteration control.
-- **@supervisor** calls orchestrator planning logic each iteration via `run_orchestrator_turn`.
-- **@supervisor** spawns workers via MCP-managed workers based on orchestrator decisions.
-- **@supervisor** deduplicates requests by `(runId, requestedRole, scope)` and publishes `worker_spawned` events.
-- **Orchestrator** never decides real work itself. A normal tick is a pure no-op; the only things it ever does are detect a stalled worker, or detect a dead-ended run (no active workers, no open requests, not marked `completed`), and publish a spawn request for a recovery @planner either way (via the same `appendSpawnRequest` path @planner's `planner_turn` uses) — unless a `blocking` user question is already open for the run, in which case it stays a no-op (`phase: 'awaiting_user_feedback'`) until that question is answered.
-- **@worker** calls `worker_turn` when it finishes; this always requests a follow-up @planner via a bus spawn request (reused only while still open or still-active-fulfilled — a stopped fulfillment is stale, so a fresh ask is made instead) with the reported result and the current `followingSteps` queue as context — the supervisor spawns that planner on its next tick, and that planner decides and publishes the actual next step. @worker calls @planner directly only when it's stuck mid-task and needs help — a different path from the automatic post-completion request.
-- **@planner** never calls other agents or spawns workers; every planner turn ends by calling `planner_turn` (with `nextStep`, or `null` if none needed, plus `followingSteps`) or `append_user_question` — never silently.
-- If a worker needs a missing downstream role, append a spawn request to the shared bus with the `requestedRole`.
-- The user sees the result of implicit calls, not the internal planning chatter.
+- Rails (`TickRunJob` + `Orchestrator::SpawnRequestedWorkers`) is the only thing that spawns processes; no agent spawns another agent directly.
+- A worker never manages its own lifecycle (no `spawn_worker`/`stop_worker`); it reports via `worker_turn` and Rails decides what happens next.
+- If a worker needs a missing downstream capability, it raises `[BLOCKED]` through `worker_turn` (or, mid-task, asks a spawned planner) rather than acting outside its assigned scope.
+- Finalization roles never call each other's tools — `Orchestrator::WorkerMcpServer` and each tool's own role guard enforce that independently.
 - All agents use the structured messaging protocol from [MESSAGING_PROTOCOL.md](./MESSAGING_PROTOCOL.md).

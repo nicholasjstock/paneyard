@@ -52,6 +52,7 @@ class TickRunJob < ApplicationJob
       else
         queue_finalization_worker(run, "reporter", "run-summary.md", "Audit the persisted run with get_run_audit and write the reviewer-facing PR audit to run-summary.md. Do not run tests, select files, commit, or publish.") ||
           queue_finalization_worker(run, "curator", "review-assets.md", "Inspect real local deliverables only. Select useful reviewer files with select_review_assets, or write that no review assets were selected. Do not audit the run, run tests, commit, or publish.") ||
+          queue_finalization_worker(run, "demo", "demo-notes.md", "Start (or reuse) this workspace's dev/demo server with start_run_command if one isn't already running, verify it is actually serving, then call complete_run_finalization with a clickPath describing how to see the change. Do not edit source, run tests, select review assets, or commit.") ||
           queue_committer(run)
         Orchestrator::SpawnRequestedWorkers.call(run: run)
       end

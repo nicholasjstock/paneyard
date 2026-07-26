@@ -33,6 +33,31 @@ RSpec.describe "terminal finalization tools" do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
+  it "lets a demo worker complete and persists an optional clickPath" do
+    workspace, run, demo = finalization_worker("demo", "demo-notes.md")
+    Orchestrator::ArtifactStore.write(run.target_root, run.run_id, demo.scope, "Started the dev server on the default port.")
+
+    response = McpTools::CompleteRunFinalizationTool.call(
+      runId: run.run_id, clickPath: "Open /schedule and click Publish.", server_context: { worker_id: demo.worker_id }
+    )
+
+    expect(tool_payload(response).fetch("outcome")).to eq("completed")
+    expect(demo.reload.handoff_completed_at).to be_present
+    expect(demo.reload.click_path).to eq("Open /schedule and click Publish.")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
+  it "rejects complete_run_finalization from a role outside reporter, curator, or demo" do
+    workspace, run, committer = finalization_worker("committer", "commit-worktree.md")
+
+    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: committer.worker_id })
+
+    expect(tool_payload(response).fetch("message")).to include("reporter, curator, or demo")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   it "accepts an explicit empty curator selection" do
     workspace, run, curator = finalization_worker("curator", "review-assets.md")
 

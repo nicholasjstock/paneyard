@@ -9,6 +9,12 @@ module Orchestrator
         [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::GetRunAuditTool, ::McpTools::CompleteRunFinalizationTool ]
       when "curator"
         [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::SelectReviewAssetsTool, ::McpTools::CompleteRunFinalizationTool ]
+      when "demo"
+        [
+          ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::StartRunCommandTool,
+          ::McpTools::StopRunCommandTool, ::McpTools::GetRunCommandTool, ::McpTools::ListRunCommandsTool,
+          ::McpTools::ReadRunCommandLogTool, ::McpTools::CompleteRunFinalizationTool
+        ]
       when "committer"
         [ ::McpTools::CommitRunChangesTool, ::McpTools::ListGitChangeRequestsTool ]
       else

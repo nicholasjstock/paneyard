@@ -46,6 +46,34 @@ RSpec.describe TickRunJob do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
+  it "queues a demo worker after the reporter and curator complete their handoffs, before the committer" do
+    workspace = Workspace.create!(name: "tick-demo-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace: workspace, run_id: "tick-demo-#{SecureRandom.hex(4)}", task: "Publish changes",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running", worktree_name: "publish-changes-a1b2"
+    )
+    Orchestrator::TickState.write(run_id: run.run_id, phase: "completed", tick_count: 1, last_plan_summary: "Done.", pending_spawn_keys: [], following_steps: [])
+    %w[reporter curator].each do |role|
+      run.workers.create!(
+        worker_id: SecureRandom.uuid, role: role, nickname: role, reason: "Finalize.", scope: "#{role}.md",
+        status: "stopped", pid: 123_456, command: "codex", args: [], handoff_completed_at: 1.minute.ago,
+        prompt_path: Rails.root.join("tmp/#{role}.prompt.txt").to_s, log_path: Rails.root.join("tmp/#{role}.log").to_s,
+        last_message_path: Rails.root.join("tmp/#{role}.last.txt").to_s, env_path: Rails.root.join("tmp/#{role}.env").to_s
+      )
+    end
+
+    without_spawning_workers do
+      TickRunJob.new.send(:tick_run, run)
+    end
+
+    request = run.spawn_requests.find_by!(requested_role: "demo")
+    expect(request.scope).to eq("demo-notes.md")
+    expect(request.text).to include("start_run_command")
+    expect(run.spawn_requests.where(requested_role: "committer")).to be_empty
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   it "does not overwrite a planner decision while fulfilling its worker request" do
     workspace = Workspace.create!(name: "tick-job-#{SecureRandom.hex(4)}", root_path: Rails.root.join("tmp", SecureRandom.hex(4)).to_s)
     run = Run.create!(
