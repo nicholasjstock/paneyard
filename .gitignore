@@ -32,8 +32,9 @@
 
 /public/assets
 
-# Planner test artifacts use generated run IDs and never belong in source control.
-/front/demo-output/agents-sdk/planner-job-*/
+# Generated workflow artifacts, logs, prompts, and state never belong in source control.
+/front/demo-output/agents-sdk/
+/demo-output/.DS_Store
 /.workflow-orchestrator/
 
 # Ignore key files for decrypting credentials and more.
