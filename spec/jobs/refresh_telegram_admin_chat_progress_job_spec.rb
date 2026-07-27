@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe RefreshTelegramAdminChatProgressJob do
-  let(:client) { instance_double(Telegram::Client, send_rich_message: true, send_rich_message_draft: true) }
+  let(:client) { instance_double(Telegram::Client, send_chat_action: true, send_rich_message: true, send_rich_message_draft: true) }
 
   before { allow(Telegram::Client).to receive(:new).and_return(client) }
 
@@ -13,6 +13,7 @@ RSpec.describe RefreshTelegramAdminChatProgressJob do
 
     described_class.perform_now
 
+    expect(client).to have_received(:send_chat_action).with(chat_id: "123", action: "typing")
     expect(client).to have_received(:send_rich_message_draft).with(chat_id: "123", draft_id: 456, html: "Streaming answer")
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && Dir.exist?(workspace.root_path)

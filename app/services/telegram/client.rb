@@ -14,6 +14,10 @@ module Telegram
       call("sendMessage", chat_id:, text:, reply_markup:)
     end
 
+    def send_chat_action(chat_id:, action:)
+      call("sendChatAction", chat_id:, action:)
+    end
+
     def send_rich_message(chat_id:, markdown:)
       call("sendRichMessage", chat_id:, rich_message: { markdown: })
     end

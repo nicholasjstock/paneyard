@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe Telegram::UpdateProcessor do
-  let(:client) { instance_double(Telegram::Client, send_message: { "message_id" => 456 }, send_rich_message_draft: true, answer_callback_query: true) }
+  let(:client) { instance_double(Telegram::Client, send_message: { "message_id" => 456 }, send_chat_action: true, send_rich_message_draft: true, answer_callback_query: true) }
   let!(:workspace) { Workspace.create!(name: "Telegram workspace #{SecureRandom.hex(4)}", root_path: Dir.mktmpdir) }
 
   before do
@@ -56,6 +56,7 @@ RSpec.describe Telegram::UpdateProcessor do
     expect(client).to have_received(:send_rich_message_draft).with(
       chat_id: "123", draft_id: kind_of(Integer), html: "<tg-thinking>Working in #{workspace.name}…</tg-thinking>"
     )
+    expect(client).to have_received(:send_chat_action).with(chat_id: "123", action: "typing")
     expect(assistant_message).to have_received(:update!).with(telegram_draft_id: kind_of(Integer))
   end
 

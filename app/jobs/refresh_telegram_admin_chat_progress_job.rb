@@ -15,6 +15,7 @@ class RefreshTelegramAdminChatProgressJob < ApplicationJob
       client = Telegram::Client.new
       return unless message.telegram_draft_id
 
+      client.send_chat_action(chat_id: message.telegram_conversation.telegram_chat_id, action: "typing")
       text = message.content.presence || "<tg-thinking>Working…</tg-thinking>"
       chunks = chunks_for(text)
       persist_completed_chunks(message, client, chunks)

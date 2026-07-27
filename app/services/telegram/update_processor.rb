@@ -91,6 +91,7 @@ module Telegram
         chat_id: conversation.telegram_chat_id, draft_id:,
         html: "<tg-thinking>Working in #{ERB::Util.html_escape(conversation.workspace.name)}…</tg-thinking>"
       )
+      @client.send_chat_action(chat_id: conversation.telegram_chat_id, action: "typing")
       assistant_message.update!(telegram_draft_id: draft_id)
     end
 
