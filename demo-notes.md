@@ -1,28 +1,21 @@
-# Demo Notes
+# Demo Execution Report
 
-## Server Status
-✓ Development server is running and serving requests
+**Run ID:** run-20260727-081644-4302  
+**Role:** demo  
+**Worker:** 684a3c61-9e5f-45b1-9ee3-f3a1848d2a70  
+**Timestamp:** 2026-07-27
 
-## Details
-- **Status**: Active
-- **Port**: 3000 (http://localhost:3000)
-- **Process**: Rails (Puma) + Solid Queue jobs process
-- **Confirmation**: 
-  - Ruby processes confirmed listening on port 3000 via `lsof`
-  - Development log shows active job processing (BroadcastWorkerLogsJob, TickRunJob)
-  - Recent log entries at 2026-07-27T09:23:45Z show jobs being performed
-  - Solid Queue job queue is active and processing recurring tasks
+## Status: READY
 
-## How to Verify
-The health endpoint is available at `http://localhost:3000/up` which returns:
-```json
-{"status":"ok","service":"workflow-orchestrator"}
-```
+An existing workspace development server was reused; no duplicate server was started.
 
-This response includes the `X-Workflow-Service: workflow-orchestrator` header.
+### Verification
 
-## Development Setup Summary
-- Dependencies installed (Gemfile.lock present)
-- Database prepared (no pending migrations)
-- Both Puma server and Solid Queue workers are running together
-- Both processes will exit together on interrupt (INT/TERM signals)
+- Listener found on port 3000.
+- `GET http://127.0.0.1:3000/up` returned HTTP 200.
+- Response included `X-Workflow-Service: workflow-orchestrator`.
+- Response body was `{"status":"ok","service":"workflow-orchestrator"}`.
+
+### Workflow bus limitation
+
+The workflow MCP tools were not exposed in this session, so `list_run_commands`, `write_workflow_artifact`, and `complete_run_finalization` could not be invoked. This file was updated directly as a fallback; no source files were changed.
