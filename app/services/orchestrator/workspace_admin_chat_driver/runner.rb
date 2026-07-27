@@ -54,7 +54,7 @@ module Orchestrator
         on_spawn = ->(pid) { assistant_message.update!(pid:, process_group_id: pid) }
 
         result = provider.run_turn(
-          workspace_path: chat.workspace.source_root, prompt:, session_id:,
+          workspace_path: chat.workspace.root_path, prompt:, session_id:,
           model: chat.model_for(provider_name), on_spawn:
         ) { |event| assistant_message.apply_event!(event) }
 
@@ -95,7 +95,7 @@ module Orchestrator
 
         reconstructed_prompt = reconstruction_prompt(chat:, provider_name:, assistant_message:, latest_prompt: prompt)
         provider.run_turn(
-          workspace_path: chat.workspace.source_root, prompt: reconstructed_prompt, session_id: nil,
+          workspace_path: chat.workspace.root_path, prompt: reconstructed_prompt, session_id: nil,
           model: chat.model_for(provider_name), on_spawn:
         ) { |event| assistant_message.apply_event!(event) }
       end

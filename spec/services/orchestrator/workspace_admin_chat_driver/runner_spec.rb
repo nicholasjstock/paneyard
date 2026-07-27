@@ -21,7 +21,7 @@ RSpec.describe Orchestrator::WorkspaceAdminChatDriver::Runner do
       # second (Runner's fresh-session retry) pops a success -- `result`
       # stays as the simple single-call case older specs already use.
       def run_turn(workspace_path:, prompt:, session_id:, model:, on_spawn: nil)
-        (@run_turn_calls ||= []) << { prompt:, session_id: }
+        (@run_turn_calls ||= []) << { workspace_path:, prompt:, session_id: }
         Array(events).each { |event| yield event }
         return spawn_and_wait(session_id, on_spawn) if spawn_real_process
 
@@ -91,6 +91,17 @@ RSpec.describe Orchestrator::WorkspaceAdminChatDriver::Runner do
     expect(chat.active_turn_id).to be_nil
     expect(chat.status).to eq("idle")
     expect(assistant_message.reload.status).to eq("completed")
+  end
+
+  it "runs the admin chat from the workspace root so sibling run worktrees are in scope" do
+    chat = create_chat
+    FakeProvider.result = { session_id: "sess-1", cancelled: false, error: false }
+    assistant_message = described_class.start_turn!(chat:, content: "inspect every worktree")
+
+    described_class.perform_turn(assistant_message)
+
+    expect(FakeProvider.run_turn_calls.first[:workspace_path]).to eq(chat.workspace.root_path)
+    expect(FakeProvider.run_turn_calls.first[:workspace_path]).not_to eq(chat.workspace.source_root)
   end
 
   it "resumes with the chat's persisted session id on the next turn" do
