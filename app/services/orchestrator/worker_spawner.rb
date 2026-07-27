@@ -207,7 +207,7 @@ module Orchestrator
     # Dispatch is single-flight per run (see SpawnRequestedWorkers), so
     # same-role sessions are never resumed concurrently. The role predicate
     # is the reliability boundary and lives here, not in caller convention:
-    # a role transition (worker -> verifier -> committer, or into
+    # a role transition (worker -> verifier -> git, or into
     # chaperone) always gets a fresh session -- a verifier must never
     # inherit the implementer's own reasoning trail. Accepted trade-off:
     # within one role, a confused worker's context now carries into the

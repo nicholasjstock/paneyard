@@ -17,20 +17,24 @@ RSpec.describe Orchestrator::WorkerMcpServer do
     curator = run.workers.create!(worker_id: SecureRandom.uuid, role: "curator", nickname: "curator", reason: "Curate.", scope: "review-assets.md", status: "running", pid: 123_457, command: "codex", args: [], prompt_path: "prompt", log_path: "log", last_message_path: "last", env_path: "env")
     demo = run.workers.create!(worker_id: SecureRandom.uuid, role: "demo", nickname: "demo", reason: "Demo.", scope: "demo-notes.md", status: "running", pid: 123_458, command: "codex", args: [], prompt_path: "prompt", log_path: "log", last_message_path: "last", env_path: "env")
     seeder = run.workers.create!(worker_id: SecureRandom.uuid, role: "seeder", nickname: "seeder", reason: "Seed.", scope: "seed-data.md", status: "running", pid: 123_459, command: "codex", args: [], prompt_path: "prompt", log_path: "log", last_message_path: "last", env_path: "env")
+    git_worker = run.workers.create!(worker_id: SecureRandom.uuid, role: "git", nickname: "git", reason: "Publish.", scope: "publish-x.md", status: "running", pid: 123_460, command: "codex", args: [], prompt_path: "prompt", log_path: "log", last_message_path: "last", env_path: "env", write_scope: "git_managed", allowed_paths: [ "**/*" ])
 
     reporter_tools = described_class.build(server_context: { worker_id: reporter.worker_id }).tools.keys
     curator_tools = described_class.build(server_context: { worker_id: curator.worker_id }).tools.keys
     demo_tools = described_class.build(server_context: { worker_id: demo.worker_id }).tools.keys
     seeder_tools = described_class.build(server_context: { worker_id: seeder.worker_id }).tools.keys
+    git_tools = described_class.build(server_context: { worker_id: git_worker.worker_id }).tools.keys
 
     expect(reporter_tools).to include("get_run_audit", "complete_run_finalization")
-    expect(reporter_tools).not_to include("select_review_assets", "commit_run_changes", "worker_turn", "start_run_command")
+    expect(reporter_tools).not_to include("select_review_assets", "finalize_run_publication", "worker_turn", "start_run_command")
     expect(curator_tools).to include("select_review_assets", "complete_run_finalization")
-    expect(curator_tools).not_to include("get_run_audit", "commit_run_changes", "worker_turn", "start_run_command")
+    expect(curator_tools).not_to include("get_run_audit", "finalize_run_publication", "worker_turn", "start_run_command")
     expect(demo_tools).to include("start_run_command", "stop_run_command", "complete_run_finalization")
-    expect(demo_tools).not_to include("get_run_audit", "select_review_assets", "commit_run_changes", "worker_turn")
+    expect(demo_tools).not_to include("get_run_audit", "select_review_assets", "finalize_run_publication", "worker_turn")
     expect(seeder_tools).to include("write_scoped_file", "get_run_context", "complete_run_finalization")
-    expect(seeder_tools).not_to include("get_run_audit", "select_review_assets", "commit_run_changes", "worker_turn", "start_run_command")
+    expect(seeder_tools).not_to include("get_run_audit", "select_review_assets", "finalize_run_publication", "worker_turn", "start_run_command")
+    expect(git_tools).to include("finalize_run_publication", "worker_turn", "get_run_context", "write_workflow_artifact")
+    expect(git_tools).not_to include("get_run_audit", "select_review_assets", "complete_run_finalization", "start_run_command")
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end

@@ -88,6 +88,35 @@ RSpec.describe Orchestrator::WorkerExecutionPolicy do
     end.to raise_error(ArgumentError, /source_protected workers cannot authorize/)
   end
 
+  it "grants full recursive write, including .git, for a git_managed worker" do
+    root = Dir.mktmpdir("git-managed-policy")
+    FileUtils.mkdir_p(File.join(root, ".git"))
+    FileUtils.mkdir_p(File.join(root, "app"))
+
+    policy = described_class.new(
+      root_dir: root, mode: "implementation", write_scope: "git_managed", allowed_paths: [ "**/*" ],
+      protected_patterns: [ "app/**/*" ]
+    )
+
+    expect(policy.repository_writable?).to be(true)
+    expect(policy.claude_tools.split(",")).to include("Bash", "Edit", "Write")
+    expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).to include(root)
+    expect(policy.claude_settings["permissions"]["allow"]).to include("Edit(#{root}/**)", "Write(#{root}/**)")
+    expect(policy.codex_config_overrides.join(" ")).to include('"."="write"')
+  ensure
+    FileUtils.remove_entry(root) if root && Dir.exist?(root)
+  end
+
+  it "requires allowed paths for a git_managed worker" do
+    root = Dir.mktmpdir("git-managed-policy")
+
+    expect do
+      described_class.new(root_dir: root, mode: "implementation", write_scope: "git_managed", allowed_paths: [])
+    end.to raise_error(ArgumentError, /git_managed workers require allowed paths/)
+  ensure
+    FileUtils.remove_entry(root) if root && Dir.exist?(root)
+  end
+
   it "rejects absolute and escaping paths while resolving a protected glob to its source root" do
     root = Dir.mktmpdir("scoped-policy")
     FileUtils.mkdir_p(File.join(root, "app"))

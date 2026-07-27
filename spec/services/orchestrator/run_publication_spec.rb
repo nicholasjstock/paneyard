@@ -1,198 +1,102 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::RunPublication do
-  it "commits source changes but keeps runtime artifacts and the PR summary out of Git" do
-    root = Dir.mktmpdir
-    git(root, "init")
-    git(root, "config", "user.name", "Workflow Orchestrator")
-    git(root, "config", "user.email", "workflow@example.test")
-    File.write(File.join(root, "existing.txt"), "before\n")
-    git(root, "add", "existing.txt")
-    git(root, "commit", "-m", "Initial commit")
-    workspace = Workspace.create!(name: "publication-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "publication-#{SecureRandom.hex(4)}", task: "Publish nothing", target_root: root,
-      launcher_variant: "codex", status: "running", worktree_name: "publish-nothing-a1b2",
-      branch_name: "workflow/publish-nothing-a1b2"
-    )
-    File.write(File.join(root, "existing.txt"), "after\n")
-    Orchestrator::ArtifactStore.write(root, run.run_id, "run-summary.md", "## Result\n\nSource change verified.")
-    Orchestrator::ArtifactStore.write(root, run.run_id, "worker.log", "sensitive runtime output")
-
-    expect(described_class.commit_all!(run)).to eq(:committed)
-    expect(git(root, "show", "--format=", "--name-only", "HEAD")).to include("existing.txt")
-    expect(git(root, "ls-files")).not_to include(".workflow-orchestrator")
-    expect(git(root, "status", "--porcelain")).to include(".workflow-orchestrator/")
-  ensure
-    FileUtils.remove_entry(root) if root && File.exist?(root)
-  end
-
-  it "excludes a committer-approved git change request from the commit and resolves requested paths" do
-    root = Dir.mktmpdir
-    git(root, "init")
-    git(root, "config", "user.name", "Workflow Orchestrator")
-    git(root, "config", "user.email", "workflow@example.test")
-    File.write(File.join(root, "existing.txt"), "before\n")
-    git(root, "add", "existing.txt")
-    git(root, "commit", "-m", "Initial commit")
-    workspace = Workspace.create!(name: "publication-exclude-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "publication-exclude-#{SecureRandom.hex(4)}", task: "Exclude a stray file", target_root: root,
-      launcher_variant: "codex", status: "running", worktree_name: "exclude-a1b2",
-      branch_name: "workflow/exclude-a1b2"
-    )
-    File.write(File.join(root, "existing.txt"), "after\n")
-    File.write(File.join(root, "stray.log"), "leftover test output\n")
-
-    excluded = described_class.request_git_change!(
-      run: run, requested_by_worker_id: "worker-1", path: "stray.log", reason: "leftover test-run output"
-    )
-    ignored = described_class.request_git_change!(
-      run: run, requested_by_worker_id: "worker-1", path: "existing.txt", reason: "not actually excluded"
-    )
-
-    expect(described_class.commit_all!(run, exclude_paths: [ "stray.log" ])).to eq(:committed)
-    expect(git(root, "show", "--format=", "--name-only", "HEAD")).to include("existing.txt")
-    expect(git(root, "ls-files")).not_to include("stray.log")
-    expect(git(root, "status", "--porcelain")).to include("stray.log")
-    expect(excluded.reload.status).to eq("applied")
-    expect(ignored.reload.status).to eq("dismissed")
-  ensure
-    FileUtils.remove_entry(root) if root && File.exist?(root)
-  end
-
-  it "rejects a git change request for a path that is not part of the worktree's real git status" do
-    root = Dir.mktmpdir
-    git(root, "init")
-    git(root, "config", "user.name", "Workflow Orchestrator")
-    git(root, "config", "user.email", "workflow@example.test")
-    File.write(File.join(root, "existing.txt"), "before\n")
-    git(root, "add", "existing.txt")
-    git(root, "commit", "-m", "Initial commit")
-    workspace = Workspace.create!(name: "publication-fictional-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "publication-fictional-#{SecureRandom.hex(4)}", task: "Reject a fictional path", target_root: root,
-      launcher_variant: "codex", status: "running", worktree_name: "fictional-a1b2",
-      branch_name: "workflow/fictional-a1b2"
-    )
-
-    expect do
-      described_class.request_git_change!(
-        run: run, requested_by_worker_id: "worker-1", path: "does-not-exist.txt", reason: "made up"
+  describe ".queue_worker!" do
+    it "spawns a git-role SpawnRequest and marks the run commit_pending" do
+      workspace = Workspace.create!(name: "publication-queue-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-queue-#{SecureRandom.hex(4)}", task: "Finalize the run", target_root: workspace.root_path,
+        launcher_variant: "codex", status: "running", worktree_name: "queue-a1b2", branch_name: "workflow/queue-a1b2"
       )
-    end.to raise_error(Orchestrator::RunPublication::Error, /not part of this run's pending changes/)
-  ensure
-    FileUtils.remove_entry(root) if root && File.exist?(root)
-  end
 
-  it "removes an approved tracked ignored artifact even when it no longer appears in git status" do
-    root = Dir.mktmpdir
-    git(root, "init")
-    git(root, "config", "user.name", "Workflow Orchestrator")
-    git(root, "config", "user.email", "workflow@example.test")
-    File.write(File.join(root, ".gitignore"), "*.log\n")
-    File.write(File.join(root, "stale.log"), "old output\n")
-    git(root, "add", ".gitignore")
-    git(root, "add", "-f", "stale.log")
-    git(root, "commit", "-m", "Initial commit")
-    File.delete(File.join(root, "stale.log"))
-    workspace = Workspace.create!(name: "publication-stale-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "publication-stale-#{SecureRandom.hex(4)}", task: "Remove stale artifact", target_root: root,
-      launcher_variant: "codex", status: "running", worktree_name: "stale-a1b2", branch_name: "workflow/stale-a1b2"
-    )
+      described_class.queue_worker!(run)
 
-    request = described_class.request_git_change!(
-      run: run, requested_by_worker_id: "worker-1", path: "stale.log", reason: "ignored runtime output"
-    )
-
-    expect(described_class.commit_all!(run, exclude_paths: [ "stale.log" ])).to eq(:committed)
-    expect(git(root, "ls-files")).not_to include("stale.log")
-    expect(git(root, "show", "--format=", "--name-only", "HEAD")).to include("stale.log")
-    expect(request.reload.status).to eq("applied")
-  ensure
-    FileUtils.remove_entry(root) if root && File.exist?(root)
-  end
-
-  it "stages related source edits before continuing a resolved rebase" do
-    root = Dir.mktmpdir
-    git(root, "init")
-    git(root, "config", "user.name", "Workflow Orchestrator")
-    git(root, "config", "user.email", "workflow@example.test")
-    File.write(File.join(root, "base.txt"), "base\n")
-    File.write(File.join(root, "related_spec.rb"), "old\n")
-    git(root, "add", ".")
-    git(root, "commit", "-m", "Initial commit")
-    git(root, "branch", "-M", "main")
-    remote = Dir.mktmpdir
-    git(remote, "init", "--bare")
-    git(root, "remote", "add", "origin", remote)
-    git(root, "push", "-u", "origin", "main")
-    git(root, "checkout", "-b", "workflow/conflict")
-    File.write(File.join(root, "base.txt"), "branch\n")
-    git(root, "commit", "-am", "Branch change")
-    git(root, "checkout", "main")
-    File.write(File.join(root, "base.txt"), "main\n")
-    git(root, "commit", "-am", "Main change")
-    git(root, "push", "origin", "main")
-    git(root, "checkout", "workflow/conflict")
-    workspace = Workspace.create!(name: "publication-continue-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "publication-continue-#{SecureRandom.hex(4)}", task: "Continue rebase", target_root: root,
-      launcher_variant: "codex", status: "running", worktree_name: "continue-a1b2", branch_name: "workflow/conflict"
-    )
-    allow(Open3).to receive(:capture3).and_call_original
-    expect(described_class.rebase_onto_main!(run)).to eq(:conflicted)
-    File.write(File.join(root, "base.txt"), "resolved\n")
-    File.write(File.join(root, "related_spec.rb"), "updated\n")
-
-    expect(described_class.continue_rebase_onto_main!(run, paths: [ "base.txt" ])).to eq(:rebased)
-    expect(git(root, "show", "--format=", "--name-only", "HEAD")).to include("related_spec.rb")
-  ensure
-    FileUtils.remove_entry(root) if root && File.exist?(root)
-    FileUtils.remove_entry(remote) if remote && File.exist?(remote)
-  end
-
-  it "caps the number of pending git change requests per run" do
-    root = Dir.mktmpdir
-    git(root, "init")
-    git(root, "config", "user.name", "Workflow Orchestrator")
-    git(root, "config", "user.email", "workflow@example.test")
-    File.write(File.join(root, "existing.txt"), "before\n")
-    git(root, "add", "existing.txt")
-    git(root, "commit", "-m", "Initial commit")
-    workspace = Workspace.create!(name: "publication-cap-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "publication-cap-#{SecureRandom.hex(4)}", task: "Cap requests", target_root: root,
-      launcher_variant: "codex", status: "running", worktree_name: "cap-a1b2",
-      branch_name: "workflow/cap-a1b2"
-    )
-    described_class::MAX_PENDING_GIT_CHANGE_REQUESTS.times do |i|
-      File.write(File.join(root, "stray-#{i}.log"), "junk\n")
-      described_class.request_git_change!(run: run, requested_by_worker_id: "worker-1", path: "stray-#{i}.log", reason: "junk")
+      expect(run.reload.publication_status).to eq("commit_pending")
+      request = SpawnRequest.find_by(run_id: run.run_id, requested_role: "git")
+      expect(request).to have_attributes(write_scope: "git_managed", allowed_paths: [ "**/*" ], model_tier: "small", status: "open")
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
     end
-    File.write(File.join(root, "one-too-many.log"), "junk\n")
 
-    expect do
-      described_class.request_git_change!(run: run, requested_by_worker_id: "worker-1", path: "one-too-many.log", reason: "junk")
-    end.to raise_error(Orchestrator::RunPublication::Error, /Too many pending git change requests/)
-  ensure
-    FileUtils.remove_entry(root) if root && File.exist?(root)
+    it "does not spawn a second request while one is already open" do
+      workspace = Workspace.create!(name: "publication-queue-dup-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-queue-dup-#{SecureRandom.hex(4)}", task: "Finalize the run", target_root: workspace.root_path,
+        launcher_variant: "codex", status: "running", worktree_name: "queue-dup-a1b2", branch_name: "workflow/queue-dup-a1b2"
+      )
+
+      described_class.queue_worker!(run)
+      described_class.queue_worker!(run)
+
+      expect(SpawnRequest.where(run_id: run.run_id, requested_role: "git").count).to eq(1)
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
   end
 
-  it "refuses to publish from the source checkout" do
-    root = Dir.mktmpdir
-    workspace = Workspace.create!(name: "publication-source-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "publication-source-#{SecureRandom.hex(4)}", task: "Do not publish source", target_root: root,
-      launcher_variant: "codex", status: "running", worktree_name: "source-a1b2", source_root: root,
-      branch_name: "workflow/source-a1b2"
-    )
+  describe ".finalize!" do
+    it "persists a published outcome, applies review asset URLs, and opens the reviewer question" do
+      workspace = Workspace.create!(name: "publication-finalize-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-finalize-#{SecureRandom.hex(4)}", task: "Finalize the run", target_root: workspace.root_path,
+        launcher_variant: "codex", status: "running", worktree_name: "finalize-a1b2", branch_name: "workflow/finalize-a1b2"
+      )
+      asset = run.review_assets.create!(workspace_path: "screenshot.png", label: "Screenshot")
 
-    expect { described_class.publish!(run) }.to raise_error(Orchestrator::RunPublication::Error, /source checkout/)
-    expect(run.reload.publication_status).to eq("failed")
-  ensure
-    FileUtils.remove_entry(root) if root && File.exist?(root)
+      outcome = described_class.finalize!(
+        run, outcome: "published", pull_request_url: "https://github.com/example/repo/pull/42",
+        review_assets: [ { workspacePath: "screenshot.png", githubUrl: "https://github.com/example/repo/releases/download/x/screenshot.png" } ]
+      )
+
+      expect(outcome).to eq(:published)
+      expect(run.reload).to have_attributes(
+        publication_status: "awaiting_approval", pull_request_url: "https://github.com/example/repo/pull/42",
+        conversation_pr_status: "ready", status: "completed"
+      )
+      expect(asset.reload.github_url).to eq("https://github.com/example/repo/releases/download/x/screenshot.png")
+      expect(run.open_blocking_question?).to be(true)
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
+
+    it "persists a no_changes outcome as completed without opening a review question" do
+      workspace = Workspace.create!(name: "publication-nochange-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-nochange-#{SecureRandom.hex(4)}", task: "Nothing to publish", target_root: workspace.root_path,
+        launcher_variant: "codex", status: "running", worktree_name: "nochange-a1b2", branch_name: "workflow/nochange-a1b2"
+      )
+
+      expect(described_class.finalize!(run, outcome: "no_changes")).to eq(:no_changes)
+      expect(run.reload).to have_attributes(publication_status: "no_changes", status: "completed")
+      expect(run.open_blocking_question?).to be(false)
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
+
+    it "persists a failed outcome with the reported error" do
+      workspace = Workspace.create!(name: "publication-failed-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-failed-#{SecureRandom.hex(4)}", task: "Fails to publish", target_root: workspace.root_path,
+        launcher_variant: "codex", status: "running", worktree_name: "failed-a1b2", branch_name: "workflow/failed-a1b2"
+      )
+
+      expect(described_class.finalize!(run, outcome: "failed", error: "push rejected")).to eq(:failed)
+      expect(run.reload).to have_attributes(publication_status: "failed", publication_error: "push rejected", status: "failed")
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
+
+    it "rejects an unknown outcome" do
+      workspace = Workspace.create!(name: "publication-unknown-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-unknown-#{SecureRandom.hex(4)}", task: "Bad outcome", target_root: workspace.root_path,
+        launcher_variant: "codex", status: "running", worktree_name: "unknown-a1b2", branch_name: "workflow/unknown-a1b2"
+      )
+
+      expect { described_class.finalize!(run, outcome: "bogus") }.to raise_error(Orchestrator::RunPublication::Error, /Unknown publication outcome/)
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
   end
 
   it "posts each question as a marked PR comment" do
@@ -223,89 +127,6 @@ RSpec.describe Orchestrator::RunPublication do
 
     expect(section).to eq("## Review evidence\n\nNo review assets were selected for upload.")
     expect(section).not_to include("run-summary.md")
-  end
-
-  it "treats an already ready PR as an idempotent publication result" do
-    workspace = Workspace.create!(name: "publication-ready-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
-    run = workspace.runs.create!(
-      run_id: "publication-ready-#{SecureRandom.hex(4)}", task: "Avoid duplicate publication",
-      target_root: workspace.root_path, launcher_variant: "codex", worktree_name: "ready-a1b2",
-      branch_name: "workflow/ready-a1b2", publication_status: "awaiting_approval",
-      conversation_pr_status: "ready", pull_request_url: "https://github.com/example/repo/pull/42"
-    )
-
-    expect(described_class.publish!(run)).to eq(:published)
-  ensure
-    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
-  end
-
-  it "treats an already-queued merge conflict as an idempotent publication result" do
-    workspace = Workspace.create!(name: "publication-conflict-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
-    run = workspace.runs.create!(
-      run_id: "publication-conflict-#{SecureRandom.hex(4)}", task: "Resolve conflict", target_root: workspace.root_path,
-      launcher_variant: "codex", worktree_name: "conflict-a1b2", branch_name: "workflow/conflict-a1b2",
-      publication_status: "merge_conflict"
-    )
-
-    expect(described_class.publish!(run)).to eq(:merge_conflict)
-  ensure
-    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
-  end
-
-  it "fills in the real body of a PR that was opened early as a draft, exactly once" do
-    root = Dir.mktmpdir
-    workspace = Workspace.create!(name: "publication-draft-body-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "publication-draft-body-#{SecureRandom.hex(4)}", task: "Finalize an early draft PR",
-      target_root: root, launcher_variant: "codex", worktree_name: "draft-body-a1b2",
-      branch_name: "workflow/draft-body-a1b2", publication_status: "committed",
-      conversation_pr_status: "draft", pull_request_url: "https://github.com/example/repo/pull/42"
-    )
-    Orchestrator::ArtifactStore.write(root, run.run_id, "run-summary.md", "## Result\n\nEverything verified.")
-    status = instance_double(Process::Status, success?: true)
-    allow(Open3).to receive(:capture3).and_return([ "", "", status ])
-    allow(Open3).to receive(:capture3).with("gh", "pr", "list", "--head", run.branch_name, "--state", "open", "--json", "url", "--jq", ".[0].url", chdir: root)
-      .and_return([ run.pull_request_url, "", status ])
-
-    expect(described_class.publish!(run)).to eq(:published)
-
-    expect(Open3).to have_received(:capture3).with(
-      "gh", "pr", "edit", run.pull_request_url, "--body", a_string_including("Everything verified."), chdir: root
-    )
-    expect(Open3).to have_received(:capture3).with("gh", "pr", "ready", run.pull_request_url, chdir: root)
-    expect(run.reload.conversation_pr_status).to eq("ready")
-  ensure
-    FileUtils.remove_entry(root) if root && File.exist?(root)
-  end
-
-  it "posts a rerun's summary as a new PR comment instead of overwriting an already-ready body" do
-    root = Dir.mktmpdir
-    workspace = Workspace.create!(name: "publication-no-clobber-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "publication-no-clobber-#{SecureRandom.hex(4)}", task: "Finalize a second time",
-      target_root: root, launcher_variant: "codex", worktree_name: "no-clobber-a1b2",
-      branch_name: "workflow/no-clobber-a1b2", publication_status: "committed",
-      conversation_pr_status: "ready", pull_request_url: "https://github.com/example/repo/pull/42"
-    )
-    Orchestrator::ArtifactStore.write(root, run.run_id, "run-summary.md", "## Result\n\nRerun addressed the feedback.")
-    status = instance_double(Process::Status, success?: true)
-    allow(Open3).to receive(:capture3).and_return([ "", "", status ])
-    allow(Open3).to receive(:capture3).with("gh", "pr", "list", "--head", run.branch_name, "--state", "open", "--json", "url", "--jq", ".[0].url", chdir: root)
-      .and_return([ run.pull_request_url, "", status ])
-    allow(Open3).to receive(:capture3).with(
-      "gh", "api", "--method", "POST", "repos/example/repo/issues/42/comments", "-f",
-      a_string_matching(/\Abody=.*Rerun addressed the feedback/m), chdir: root
-    ).and_return([ { id: 99, html_url: "https://github.com/example/repo/pull/42#issuecomment-99" }.to_json, "", status ])
-
-    expect(described_class.publish!(run)).to eq(:published)
-
-    expect(Open3).to have_received(:capture3).with(
-      "gh", "api", "--method", "POST", "repos/example/repo/issues/42/comments", "-f", any_args, chdir: root
-    )
-    expect(Open3).not_to have_received(:capture3).with("gh", "pr", "edit", any_args)
-    expect(Open3).not_to have_received(:capture3).with("gh", "pr", "ready", any_args)
-  ensure
-    FileUtils.remove_entry(root) if root && File.exist?(root)
   end
 
   it "does not let a missing historical worktree raise during merge detection" do

@@ -25,8 +25,7 @@ Rails owns orchestration state, planning, retries, and process dispatch (see [AG
  infrastructure/     structured output       under one lineage)
  project_init/       only -- no OS
  reporter/curator/   process spawned)
- seeder/demo/
- committer)
+ seeder/demo/git)
 ```
 
 Execution is strictly sequential: `Orchestrator::SpawnRequestedWorkers.call_locked` (`app/services/orchestrator/spawn_requested_workers.rb`) refuses to spawn anything while a worker is already `running` for the run, or while a `PlannerDecision` is `queued`/`running`, or (except for its own reviewer) while a `ChaperoneReview` is open.
@@ -77,15 +76,21 @@ run completed
   → reporter   (get_run_audit, write run-summary.md)               → complete_run_finalization
   → curator    (select_review_assets, write review-assets.md)      → complete_run_finalization
   → demo       (start_run_command, write demo-notes.md)            → complete_run_finalization
-  → committer  (list_git_change_requests, commit_run_changes)       -- terminal, no handoff call
-  → Rails pushes the branch, creates a draft evidence release,
-    uploads curator's selected assets, opens the PR with the
-    reporter's summary (which already includes the seeder's
-    verification steps, read back via get_run_audit)
+  → git        (real .git access: commit, rebase onto origin/main,  → finalize_run_publication
+                resolving any conflicts itself; push; gh pr
+                create/edit/ready; gh release for review assets)
   → approval → Rails deletes the draft release, merges, removes the worktree
 ```
 
-Seeder runs first, ahead of reporter and curator, for two reasons: the reporter's audit must be able to describe what was seeded and how to verify it, and the demo role needs the seeded data to already exist. Seeder — not demo — owns the reviewer-facing verification steps (`complete_run_finalization`'s `clickPath` parameter, the same field `worker_turn` also exposes to ordinary workers): it is the only finalization role with both full task context (`get_run_context`) and knowledge of exactly what data now exists, where demo has neither and is purely mechanical (start/reuse the server, confirm it is listening). Reporter, curator, and seeder must explicitly call `complete_run_finalization` after writing their assigned artifact; committer only commits and never calls it. Unlike every other finalization role, seeder is spawned with `write_scope: "scoped_changes"` and the workspace's full `protected_write_patterns` — the same wholesale grant an implementation worker gets — because its entire job is writing real seed/fixture files for the committer to pick up afterward. Any `run_commands` process the demo role starts (or any other worker leaves running) is stopped automatically once the run reaches a terminal status (`Run#stop_active_run_commands`) — no manual cleanup step is needed.
+Seeder runs first, ahead of reporter and curator, for two reasons: the reporter's audit must be able to describe what was seeded and how to verify it, and the demo role needs the seeded data to already exist. Seeder — not demo — owns the reviewer-facing verification steps (`complete_run_finalization`'s `clickPath` parameter, the same field `worker_turn` also exposes to ordinary workers): it is the only finalization role with both full task context (`get_run_context`) and knowledge of exactly what data now exists, where demo has neither and is purely mechanical (start/reuse the server, confirm it is listening). Reporter, curator, and seeder must explicitly call `complete_run_finalization` after writing their assigned artifact; the git worker calls `finalize_run_publication` instead, exactly once, as its own terminal signal. Unlike every other finalization role, seeder is spawned with `write_scope: "scoped_changes"` and the workspace's full `protected_write_patterns` — the same wholesale grant an implementation worker gets — because its entire job is writing real seed/fixture files for the git worker to pick up afterward. Any `run_commands` process the demo role starts (or any other worker leaves running) is stopped automatically once the run reaches a terminal status (`Run#stop_active_run_commands`) — no manual cleanup step is needed.
+
+### The git worker: the one role with real `.git` access
+
+Every other role in this system is git-blind by design — `WorkerExecutionPolicy` unconditionally excludes `.git` from every writable path, regardless of `write_scope`. The `git` role is the sole, deliberate exception: it is spawned with `write_scope: "git_managed"`, which grants full recursive write over its worktree (including `.git`), and its persona (`git.md`/`git.toml`) owns the *entire* commit → conflict-repair → rebase → push → PR sequence itself, using real `git status`/`git diff`/`git log` visibility — not a text description of which paths conflicted.
+
+It always starts on the small model tier, same as any other dispatch — never hardcoded to strong. If it reports `[BLOCKED]` (a genuinely ambiguous conflict, or repeated rejected pushes), `Orchestrator::GitPublicationRecovery` intercepts that failure the same way `VerifierRecovery` does for verifier work (a planner cannot legally dispatch `git`-role work either — see `StepPolicy::PLANNER_STEP_OWNERS`): the first failure just requeues a fresh small-tier git worker directly; a second failure on the same lineage crosses the normal chaperone threshold and a strong-model chaperone review decides whether to continue small, promote, or stop.
+
+A PR comment resuming an already-published run always triggers a fresh git-worker reconciliation pass first (`Orchestrator::PullRequestResume` → `RunPublication.queue_worker!`), regardless of what the comment says — rebasing against `main` is cheap and idempotent, so there is no special phrase to match. The comment still goes to the planner too, in case it also asks for further work; the planner already knows (from its own brief) that git/commit hygiene is never something it should plan around.
 
 ## Coordination Rules
 

@@ -64,8 +64,8 @@ RSpec.describe WorkerReconcileJob do
     worker = Worker.create!(
       worker_id: SecureRandom.uuid,
       run_id: run.run_id,
-      role: "committer",
-      nickname: "committer-test",
+      role: "git",
+      nickname: "git-test",
       reason: "Test worker",
       scope: "test.md",
       status: "running",

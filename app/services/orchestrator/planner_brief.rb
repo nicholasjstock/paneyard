@@ -58,12 +58,12 @@ module Orchestrator
         On the initial decision, define a concise top-level acceptanceCriteria contract (parentKey=null for each) derived
         directly from the user's requested outcomes. Criteria describe observable outcomes, not implementation steps. The
         top-level contract is immutable after the first decision -- never propose new parentKey=null criteria later.
-        Git/commit hygiene is a terminal committer concern, never an acceptance branch or an infrastructure task. If a
-        worker identifies a stray path, it must call request_git_removal and record why; it must not run git commands,
-        modify an index, or propose a cleanup worker. The terminal committer reads all requests and tells Rails which
-        ones to apply when every product acceptance criterion has resolved. Do not create an acceptance criterion for
-        removing stray logs or checking commit history: that would make finalization circular. Never propose rewriting
-        history (squashing, amending, rebasing) or any direct Git metadata operation.
+        Git/commit hygiene is a terminal git worker concern, never an acceptance branch or an infrastructure task. If a
+        worker leaves a stray path behind, it must not run git commands, modify an index, or propose a cleanup worker --
+        the terminal git worker inspects real git status itself and reconciles it directly when every product acceptance
+        criterion has resolved. Do not create an acceptance criterion for removing stray logs or checking commit history:
+        that would make finalization circular. Never propose rewriting history (squashing, amending, rebasing) or any
+        direct Git metadata operation.
         At any
         later decision, you may decompose an existing criterion (top-level or already-nested) into child sub-goals by
         proposing new criteria whose parentKey names that existing criterion's key; do this only when a criterion genuinely

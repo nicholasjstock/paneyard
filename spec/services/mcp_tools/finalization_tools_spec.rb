@@ -49,9 +49,9 @@ RSpec.describe "terminal finalization tools" do
   end
 
   it "rejects complete_run_finalization from a role outside reporter, curator, seeder, or demo" do
-    workspace, run, committer = finalization_worker("committer", "commit-worktree.md")
+    workspace, run, git_worker = finalization_worker("git", "publish-worktree.md")
 
-    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: committer.worker_id })
+    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: git_worker.worker_id })
 
     expect(tool_payload(response).fetch("message")).to include("reporter, curator, seeder, or demo")
   ensure

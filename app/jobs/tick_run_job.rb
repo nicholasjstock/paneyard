@@ -17,12 +17,6 @@ class TickRunJob < ApplicationJob
   private
 
   def tick_run(run)
-    if run.publication_status == "merge_conflict"
-      Orchestrator::SpawnRequestedWorkers.call(run: run)
-      Orchestrator::MergeConflictResolution.continue_if_ready!(run)
-      return
-    end
-
     if run.capacity_blocked?
       run.publish_phase!(
         phase: "waiting_on_capacity",
@@ -47,34 +41,19 @@ class TickRunJob < ApplicationJob
     if run.worktree_name.present?
       return if run.publication_status.in?(%w[publishing published])
 
-      if run.publication_status.in?(%w[committed no_changes])
-        FinalizeRunPublicationJob.perform_later(run.id)
+      if run.publication_status == "commit_pending"
+        Orchestrator::RunPublication.queue_worker!(run)
       else
         queue_finalization_worker(run, "seeder", "seed-data.md", "Inspect git status/diff, get_run_context, and this workspace's own seed/fixture convention (a seed script, fixture loader, factory -- do not invent a new mechanism). If the run added or altered a human-visible state, add or update the seed/fixture data needed to see it outside production; never depend on a real model call for that data. Write seed-data.md stating what you added or that nothing was needed, then call complete_run_finalization with a clickPath describing the concrete verification steps a reviewer should follow, naming any seeded record. Do not select review assets, write a run summary, start a demo server, run tests, or commit.", write_scope: "scoped_changes", execution_mode: "implementation") ||
           queue_finalization_worker(run, "reporter", "run-summary.md", "Audit the persisted run with get_run_audit and write the reviewer-facing PR audit to run-summary.md. Do not run tests, select files, commit, or publish.") ||
           queue_finalization_worker(run, "curator", "review-assets.md", "Inspect real local deliverables only. Select useful reviewer files with select_review_assets, or write that no review assets were selected. Do not audit the run, run tests, commit, or publish.") ||
           queue_finalization_worker(run, "demo", "demo-notes.md", "Start (or reuse) this workspace's dev/demo server with start_run_command if one isn't already running and verify it is actually serving, then call complete_run_finalization. Do not edit source, run tests, select review assets, or commit.") ||
-          queue_committer(run)
+          Orchestrator::RunPublication.queue_worker!(run)
         Orchestrator::SpawnRequestedWorkers.call(run: run)
       end
     else
       run.update!(status: "completed", stopped_at: run.stopped_at || Time.current) unless run.status == "completed"
     end
-  end
-
-  def queue_committer(run)
-    return if Worker.active.exists?(run_id: run.run_id, role: "committer")
-    return if SpawnRequest.where(run_id: run.run_id, requested_role: "committer", status: "open").exists?
-
-    run.update!(publication_status: "commit_pending", publication_error: nil)
-    SpawnRequest.create!(
-      run_id: run.run_id, asked_by: "orchestrator", requested_role: "committer", priority: "blocking",
-      scope: "commit-#{run.worktree_name}.md", execution_mode: "diagnosis", write_scope: "source_protected",
-      text: "Inspect git status, call list_git_change_requests and reconcile what workers asked to exclude, then call " \
-        "commit_run_changes exactly once with excludePaths set to whichever of those you decide to honor. Do not " \
-        "write a run summary, select review assets, run tests, inspect run audits, publish, or call worker_turn."
-    )
-    run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "A committer is reviewing and committing the complete run worktree.")
   end
 
   def clear_expired_capacity_phase(run)

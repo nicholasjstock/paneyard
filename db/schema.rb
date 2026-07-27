@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_27_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_27_154400) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -70,18 +70,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_27_130000) do
     t.index ["run_id", "status"], name: "index_chaperone_reviews_on_run_id_and_status"
     t.index ["subject_type", "subject_id", "status"], name: "index_chaperone_reviews_on_subject_and_status"
     t.index ["token_digest"], name: "index_chaperone_reviews_on_token_digest", unique: true
-  end
-
-  create_table "git_change_requests", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "path", null: false
-    t.text "reason", null: false
-    t.string "requested_by_worker_id", null: false
-    t.string "run_id", null: false
-    t.string "status", default: "requested", null: false
-    t.datetime "updated_at", null: false
-    t.index ["run_id", "path"], name: "index_git_change_requests_on_run_id_and_path", unique: true
-    t.index ["run_id"], name: "index_git_change_requests_on_run_id"
   end
 
   create_table "guarded_command_executions", force: :cascade do |t|

@@ -21,14 +21,14 @@ module Orchestrator
       active_worker_ids = Worker.where(run_id: run_id, status: "running").pluck(:worker_id).to_set
 
       if (intervention = record_step_attempt(run_id:, nickname:, result:, evidence_outcome:, evidence_citations:))
-        # Either a chaperone now owns the failure, or VerifierRecovery has
-        # already re-requested/escalated verification -- in both cases the
-        # worker's own follow-up planner request must NOT be created, or a
-        # planner would race the recovery with a step it cannot legally
-        # express (verifier-role work).
+        # Either a chaperone now owns the failure, or VerifierRecovery/
+        # GitPublicationRecovery has already re-requested/escalated its own
+        # role directly -- in both cases the worker's own follow-up planner
+        # request must NOT be created, or a planner would race the recovery
+        # with a step it cannot legally express (verifier- or git-role work).
         summary = intervention.is_a?(ChaperoneReview) ?
           "Strong chaperone is reviewing repeated worker failures." :
-          "Rails re-dispatched independent verification after a failed verifier attempt."
+          "Rails re-dispatched independent recovery for the failed role directly."
         next_state = (previous_state || TickState.default_state(run_id)).merge(
           phase: "planning", last_plan_summary: summary,
           last_updated_at: now.utc.iso8601(3)
@@ -174,8 +174,12 @@ module Orchestrator
       # re-requests a real verifier or escalates to the operator), never
       # through the chaperone/planner path -- a planner cannot legally
       # dispatch verifier-role work, so that road always dead-ends in a
-      # role-mismatch rejection.
+      # role-mismatch rejection. Git-publication lineages are the same
+      # structural problem for the same reason (see
+      # StepPolicy::PLANNER_STEP_OWNERS), so GitPublicationRecovery gets the
+      # identical carve-out.
       return VerifierRecovery.call(attempt) if VerifierRecovery.applicable?(attempt)
+      return GitPublicationRecovery.call(attempt) if GitPublicationRecovery.applicable?(attempt)
 
       ChaperoneTrigger.call(attempt)
     end

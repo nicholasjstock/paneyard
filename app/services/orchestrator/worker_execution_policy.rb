@@ -3,7 +3,7 @@ module Orchestrator
     BASE_CLAUDE_TOOLS = %w[Bash Read Grep Glob ToolSearch].freeze
     WRITING_CLAUDE_TOOLS = %w[Edit Write].freeze
 
-    WRITE_SCOPES = %w[source_protected tests_only scoped_changes].freeze
+    WRITE_SCOPES = %w[source_protected tests_only scoped_changes git_managed].freeze
 
     attr_reader :root_dir, :mode, :write_scope, :allowed_paths, :protected_patterns, :profile_name
 
@@ -18,7 +18,7 @@ module Orchestrator
     end
 
     def repository_writable?
-      write_scope.in?(%w[tests_only scoped_changes]) && allowed_paths.any?
+      write_scope.in?(%w[tests_only scoped_changes git_managed]) && allowed_paths.any?
     end
 
     def claude_tools
@@ -139,7 +139,11 @@ module Orchestrator
     # infrastructure, and record_protected_paths_tool's own validation
     # actually forbids declaring .git as protected, so it must be handled
     # here or it would otherwise fall through as "not source" and become
-    # writable.
+    # writable. This exclusion is irrelevant for write_scope "git_managed":
+    # that scope's allowed_paths grants the whole root recursively (see
+    # allowed_write_roots), and .git is a subdirectory of that already-granted
+    # root -- the one role permitted real git rights gets it without needing
+    # a carve-out here.
     def scratch_writable_relative_paths
       @scratch_writable_relative_paths ||= begin
         protected_roots = protected_patterns.map { |pattern| glob_root(pattern) }.uniq
@@ -182,7 +186,7 @@ module Orchestrator
       raise ArgumentError, "Unknown worker write scope: #{write_scope}" unless WRITE_SCOPES.include?(write_scope)
       raise ArgumentError, "Worker permission profile name is empty" if profile_name.blank?
 
-      if write_scope.in?(%w[tests_only scoped_changes]) && allowed_paths.empty?
+      if write_scope.in?(%w[tests_only scoped_changes git_managed]) && allowed_paths.empty?
         raise ArgumentError, "#{write_scope} workers require allowed paths"
       end
       if write_scope == "source_protected" && allowed_paths.any?

@@ -3,7 +3,7 @@ require "rails_helper"
 RSpec.describe Orchestrator::PullRequestResume do
   before { Run.reset_column_information }
 
-  it "implicitly answers the sole open blocking question and queues a continuation planner request" do
+  it "implicitly answers the sole open blocking question, reconciles a published run with main, and still queues a continuation planner request" do
     workspace = Workspace.create!(name: "pr-resume-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(
       run_id: "pr-resume-#{SecureRandom.hex(4)}", task: "Resume from PR", target_root: workspace.root_path,
@@ -18,10 +18,30 @@ RSpec.describe Orchestrator::PullRequestResume do
 
     described_class.resume!(run, comment)
 
-    expect(run.reload).to have_attributes(status: "running", publication_status: "resume_requested", last_pull_request_comment_id: "123")
+    expect(run.reload).to have_attributes(status: "running", publication_status: "commit_pending", last_pull_request_comment_id: "123")
     expect(review_question.reload).to have_attributes(status: "answered", answered_by: "github:reviewer", answer_text: "Please add a test.")
     expect(run.run_context_entries.find_by!(entry_key: "pr-comment-123").content).to include("Please add a test.")
     expect(run.spawn_requests.find_by!(asked_by: "github_pr_comment").context).to include("Please add a test.")
+    expect(run.spawn_requests.find_by(requested_role: "git")).to have_attributes(write_scope: "git_managed")
+  end
+
+  it "only queues the continuation planner request, without touching git, for a run that has not published a PR yet" do
+    workspace = Workspace.create!(name: "pr-resume-unpublished-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "pr-resume-unpublished-#{SecureRandom.hex(4)}", task: "Resume before publishing",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "completed",
+      phase: "awaiting_user_feedback", worktree_name: "resume-unpub-a1b2", branch_name: "workflow/resume-unpub-a1b2"
+    )
+    UserQuestion.create!(
+      run_id: run.run_id, asked_by: "chaperone", scope: "workflow-plan.md", priority: "blocking",
+      text: "Should this run stop here or retry?"
+    )
+
+    described_class.resume!(run, { "id" => 200, "body" => "Retry it.", "user" => { "login" => "reviewer" } })
+
+    expect(run.reload).to have_attributes(status: "running", publication_status: "resume_requested")
+    expect(run.spawn_requests.where(requested_role: "git")).to be_empty
+    expect(run.spawn_requests.find_by!(asked_by: "github_pr_comment").context).to include("Retry it.")
   end
 
   it "does not reprocess an already-recorded comment" do
@@ -36,7 +56,7 @@ RSpec.describe Orchestrator::PullRequestResume do
       .not_to change(SpawnRequest, :count)
   end
 
-  it "turns a reviewer request to fix merge conflicts into Rails-owned reconciliation" do
+  it "reconciles with main on any comment wording, not just an exact merge-conflict phrase" do
     workspace = Workspace.create!(name: "pr-merge-conflict-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(
       run_id: "pr-merge-conflict-#{SecureRandom.hex(4)}", task: "Resolve conflict", target_root: workspace.root_path,
@@ -44,29 +64,12 @@ RSpec.describe Orchestrator::PullRequestResume do
       pull_request_url: "https://github.com/example/repo/pull/42", publication_status: "awaiting_approval"
     )
     UserQuestion.create!(run_id: run.run_id, asked_by: "orchestrator", scope: "pull_request_review", priority: "blocking", text: "Ready for review.")
-    allow(FinalizeRunPublicationJob).to receive(:perform_later)
 
-    described_class.resume!(run, { "id" => 124, "body" => "fix the merge conflicts", "user" => { "login" => "reviewer" } })
+    described_class.resume!(run, { "id" => 124, "body" => "Can you resolve the conflict with main?", "user" => { "login" => "reviewer" } })
 
-    expect(run.reload).to have_attributes(status: "running", publication_status: "committed")
-    expect(FinalizeRunPublicationJob).to have_received(:perform_later).with(run.id)
-    expect(run.spawn_requests).to be_empty
-  end
-
-  it "treats only the exact merge-conflict command as a Rails reconciliation request" do
-    workspace = Workspace.create!(name: "pr-merge-command-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
-    run = workspace.runs.create!(
-      run_id: "pr-merge-command-#{SecureRandom.hex(4)}", task: "Do not over-match", target_root: workspace.root_path,
-      launcher_variant: "codex", status: "completed", worktree_name: "merge-command-a1b2", branch_name: "workflow/merge-command-a1b2",
-      pull_request_url: "https://github.com/example/repo/pull/42", publication_status: "awaiting_approval"
-    )
-    UserQuestion.create!(run_id: run.run_id, asked_by: "orchestrator", scope: "pull_request_review", priority: "blocking", text: "Ready for review.")
-    allow(FinalizeRunPublicationJob).to receive(:perform_later)
-
-    described_class.resume!(run, { "id" => 125, "body" => "Please fix the merge conflicts.", "user" => { "login" => "reviewer" } })
-
-    expect(run.reload.publication_status).to eq("resume_requested")
-    expect(FinalizeRunPublicationJob).not_to have_received(:perform_later)
+    expect(run.reload).to have_attributes(status: "running", publication_status: "commit_pending")
+    expect(run.spawn_requests.find_by(requested_role: "git")).to have_attributes(write_scope: "git_managed")
+    expect(run.spawn_requests.find_by!(requested_role: "planner").context).to include("Can you resolve the conflict with main?")
   end
 
   it "answers only explicitly referenced questions and does not resume while another stays open" do

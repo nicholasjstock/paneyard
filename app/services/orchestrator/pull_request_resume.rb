@@ -40,7 +40,7 @@ module Orchestrator
     # question -- never unconditionally. Every run reachable via PR comments
     # (awaiting_user_feedback or completed-and-published) is expected to always
     # have exactly one open blocking UserQuestion (see
-    # FinalizeRunPublicationJob#open_review_question! for the completed
+    # Orchestrator::RunPublication#open_review_question! for the completed
     # case, and Orchestrator::ApplyChaperoneDecision for the blocked case),
     # so "the sole open blocking question" is a safe implicit target when
     # the comment doesn't reference one by id.
@@ -71,21 +71,27 @@ module Orchestrator
 
         remaining = run.user_questions.open_only.where(priority: "blocking").order(:asked_at).to_a
         if answered_any && remaining.empty?
-          if merge_conflict_repair_requested?(body)
-            run.update!(status: "running", stopped_at: nil, publication_status: "committed")
-            FinalizeRunPublicationJob.perform_later(run.id)
-            run.publish_phase!(phase: "reconciling_with_main", owner: "github", summary: "Reconciling the branch with main after pull request comment ##{comment_id}.")
-            Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=merge_conflict_repair")
+          run.update!(status: "running", stopped_at: nil)
+          # A published run's branch may have drifted from main since the PR
+          # was opened -- always reconcile it, regardless of what the comment
+          # says. This is cheap and idempotent (a no-op commit/rebase when
+          # nothing has changed), so there is no wording to match and nothing
+          # for the operator to get "just right": no magic phrase, just an
+          # always-safe check. The comment still goes to the planner too
+          # (below) in case it also asks for further work.
+          if run.pull_request_url.present?
+            Orchestrator::RunPublication.queue_worker!(run)
           else
-            run.update!(status: "running", stopped_at: nil, publication_status: "resume_requested")
-            SpawnRequest.create!(
-              run_id: run.run_id, asked_by: "github_pr_comment", requested_role: "planner", priority: "blocking",
-              scope: "workflow-plan.md", text: "A new pull request comment requests that this run continue. Incorporate the comment as the current operator instruction and plan the next bounded step.",
-              context: "GitHub comment ##{comment_id} from #{author}: #{body}", tags: %w[github pr-comment resume]
-            )
-            run.publish_phase!(phase: "planning", owner: "github", summary: "Resuming from pull request comment ##{comment_id}.")
-            Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=resumed")
+            run.update!(publication_status: "resume_requested")
           end
+          SpawnRequest.create!(
+            run_id: run.run_id, asked_by: "github_pr_comment", requested_role: "planner", priority: "blocking",
+            scope: "workflow-plan.md", text: "A new pull request comment requests that this run continue. Incorporate the comment as the current operator instruction and plan the next bounded step. " \
+              "If the branch needed reconciling with main, Rails already triggered that separately through the terminal git worker -- do not propose git/commit/rebase work yourself.",
+            context: "GitHub comment ##{comment_id} from #{author}: #{body}", tags: %w[github pr-comment resume]
+          )
+          run.publish_phase!(phase: "planning", owner: "github", summary: "Resuming from pull request comment ##{comment_id}.")
+          Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=resumed")
         else
           reply_comment_id = post_reply!(run, unresolved_explanation(unmatched_ids:, remaining:))
           run.update!(last_pull_request_comment_id: [ comment_id.to_i, reply_comment_id.to_i ].max.to_s)
@@ -96,11 +102,6 @@ module Orchestrator
         end
       end
     end
-
-    def merge_conflict_repair_requested?(body)
-      body.to_s.strip.casecmp?("fix the merge conflicts")
-    end
-    private_class_method :merge_conflict_repair_requested?
 
     # Explicit references (`Question <uuid>: ...`) are matched against every
     # open question, not only blocking ones -- an advisory question (see

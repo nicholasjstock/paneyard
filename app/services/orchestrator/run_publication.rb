@@ -6,187 +6,111 @@ module Orchestrator
     class Error < StandardError; end
     module_function
 
-    # The committer worker deliberately requests this action after reviewing
-    # the whole worktree. Rails performs the Git metadata write because the
-    # worker sandbox must never receive broad access to .git internals.
-    # exclude_paths is the committer's own reconciled decision about which
-    # pending GitChangeRequests to honor -- see request_git_change! and
-    # resolve_git_change_requests!; Rails applies exactly that list and
-    # nothing more.
-    def commit_all!(run, exclude_paths: [])
+    # Commit, conflict repair, rebase, and push/PR creation are owned by the
+    # terminal "git" worker (see .claude/agents/git.md) -- the one role with
+    # real .git write access, driving those git/gh commands itself instead of
+    # Rails guessing on its behalf. This module now only persists the outcome
+    # that worker reports (via McpTools::FinalizeRunPublicationTool) and owns
+    # the git operations that are unrelated to that finalize lifecycle: the
+    # mid-run blocking-question draft PR, and post-merge cleanup.
+
+    # Single dispatch point for the git worker -- used by TickRunJob once a
+    # run's other finalization workers (seeder/reporter/curator/demo) are
+    # done, by PullRequestResume's "fix the merge conflicts" comment
+    # shortcut, by GitPublicationRecovery's direct requeue after a blocked
+    # attempt, and by the operator's retry_publication action. One spawn
+    # drives the entire commit -> conflict repair -> rebase -> push -> PR
+    # sequence itself (see the persona), so there is nothing left for Rails
+    # to loop on the way the old MergeConflictResolution state machine did.
+    #
+    # Always starts on the small model tier, same as any other planning/
+    # worker dispatch -- it is never hardcoded to "strong" here. A repeated
+    # failure on this run's git lineage crosses ChaperoneTrigger's normal
+    # threshold exactly like any other worker's, and the resulting
+    # strong-model chaperone review decides whether to continue small,
+    # promote, or stop; nothing about publication work gets a standing
+    # exception from that judgment call.
+    # Guards only against a duplicate *open* request, not a still-"running"
+    # prior git worker -- the same shape as VerifierRecovery#requeue!. A
+    # worker that just reported [BLOCKED] via worker_turn is expected to
+    # exit immediately after, but its Worker row only flips to "stopped"
+    # once WorkerReconcileJob later observes the dead process; blocking on
+    # that here would delay recovery by a full reconcile cycle for no
+    # safety benefit, since actual process dispatch is already single-flight
+    # per run (see SpawnRequestedWorkers).
+    def queue_worker!(run)
+      return if SpawnRequest.where(run_id: run.run_id, requested_role: "git", status: "open").exists?
+
+      run.update!(publication_status: "commit_pending", publication_error: nil)
+      SpawnRequest.create!(
+        run_id: run.run_id, asked_by: "orchestrator", requested_role: "git", priority: "blocking",
+        scope: "publish-#{run.worktree_name}.md", execution_mode: "implementation", write_scope: "git_managed",
+        allowed_paths: [ "**/*" ], model_tier: "small",
+        text: "Commit this run's changes, rebase onto origin/main (resolving any conflicts yourself with real git " \
+          "access), push, and create or update the pull request. Call finalize_run_publication exactly once when done."
+      )
+      run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "The git worker is committing, rebasing, and publishing this run.")
+    end
+
+    def finalize!(run, outcome:, pull_request_url: nil, error: nil, review_assets: [])
       return :unmanaged if run.worktree_name.blank?
-      return :committed if run.publication_status == "committed"
-      return :no_changes if run.publication_status == "no_changes"
 
       run.with_lock do
-        root = validated_root!(run)
-        run.update!(publication_status: "committing", publication_error: nil, publication_started_at: Time.current)
-        stage_for_publication!(run, root, exclude_paths:)
-        resolve_git_change_requests!(run, exclude_paths)
-        if git_success?(root, "diff", "--cached", "--quiet")
-          run.update!(publication_status: "no_changes", publication_completed_at: Time.current)
-          return :no_changes
-        end
-
-        git!(root, "commit", "-m", run.task.to_s.truncate(72))
-        run.update!(publication_status: "committed", publication_completed_at: Time.current)
-        :committed
-      end
-    rescue StandardError => error
-      record_failure!(run, error)
-      raise error if error.is_a?(Error)
-
-      raise Error, error.message
-    end
-
-    # A worker can request an untracked pending path, or a path that is
-    # already tracked despite matching .gitignore (the latter is the common
-    # "old test log committed by mistake" case). This is only a request: the
-    # terminal committer reviews it before Rails changes the index. The
-    # unique index on (run_id, path) means re-requesting the same path is a
-    # no-op rather than a way to pile up duplicate requests.
-    MAX_PENDING_GIT_CHANGE_REQUESTS = 20
-
-    def request_git_change!(run:, requested_by_worker_id:, path:, reason:)
-      root = validated_root!(run)
-      unless requestable_git_change_path?(root, path)
-        raise Error, "Path is not part of this run's pending changes or a tracked ignored artifact: #{path}"
-      end
-
-      if run.git_change_requests.pending.count >= MAX_PENDING_GIT_CHANGE_REQUESTS
-        raise Error, "Too many pending git change requests for this run (max #{MAX_PENDING_GIT_CHANGE_REQUESTS})"
-      end
-
-      run.git_change_requests.create!(requested_by_worker_id:, path:, reason:, status: "requested")
-    end
-
-    def requestable_git_change_path?(root, path)
-      return true if git_status_paths(root).include?(path)
-
-      git_success?(root, "ls-files", "--error-unmatch", "--", path) &&
-        git_success?(root, "check-ignore", "-q", "--", path)
-    end
-    private_class_method :requestable_git_change_path?
-
-    def resolve_git_change_requests!(run, exclude_paths)
-      run.git_change_requests.pending.find_each do |request|
-        request.update!(status: exclude_paths.include?(request.path) ? "applied" : "dismissed")
-      end
-    end
-    private_class_method :resolve_git_change_requests!
-
-    def publish!(run)
-      return :unmanaged if run.worktree_name.blank?
-      return :published if run.publication_status == "published" && run.conversation_pr_status == "ready"
-      return :published if run.publication_status == "awaiting_approval" && run.pull_request_url.present? && run.conversation_pr_status == "ready"
-      return :no_changes if run.publication_status == "no_changes" && run.pull_request_url.blank?
-      return :merge_conflict if run.publication_status == "merge_conflict"
-
-      run.with_lock do
-        return :published if run.reload.publication_status == "published"
-
-        root = validated_root!(run)
-        unless run.publication_status.in?(%w[committed no_changes])
-          raise Error, "Run changes have not been committed"
-        end
-
-        run.update!(publication_status: "publishing", publication_error: nil)
-        return :merge_conflict if rebase_onto_main!(run, root:) == :conflicted
-
-        git!(root, "push", "--force-with-lease", "-u", "origin", run.branch_name)
-        assets = publish_review_assets!(root, run)
-        url = existing_pr_url(root, run.branch_name)
-        if url
-          # conversation_pr_status only reads "draft" for a PR that
-          # ensure_conversation_pr! opened early (e.g. for a blocking
-          # question) and that has never been finalized since -- its body
-          # is still the placeholder create_pr wrote with no run summary
-          # and no review assets, because that's the only time this branch
-          # runs. Once flipped to "ready" below, a later publish! for the
-          # same run (e.g. the operator replies on the PR asking for a
-          # rerun, and the run does more work and finishes again) posts the
-          # fresh summary as a new comment instead of overwriting the body:
-          # the body is the run's one settled description, while a rerun's
-          # outcome is new information that belongs in the PR's timeline
-          # alongside the comment that triggered it, not silently replacing
-          # what was there.
-          if run.conversation_pr_status == "draft"
-            update_pr_body!(root, url, build_pr_body(run, root, assets:))
-            ready_pr!(root, url)
-          else
-            post_rerun_summary_comment!(root, url, run, assets:)
-          end
+        case outcome.to_s
+        when "published"
+          run.update!(
+            publication_status: "awaiting_approval", pull_request_url: pull_request_url,
+            conversation_pr_status: "ready", publication_completed_at: Time.current, publication_error: nil,
+            status: "completed", stopped_at: run.stopped_at || Time.current
+          )
+          apply_review_asset_urls!(run, review_assets)
+          open_review_question!(run)
+        when "no_changes"
+          run.update!(
+            publication_status: "no_changes", publication_completed_at: Time.current, publication_error: nil,
+            status: "completed", stopped_at: run.stopped_at || Time.current
+          )
+        when "failed"
+          run.update!(publication_status: "failed", publication_error: error.presence || "git worker reported failure", status: "failed")
         else
-          url = create_pr(root, run, assets:)
+          raise Error, "Unknown publication outcome: #{outcome.inspect}"
         end
-        run.update!(publication_status: "awaiting_approval", pull_request_url: url, conversation_pr_status: "ready", publication_completed_at: Time.current)
-        :published
-      end
-    rescue StandardError => error
-      record_failure!(run, error)
-      raise error if error.is_a?(Error)
-
-      raise Error, error.message
-    end
-
-    # Rails, rather than a sandboxed worker, owns Git history operations.
-    # A clean rebase makes the PR genuinely reviewable; a conflicted rebase
-    # leaves only source files for a normal implementation worker to repair.
-    def rebase_onto_main!(run, root: nil)
-      root ||= validated_root!(run)
-      git!(root, "fetch", "origin", "main")
-      _output, error, status = Open3.capture3("git", "-C", root.to_s, "rebase", "origin/main")
-      return :rebased if status.success?
-
-      if rebase_in_progress?(root)
-        run.update!(publication_status: "merge_conflict", publication_error: error.presence || "Rebase onto main has conflicts")
-        return :conflicted
       end
 
-      raise Error, "git rebase origin/main failed: #{error}"
+      run.publish_phase!(phase: finalize_phase(outcome), owner: "orchestrator", summary: finalize_summary(run, outcome))
+      outcome.to_s.to_sym
     end
 
-    def continue_rebase_onto_main!(run, paths:)
-      root = validated_root!(run)
-      raise Error, "No merge-conflict rebase is in progress" unless rebase_in_progress?(root)
-      raise Error, "Merge-conflict worker left conflict markers behind" if conflict_markers?(root, paths)
-
-      # A conflict repair can require a related protected-source update (for
-      # example, adapting a regression spec to the merged behavior), not only
-      # the files Git initially marked unmerged. Stage the managed source set
-      # exactly as the terminal committer would, while keeping runtime output
-      # out of the rebase commit.
-      stage_for_publication!(run, root)
-      output, error, status = Open3.capture3({ "GIT_EDITOR" => "true" }, "git", "-C", root.to_s, "rebase", "--continue")
-      return :rebased if status.success?
-
-      if rebase_in_progress?(root)
-        run.update!(publication_status: "merge_conflict", publication_error: error.presence || output.presence || "Rebase has further conflicts")
-        return :conflicted
-      end
-
-      raise Error, "git rebase --continue failed: #{error.presence || output}"
+    def finalize_phase(outcome)
+      outcome.to_s == "failed" ? "failed" : "completed"
     end
+    private_class_method :finalize_phase
 
-    def merge_conflict_paths(run)
-      root = validated_root!(run)
-      git!(root, "diff", "--name-only", "--diff-filter=U").lines.map(&:strip).reject(&:blank?)
-    end
-
-    def prepare_retry!(run)
-      root = validated_root!(run)
-      if git_success?(root, "diff", "--quiet", run.base_sha, "HEAD")
-        run.update!(publication_status: "queued", publication_error: nil)
-        commit_all!(run)
-      else
-        run.update!(publication_status: "committed", publication_error: nil)
-        :committed
+    def finalize_summary(run, outcome)
+      case outcome.to_s
+      when "published" then "Pull request ready for review: #{run.pull_request_url}"
+      when "no_changes" then "Run completed with no source changes; no PR was created."
+      when "failed" then "PR publication failed: #{run.publication_error}"
       end
     end
+    private_class_method :finalize_summary
+
+    def apply_review_asset_urls!(run, review_assets)
+      Array(review_assets).each do |asset|
+        path = asset[:workspacePath] || asset["workspacePath"]
+        url = asset[:githubUrl] || asset["githubUrl"]
+        next if path.blank? || url.blank?
+
+        run.review_assets.where(workspace_path: path).update_all(github_url: url)
+      end
+    end
+    private_class_method :apply_review_asset_urls!
 
     # A question is sufficient reason to establish the run's shared GitHub
     # conversation. A clean branch receives an empty commit because GitHub
-    # cannot open a PR for a branch identical to its base.
+    # cannot open a PR for a branch identical to its base. This is a small,
+    # low-risk git write (unlike commit/rebase/publish) that stays Rails-owned
+    # since it can happen mid-run, independent of the terminal git worker.
     def ensure_conversation_pr!(run)
       return run.pull_request_url if run.pull_request_url.present?
 
@@ -298,12 +222,6 @@ module Orchestrator
       output.strip
     end
 
-    def update_pr_body!(root, url, body)
-      _output, error, status = Open3.capture3("gh", "pr", "edit", url, "--body", body, chdir: root.to_s)
-      raise Error, "gh pr edit failed: #{error}" unless status.success?
-    end
-    private_class_method :update_pr_body!
-
     def post_pr_comment!(root, url, body)
       repository, number = repository_and_number(url)
       output, error, status = Open3.capture3("gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}", chdir: root.to_s)
@@ -312,71 +230,6 @@ module Orchestrator
       JSON.parse(output)
     end
     private_class_method :post_pr_comment!
-
-    # A rerun's outcome is new information appended to the PR's timeline,
-    # not a replacement for the body's settled description -- see the
-    # comment at this method's call site in publish!.
-    def post_rerun_summary_comment!(root, url, run, assets: [])
-      body = <<~MARKDOWN
-        ## Run finished again
-
-        #{run_summary(run, root) || "No summary was recorded for this pass."}
-
-        #{review_assets_section(assets)}
-      MARKDOWN
-      post_pr_comment!(root, url, body)
-    end
-    private_class_method :post_rerun_summary_comment!
-
-    def publish_review_assets!(root, run)
-      return [] if run.review_assets.empty?
-
-      tag = "workflow-evidence-#{run.run_id}"
-      unless release_exists?(root, tag)
-        _output, error, status = Open3.capture3("gh", "release", "create", tag, "--draft", "--target", run.branch_name, "--title", "Workflow evidence #{run.run_id}", "--notes", "Review evidence for #{run.run_id}.", chdir: root.to_s)
-        raise Error, "gh release create failed: #{error}" unless status.success?
-      end
-
-      output, error, status = Open3.capture3("gh", "release", "view", tag, "--json", "assets", chdir: root.to_s)
-      raise Error, "gh release view failed: #{error}" unless status.success?
-      existing_asset_names = JSON.parse(output).fetch("assets").map { |entry| entry.fetch("name") }
-
-      run.review_assets.find_each do |asset|
-        path = review_asset_path!(root, asset.workspace_path)
-
-        unless asset.github_url.present? || existing_asset_names.include?(File.basename(asset.workspace_path))
-          _output, error, status = Open3.capture3("gh", "release", "upload", tag, "#{path}##{asset.label}", chdir: root.to_s)
-          raise Error, "gh release upload failed: #{error}" unless status.success?
-        end
-      end
-
-      output, error, status = Open3.capture3("gh", "release", "view", tag, "--json", "url,assets", chdir: root.to_s)
-      raise Error, "gh release view failed: #{error}" unless status.success?
-
-      details = JSON.parse(output)
-      run.review_assets.find_each do |asset|
-        url = details.fetch("assets").find { |entry| entry["name"] == File.basename(asset.workspace_path) }&.fetch("url", nil)
-        asset.update!(github_url: url)
-      end
-      run.review_assets.reload.map { |asset| { label: asset.label, url: asset.github_url } }
-    end
-    private_class_method :publish_review_assets!
-
-    def release_exists?(root, tag)
-      _output, _error, status = Open3.capture3("gh", "release", "view", tag, chdir: root.to_s)
-      status.success?
-    end
-    private_class_method :release_exists?
-
-    def review_asset_path!(root, workspace_path)
-      path = Pathname(root).join(workspace_path).cleanpath
-      unless path.to_s.start_with?("#{Pathname(root).expand_path}/") && path.file?
-        raise Error, "Selected review asset is missing: #{workspace_path}"
-      end
-
-      path
-    end
-    private_class_method :review_asset_path!
 
     def delete_review_release!(root, run)
       tag = "workflow-evidence-#{run.run_id}"
@@ -401,14 +254,8 @@ module Orchestrator
     end
     private_class_method :review_assets_section
 
-    def ready_pr!(root, url)
-      _output, error, status = Open3.capture3("gh", "pr", "ready", url, chdir: root.to_s)
-      raise Error, "gh pr ready failed: #{error}" unless status.success?
-    end
-    private_class_method :ready_pr!
-
     def checkpoint_for_conversation!(run, root)
-      stage_for_publication!(run, root)
+      stage_for_publication!(root)
       dirty = !git_success?(root, "diff", "--cached", "--quiet")
       message = dirty ? "Checkpoint before workflow question" : "Start workflow conversation"
       git!(root, "commit", "--allow-empty", "-m", message)
@@ -443,48 +290,24 @@ module Orchestrator
     end
     private_class_method :record_failure!
 
-    # Runtime output stays local. The committer's concise run summary becomes
-    # the PR body; raw logs, prompts, environment snapshots, MCP configs, and
-    # command output must never enter Git history.
-    def stage_for_publication!(run, root, exclude_paths: [])
+    # Runtime output stays local -- used only by the mid-run question
+    # checkpoint commit above, which (unlike the terminal git worker) never
+    # needs to reconcile exclusion requests: it always stages every source
+    # change as-is.
+    def stage_for_publication!(root)
       runtime_root = relative_path(root, ArtifactStore.output_dir(root))
       git!(root, "reset", "--", runtime_root) if runtime_root.present?
-      exclude_paths.each do |path|
-        # An approved removal can name a stale path that is still in the
-        # index but absent from the working tree. `git add` cannot remove
-        # that path, so the Rails-owned finalizer performs the index update
-        # before staging the remaining source changes.
-        git!(root, "rm", "--cached", "--ignore-unmatch", "--", path)
-      end
       source_paths = git_status_paths(root).reject do |path|
         status_path = path.delete_suffix("/")
-        exclude_paths.include?(status_path) ||
-          (runtime_root.present? && (
-            status_path == runtime_root ||
-            status_path.start_with?("#{runtime_root}/") ||
-            runtime_root.start_with?("#{status_path}/")
-          ))
+        runtime_root.present? && (
+          status_path == runtime_root ||
+          status_path.start_with?("#{runtime_root}/") ||
+          runtime_root.start_with?("#{status_path}/")
+        )
       end
       git!(root, "add", "--", *source_paths) if source_paths.any?
     end
     private_class_method :stage_for_publication!
-
-    def rebase_in_progress?(root)
-      git_dir = git!(root, "rev-parse", "--git-dir").strip
-      git_dir = Pathname(root).join(git_dir) unless Pathname(git_dir).absolute?
-      File.directory?(Pathname(git_dir).join("rebase-merge")) || File.directory?(Pathname(git_dir).join("rebase-apply"))
-    end
-    private_class_method :rebase_in_progress?
-
-    def conflict_markers?(root, paths)
-      return false if paths.empty?
-
-      _output, _error, status = Open3.capture3(
-        "git", "-C", root.to_s, "grep", "-nE", "^(<<<<<<<|=======|>>>>>>>)", "--", *paths
-      )
-      status.success?
-    end
-    private_class_method :conflict_markers?
 
     def git_status_paths(root)
       entries = git!(root, "status", "--porcelain", "-z").split("\0")
@@ -525,5 +348,22 @@ module Orchestrator
       status.success?
     end
     private_class_method :git_success?
+
+    # Ported verbatim from the "open_review_question!" step of the removed
+    # FinalizeRunPublicationJob: a published PR has nothing open to answer
+    # unless something asked a question, but a completed run needs one too,
+    # to give a reviewer's "this isn't actually done" PR comment the same
+    # mechanism a chaperone-raised block already has. Idempotent: a retried
+    # finalize call must not pile up duplicate review questions.
+    def open_review_question!(run)
+      return if run.open_blocking_question?
+
+      UserQuestion.create!(
+        run_id: run.run_id, asked_by: "orchestrator", scope: "pull_request_review", priority: "blocking",
+        text: "This run's work is ready for review. Reply on this PR to continue the run with further " \
+              "instructions, or approve/merge if it's complete."
+      )
+    end
+    private_class_method :open_review_question!
   end
 end

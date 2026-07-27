@@ -142,13 +142,20 @@ class WorkerReconcileJob < ApplicationJob
     # A failed verification attempt is recovered by Rails re-requesting a
     # real verifier (see Orchestrator::VerifierRecovery) -- routing it to
     # chaperone/planner recovery is structurally doomed, since a planner
-    # cannot dispatch verifier-role work. VerifierRecovery publishes its
-    # own phase; returning nil lets the caller tick immediately so the
-    # fresh verifier request dispatches. It can still hand back a
-    # ChaperoneReview (criterion no longer awaiting verification), which
-    # then follows the normal chaperone announcement below.
+    # cannot dispatch verifier-role work. A failed git-publication attempt
+    # is the same problem for the same reason (see GitPublicationRecovery).
+    # Both publish their own phase; returning nil lets the caller tick
+    # immediately so the fresh request dispatches. Either can still hand
+    # back a ChaperoneReview once its own recovery budget is exhausted (or,
+    # for git, once repeated failures cross the normal chaperone threshold),
+    # which then follows the normal chaperone announcement below.
     if Orchestrator::VerifierRecovery.applicable?(attempt)
       outcome = Orchestrator::VerifierRecovery.call(attempt)
+      return nil unless outcome.is_a?(ChaperoneReview)
+
+      review = outcome
+    elsif Orchestrator::GitPublicationRecovery.applicable?(attempt)
+      outcome = Orchestrator::GitPublicationRecovery.call(attempt)
       return nil unless outcome.is_a?(ChaperoneReview)
 
       review = outcome

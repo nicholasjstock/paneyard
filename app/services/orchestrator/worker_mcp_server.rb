@@ -20,8 +20,11 @@ module Orchestrator
           ::McpTools::StopRunCommandTool, ::McpTools::GetRunCommandTool, ::McpTools::ListRunCommandsTool,
           ::McpTools::ReadRunCommandLogTool, ::McpTools::CompleteRunFinalizationTool
         ]
-      when "committer"
-        [ ::McpTools::CommitRunChangesTool, ::McpTools::ListGitChangeRequestsTool ]
+      when "git"
+        [
+          ::McpTools::PingTool, ::McpTools::GetRunContextTool, ::McpTools::WriteWorkflowArtifactTool,
+          ::McpTools::WorkerTurnTool, ::McpTools::FinalizeRunPublicationTool
+        ]
       else
         ordinary_worker_tools
       end
@@ -52,8 +55,7 @@ module Orchestrator
           ::McpTools::RecordProjectSetupTool,
           ::McpTools::RecordProtectedPathsTool,
           ::McpTools::ReportFailedApproachTool,
-          ::McpTools::SubmitAcceptanceVerificationTool,
-          ::McpTools::RequestGitRemovalTool
+          ::McpTools::SubmitAcceptanceVerificationTool
       ]
     end
   end

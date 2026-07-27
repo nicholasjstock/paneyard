@@ -105,7 +105,7 @@ module Orchestrator
         lines << "This is an evidence-gathering task. Do not implement an application fix or change a public contract. Report the confirmed boundary back to the planner."
         lines << "Before worker_turn, write the artifact and pass evidenceOutcome=confirmed or blocked plus evidenceCitations copied verbatim from that artifact. Use blocked when the reproduction did not reach the target boundary."
       end
-      lines << "Git hygiene is deferred work: if you find a stray path, call request_git_removal. Never run Git metadata commands (including git rm, reset, commit, rebase, or index changes); the terminal committer reviews requests and Rails applies its decision."
+      lines << "Git hygiene is deferred work: if you find a stray path, just leave it. Never run Git metadata commands (including git rm, reset, commit, rebase, or index changes); the terminal git worker inspects real git status itself and reconciles it directly at finalize time."
       lines.join(" ")
     end
 
@@ -113,7 +113,7 @@ module Orchestrator
       instruction = step.values_at(:success_check, :scope, :reason, :text).compact.join(" ")
       return unless instruction.match?(/\bgit\s+(?:rm|reset|commit|rebase|amend|update-index|filter-repo)\b/i)
 
-      raise ArgumentError, "Planner steps cannot direct Git metadata work; use request_git_removal and leave the decision to the terminal committer"
+      raise ArgumentError, "Planner steps cannot direct Git metadata work; leave stray paths for the terminal git worker to reconcile"
     end
     private_class_method :reject_direct_git_metadata_work!
 
