@@ -51,6 +51,39 @@ RSpec.describe TickRunJob do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
+  # Regression: publication_status flips to "commit_pending" the moment ANY
+  # finalization role is first queued (queue_finalization_worker sets it
+  # generically, not only once the whole chain reaches the git worker) --
+  # observed live in run-20260727-171200-fffd, where seeder's own dispatch
+  # set commit_pending, and the very next tick jumped straight to the git
+  # worker, skipping reporter/curator/demo entirely. finalize_completed_run
+  # must always re-walk the chain from the top rather than branching on
+  # publication_status.
+  it "still queues the reporter next, not the git worker, when publication_status is already commit_pending from the seeder's own dispatch" do
+    workspace = Workspace.create!(name: "tick-no-skip-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(
+      workspace: workspace, run_id: "tick-no-skip-#{SecureRandom.hex(4)}", task: "Publish changes",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running",
+      worktree_name: "publish-changes-a1b2", publication_status: "commit_pending"
+    )
+    Orchestrator::TickState.write(run_id: run.run_id, phase: "completed", tick_count: 1, last_plan_summary: "Done.", pending_spawn_keys: [], following_steps: [])
+    run.workers.create!(
+      worker_id: SecureRandom.uuid, role: "seeder", nickname: "seeder", reason: "Finalize.", scope: "seed-data.md",
+      status: "stopped", pid: 123_456, command: "codex", args: [], handoff_completed_at: 1.minute.ago,
+      prompt_path: Rails.root.join("tmp/seeder.prompt.txt").to_s, log_path: Rails.root.join("tmp/seeder.log").to_s,
+      last_message_path: Rails.root.join("tmp/seeder.last.txt").to_s, env_path: Rails.root.join("tmp/seeder.env").to_s
+    )
+
+    without_spawning_workers do
+      TickRunJob.new.send(:tick_run, run)
+    end
+
+    expect(run.spawn_requests.find_by(requested_role: "reporter")).to be_present
+    expect(run.spawn_requests.where(requested_role: %w[curator demo git])).to be_empty
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   it "queues a demo worker after seeder, reporter, and curator complete their handoffs, before the git worker" do
     workspace = Workspace.create!(name: "tick-demo-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(

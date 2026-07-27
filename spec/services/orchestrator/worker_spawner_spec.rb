@@ -105,6 +105,42 @@ RSpec.describe Orchestrator::WorkerSpawner do
       )
     end
 
+    # Regression: a linked git worktree's own .git is just a one-line
+    # pointer file -- the real metadata (and the shared objects/refs every
+    # worktree writes into) lives back in the source checkout's .git/,
+    # entirely outside the worktree root_dir a git-managed worker is
+    # sandboxed to. Observed live (run-20260727-171200-fffd): the git
+    # worker could not create .git/index.lock and failed publication
+    # entirely. WorkerSpawner must grant that external .git directory,
+    # not just the worktree itself.
+    it "grants a git-managed worker write access to the source checkout's external .git directory, not just its own worktree" do
+      source_root = Dir.mktmpdir("workflow-worker-spawner-source")
+      worktree_root = Dir.mktmpdir("workflow-worker-spawner-worktree")
+      workspace = Workspace.create!(name: "git-worker-#{SecureRandom.hex(4)}", root_path: source_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Publish the run", target_root: worktree_root,
+        source_root:, launcher_variant: "claude", status: "running", launched_by: "operator",
+        started_at: Time.current, worktree_name: "demo-a1b2", branch_name: "workflow/demo-a1b2"
+      )
+
+      allow(Process).to receive(:spawn).and_return(45_678)
+      allow(Process).to receive(:detach)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "git", nickname: "git", reason: "Publish.", scope: "publish-demo-a1b2.md",
+        prompt: "Commit, rebase, push, and publish.", write_scope: "git_managed", allowed_paths: [ "**/*" ]
+      )
+
+      claude_settings_path = worker.mcp_config_path.sub(/\.mcp\.json\z/, ".claude-settings.json")
+      settings = JSON.parse(File.read(claude_settings_path))
+      external_git_dir = File.join(source_root, ".git")
+      expect(settings.dig("sandbox", "filesystem", "allowWrite")).to include(external_git_dir)
+      expect(settings["permissions"]["allow"]).to include("Edit(#{external_git_dir}/**)", "Write(#{external_git_dir}/**)")
+    ensure
+      FileUtils.remove_entry(source_root) if source_root && Dir.exist?(source_root)
+      FileUtils.remove_entry(worktree_root) if worktree_root && Dir.exist?(worktree_root)
+    end
+
     it "injects the workspace's recorded project setup into every spawned worker's prompt" do
       workspace_root = Dir.mktmpdir("workflow-worker-spawner-memory")
       workspace = Workspace.create!(name: "memory-#{SecureRandom.hex(4)}", root_path: workspace_root)

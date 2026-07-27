@@ -5,15 +5,26 @@ module Orchestrator
 
     WRITE_SCOPES = %w[source_protected tests_only scoped_changes git_managed].freeze
 
-    attr_reader :root_dir, :mode, :write_scope, :allowed_paths, :protected_patterns, :profile_name
+    attr_reader :root_dir, :mode, :write_scope, :allowed_paths, :protected_patterns, :profile_name,
+      :extra_writable_absolute_paths
 
-    def initialize(root_dir:, mode:, write_scope:, allowed_paths:, protected_patterns: [], profile_name: "worker")
+    # extra_writable_absolute_paths grants specific paths OUTSIDE root_dir --
+    # the only legitimate use is the "git_managed" role's source checkout's
+    # .git directory (see WorkerSpawner). A linked git worktree's own .git is
+    # just a one-line pointer file; the real metadata it writes to (index,
+    # HEAD, and -- critically -- the shared objects/refs every worktree
+    # writes into) lives back in the source checkout's .git/, entirely
+    # outside root_dir. Every other write_scope stays exactly as confined to
+    # root_dir as before; this is the one deliberate, narrow exception.
+    def initialize(root_dir:, mode:, write_scope:, allowed_paths:, protected_patterns: [], profile_name: "worker",
+      extra_writable_absolute_paths: [])
       @root_dir = Pathname(root_dir).expand_path
       @mode = mode.to_s
       @write_scope = write_scope.to_s
       @allowed_paths = Array(allowed_paths).map { |path| normalize_path(path) }.uniq
       @protected_patterns = Array(protected_patterns).map { |path| normalize_path(path) }.uniq
       @profile_name = profile_name.to_s.gsub(/[^a-zA-Z0-9_-]/, "-")
+      @extra_writable_absolute_paths = Array(extra_writable_absolute_paths).map { |path| Pathname(path).expand_path }.uniq
       validate!
     end
 
@@ -52,6 +63,10 @@ module Orchestrator
         allow_rules << "Edit(#{claude_absolute_path(path)}#{suffix})"
         allow_rules << "Write(#{claude_absolute_path(path)}#{suffix})"
       end
+      extra_writable_absolute_paths.each do |path|
+        allow_rules << "Edit(#{claude_absolute_path(path)}/**)"
+        allow_rules << "Write(#{claude_absolute_path(path)}/**)"
+      end
 
       {
         "permissions" => { "allow" => allow_rules },
@@ -59,7 +74,9 @@ module Orchestrator
           "enabled" => true,
           "failIfUnavailable" => true,
           "allowUnsandboxedCommands" => false,
-          "filesystem" => { "allowWrite" => (allowed_absolute_paths + scratch_writable_absolute_paths).map(&:to_s) }
+          "filesystem" => {
+            "allowWrite" => (allowed_absolute_paths + scratch_writable_absolute_paths + extra_writable_absolute_paths).map(&:to_s)
+          }
         }
       }
     end
@@ -89,7 +106,7 @@ module Orchestrator
         ":workspace_roots" => { "." => "read" }
           .merge(allowed_write_roots.index_with { "write" })
           .merge(scratch_writable_relative_paths.index_with { "write" })
-      }
+      }.merge(extra_writable_absolute_paths.map(&:to_s).index_with { "write" })
 
       [
         toml_assignment("default_permissions", profile_name),
@@ -191,6 +208,9 @@ module Orchestrator
       end
       if write_scope == "source_protected" && allowed_paths.any?
         raise ArgumentError, "source_protected workers cannot authorize repository paths"
+      end
+      if extra_writable_absolute_paths.any? && write_scope != "git_managed"
+        raise ArgumentError, "Only git_managed workers may declare extra_writable_absolute_paths"
       end
 
       real_root = root_dir.realpath

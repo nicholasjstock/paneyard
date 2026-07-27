@@ -107,6 +107,38 @@ RSpec.describe Orchestrator::WorkerExecutionPolicy do
     FileUtils.remove_entry(root) if root && Dir.exist?(root)
   end
 
+  it "grants write access to an external .git directory for a git_managed worker" do
+    root = Dir.mktmpdir("git-managed-worktree")
+    external_git_dir = Dir.mktmpdir("source-checkout-git")
+
+    policy = described_class.new(
+      root_dir: root, mode: "implementation", write_scope: "git_managed", allowed_paths: [ "**/*" ],
+      extra_writable_absolute_paths: [ external_git_dir ]
+    )
+
+    expect(policy.claude_settings.dig("sandbox", "filesystem", "allowWrite")).to include(external_git_dir)
+    expect(policy.claude_settings["permissions"]["allow"]).to include("Edit(#{external_git_dir}/**)", "Write(#{external_git_dir}/**)")
+    expect(policy.codex_config_overrides.join(" ")).to include(%("#{external_git_dir}"="write"))
+  ensure
+    FileUtils.remove_entry(root) if root && Dir.exist?(root)
+    FileUtils.remove_entry(external_git_dir) if external_git_dir && Dir.exist?(external_git_dir)
+  end
+
+  it "rejects extra_writable_absolute_paths for any write_scope other than git_managed" do
+    root = Dir.mktmpdir("non-git-managed")
+    external_dir = Dir.mktmpdir("should-not-be-grantable")
+
+    expect do
+      described_class.new(
+        root_dir: root, mode: "implementation", write_scope: "scoped_changes", allowed_paths: [ "app/**/*.rb" ],
+        extra_writable_absolute_paths: [ external_dir ]
+      )
+    end.to raise_error(ArgumentError, /Only git_managed workers may declare extra_writable_absolute_paths/)
+  ensure
+    FileUtils.remove_entry(root) if root && Dir.exist?(root)
+    FileUtils.remove_entry(external_dir) if external_dir && Dir.exist?(external_dir)
+  end
+
   it "requires allowed paths for a git_managed worker" do
     root = Dir.mktmpdir("git-managed-policy")
 

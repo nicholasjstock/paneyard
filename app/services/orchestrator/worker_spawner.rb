@@ -62,6 +62,7 @@ module Orchestrator
       policy = WorkerExecutionPolicy.new(
         root_dir:, mode:, write_scope: write_scope.presence || "source_protected", allowed_paths:,
         protected_patterns: run.workspace.protected_write_patterns,
+        extra_writable_absolute_paths: git_managed_extra_writable_paths(run:, write_scope:),
         profile_name: "worker-#{worker_id.delete('-')}"
       ) unless mcp_override
 
@@ -281,6 +282,24 @@ module Orchestrator
 
     def worker_file_basename(run_id:, nickname:)
       "#{ArtifactStore.sanitize_run_id(run_id)}-#{nickname}"
+    end
+
+    # A linked git worktree's own .git is just a one-line pointer file --
+    # the real metadata it writes to (HEAD, index) plus the shared objects/
+    # refs every worktree writes into (confirmed empirically: git add/commit
+    # touches .git/objects/** and .git/refs/heads/<branch>; push/fetch also
+    # touch .git/refs/remotes/**) all live back in the source checkout's
+    # .git/, entirely outside this worker's root_dir. Granting the whole
+    # .git/ directory (never the source checkout's actual working-tree
+    # files, which live in source_root itself, outside .git/) is simpler and
+    # more robust than enumerating every internal git path that might need
+    # writing, and matches git's own worktree safety model: concurrent
+    # worktrees already share one .git/ database safely by design.
+    def git_managed_extra_writable_paths(run:, write_scope:)
+      return [] unless write_scope == "git_managed"
+      return [] if run.source_root.blank?
+
+      [ File.join(run.source_root, ".git") ]
     end
 
     # Print mode normally writes only a final response. Stream JSON with
