@@ -19,6 +19,8 @@ class Run < ApplicationRecord
   LAUNCHER_VARIANTS = %w[claude codex].freeze
   STATUSES = %w[launching running stopping stopped completed failed].freeze
   NON_TERMINAL_STATUSES = %w[launching running stopping].freeze
+  FINALIZATION_ROLES = %w[seeder reporter curator demo committer].freeze
+  SKIPPABLE_ROLES = %w[worker infrastructure verifier reporter curator seeder demo committer project_init].freeze
 
   belongs_to :workspace
 
@@ -42,6 +44,7 @@ class Run < ApplicationRecord
   validates :target_root, presence: true
   validates :launcher_variant, inclusion: { in: LAUNCHER_VARIANTS }
   validates :status, inclusion: { in: STATUSES }
+  validate :validate_persona_config, if: :persona_config?
 
   scope :active, -> { where(status: NON_TERMINAL_STATUSES) }
 
@@ -159,7 +162,46 @@ class Run < ApplicationRecord
     { runId: run_id, phase: phase, owner: phase_owner, summary: phase_summary, at: phase_updated_at&.iso8601(3) }
   end
 
+  def persona_config
+    (self[:persona_config] || {}).symbolize_keys
+  end
+
+  def finalization_roles
+    if persona_config.key?(:finalization_roles)
+      Array(persona_config[:finalization_roles])
+    else
+      FINALIZATION_ROLES
+    end
+  end
+
+  def skip_roles
+    if persona_config.key?(:skip_roles)
+      Array(persona_config[:skip_roles])
+    else
+      []
+    end
+  end
+
   private
+
+  def validate_persona_config
+    config = persona_config
+
+    if config[:finalization_roles].present?
+      invalid_roles = config[:finalization_roles] - FINALIZATION_ROLES
+      if invalid_roles.any?
+        errors.add(:persona_config, "finalization_roles contains invalid roles: #{invalid_roles.join(', ')}")
+      end
+    end
+
+    if config[:skip_roles].present?
+      skip_roles_arr = Array(config[:skip_roles])
+      invalid_skips = skip_roles_arr - SKIPPABLE_ROLES
+      if invalid_skips.any?
+        errors.add(:persona_config, "skip_roles contains invalid roles: #{invalid_skips.join(', ')}")
+      end
+    end
+  end
 
   def broadcast_workspace_refresh
     Turbo::StreamsChannel.broadcast_refresh_to("run_#{run_id}")

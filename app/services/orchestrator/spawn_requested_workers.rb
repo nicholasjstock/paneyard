@@ -132,11 +132,14 @@ module Orchestrator
     private_class_method :call_locked
 
     def collect_spawn_requests(run_id:, active_workers:)
+      run = Run.find_by(run_id: run_id)
+      skip_roles = run&.skip_roles || []
       active_keys = active_workers.map { |worker| [ worker.role, worker.scope ] }.to_set
       latest_by_key = {}
 
       SpawnRequest.where(run_id: run_id, status: "open").order(:created_at, :id).each do |request|
         next unless request.requested_role.present?
+        next if skip_roles.include?(request.requested_role)
 
         key = [ request.requested_role, request.scope ]
         next if active_keys.include?(key)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_26_171354) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_27_081644) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -240,6 +240,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_171354) do
     t.string "launched_by"
     t.string "launcher_variant", default: "claude", null: false
     t.string "log_path"
+    t.json "persona_config", default: {}, null: false
     t.string "phase"
     t.string "phase_owner"
     t.text "phase_summary"

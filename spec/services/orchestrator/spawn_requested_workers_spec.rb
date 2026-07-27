@@ -359,4 +359,63 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
   ensure
     FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
   end
+
+  describe "persona configuration" do
+    it "does not spawn workers for skipped roles, leaving them open for other ticks" do
+      workspace = Workspace.create!(name: "skip-roles-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "skip-roles-#{SecureRandom.hex(4)}", task: "Test skip roles",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        persona_config: { skip_roles: %w[verifier curator] }
+      )
+
+      verifier_request = run.spawn_requests.create!(
+        asked_by: "planner", scope: "verify.md", text: "Verify something.",
+        requested_role: "verifier", priority: "blocking", model_tier: "small"
+      )
+      worker_request = run.spawn_requests.create!(
+        asked_by: "planner", scope: "worker.md", text: "Do work.",
+        requested_role: "worker", priority: "blocking"
+      )
+
+      spawned_role = nil
+      expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+        spawned_role = kwargs[:role]
+        instance_double(Worker, worker_id: kwargs[:worker_id])
+      end
+
+      spawned = Orchestrator::SpawnRequestedWorkers.call(run:)
+
+      expect(spawned).not_to be_empty
+      assert_equal "worker", spawned_role
+      assert_equal "open", verifier_request.reload.status
+      assert_equal "fulfilled", worker_request.reload.status
+    end
+
+    it "allows all roles when skip_roles is empty" do
+      workspace = Workspace.create!(name: "no-skip-roles-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "no-skip-roles-#{SecureRandom.hex(4)}", task: "Test no skip roles",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        persona_config: {}
+      )
+
+      verifier_request = run.spawn_requests.create!(
+        asked_by: "planner", scope: "verify.md", text: "Verify something.",
+        requested_role: "verifier", priority: "blocking", model_tier: "small"
+      )
+
+      spawned_role = nil
+      expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+        spawned_role = kwargs[:role]
+        instance_double(Worker, worker_id: kwargs[:worker_id])
+      end
+
+      spawned = Orchestrator::SpawnRequestedWorkers.call(run:)
+
+      expect(spawned).not_to be_empty
+      assert_equal "verifier", spawned_role
+      assert_equal "fulfilled", verifier_request.reload.status
+    end
+  end
 end

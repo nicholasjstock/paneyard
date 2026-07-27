@@ -50,16 +50,42 @@ class TickRunJob < ApplicationJob
       if run.publication_status.in?(%w[committed no_changes])
         FinalizeRunPublicationJob.perform_later(run.id)
       else
-        queue_finalization_worker(run, "seeder", "seed-data.md", "Inspect git status/diff, get_run_context, and this workspace's own seed/fixture convention (a seed script, fixture loader, factory -- do not invent a new mechanism). If the run added or altered a human-visible state, add or update the seed/fixture data needed to see it outside production; never depend on a real model call for that data. Write seed-data.md stating what you added or that nothing was needed, then call complete_run_finalization with a clickPath describing the concrete verification steps a reviewer should follow, naming any seeded record. Do not select review assets, write a run summary, start a demo server, run tests, or commit.", write_scope: "scoped_changes", execution_mode: "implementation") ||
-          queue_finalization_worker(run, "reporter", "run-summary.md", "Audit the persisted run with get_run_audit and write the reviewer-facing PR audit to run-summary.md. Do not run tests, select files, commit, or publish.") ||
-          queue_finalization_worker(run, "curator", "review-assets.md", "Inspect real local deliverables only. Select useful reviewer files with select_review_assets, or write that no review assets were selected. Do not audit the run, run tests, commit, or publish.") ||
-          queue_finalization_worker(run, "demo", "demo-notes.md", "Start (or reuse) this workspace's dev/demo server with start_run_command if one isn't already running and verify it is actually serving, then call complete_run_finalization. Do not edit source, run tests, select review assets, or commit.") ||
-          queue_committer(run)
+        queue_finalization_workers(run) || queue_committer(run)
         Orchestrator::SpawnRequestedWorkers.call(run: run)
       end
     else
       run.update!(status: "completed", stopped_at: run.stopped_at || Time.current) unless run.status == "completed"
     end
+  end
+
+  def queue_finalization_workers(run)
+    finalization_prompts = {
+      "seeder" => "Inspect git status/diff, get_run_context, and this workspace's own seed/fixture convention (a seed script, fixture loader, factory -- do not invent a new mechanism). If the run added or altered a human-visible state, add or update the seed/fixture data needed to see it outside production; never depend on a real model call for that data. Write seed-data.md stating what you added or that nothing was needed, then call complete_run_finalization with a clickPath describing the concrete verification steps a reviewer should follow, naming any seeded record. Do not select review assets, write a run summary, start a demo server, run tests, or commit.",
+      "reporter" => "Audit the persisted run with get_run_audit and write the reviewer-facing PR audit to run-summary.md. Do not run tests, select files, commit, or publish.",
+      "curator" => "Inspect real local deliverables only. Select useful reviewer files with select_review_assets, or write that no review assets were selected. Do not audit the run, run tests, commit, or publish.",
+      "demo" => "Start (or reuse) this workspace's dev/demo server with start_run_command if one isn't already running and verify it is actually serving, then call complete_run_finalization. Do not edit source, run tests, select review assets, or commit."
+    }
+
+    finalization_scopes = {
+      "seeder" => "seed-data.md",
+      "reporter" => "run-summary.md",
+      "curator" => "review-assets.md",
+      "demo" => "demo-notes.md"
+    }
+
+    finalization_modes = {
+      "seeder" => { write_scope: "scoped_changes", execution_mode: "implementation" }
+    }
+
+    run.finalization_roles.each do |role|
+      write_scope = finalization_modes.dig(role, :write_scope) || "source_protected"
+      execution_mode = finalization_modes.dig(role, :execution_mode) || "diagnosis"
+      prompt = finalization_prompts[role]
+      scope = finalization_scopes[role]
+      return true if queue_finalization_worker(run, role, scope, prompt, write_scope: write_scope, execution_mode: execution_mode)
+    end
+
+    false
   end
 
   def queue_committer(run)

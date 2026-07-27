@@ -59,4 +59,70 @@ RSpec.describe Run, type: :model do
   ensure
     Orchestrator::RunCommandRunner.stop(command: other_command, reason: "test cleanup") if other_command
   end
+
+  describe "persona configuration" do
+    let(:workspace) { Workspace.create!(name: "persona-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir("workflow-persona")) }
+
+    it "defaults to all finalization roles when no persona_config is set" do
+      run = Run.create!(
+        run_id: "persona-default-#{SecureRandom.hex(4)}", task: "Test persona defaults", workspace:,
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+      )
+
+      expect(run.finalization_roles).to eq(%w[seeder reporter curator demo committer])
+      expect(run.skip_roles).to eq([])
+    end
+
+    it "respects finalization_roles configuration" do
+      run = Run.create!(
+        run_id: "persona-finalization-#{SecureRandom.hex(4)}", task: "Test finalization override", workspace:,
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        persona_config: { finalization_roles: %w[seeder reporter] }
+      )
+
+      expect(run.finalization_roles).to eq(%w[seeder reporter])
+    end
+
+    it "respects skip_roles configuration" do
+      run = Run.create!(
+        run_id: "persona-skip-#{SecureRandom.hex(4)}", task: "Test skip roles", workspace:,
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        persona_config: { skip_roles: %w[curator demo] }
+      )
+
+      expect(run.skip_roles).to eq(%w[curator demo])
+    end
+
+    it "validates finalization_roles contains only valid roles" do
+      run = Run.new(
+        run_id: "persona-invalid-finalization-#{SecureRandom.hex(4)}", task: "Test validation", workspace:,
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        persona_config: { finalization_roles: %w[seeder invalid_role] }
+      )
+
+      expect(run.valid?).to be(false)
+      expect(run.errors[:persona_config]).to include(/contains invalid roles/)
+    end
+
+    it "validates skip_roles contains only valid roles" do
+      run = Run.new(
+        run_id: "persona-invalid-skip-#{SecureRandom.hex(4)}", task: "Test validation", workspace:,
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        persona_config: { skip_roles: %w[worker unknown_role] }
+      )
+
+      expect(run.valid?).to be(false)
+      expect(run.errors[:persona_config]).to include(/contains invalid roles/)
+    end
+
+    it "allows empty finalization_roles to skip all finalization personas" do
+      run = Run.create!(
+        run_id: "persona-no-finalization-#{SecureRandom.hex(4)}", task: "Skip finalization", workspace:,
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        persona_config: { finalization_roles: [] }
+      )
+
+      expect(run.finalization_roles).to eq([])
+    end
+  end
 end
