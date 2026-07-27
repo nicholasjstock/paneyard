@@ -14,12 +14,12 @@ module Telegram
       call("sendMessage", chat_id:, text:, reply_markup:)
     end
 
-    def edit_message_text(chat_id:, message_id:, text:)
-      call("editMessageText", chat_id:, message_id:, text:)
+    def send_rich_message(chat_id:, markdown:)
+      call("sendRichMessage", chat_id:, rich_message: { markdown: })
     end
 
-    def send_chat_action(chat_id:, action:)
-      call("sendChatAction", chat_id:, action:)
+    def send_rich_message_draft(chat_id:, draft_id:, html:)
+      call("sendRichMessageDraft", chat_id:, draft_id:, rich_message: { html: })
     end
 
     def answer_callback_query(callback_query_id:)

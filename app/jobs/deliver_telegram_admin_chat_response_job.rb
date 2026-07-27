@@ -22,11 +22,6 @@ class DeliverTelegramAdminChatResponseJob < ApplicationJob
     client = Telegram::Client.new
     chat_id = message.telegram_conversation.telegram_chat_id
 
-    if message.telegram_message_id
-      client.edit_message_text(chat_id:, message_id: message.telegram_message_id, text: chunks.shift)
-      chunks.each { |chunk| client.send_message(chat_id:, text: chunk) }
-    else
-      chunks.each { |chunk| client.send_message(chat_id:, text: chunk) }
-    end
+    chunks.each { |chunk| client.send_rich_message(chat_id:, markdown: chunk) }
   end
 end

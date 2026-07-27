@@ -31,10 +31,16 @@ module Telegram
 
       chat = conversation.workspace.workspace_admin_chat || conversation.workspace.create_workspace_admin_chat!
       assistant_message = Orchestrator::WorkspaceAdminChatDriver::Runner.start_turn!(chat:, content: text, telegram_conversation: conversation)
-      placeholder = "Working in #{conversation.workspace.name}…"
-      telegram_message = @client.send_message(chat_id: conversation.telegram_chat_id, text: placeholder)
-      assistant_message.update!(telegram_message_id: telegram_message.fetch("message_id"), telegram_synced_content: placeholder)
-      @client.send_chat_action(chat_id: conversation.telegram_chat_id, action: "typing")
+      start_live_response(assistant_message, conversation)
+    end
+
+    def start_live_response(assistant_message, conversation)
+      draft_id = SecureRandom.random_number(1..(2**63 - 1))
+      @client.send_rich_message_draft(
+        chat_id: conversation.telegram_chat_id, draft_id:,
+        html: "<tg-thinking>Working in #{ERB::Util.html_escape(conversation.workspace.name)}…</tg-thinking>"
+      )
+      assistant_message.update!(telegram_draft_id: draft_id)
     end
 
     def handle_callback(callback)
