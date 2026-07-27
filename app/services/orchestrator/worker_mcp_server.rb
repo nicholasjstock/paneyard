@@ -9,6 +9,11 @@ module Orchestrator
         [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::GetRunAuditTool, ::McpTools::CompleteRunFinalizationTool ]
       when "curator"
         [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::SelectReviewAssetsTool, ::McpTools::CompleteRunFinalizationTool ]
+      when "seeder"
+        [
+          ::McpTools::PingTool, ::McpTools::GetRunContextTool, ::McpTools::WriteScopedFileTool,
+          ::McpTools::WriteWorkflowArtifactTool, ::McpTools::CompleteRunFinalizationTool
+        ]
       when "demo"
         [
           ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::StartRunCommandTool,

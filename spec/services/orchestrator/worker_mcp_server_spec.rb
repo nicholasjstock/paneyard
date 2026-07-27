@@ -16,10 +16,12 @@ RSpec.describe Orchestrator::WorkerMcpServer do
     reporter = run.workers.create!(worker_id: SecureRandom.uuid, role: "reporter", nickname: "reporter", reason: "Report.", scope: "run-summary.md", status: "running", pid: 123_456, command: "codex", args: [], prompt_path: "prompt", log_path: "log", last_message_path: "last", env_path: "env")
     curator = run.workers.create!(worker_id: SecureRandom.uuid, role: "curator", nickname: "curator", reason: "Curate.", scope: "review-assets.md", status: "running", pid: 123_457, command: "codex", args: [], prompt_path: "prompt", log_path: "log", last_message_path: "last", env_path: "env")
     demo = run.workers.create!(worker_id: SecureRandom.uuid, role: "demo", nickname: "demo", reason: "Demo.", scope: "demo-notes.md", status: "running", pid: 123_458, command: "codex", args: [], prompt_path: "prompt", log_path: "log", last_message_path: "last", env_path: "env")
+    seeder = run.workers.create!(worker_id: SecureRandom.uuid, role: "seeder", nickname: "seeder", reason: "Seed.", scope: "seed-data.md", status: "running", pid: 123_459, command: "codex", args: [], prompt_path: "prompt", log_path: "log", last_message_path: "last", env_path: "env")
 
     reporter_tools = described_class.build(server_context: { worker_id: reporter.worker_id }).tools.keys
     curator_tools = described_class.build(server_context: { worker_id: curator.worker_id }).tools.keys
     demo_tools = described_class.build(server_context: { worker_id: demo.worker_id }).tools.keys
+    seeder_tools = described_class.build(server_context: { worker_id: seeder.worker_id }).tools.keys
 
     expect(reporter_tools).to include("get_run_audit", "complete_run_finalization")
     expect(reporter_tools).not_to include("select_review_assets", "commit_run_changes", "worker_turn", "start_run_command")
@@ -27,6 +29,8 @@ RSpec.describe Orchestrator::WorkerMcpServer do
     expect(curator_tools).not_to include("get_run_audit", "commit_run_changes", "worker_turn", "start_run_command")
     expect(demo_tools).to include("start_run_command", "stop_run_command", "complete_run_finalization")
     expect(demo_tools).not_to include("get_run_audit", "select_review_assets", "commit_run_changes", "worker_turn")
+    expect(seeder_tools).to include("write_scoped_file", "get_run_context", "complete_run_finalization")
+    expect(seeder_tools).not_to include("get_run_audit", "select_review_assets", "commit_run_changes", "worker_turn", "start_run_command")
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end

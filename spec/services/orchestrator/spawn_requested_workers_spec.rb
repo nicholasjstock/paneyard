@@ -113,6 +113,36 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
   end
 
+  it "grants the complete project-init-protected source surface to a finalization seeder" do
+    project_root = Dir.mktmpdir
+    source_root = File.join(project_root, "main")
+    workspace = Workspace.create!(
+      name: "spawn-seeder-roots-#{SecureRandom.hex(4)}", root_path: project_root,
+      protected_path_patterns: [ "app/**", "db/seeds.rb" ]
+    )
+    run = workspace.runs.create!(
+      run_id: "spawn-seeder-roots-#{SecureRandom.hex(4)}", task: "Seed demo data", target_root: source_root,
+      launcher_variant: "claude", status: "running"
+    )
+    run.spawn_requests.create!(
+      asked_by: "orchestrator", scope: "seed-data.md", text: "Seed the workspace.", requested_role: "seeder", priority: "blocking",
+      execution_mode: "implementation", write_scope: "scoped_changes"
+    )
+
+    spawned = nil
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+      spawned = kwargs
+      instance_double(Worker, worker_id: kwargs[:worker_id])
+    end
+
+    Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    expect(spawned[:role]).to eq("seeder")
+    expect(spawned[:allowed_paths]).to contain_exactly("app/**", "db/seeds.rb")
+  ensure
+    FileUtils.remove_entry(project_root) if project_root && Dir.exist?(project_root)
+  end
+
   it "grants the protected source surface to scoped infrastructure workers" do
     project_root = Dir.mktmpdir
     source_root = File.join(project_root, "main")

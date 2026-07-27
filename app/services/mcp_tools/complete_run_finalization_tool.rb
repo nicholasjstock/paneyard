@@ -1,14 +1,14 @@
 module McpTools
   class CompleteRunFinalizationTool < MCP::Tool
     tool_name "complete_run_finalization"
-    description "Mark the reporter, curator, or demo finalization stage complete after its assigned artifact has been written. " \
+    description "Mark the reporter, curator, seeder, or demo finalization stage complete after its assigned artifact has been written. " \
       "The demo role may pass clickPath (starting page, what to click) to report how to see the change; this is " \
       "persisted on the worker row the same way worker_turn's clickPath is."
     input_schema(properties: { runId: { type: "string" }, clickPath: { type: "string" } }, required: %w[runId])
 
     def self.call(runId:, server_context:, clickPath: nil)
       worker = WorkerAuthorization.worker!(server_context:, run_id: runId)
-      raise ArgumentError, "complete_run_finalization requires an authenticated reporter, curator, or demo worker" unless worker.role.in?(%w[reporter curator demo])
+      raise ArgumentError, "complete_run_finalization requires an authenticated reporter, curator, seeder, or demo worker" unless worker.role.in?(%w[reporter curator seeder demo])
 
       run = Run.find_by!(run_id: runId)
       artifact = Orchestrator::ArtifactStore.read_window(run.target_root, runId, worker.scope, offset: 0, limit: 1)

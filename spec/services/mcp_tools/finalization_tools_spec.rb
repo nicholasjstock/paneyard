@@ -48,12 +48,27 @@ RSpec.describe "terminal finalization tools" do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
-  it "rejects complete_run_finalization from a role outside reporter, curator, or demo" do
+  it "rejects complete_run_finalization from a role outside reporter, curator, seeder, or demo" do
     workspace, run, committer = finalization_worker("committer", "commit-worktree.md")
 
     response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: committer.worker_id })
 
-    expect(tool_payload(response).fetch("message")).to include("reporter, curator, or demo")
+    expect(tool_payload(response).fetch("message")).to include("reporter, curator, seeder, or demo")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
+  it "lets a seeder complete only after writing its assigned artifact" do
+    workspace, run, seeder = finalization_worker("seeder", "seed-data.md")
+
+    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: seeder.worker_id })
+    expect(tool_payload(response).fetch("message")).to include("Write seed-data.md")
+
+    Orchestrator::ArtifactStore.write(run.target_root, run.run_id, seeder.scope, "Seeded one demo record.")
+    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: seeder.worker_id })
+
+    expect(tool_payload(response).fetch("outcome")).to eq("completed")
+    expect(seeder.reload.handoff_completed_at).to be_present
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end

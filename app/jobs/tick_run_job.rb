@@ -50,9 +50,10 @@ class TickRunJob < ApplicationJob
       if run.publication_status.in?(%w[committed no_changes])
         FinalizeRunPublicationJob.perform_later(run.id)
       else
-        queue_finalization_worker(run, "reporter", "run-summary.md", "Audit the persisted run with get_run_audit and write the reviewer-facing PR audit to run-summary.md. Do not run tests, select files, commit, or publish.") ||
+        queue_finalization_worker(run, "seeder", "seed-data.md", "Inspect git status/diff, get_run_context, and this workspace's own seed/fixture convention (a seed script, fixture loader, factory -- do not invent a new mechanism). If the run added or altered a human-visible state, add or update the seed/fixture data needed to see it outside production; never depend on a real model call for that data. Write seed-data.md stating what you added or that nothing was needed, then call complete_run_finalization with a clickPath describing the concrete verification steps a reviewer should follow, naming any seeded record. Do not select review assets, write a run summary, start a demo server, run tests, or commit.", write_scope: "scoped_changes", execution_mode: "implementation") ||
+          queue_finalization_worker(run, "reporter", "run-summary.md", "Audit the persisted run with get_run_audit and write the reviewer-facing PR audit to run-summary.md. Do not run tests, select files, commit, or publish.") ||
           queue_finalization_worker(run, "curator", "review-assets.md", "Inspect real local deliverables only. Select useful reviewer files with select_review_assets, or write that no review assets were selected. Do not audit the run, run tests, commit, or publish.") ||
-          queue_finalization_worker(run, "demo", "demo-notes.md", "Start (or reuse) this workspace's dev/demo server with start_run_command if one isn't already running, verify it is actually serving, then call complete_run_finalization with a clickPath describing how to see the change. Do not edit source, run tests, select review assets, or commit.") ||
+          queue_finalization_worker(run, "demo", "demo-notes.md", "Start (or reuse) this workspace's dev/demo server with start_run_command if one isn't already running and verify it is actually serving, then call complete_run_finalization. Do not edit source, run tests, select review assets, or commit.") ||
           queue_committer(run)
         Orchestrator::SpawnRequestedWorkers.call(run: run)
       end
@@ -101,12 +102,12 @@ class TickRunJob < ApplicationJob
     end
   end
 
-  def queue_finalization_worker(run, role, scope, text)
+  def queue_finalization_worker(run, role, scope, text, write_scope: "source_protected", execution_mode: "diagnosis")
     return true if Worker.active.exists?(run_id: run.run_id, role: role) || SpawnRequest.where(run_id: run.run_id, requested_role: role, status: "open").exists?
     return false if Worker.where(run_id: run.run_id, role: role).where.not(handoff_completed_at: nil).exists?
 
     run.update!(publication_status: "commit_pending", publication_error: nil)
-    SpawnRequest.create!(run_id: run.run_id, asked_by: "orchestrator", requested_role: role, priority: "blocking", scope:, execution_mode: "diagnosis", write_scope: "source_protected", text:)
+    SpawnRequest.create!(run_id: run.run_id, asked_by: "orchestrator", requested_role: role, priority: "blocking", scope:, execution_mode:, write_scope:, text:)
     run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "#{role.humanize} is finalizing the run.")
     true
   end

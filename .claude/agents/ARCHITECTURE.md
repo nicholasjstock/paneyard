@@ -25,7 +25,8 @@ Rails owns orchestration state, planning, retries, and process dispatch (see [AG
  infrastructure/     structured output       under one lineage)
  project_init/       only -- no OS
  reporter/curator/   process spawned)
- demo/committer)
+ seeder/demo/
+ committer)
 ```
 
 Execution is strictly sequential: `Orchestrator::SpawnRequestedWorkers.call_locked` (`app/services/orchestrator/spawn_requested_workers.rb`) refuses to spawn anything while a worker is already `running` for the run, or while a `PlannerDecision` is `queued`/`running`, or (except for its own reviewer) while a `ChaperoneReview` is open.
@@ -67,22 +68,24 @@ Repeated unsuccessful attempts under one stable `lineageKey` trigger a **chapero
 
 ## Finalization pipeline
 
-Once a run reaches `phase: "completed"`, `TickRunJob#finalize_completed_run` queues four terminal roles strictly in sequence, each with its own narrow MCP tool slice (`Orchestrator::WorkerMcpServer`) and its own role check inside the tools it's allowed to call:
+Once a run reaches `phase: "completed"`, `TickRunJob#finalize_completed_run` queues five terminal roles strictly in sequence, each with its own narrow MCP tool slice (`Orchestrator::WorkerMcpServer`) and its own role check inside the tools it's allowed to call:
 
 ```
 run completed
+  → seeder     (write_scoped_file, write seed-data.md,             → complete_run_finalization
+                report clickPath = verification steps)
   → reporter   (get_run_audit, write run-summary.md)               → complete_run_finalization
   → curator    (select_review_assets, write review-assets.md)      → complete_run_finalization
-  → demo       (start_run_command, write demo-notes.md,             → complete_run_finalization
-                report clickPath)
+  → demo       (start_run_command, write demo-notes.md)            → complete_run_finalization
   → committer  (list_git_change_requests, commit_run_changes)       -- terminal, no handoff call
   → Rails pushes the branch, creates a draft evidence release,
     uploads curator's selected assets, opens the PR with the
-    reporter's summary and the demo role's clickPath
+    reporter's summary (which already includes the seeder's
+    verification steps, read back via get_run_audit)
   → approval → Rails deletes the draft release, merges, removes the worktree
 ```
 
-Reporter and curator are read-only and must explicitly call `complete_run_finalization` after writing their assigned artifact; committer only commits and never calls it. Any `run_commands` process the demo role starts (or any other worker leaves running) is stopped automatically once the run reaches a terminal status (`Run#stop_active_run_commands`) — no manual cleanup step is needed.
+Seeder runs first, ahead of reporter and curator, for two reasons: the reporter's audit must be able to describe what was seeded and how to verify it, and the demo role needs the seeded data to already exist. Seeder — not demo — owns the reviewer-facing verification steps (`complete_run_finalization`'s `clickPath` parameter, the same field `worker_turn` also exposes to ordinary workers): it is the only finalization role with both full task context (`get_run_context`) and knowledge of exactly what data now exists, where demo has neither and is purely mechanical (start/reuse the server, confirm it is listening). Reporter, curator, and seeder must explicitly call `complete_run_finalization` after writing their assigned artifact; committer only commits and never calls it. Unlike every other finalization role, seeder is spawned with `write_scope: "scoped_changes"` and the workspace's full `protected_write_patterns` — the same wholesale grant an implementation worker gets — because its entire job is writing real seed/fixture files for the committer to pick up afterward. Any `run_commands` process the demo role starts (or any other worker leaves running) is stopped automatically once the run reaches a terminal status (`Run#stop_active_run_commands`) — no manual cleanup step is needed.
 
 ## Coordination Rules
 
