@@ -15,7 +15,7 @@ module Orchestrator
       # Creates the user/assistant message pair and enqueues the turn job
       # inside one lock+transaction, so two racing requests for the same chat
       # can't both observe active_turn_id blank and both start a turn.
-      def start_turn!(chat:, content:)
+      def start_turn!(chat:, content:, telegram_conversation: nil)
         raise ArgumentError, "content is required" if content.blank?
 
         turn_id = SecureRandom.uuid
@@ -27,7 +27,7 @@ module Orchestrator
 
           chat.update!(active_turn_id: turn_id, status: "running", last_error: nil)
           chat.messages.create!(role: "user", provider:, turn_id:, status: "completed", content:)
-          assistant_message = chat.messages.create!(role: "assistant", provider:, turn_id:, status: "running")
+          assistant_message = chat.messages.create!(role: "assistant", provider:, turn_id:, status: "running", telegram_conversation:)
         end
 
         WorkspaceAdminChatTurnJob.perform_later(assistant_message.id)
@@ -69,10 +69,12 @@ module Orchestrator
 
         assistant_message.update!(status: result[:cancelled] ? "cancelled" : (result[:error] ? "failed" : "completed"))
         chat.update!(status: result[:error] ? "failed" : "idle", last_error: result[:error] ? assistant_message.error_message : nil)
+        DeliverTelegramAdminChatResponseJob.perform_later(assistant_message.id) if assistant_message.telegram_conversation
       rescue => e
         assistant_message.apply_event!({ type: "error", message: e.message })
         assistant_message.update!(status: "failed")
         chat&.update!(status: "failed", last_error: e.message)
+        DeliverTelegramAdminChatResponseJob.perform_later(assistant_message.id) if assistant_message.telegram_conversation
         raise
       ensure
         chat&.update!(active_turn_id: nil)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_26_171354) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_27_100001) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -324,6 +324,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_171354) do
     t.index ["run_id", "lineage_key"], name: "index_step_attempts_on_run_id_and_lineage_key"
   end
 
+  create_table "telegram_conversations", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "telegram_chat_id", null: false
+    t.string "telegram_user_id", null: false
+    t.datetime "updated_at", null: false
+    t.integer "workspace_id"
+    t.index ["telegram_chat_id"], name: "index_telegram_conversations_on_telegram_chat_id", unique: true
+    t.index ["workspace_id"], name: "index_telegram_conversations_on_workspace_id"
+  end
+
   create_table "terminal_sessions", force: :cascade do |t|
     t.integer "cols"
     t.datetime "created_at", null: false
@@ -425,10 +435,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_171354) do
     t.string "provider"
     t.string "role", null: false
     t.string "status", default: "queued", null: false
+    t.integer "telegram_conversation_id"
+    t.datetime "telegram_delivered_at"
     t.string "turn_id"
     t.datetime "updated_at", null: false
     t.json "usage", default: {}, null: false
     t.integer "workspace_admin_chat_id", null: false
+    t.index ["telegram_conversation_id"], name: "idx_on_telegram_conversation_id_d672f9d019"
     t.index ["turn_id"], name: "index_workspace_admin_chat_messages_on_turn_id"
     t.index ["workspace_admin_chat_id"], name: "index_workspace_admin_chat_messages_on_workspace_admin_chat_id"
   end
@@ -479,7 +492,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_26_171354) do
   add_foreign_key "acceptance_criterion_steps", "acceptance_criteria"
   add_foreign_key "planner_decision_attempts", "planner_decisions"
   add_foreign_key "runs", "workspaces"
+  add_foreign_key "telegram_conversations", "workspaces"
   add_foreign_key "terminal_sessions", "workspaces"
+  add_foreign_key "workspace_admin_chat_messages", "telegram_conversations"
   add_foreign_key "workspace_admin_chat_messages", "workspace_admin_chats"
   add_foreign_key "workspace_admin_chats", "workspaces"
   add_foreign_key "workspace_memory_entries", "workspace_memory_entries", column: "supersedes_id"

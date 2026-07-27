@@ -42,3 +42,25 @@ Before spawning a worker, Rails verifies only that the target directory and sele
 Workers inspect each repository and run its native commands through Codex or Claude. Safeguards are applied at that launcher boundary: artifact-only workers receive read-only repository access, while implementation workers receive write access only to the planner-authorized exact files. Commands run in the foreground so child processes remain in the worker's process group and inherit the same filesystem policy.
 
 Rails never executes worker-supplied shell commands outside that sandbox and never infers a workspace's language, package manager, dependency layout, ports, or health endpoints.
+
+## Telegram admin chat
+
+The optional Telegram bot fronts the existing workspace admin chats. It is restricted to the Telegram user IDs configured below; it does not accept messages from anyone else.
+
+Add these values to Rails credentials (or set equivalent environment variables):
+
+```yaml
+telegram:
+  bot_token: "<BotFather token>"
+  webhook_secret: "<random 1-256 character token using letters, numbers, underscores, or hyphens>"
+  allowed_user_ids:
+    - "<your numeric Telegram user id>"
+```
+
+Deploy the app at a public HTTPS URL, then register its webhook:
+
+```sh
+WEBHOOK_URL=https://your-app.example/integrations/telegram/webhook bin/rails telegram:webhook:set
+```
+
+In Telegram, send `/workspaces`, select a workspace, and then chat normally. `/stop` cancels that workspace's current admin-chat turn. Telegram sends webhook requests with the configured secret header, as documented by the [Telegram Bot API](https://core.telegram.org/bots/api#setwebhook).

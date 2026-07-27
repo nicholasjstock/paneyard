@@ -9,6 +9,7 @@ class WorkspaceAdminChatMessage < ApplicationRecord
   STATUSES = %w[queued running completed failed cancelled].freeze
 
   belongs_to :workspace_admin_chat, touch: true
+  belongs_to :telegram_conversation, optional: true
 
   validates :role, inclusion: { in: ROLES }
   validates :status, inclusion: { in: STATUSES }
