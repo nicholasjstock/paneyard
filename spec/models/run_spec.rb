@@ -59,4 +59,37 @@ RSpec.describe Run, type: :model do
   ensure
     Orchestrator::RunCommandRunner.stop(command: other_command, reason: "test cleanup") if other_command
   end
+
+  describe "#publication_retryable?" do
+    # worktree_name is assigned eagerly at run creation (RunsController#create),
+    # before LaunchRunJob ever attempts GitWorktree.provision! -- a run whose
+    # provisioning failed (e.g. a dirty source checkout) keeps that proposed
+    # name with no real worktree behind it. branch_name is only ever set once
+    # provisioning actually succeeds, so it's the real signal.
+    it "is false for a run whose worktree was never actually provisioned, even though worktree_name is set" do
+      workspace = Workspace.create!(name: "retry-unprovisioned-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "retry-unprovisioned-#{SecureRandom.hex(4)}", task: "Never provisioned", workspace:,
+        target_root: workspace.root_path, launcher_variant: "claude", status: "failed",
+        worktree_name: "never-provisioned-a1b2", branch_name: nil, publication_status: "failed"
+      )
+
+      expect(run.publication_retryable?).to be(false)
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
+
+    it "is true for a genuinely provisioned run that failed publication" do
+      workspace = Workspace.create!(name: "retry-provisioned-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "retry-provisioned-#{SecureRandom.hex(4)}", task: "Provisioned then failed", workspace:,
+        target_root: File.join(workspace.root_path, "worktree"), launcher_variant: "claude", status: "failed",
+        worktree_name: "provisioned-a1b2", branch_name: "workflow/provisioned-a1b2", publication_status: "failed"
+      )
+
+      expect(run.publication_retryable?).to be(true)
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
+  end
 end

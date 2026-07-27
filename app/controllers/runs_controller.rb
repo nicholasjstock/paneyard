@@ -81,6 +81,9 @@ class RunsController < ApplicationController
     @run.update!(status: "running")
     Orchestrator::RunPublication.queue_worker!(@run)
     redirect_to workspace_run_path(current_workspace, @run), notice: "Retrying PR publication…"
+  rescue Orchestrator::RunPublication::Error => error
+    @run.update!(status: "failed", publication_status: "failed", publication_error: error.message)
+    redirect_to workspace_run_path(current_workspace, @run), alert: "Could not retry publication: #{error.message}"
   end
 
   private

@@ -41,6 +41,7 @@ module Orchestrator
     def queue_worker!(run)
       return if SpawnRequest.where(run_id: run.run_id, requested_role: "git", status: "open").exists?
 
+      validated_root!(run)
       run.update!(publication_status: "commit_pending", publication_error: nil)
       SpawnRequest.create!(
         run_id: run.run_id, asked_by: "orchestrator", requested_role: "git", priority: "blocking",

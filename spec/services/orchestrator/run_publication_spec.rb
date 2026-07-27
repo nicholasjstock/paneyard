@@ -32,6 +32,42 @@ RSpec.describe Orchestrator::RunPublication do
     ensure
       FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
     end
+
+    # Regression: run-20260727-165215-d272 failed GitWorktree.provision! (a
+    # dirty source checkout) before ever setting branch_name/a real target_root
+    # -- but worktree_name was already assigned at run creation, so
+    # publication_retryable? still read true. Without this guard,
+    # queue_worker! would spawn the git role's full .git write access
+    # directly against whatever target_root happens to be, which for an
+    # unprovisioned run is the plain source checkout, not an isolated worktree.
+    it "refuses to spawn the git worker against a run whose worktree was never actually provisioned" do
+      workspace = Workspace.create!(name: "publication-unprovisioned-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-unprovisioned-#{SecureRandom.hex(4)}", task: "Never provisioned",
+        target_root: workspace.root_path, launcher_variant: "codex", status: "failed",
+        worktree_name: "never-provisioned-a1b2", branch_name: nil, publication_status: "failed"
+      )
+
+      expect { described_class.queue_worker!(run) }.to raise_error(Orchestrator::RunPublication::Error, /no publication branch/)
+      expect(SpawnRequest.where(run_id: run.run_id, requested_role: "git")).to be_empty
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
+
+    it "refuses to spawn the git worker directly against the source checkout" do
+      workspace = Workspace.create!(name: "publication-same-root-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-same-root-#{SecureRandom.hex(4)}", task: "Target equals source",
+        target_root: workspace.root_path, source_root: workspace.root_path, launcher_variant: "codex",
+        status: "failed", worktree_name: "same-root-a1b2", branch_name: "workflow/same-root-a1b2",
+        publication_status: "failed"
+      )
+
+      expect { described_class.queue_worker!(run) }.to raise_error(Orchestrator::RunPublication::Error, /source checkout/)
+      expect(SpawnRequest.where(run_id: run.run_id, requested_role: "git")).to be_empty
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
   end
 
   describe ".finalize!" do
