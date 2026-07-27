@@ -19,6 +19,27 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_text(workspace.name)
   end
 
+  it "configures personas from the new run form" do
+    workspace = create_workspace(source_checkout: true)
+
+    visit workspace_runs_path(workspace)
+    click_link "Launch task"
+
+    expect(page).to have_css("[data-testid='persona-configuration']")
+    uncheck "Seeder"
+    uncheck "Curator"
+    check "Demo"
+    check "Skip Verifier"
+
+    fill_in "Task", with: "Launch with a persona configuration"
+    perform_enqueued_jobs { click_button "Launch" }
+
+    run = Run.order(:created_at).last
+    expect(run.finalization_roles).to eq(%w[reporter demo committer])
+    expect(run.skip_roles).to include("verifier")
+    expect(page).to have_current_path(workspace_run_path(workspace, run))
+  end
+
   it "opens the detail page from the workspace run list" do
     workspace = create_workspace
     run = create_run(workspace:, suffix: "detail-open", task: "Inspect the orchestrator detail page")

@@ -13,6 +13,29 @@
     <%= form.select :launcher_variant, Run::LAUNCHER_VARIANTS.map { |v| [v, v] } %>
   </div>
 
+  <fieldset class="field" data-testid="persona-configuration">
+    <legend>Personas</legend>
+    <p>Select the finalization personas to run, and any planning personas to skip.</p>
+
+    <div>
+      <strong>Finalization personas</strong>
+      <%= hidden_field_tag "run[persona_config][finalization_roles][]", "" %>
+      <% Run::FINALIZATION_ROLES.each do |role| %>
+        <%= check_box_tag "run[persona_config][finalization_roles][]", role, @run.finalization_roles.include?(role), id: "run_persona_config_finalization_roles_#{role}" %>
+        <%= label_tag "run_persona_config_finalization_roles_#{role}", role.capitalize %>
+      <% end %>
+    </div>
+
+    <div>
+      <strong>Skip during planning</strong>
+      <%= hidden_field_tag "run[persona_config][skip_roles][]", "" %>
+      <% Run::SKIPPABLE_ROLES.each do |role| %>
+        <%= check_box_tag "run[persona_config][skip_roles][]", role, @run.skip_roles.include?(role), id: "run_persona_config_skip_roles_#{role}" %>
+        <%= label_tag "run_persona_config_skip_roles_#{role}", "Skip #{role.capitalize}" %>
+      <% end %>
+    </div>
+  </fieldset>
+
   <%= form.submit "Launch", class: "btn primary" %>
   <%= link_to "Cancel", workspace_runs_path(current_workspace), class: "btn" %>
 <% end %>

@@ -102,7 +102,18 @@ class RunsController < ApplicationController
   end
 
   def run_params
-    params.require(:run).permit(:task, :launcher_variant)
+    permitted = params.require(:run).permit(
+      :task,
+      :launcher_variant,
+      persona_config: { finalization_roles: [], skip_roles: [] }
+    )
+    return permitted unless permitted[:persona_config]
+
+    permitted[:persona_config][:finalization_roles] =
+      Array(permitted[:persona_config][:finalization_roles]).compact_blank
+    permitted[:persona_config][:skip_roles] =
+      Array(permitted[:persona_config][:skip_roles]).compact_blank
+    permitted
   end
 
   def generate_run_id
