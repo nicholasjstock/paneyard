@@ -59,6 +59,32 @@ RSpec.describe Telegram::UpdateProcessor do
     expect(assistant_message).to have_received(:update!).with(telegram_draft_id: kind_of(Integer))
   end
 
+  it "reports the selected workspace's active provider, model, and status" do
+    conversation = TelegramConversation.create!(telegram_chat_id: "123", telegram_user_id: "42", workspace:)
+    chat = workspace.create_workspace_admin_chat!(active_provider: "codex", codex_model: Orchestrator::WorkerSpawner::CODEX_PROMOTED_MODEL)
+
+    described_class.call(message("/status"))
+
+    expect(client).to have_received(:send_message).with(
+      chat_id: "123", text: "#{workspace.name}\nProvider: codex\nModel: #{chat.codex_model}\nStatus: idle"
+    )
+  end
+
+  it "switches provider, changes its model, and resets that provider's session" do
+    TelegramConversation.create!(telegram_chat_id: "123", telegram_user_id: "42", workspace:)
+    chat = workspace.create_workspace_admin_chat!(active_provider: "claude", claude_session_id: "old-session")
+
+    described_class.call(message("/provider codex"))
+    described_class.call(message("/model #{Orchestrator::WorkerSpawner::CODEX_PROMOTED_MODEL}"))
+    described_class.call(message("/reset"))
+
+    chat.reload
+    expect(chat.active_provider).to eq("codex")
+    expect(chat.codex_model).to eq(Orchestrator::WorkerSpawner::CODEX_PROMOTED_MODEL)
+    expect(chat.codex_session_id).to be_nil
+    expect(client).to have_received(:send_message).with(chat_id: "123", text: "Reset the codex session. Message history is retained.")
+  end
+
   it "does not process a message from an unauthorized user" do
     allow(Telegram::Configuration).to receive(:authorized_user?).with("99").and_return(false)
 

@@ -27,11 +27,62 @@ module Telegram
       return show_workspaces(conversation) if text.in?([ "/start", "/workspaces" ])
       return cancel_turn(conversation) if text == "/stop"
       return @client.send_message(chat_id: conversation.telegram_chat_id, text: "Choose a workspace first with /workspaces.") unless conversation.workspace
-      return @client.send_message(chat_id: conversation.telegram_chat_id, text: "That workspace is still working. Send /stop to cancel it.") if conversation.workspace.workspace_admin_chat&.active?
 
       chat = conversation.workspace.workspace_admin_chat || conversation.workspace.create_workspace_admin_chat!
+      return handle_command(text, conversation, chat) if text.start_with?("/")
+      return @client.send_message(chat_id: conversation.telegram_chat_id, text: "That workspace is still working. Send /stop to cancel it.") if chat.active?
+
       assistant_message = Orchestrator::WorkspaceAdminChatDriver::Runner.start_turn!(chat:, content: text, telegram_conversation: conversation)
       start_live_response(assistant_message, conversation)
+    end
+
+    def handle_command(text, conversation, chat)
+      case text
+      when "/status"
+        send_status(conversation, chat)
+      when "/reset"
+        reset_session(conversation, chat)
+      when %r{\A/provider\s+(.+)\z}
+        switch_provider(conversation, chat, Regexp.last_match(1).strip)
+      when %r{\A/model(?:\s+(.+))?\z}
+        change_model(conversation, chat, Regexp.last_match(1)&.strip)
+      else
+        @client.send_message(chat_id: conversation.telegram_chat_id, text: "Commands: /status, /provider claude|codex, /model <name>, /reset, /stop, /workspaces")
+      end
+    end
+
+    def send_status(conversation, chat)
+      @client.send_message(
+        chat_id: conversation.telegram_chat_id,
+        text: "#{conversation.workspace.name}\nProvider: #{chat.active_provider}\nModel: #{chat.model_for(chat.active_provider)}\nStatus: #{chat.active? ? 'working' : chat.status}"
+      )
+    end
+
+    def switch_provider(conversation, chat, provider)
+      unless WorkspaceAdminChat::PROVIDERS.include?(provider)
+        return @client.send_message(chat_id: conversation.telegram_chat_id, text: "Choose a provider: #{WorkspaceAdminChat::PROVIDERS.join(', ')}")
+      end
+
+      chat.update!(active_provider: provider)
+      @client.send_message(chat_id: conversation.telegram_chat_id, text: "Provider: #{provider}\nModel: #{chat.model_for(provider)}")
+    end
+
+    def change_model(conversation, chat, model)
+      provider = chat.active_provider
+      available_models = WorkspaceAdminChat.models_for(provider)
+      unless model && available_models.include?(model)
+        return @client.send_message(chat_id: conversation.telegram_chat_id, text: "#{provider} models: #{available_models.join(', ')}")
+      end
+
+      chat.update!(provider == "codex" ? { codex_model: model } : { claude_model: model })
+      @client.send_message(chat_id: conversation.telegram_chat_id, text: "Model: #{model}")
+    end
+
+    def reset_session(conversation, chat)
+      return @client.send_message(chat_id: conversation.telegram_chat_id, text: "Send /stop before resetting a running session.") if chat.active?
+
+      chat.reset_session!(chat.active_provider)
+      @client.send_message(chat_id: conversation.telegram_chat_id, text: "Reset the #{chat.active_provider} session. Message history is retained.")
     end
 
     def start_live_response(assistant_message, conversation)
