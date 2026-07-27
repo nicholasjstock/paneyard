@@ -18,7 +18,7 @@ class DeliverTelegramAdminChatResponseJob < ApplicationJob
 
   def deliver(message)
     text = message.content.presence || message.error_message.presence || "The admin-chat turn finished without a response."
-    chunks = text.scan(/.{1,#{MAX_TELEGRAM_MESSAGE_LENGTH}}/m)
+    chunks = text.each_char.drop(message.telegram_persisted_characters).each_slice(MAX_TELEGRAM_MESSAGE_LENGTH).map(&:join)
     client = Telegram::Client.new
     chat_id = message.telegram_conversation.telegram_chat_id
 
