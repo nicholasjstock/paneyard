@@ -158,6 +158,63 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end
 
+  it "includes GH_TOKEN in gh CLI invocations when GitHub App is configured" do
+    root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "gh-token-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "gh-token-#{SecureRandom.hex(4)}", task: "Create PR with GitHub App", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "test-a1b2", branch_name: "workflow/test-a1b2",
+      base_sha: "abc123"
+    )
+
+    allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(true)
+    allow(Orchestrator::GitHubAppAuth).to receive(:installation_token_for)
+      .with(workspace_root: root).and_return("ghu_test_token")
+    allow(described_class).to receive(:build_pr_body).and_return("PR body")
+
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).with(
+      { "GH_TOKEN" => "ghu_test_token" }, "gh", "pr", "create",
+      "--base", "main", "--head", "workflow/test-a1b2",
+      "--title", anything,
+      "--body", anything,
+      chdir: root
+    ).and_return([ "https://github.com/example/repo/pull/42\n", "", status ])
+
+    result = described_class.send(:create_pr, Pathname(root), run)
+    expect(result).to eq("https://github.com/example/repo/pull/42")
+    expect(Open3).to have_received(:capture3).with(hash_including("GH_TOKEN" => "ghu_test_token"), any_args)
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
+  it "passes empty environment hash when GitHub App is not configured" do
+    root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "no-gh-token-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "no-gh-token-#{SecureRandom.hex(4)}", task: "Create PR without GitHub App", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "test-a1b2", branch_name: "workflow/test-a1b2",
+      base_sha: "abc123"
+    )
+
+    allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(false)
+    allow(described_class).to receive(:build_pr_body).and_return("PR body")
+
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).with(
+      {}, "gh", "pr", "create",
+      "--base", "main", "--head", "workflow/test-a1b2",
+      "--title", anything,
+      "--body", anything,
+      chdir: root
+    ).and_return([ "https://github.com/example/repo/pull/42\n", "", status ])
+
+    result = described_class.send(:create_pr, Pathname(root), run)
+    expect(result).to eq("https://github.com/example/repo/pull/42")
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
   it "states that no review evidence was uploaded without listing local artifacts" do
     section = described_class.send(:review_assets_section, [])
 

@@ -147,6 +147,7 @@ module Orchestrator
         "WORKFLOW_WORKER_SCOPE" => scope,
         "WORKFLOW_WORKER_TOKEN" => capability_token,
         "WORKFLOW_CHAPERONE_TOKEN" => mcp_override&.dig(:token),
+        "GH_TOKEN" => github_app_token_for_run(run),
         # Tools such as RuboCop initialize caches before reading command-line
         # options. Keep disposable caches out of the sandboxed user's
         # ~/.cache and the target repository.
@@ -611,10 +612,24 @@ module Orchestrator
         WORKFLOW_WORKER_SCOPE: resolved.call("WORKFLOW_WORKER_SCOPE"),
         WORKFLOW_WORKER_TOKEN: resolved.call("WORKFLOW_WORKER_TOKEN").present? ? "[set]" : nil,
         WORKFLOW_CHAPERONE_TOKEN: resolved.call("WORKFLOW_CHAPERONE_TOKEN").present? ? "[set]" : nil,
+        GH_TOKEN: resolved.call("GH_TOKEN").present? ? "[set]" : nil,
         OPENAI_API_KEY: resolved.call("OPENAI_API_KEY").present? ? "[set]" : nil,
         OPENAI_BASE_URL: resolved.call("OPENAI_BASE_URL")
       }
     end
+
+    # Get GitHub App installation token for this run's repository.
+    # Falls back to empty string if app is not configured, allowing gh CLI
+    # to use any existing local auth.
+    def github_app_token_for_run(run)
+      return "" unless GitHubAppAuth.app_configured?
+
+      GitHubAppAuth.installation_token_for(workspace_root: run.target_root)
+    rescue GitHubAppAuth::Error => e
+      Rails.logger.warn "Failed to get GitHub App token for worker: #{e.message}"
+      ""
+    end
+    private_class_method :github_app_token_for_run
 
     def append_lifecycle_line(log_path, event:, worker_id:, run_id:, role:, nickname:, pid:, scope:, reason:, command:, status:, stop_reason: nil)
       details = {
