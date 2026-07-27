@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_27_100001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_27_100002) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -332,6 +332,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_27_100001) do
     t.integer "workspace_id"
     t.index ["telegram_chat_id"], name: "index_telegram_conversations_on_telegram_chat_id", unique: true
     t.index ["workspace_id"], name: "index_telegram_conversations_on_workspace_id"
+  end
+
+  create_table "telegram_update_cursors", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "last_update_id", default: -1, null: false
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_telegram_update_cursors_on_name", unique: true
   end
 
   create_table "terminal_sessions", force: :cascade do |t|

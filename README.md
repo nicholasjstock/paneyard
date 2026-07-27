@@ -52,15 +52,14 @@ Add these values to Rails credentials (or set equivalent environment variables):
 ```yaml
 telegram:
   bot_token: "<BotFather token>"
-  webhook_secret: "<random 1-256 character token using letters, numbers, underscores, or hyphens>"
   allowed_user_ids:
     - "<your numeric Telegram user id>"
 ```
 
-Deploy the app at a public HTTPS URL, then register its webhook:
+The app polls Telegram every five seconds, so it only needs outbound internet access; it does not need a public URL. If this bot previously had a webhook, clear it once so Telegram resumes making updates available to polling:
 
 ```sh
-WEBHOOK_URL=https://your-app.example/integrations/telegram/webhook bin/rails telegram:webhook:set
+bin/rails runner 'Telegram::Client.new.delete_webhook'
 ```
 
-In Telegram, send `/workspaces`, select a workspace, and then chat normally. `/stop` cancels that workspace's current admin-chat turn. Telegram sends webhook requests with the configured secret header, as documented by the [Telegram Bot API](https://core.telegram.org/bots/api#setwebhook).
+In Telegram, send `/workspaces`, select a workspace, and then chat normally. `/stop` cancels that workspace's current admin-chat turn. Telegram's [`getUpdates`](https://core.telegram.org/bots/api#getupdates) polling API cannot be used while a webhook is configured.

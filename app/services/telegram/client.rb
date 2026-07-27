@@ -18,11 +18,12 @@ module Telegram
       call("answerCallbackQuery", callback_query_id:)
     end
 
-    def set_webhook(url:)
-      call(
-        "setWebhook", url:, secret_token: Configuration.webhook_secret,
-        allowed_updates: %w[message callback_query], drop_pending_updates: true
-      )
+    def get_updates(offset:)
+      call("getUpdates", offset:, timeout: 0, allowed_updates: %w[message callback_query])
+    end
+
+    def delete_webhook
+      call("deleteWebhook", drop_pending_updates: false)
     end
 
     private

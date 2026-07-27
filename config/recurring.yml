@@ -34,6 +34,9 @@ production: &recurring_jobs
   resume_runs_from_pull_request_comments:
     class: ResumeRunsFromPullRequestCommentsJob
     schedule: every minute
+  poll_telegram_updates:
+    class: PollTelegramUpdatesJob
+    schedule: every 5 seconds
 
 development:
   <<: *recurring_jobs
