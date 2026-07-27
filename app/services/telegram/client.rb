@@ -14,6 +14,14 @@ module Telegram
       call("sendMessage", chat_id:, text:, reply_markup:)
     end
 
+    def edit_message_text(chat_id:, message_id:, text:)
+      call("editMessageText", chat_id:, message_id:, text:)
+    end
+
+    def send_chat_action(chat_id:, action:)
+      call("sendChatAction", chat_id:, action:)
+    end
+
     def answer_callback_query(callback_query_id:)
       call("answerCallbackQuery", callback_query_id:)
     end

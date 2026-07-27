@@ -30,8 +30,11 @@ module Telegram
       return @client.send_message(chat_id: conversation.telegram_chat_id, text: "That workspace is still working. Send /stop to cancel it.") if conversation.workspace.workspace_admin_chat&.active?
 
       chat = conversation.workspace.workspace_admin_chat || conversation.workspace.create_workspace_admin_chat!
-      Orchestrator::WorkspaceAdminChatDriver::Runner.start_turn!(chat:, content: text, telegram_conversation: conversation)
-      @client.send_message(chat_id: conversation.telegram_chat_id, text: "Working in #{conversation.workspace.name}…")
+      assistant_message = Orchestrator::WorkspaceAdminChatDriver::Runner.start_turn!(chat:, content: text, telegram_conversation: conversation)
+      placeholder = "Working in #{conversation.workspace.name}…"
+      telegram_message = @client.send_message(chat_id: conversation.telegram_chat_id, text: placeholder)
+      assistant_message.update!(telegram_message_id: telegram_message.fetch("message_id"), telegram_synced_content: placeholder)
+      @client.send_chat_action(chat_id: conversation.telegram_chat_id, action: "typing")
     end
 
     def handle_callback(callback)

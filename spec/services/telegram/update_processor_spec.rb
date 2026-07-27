@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe Telegram::UpdateProcessor do
-  let(:client) { instance_double(Telegram::Client, send_message: true, answer_callback_query: true) }
+  let(:client) { instance_double(Telegram::Client, send_message: { "message_id" => 456 }, send_chat_action: true, answer_callback_query: true) }
   let!(:workspace) { Workspace.create!(name: "Telegram workspace #{SecureRandom.hex(4)}", root_path: Dir.mktmpdir) }
 
   before do
@@ -42,7 +42,7 @@ RSpec.describe Telegram::UpdateProcessor do
 
   it "starts the selected workspace's admin chat and records the originating conversation" do
     conversation = TelegramConversation.create!(telegram_chat_id: "123", telegram_user_id: "42", workspace:)
-    assistant_message = instance_double(WorkspaceAdminChatMessage)
+    assistant_message = instance_double(WorkspaceAdminChatMessage, update!: true)
 
     expect(Orchestrator::WorkspaceAdminChatDriver::Runner).to receive(:start_turn!) do |chat:, content:, telegram_conversation:|
       expect(chat.workspace).to eq(workspace)
@@ -54,6 +54,8 @@ RSpec.describe Telegram::UpdateProcessor do
     described_class.call(message("check the run"))
 
     expect(client).to have_received(:send_message).with(chat_id: "123", text: "Working in #{workspace.name}…")
+    expect(assistant_message).to have_received(:update!).with(telegram_message_id: 456, telegram_synced_content: "Working in #{workspace.name}…")
+    expect(client).to have_received(:send_chat_action).with(chat_id: "123", action: "typing")
   end
 
   it "does not process a message from an unauthorized user" do

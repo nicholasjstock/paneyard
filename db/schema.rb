@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_27_100002) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_27_110000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -445,6 +445,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_27_100002) do
     t.string "status", default: "queued", null: false
     t.integer "telegram_conversation_id"
     t.datetime "telegram_delivered_at"
+    t.integer "telegram_message_id"
+    t.text "telegram_synced_content"
     t.string "turn_id"
     t.datetime "updated_at", null: false
     t.json "usage", default: {}, null: false

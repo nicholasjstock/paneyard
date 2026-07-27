@@ -30,7 +30,14 @@ module Orchestrator
           assistant_message = chat.messages.create!(role: "assistant", provider:, turn_id:, status: "running", telegram_conversation:)
         end
 
-        WorkspaceAdminChatTurnJob.perform_later(assistant_message.id)
+        # Telegram polling processes an update while holding its durable
+        # cursor transaction. The queue database is separate, so enqueueing
+        # immediately lets a worker claim this job before that outer primary
+        # database transaction has committed the message row. Defer through
+        # all surrounding transactions so every queue worker can see it.
+        ActiveRecord.after_all_transactions_commit do
+          WorkspaceAdminChatTurnJob.perform_later(assistant_message.id)
+        end
         assistant_message
       end
 
