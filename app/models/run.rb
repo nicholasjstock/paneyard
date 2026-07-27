@@ -93,8 +93,16 @@ class Run < ApplicationRecord
     worktree_name.present?
   end
 
+  # branch_name is only ever set by GitWorktree.provision! after it actually
+  # succeeds -- worktree_name alone is not proof of that: it's assigned
+  # eagerly at run creation (RunsController#create), before LaunchRunJob
+  # ever attempts provisioning, so a run whose provisioning failed (for
+  # example, a dirty source checkout) can carry a worktree_name with no real
+  # worktree behind it. Without this, publication_retryable? would offer a
+  # retry that spawns the git worker's full .git write access directly
+  # against the plain source checkout instead of a real isolated worktree.
   def publication_retryable?
-    managed_worktree? && publication_status == "failed"
+    managed_worktree? && branch_name.present? && publication_status == "failed"
   end
 
   # At most one blocking question is ever open on a run at a time -- a

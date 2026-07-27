@@ -32,6 +32,42 @@ RSpec.describe Orchestrator::RunPublication do
     ensure
       FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
     end
+
+    # Regression: run-20260727-165215-d272 failed GitWorktree.provision! (a
+    # dirty source checkout) before ever setting branch_name/a real target_root
+    # -- but worktree_name was already assigned at run creation, so
+    # publication_retryable? still read true. Without this guard,
+    # queue_worker! would spawn the git role's full .git write access
+    # directly against whatever target_root happens to be, which for an
+    # unprovisioned run is the plain source checkout, not an isolated worktree.
+    it "refuses to spawn the git worker against a run whose worktree was never actually provisioned" do
+      workspace = Workspace.create!(name: "publication-unprovisioned-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-unprovisioned-#{SecureRandom.hex(4)}", task: "Never provisioned",
+        target_root: workspace.root_path, launcher_variant: "codex", status: "failed",
+        worktree_name: "never-provisioned-a1b2", branch_name: nil, publication_status: "failed"
+      )
+
+      expect { described_class.queue_worker!(run) }.to raise_error(Orchestrator::RunPublication::Error, /no publication branch/)
+      expect(SpawnRequest.where(run_id: run.run_id, requested_role: "git")).to be_empty
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
+
+    it "refuses to spawn the git worker directly against the source checkout" do
+      workspace = Workspace.create!(name: "publication-same-root-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+      run = workspace.runs.create!(
+        run_id: "publication-same-root-#{SecureRandom.hex(4)}", task: "Target equals source",
+        target_root: workspace.root_path, source_root: workspace.root_path, launcher_variant: "codex",
+        status: "failed", worktree_name: "same-root-a1b2", branch_name: "workflow/same-root-a1b2",
+        publication_status: "failed"
+      )
+
+      expect { described_class.queue_worker!(run) }.to raise_error(Orchestrator::RunPublication::Error, /source checkout/)
+      expect(SpawnRequest.where(run_id: run.run_id, requested_role: "git")).to be_empty
+    ensure
+      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    end
   end
 
   describe ".finalize!" do
@@ -118,6 +154,63 @@ RSpec.describe Orchestrator::RunPublication do
       github_comment_id: "123", github_comment_url: "https://github.com/example/repo/pull/42#issuecomment-123"
     )
     expect(Open3).to have_received(:capture3).with(*a_string_starting_with("gh"), any_args)
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
+  it "includes GH_TOKEN in gh CLI invocations when GitHub App is configured" do
+    root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "gh-token-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "gh-token-#{SecureRandom.hex(4)}", task: "Create PR with GitHub App", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "test-a1b2", branch_name: "workflow/test-a1b2",
+      base_sha: "abc123"
+    )
+
+    allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(true)
+    allow(Orchestrator::GitHubAppAuth).to receive(:installation_token_for)
+      .with(workspace_root: root).and_return("ghu_test_token")
+    allow(described_class).to receive(:build_pr_body).and_return("PR body")
+
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).with(
+      { "GH_TOKEN" => "ghu_test_token" }, "gh", "pr", "create",
+      "--base", "main", "--head", "workflow/test-a1b2",
+      "--title", anything,
+      "--body", anything,
+      chdir: root
+    ).and_return([ "https://github.com/example/repo/pull/42\n", "", status ])
+
+    result = described_class.send(:create_pr, Pathname(root), run)
+    expect(result).to eq("https://github.com/example/repo/pull/42")
+    expect(Open3).to have_received(:capture3).with(hash_including("GH_TOKEN" => "ghu_test_token"), any_args)
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
+  it "passes empty environment hash when GitHub App is not configured" do
+    root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "no-gh-token-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "no-gh-token-#{SecureRandom.hex(4)}", task: "Create PR without GitHub App", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "test-a1b2", branch_name: "workflow/test-a1b2",
+      base_sha: "abc123"
+    )
+
+    allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(false)
+    allow(described_class).to receive(:build_pr_body).and_return("PR body")
+
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).with(
+      {}, "gh", "pr", "create",
+      "--base", "main", "--head", "workflow/test-a1b2",
+      "--title", anything,
+      "--body", anything,
+      chdir: root
+    ).and_return([ "https://github.com/example/repo/pull/42\n", "", status ])
+
+    result = described_class.send(:create_pr, Pathname(root), run)
+    expect(result).to eq("https://github.com/example/repo/pull/42")
   ensure
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end

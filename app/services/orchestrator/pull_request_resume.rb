@@ -14,9 +14,11 @@ module Orchestrator
     # poll, that gap is unreproducible after the fact. Keep this until a
     # recurrence is caught with these fields and the actual cause found.
     def comments_after(run)
+      token = gh_token(run)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
       repository, number = repository_and_number(run)
       endpoint = "repos/#{repository}/issues/#{number}/comments?per_page=100"
-      output, error, status = Open3.capture3("gh", "api", endpoint)
+      output, error, status = Open3.capture3(env, "gh", "api", endpoint)
       Rails.logger.info(
         "PullRequestResume.comments_after run=#{run.run_id} last_comment_id=#{run.last_pull_request_comment_id.inspect} " \
         "gh_exit=#{status.exitstatus} gh_stderr=#{error.presence.inspect} raw_comment_ids=#{safe_comment_ids(output)}"
@@ -162,8 +164,10 @@ module Orchestrator
     private_class_method :unresolved_explanation
 
     def post_reply!(run, body)
+      token = gh_token(run)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
       repository, number = repository_and_number(run)
-      output, error, status = Open3.capture3("gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}")
+      output, error, status = Open3.capture3(env, "gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}")
       raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
 
       JSON.parse(output).fetch("id").to_s
@@ -182,5 +186,15 @@ module Orchestrator
       raise Error, "Invalid pull request URL: #{run.pull_request_url}"
     end
     private_class_method :repository_and_number
+
+    def gh_token(run)
+      return "" unless GitHubAppAuth.app_configured?
+
+      GitHubAppAuth.installation_token_for(workspace_root: run.target_root)
+    rescue GitHubAppAuth::Error => e
+      Rails.logger.warn "Failed to get GitHub App token: #{e.message}"
+      ""
+    end
+    private_class_method :gh_token
   end
 end

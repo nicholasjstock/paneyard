@@ -130,6 +130,53 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(File.read(worker.prompt_path)).to include("Run `bin/dev` from the repository root to start every service together.")
     end
 
+    it "includes GitHub App token in worker environment when app is configured" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-github-app")
+      workspace = Workspace.create!(name: "github-app-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "GitHub App authenticated task",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(56_789)
+      allow(Process).to receive(:detach)
+      allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(true)
+      allow(Orchestrator::GitHubAppAuth).to receive(:installation_token_for)
+        .with(workspace_root: workspace.root_path).and_return("ghu_test_token_123")
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "github-app-worker", reason: "Test GitHub App auth.",
+        scope: "github-task.md", prompt: "Use GitHub App token."
+      )
+
+      environment = JSON.parse(File.read(worker.env_path))
+      expect(environment).to include("GH_TOKEN" => "[set]")
+    end
+
+    it "falls back gracefully when GitHub App is not configured" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-no-github-app")
+      workspace = Workspace.create!(name: "no-app-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Task without GitHub App",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(67_890)
+      allow(Process).to receive(:detach)
+      allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(false)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "no-app-worker", reason: "Task without app config.",
+        scope: "task.md", prompt: "Fallback to local auth."
+      )
+
+      environment = JSON.parse(File.read(worker.env_path))
+      # GH_TOKEN should be empty string (falsy) when not configured
+      expect(environment["GH_TOKEN"]).to be_nil
+    end
+
     it "spawns a chaperone worker on a Claude run against the curated MCP override instead of the normal worker MCP config" do
       workspace_root = Dir.mktmpdir("workflow-worker-spawner-chaperone")
       workspace = Workspace.create!(name: "chaperone-#{SecureRandom.hex(4)}", root_path: workspace_root)

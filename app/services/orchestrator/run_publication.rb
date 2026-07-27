@@ -41,6 +41,7 @@ module Orchestrator
     def queue_worker!(run)
       return if SpawnRequest.where(run_id: run.run_id, requested_role: "git", status: "open").exists?
 
+      validated_root!(run)
       run.update!(publication_status: "commit_pending", publication_error: nil)
       SpawnRequest.create!(
         run_id: run.run_id, asked_by: "orchestrator", requested_role: "git", priority: "blocking",
@@ -162,7 +163,10 @@ module Orchestrator
     end
 
     def existing_pr_url(root, branch)
+      token = gh_token(root)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
       output, _error, status = Open3.capture3(
+        env,
         "gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url",
         chdir: root.to_s
       )
@@ -170,7 +174,9 @@ module Orchestrator
     end
 
     def merged?(run)
-      output, _error, status = Open3.capture3("gh", "pr", "view", run.pull_request_url, "--json", "state", chdir: run.target_root)
+      token = gh_token(Pathname(run.target_root))
+      env = token.present? ? { "GH_TOKEN" => token } : {}
+      output, _error, status = Open3.capture3(env, "gh", "pr", "view", run.pull_request_url, "--json", "state", chdir: run.target_root)
       return false unless status.success?
 
       details = JSON.parse(output)
@@ -211,20 +217,24 @@ module Orchestrator
     private_class_method :build_pr_body
 
     def create_pr(root, run, draft: false, assets: [])
+      token = gh_token(root)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
       args = [
         "gh", "pr", "create", "--base", "main", "--head", run.branch_name,
         "--title", run.task.to_s.truncate(120), "--body", build_pr_body(run, root, assets:)
       ]
       args << "--draft" if draft
-      output, error, status = Open3.capture3(*args, chdir: root.to_s)
+      output, error, status = Open3.capture3(env, *args, chdir: root.to_s)
       raise Error, "gh pr create failed: #{error.presence || output}" unless status.success?
 
       output.strip
     end
 
     def post_pr_comment!(root, url, body)
+      token = gh_token(root)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
       repository, number = repository_and_number(url)
-      output, error, status = Open3.capture3("gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}", chdir: root.to_s)
+      output, error, status = Open3.capture3(env, "gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}", chdir: root.to_s)
       raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
 
       JSON.parse(output)
@@ -232,8 +242,10 @@ module Orchestrator
     private_class_method :post_pr_comment!
 
     def delete_review_release!(root, run)
+      token = gh_token(root)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
       tag = "workflow-evidence-#{run.run_id}"
-      _output, _error, status = Open3.capture3("gh", "release", "delete", tag, "--yes", "--cleanup-tag", chdir: root.to_s)
+      _output, _error, status = Open3.capture3(env, "gh", "release", "delete", tag, "--yes", "--cleanup-tag", chdir: root.to_s)
       raise Error, "gh release delete failed" unless status.success?
     end
     private_class_method :delete_review_release!
@@ -365,5 +377,17 @@ module Orchestrator
       )
     end
     private_class_method :open_review_question!
+
+    # Get GitHub App installation token for authenticating gh CLI calls.
+    # Falls back to no token if GitHub App is not configured.
+    def gh_token(root)
+      return "" unless GitHubAppAuth.app_configured?
+
+      GitHubAppAuth.installation_token_for(workspace_root: root.to_s)
+    rescue GitHubAppAuth::Error => e
+      Rails.logger.warn "Failed to get GitHub App token: #{e.message}"
+      ""
+    end
+    private_class_method :gh_token
   end
 end

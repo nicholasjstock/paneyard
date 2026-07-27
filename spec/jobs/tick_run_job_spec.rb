@@ -83,7 +83,8 @@ RSpec.describe TickRunJob do
     workspace = Workspace.create!(name: "tick-git-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(
       workspace: workspace, run_id: "tick-git-#{SecureRandom.hex(4)}", task: "Publish changes",
-      target_root: workspace.root_path, launcher_variant: "codex", status: "running", worktree_name: "publish-changes-a1b2"
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running", worktree_name: "publish-changes-a1b2",
+      branch_name: "workflow/publish-changes-a1b2"
     )
     Orchestrator::TickState.write(run_id: run.run_id, phase: "completed", tick_count: 1, last_plan_summary: "Done.", pending_spawn_keys: [], following_steps: [])
     %w[reporter curator seeder demo].each do |role|

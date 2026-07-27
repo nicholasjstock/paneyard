@@ -1,3 +1,34 @@
+# Handoff — 2026-07-27 session
+
+## What this session did
+
+Extended the finalization pipeline with two new terminal roles, following the existing reporter/curator/committer pattern from the prior session's refactor:
+
+1. **`demo` role** (commit `7f39808`) — starts (or reuses) the workspace's dev/demo server via `start_run_command` so the run dashboard's existing "Open app" button actually has something to open. Added to `Worker::ROLES`, `Orchestrator::WorkerMcpServer`, `.claude/agents/demo.md` + `.codex/agents/demo.toml`.
+2. **`seeder` role** (commit `d6c776f`) — adds/updates whatever seed or fixture data this workspace's own convention needs to demonstrate a new human-visible state, using the same wholesale `write_scope: "scoped_changes"` + `protected_write_patterns` grant an implementation worker gets (the only finalization role with real repo write access). It also now owns the reviewer-facing verification steps (`complete_run_finalization`'s `clickPath` param) instead of `demo`, since it's the only finalization role with both full task context (`get_run_context`) and knowledge of exactly what data now exists.
+
+**Final finalization order: `seeder` → `reporter` → `curator` → `demo` → `committer`.** Seeder runs first (not last) so the reporter's audit can describe what was seeded and demo has data to actually demonstrate.
+
+Also rewrote `.claude/agents/README.md` + `ARCHITECTURE.md` and `.codex/agents/README.md`, which had gone stale describing an old supervisor/planner-subagent design from before the Rails-owned `TickRunJob`/`PlannerDecisionJob` architecture existed.
+
+Cleaned up 9 fully-merged branches (local + remote) and one stray worktree — all verified byte-for-byte identical to what's already on `main` before deleting (see git reflog if anything needs recovering).
+
+## Open PR needing review
+
+**PR #28** (`workflow/each-launch-should-be-able-to-configure-which-pe-4302`, still **open**, not merged) — a live run's own output, adding a `persona_config` JSON column on `Run` so a run can override `finalization_roles`/`skip_roles` per-run. Worktree still exists at `../each-launch-should-be-able-to-configure-which-pe-4302`. Needs human review before merge.
+
+## Live incident this session (resolved, but read before starting a new run)
+
+That PR #28 run's `demo` role started its own `bin/dev`, which defaulted to **port 3000** — the same port `bin/production` (this machine's real, long-running production-data instance, started via `bin/production`, see that script's comments) already listens on. macOS routed all `localhost`/`127.0.0.1` traffic to the run's more-specifically-bound socket instead of production's wildcard bind, so production appeared to have "no workspaces" (you were actually looking at the worktree's own empty/dev-seeded database).
+
+I made it worse while diagnosing: restarted a replacement on port 3001 without `RAILS_ENV=production`, which defaulted to `development` and served `storage/development.sqlite3` — which has `db/seeds.rb`'s dev-only demo fixtures (a `demo: simple-retail-planner` workspace + 5 fake runs). I incorrectly told the user that was their real untouched database. That instance has since been killed.
+
+**Current state (verified)**: `bin/production` (PID tree rooted at `bin/production`, real `storage/production.sqlite3`, 2 real workspaces) is healthy on `localhost:3000`. The rogue worktree dev server had already exited on its own (`Run#stop_active_run_commands` fires once a run's `run_commands` process reaches a terminal run status — the same cleanup mechanism the new `demo` role relies on) by the time I went to stop it manually.
+
+**Not yet fixed — real follow-up needed**: nothing stops the next `demo`-role dev server from defaulting to port 3000 again and repeating this exact collision with `bin/production` (or anyone's local `bin/dev`). Worth either (a) having `demo`'s persona instructions/tooling probe for and avoid ports already bound by `bin/production`/`bin/dev`, or (b) giving worker-spawned dev servers a distinct default port range. Nothing implemented yet — just diagnosed and manually resolved this one occurrence.
+
+---
+
 # Handoff — 2026-07-06 session
 
 ## What this session did

@@ -72,28 +72,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_27_154400) do
     t.index ["token_digest"], name: "index_chaperone_reviews_on_token_digest", unique: true
   end
 
-  create_table "guarded_command_executions", force: :cascade do |t|
-    t.json "args", default: [], null: false
-    t.string "command", null: false
-    t.datetime "completed_at"
-    t.datetime "created_at", null: false
-    t.string "cwd", null: false
-    t.string "execution_id", null: false
-    t.integer "exit_code"
-    t.string "exit_status_path", null: false
-    t.string "log_path", null: false
-    t.string "operation", null: false
-    t.integer "pid", default: 0, null: false
-    t.string "run_id", null: false
-    t.datetime "started_at"
-    t.string "status", default: "launching", null: false
-    t.datetime "updated_at", null: false
-    t.string "worker_id", null: false
-    t.index ["execution_id"], name: "index_guarded_command_executions_on_execution_id", unique: true
-    t.index ["run_id", "operation"], name: "index_guarded_command_executions_on_run_id_and_operation"
-    t.index ["worker_id", "status"], name: "index_guarded_command_executions_on_worker_id_and_status"
-  end
-
   create_table "memory_candidates", force: :cascade do |t|
     t.text "approach", null: false
     t.string "candidate_id", null: false

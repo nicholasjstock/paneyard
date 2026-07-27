@@ -9,37 +9,7 @@
 #     priority: 2
 #     schedule: at 5am every day
 
-production: &recurring_jobs
+production:
   clear_solid_queue_finished_jobs:
     command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
     schedule: every hour at minute 12
-  tick_runs:
-    class: TickRunJob
-    schedule: every 5 seconds
-  broadcast_worker_logs:
-    class: BroadcastWorkerLogsJob
-    schedule: every second
-  reconcile_workers:
-    class: WorkerReconcileJob
-    schedule: every minute
-  reconcile_run_commands:
-    class: RunCommandReconcileJob
-    schedule: every minute
-  reconcile_terminal_sessions:
-    class: TerminalSessionReconcileJob
-    schedule: every minute
-  merge_approved_runs:
-    class: MergeApprovedRunsJob
-    schedule: every minute
-  resume_runs_from_pull_request_comments:
-    class: ResumeRunsFromPullRequestCommentsJob
-    schedule: every minute
-  poll_telegram_updates:
-    class: PollTelegramUpdatesJob
-    schedule: every 5 seconds
-  refresh_telegram_admin_chat_progress:
-    class: RefreshTelegramAdminChatProgressJob
-    schedule: every 4 seconds
-
-development:
-  <<: *recurring_jobs
