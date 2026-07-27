@@ -21,6 +21,10 @@ gem "jbuilder"
 # worker/planner CLI subprocesses connect to (see app/mcp/).
 gem "mcp"
 
+# Signs the JWT a GitHub App exchanges for a short-lived, repository-scoped
+# installation token (see Orchestrator::GitHubAppAuth).
+gem "jwt"
+
 # Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
 # gem "bcrypt", "~> 3.1.7"
 

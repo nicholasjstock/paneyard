@@ -123,6 +123,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
         started_at: Time.current, worktree_name: "demo-a1b2", branch_name: "workflow/demo-a1b2"
       )
 
+      allow(described_class).to receive(:gh_auth_token).and_return("gho_fake_token_for_spec")
       allow(Process).to receive(:spawn).and_return(45_678)
       allow(Process).to receive(:detach)
 
@@ -136,9 +137,33 @@ RSpec.describe Orchestrator::WorkerSpawner do
       external_git_dir = File.join(source_root, ".git")
       expect(settings.dig("sandbox", "filesystem", "allowWrite")).to include(external_git_dir)
       expect(settings["permissions"]["allow"]).to include("Edit(#{external_git_dir}/**)", "Write(#{external_git_dir}/**)")
+
+      environment = JSON.parse(File.read(worker.env_path))
+      expect(environment["GH_TOKEN"]).to eq("[set]")
     ensure
       FileUtils.remove_entry(source_root) if source_root && Dir.exist?(source_root)
       FileUtils.remove_entry(worktree_root) if worktree_root && Dir.exist?(worktree_root)
+    end
+
+    it "never resolves a gh token for a non-git role" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-nongit")
+      workspace = Workspace.create!(name: "nongit-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Do ordinary work", target_root: workspace.root_path,
+        launcher_variant: "claude", status: "running", launched_by: "operator", started_at: Time.current
+      )
+
+      expect(described_class).not_to receive(:gh_auth_token)
+      allow(Process).to receive(:spawn).and_return(56_789)
+      allow(Process).to receive(:detach)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "worker", reason: "Do work.", scope: "task.md",
+        prompt: "Do the work."
+      )
+
+      environment = JSON.parse(File.read(worker.env_path))
+      expect(environment["GH_TOKEN"]).to be_nil
     end
 
     it "injects the workspace's recorded project setup into every spawned worker's prompt" do
@@ -166,50 +191,86 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(File.read(worker.prompt_path)).to include("Run `bin/dev` from the repository root to start every service together.")
     end
 
-    it "includes GitHub App token in worker environment when app is configured" do
-      workspace_root = Dir.mktmpdir("workflow-worker-spawner-github-app")
-      workspace = Workspace.create!(name: "github-app-#{SecureRandom.hex(4)}", root_path: workspace_root)
+    # A GitHub App installation token is scoped to this one repository/
+    # installation, not the operator's own identity -- prefer it over the
+    # ambient gh auth fallback whenever one is configured. This is the git
+    # role's concern alone: every other role stays exactly as git-blind as
+    # WorkerExecutionPolicy already makes them, so this must never leak a
+    # credential to an ordinary worker.
+    it "prefers a GitHub App installation token for the git role when the app is configured" do
+      source_root = Dir.mktmpdir("workflow-worker-spawner-github-app-source")
+      worktree_root = Dir.mktmpdir("workflow-worker-spawner-github-app-worktree")
+      workspace = Workspace.create!(name: "github-app-#{SecureRandom.hex(4)}", root_path: source_root)
       run = workspace.runs.create!(
-        run_id: "demo-#{SecureRandom.hex(4)}", task: "GitHub App authenticated task",
-        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
-        launched_by: "operator", started_at: Time.current
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Publish with a GitHub App token",
+        target_root: worktree_root, source_root:, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current, worktree_name: "app-a1b2", branch_name: "workflow/app-a1b2"
       )
 
       allow(Process).to receive(:spawn).and_return(56_789)
       allow(Process).to receive(:detach)
       allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(true)
       allow(Orchestrator::GitHubAppAuth).to receive(:installation_token_for)
-        .with(workspace_root: workspace.root_path).and_return("ghu_test_token_123")
+        .with(workspace_root: worktree_root).and_return("ghu_test_token_123")
+      expect(described_class).not_to receive(:gh_auth_token)
 
       worker = described_class.spawn_worker(
-        run: run, role: "worker", nickname: "github-app-worker", reason: "Test GitHub App auth.",
-        scope: "github-task.md", prompt: "Use GitHub App token."
+        run: run, role: "git", nickname: "git", reason: "Publish.", scope: "publish-app-a1b2.md",
+        prompt: "Commit, rebase, push, and publish.", write_scope: "git_managed", allowed_paths: [ "**/*" ]
       )
 
       environment = JSON.parse(File.read(worker.env_path))
       expect(environment).to include("GH_TOKEN" => "[set]")
+    ensure
+      FileUtils.remove_entry(source_root) if source_root && Dir.exist?(source_root)
+      FileUtils.remove_entry(worktree_root) if worktree_root && Dir.exist?(worktree_root)
     end
 
-    it "falls back gracefully when GitHub App is not configured" do
-      workspace_root = Dir.mktmpdir("workflow-worker-spawner-no-github-app")
-      workspace = Workspace.create!(name: "no-app-#{SecureRandom.hex(4)}", root_path: workspace_root)
+    it "falls back to the operator's ambient gh auth for the git role when no GitHub App is configured" do
+      source_root = Dir.mktmpdir("workflow-worker-spawner-no-github-app-source")
+      worktree_root = Dir.mktmpdir("workflow-worker-spawner-no-github-app-worktree")
+      workspace = Workspace.create!(name: "no-app-#{SecureRandom.hex(4)}", root_path: source_root)
       run = workspace.runs.create!(
-        run_id: "demo-#{SecureRandom.hex(4)}", task: "Task without GitHub App",
-        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
-        launched_by: "operator", started_at: Time.current
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Publish without a GitHub App",
+        target_root: worktree_root, source_root:, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current, worktree_name: "noapp-a1b2", branch_name: "workflow/noapp-a1b2"
       )
 
       allow(Process).to receive(:spawn).and_return(67_890)
       allow(Process).to receive(:detach)
       allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(false)
+      allow(described_class).to receive(:gh_auth_token).and_return("gho_fallback_token")
 
       worker = described_class.spawn_worker(
-        run: run, role: "worker", nickname: "no-app-worker", reason: "Task without app config.",
-        scope: "task.md", prompt: "Fallback to local auth."
+        run: run, role: "git", nickname: "git", reason: "Publish.", scope: "publish-noapp-a1b2.md",
+        prompt: "Commit, rebase, push, and publish.", write_scope: "git_managed", allowed_paths: [ "**/*" ]
       )
 
       environment = JSON.parse(File.read(worker.env_path))
-      # GH_TOKEN should be empty string (falsy) when not configured
+      expect(environment).to include("GH_TOKEN" => "[set]")
+    ensure
+      FileUtils.remove_entry(source_root) if source_root && Dir.exist?(source_root)
+      FileUtils.remove_entry(worktree_root) if worktree_root && Dir.exist?(worktree_root)
+    end
+
+    it "never exposes a GitHub App token to a non-git role" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-app-nongit")
+      workspace = Workspace.create!(name: "app-nongit-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Ordinary work", target_root: workspace.root_path,
+        launcher_variant: "claude", status: "running", launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(78_901)
+      allow(Process).to receive(:detach)
+      allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(true)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "ordinary-worker", reason: "Do work.", scope: "task.md",
+        prompt: "Do the work."
+      )
+
+      environment = JSON.parse(File.read(worker.env_path))
       expect(environment["GH_TOKEN"]).to be_nil
     end
 

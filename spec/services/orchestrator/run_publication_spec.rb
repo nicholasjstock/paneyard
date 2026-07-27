@@ -153,7 +153,7 @@ RSpec.describe Orchestrator::RunPublication do
     expect(question.reload).to have_attributes(
       github_comment_id: "123", github_comment_url: "https://github.com/example/repo/pull/42#issuecomment-123"
     )
-    expect(Open3).to have_received(:capture3).with(*a_string_starting_with("gh"), any_args)
+    expect(Open3).to have_received(:capture3).with(anything, *a_string_starting_with("gh"), any_args)
   ensure
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end

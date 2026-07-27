@@ -90,7 +90,7 @@ RSpec.describe Orchestrator::PullRequestResume do
     expect(other_question.reload.status).to eq("open")
     expect(run.reload.status).to eq("completed")
     expect(Open3).to have_received(:capture3).with(
-      "gh", "api", "--method", "POST", anything, "-f", a_string_including(other_question.question_id)
+      anything, "gh", "api", "--method", "POST", anything, "-f", a_string_including(other_question.question_id)
     )
   end
 
@@ -112,7 +112,7 @@ RSpec.describe Orchestrator::PullRequestResume do
     expect(second_question.reload.status).to eq("open")
     expect(run.reload.status).to eq("completed")
     expect(Open3).to have_received(:capture3).with(
-      "gh", "api", "--method", "POST", anything, "-f",
+      anything, "gh", "api", "--method", "POST", anything, "-f",
       a_string_including(first_question.question_id).and(a_string_including(second_question.question_id))
     )
   end
@@ -149,7 +149,7 @@ RSpec.describe Orchestrator::PullRequestResume do
     expect(real_question.reload.status).to eq("open")
     expect(run.reload.status).to eq("completed")
     expect(Open3).to have_received(:capture3).with(
-      "gh", "api", "--method", "POST", anything, "-f",
+      anything, "gh", "api", "--method", "POST", anything, "-f",
       a_string_including(bogus_id).and(a_string_including(real_question.question_id))
     )
   end

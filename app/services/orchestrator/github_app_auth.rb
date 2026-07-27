@@ -1,6 +1,7 @@
 require "jwt"
 require "open3"
 require "json"
+require "openssl"
 
 module Orchestrator
   module GitHubAppAuth
@@ -83,11 +84,21 @@ module Orchestrator
           iat: Time.now.to_i,
           exp: (Time.now + 10.minutes).to_i
         }
-        JWT.encode(payload, private_key, "RS256")
+        # RS256 requires an actual RSA key object, not the raw PEM text --
+        # passing the PEM string directly raises JWT::EncodeError.
+        JWT.encode(payload, OpenSSL::PKey::RSA.new(private_key), "RS256")
+      rescue OpenSSL::PKey::RSAError => e
+        raise Error, "GitHub App private key is not a valid PEM-formatted RSA key: #{e.message}"
       end
 
       def find_installation_id(workspace_root:)
-        # Get repository owner and name from the workspace
+        # A pre-configured installation ID means we never need the repository's
+        # own remote URL at all -- looking it up unconditionally here broke
+        # every caller that already knows the installation (including a repo
+        # path that isn't a real git checkout, e.g. in tests).
+        installation_id = ENV["GITHUB_APP_INSTALLATION_ID"]
+        return installation_id if installation_id.present?
+
         repository = get_repository_info(workspace_root)
         app_id = load_app_id
         private_key = load_private_key

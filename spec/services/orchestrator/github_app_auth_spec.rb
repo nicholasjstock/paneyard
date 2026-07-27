@@ -1,6 +1,11 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::GitHubAppAuth do
+  # RS256 needs a real RSA key it can actually parse -- a placeholder string
+  # between PEM headers raises OpenSSL::PKey::PKeyError, not the app-level
+  # Error these specs mean to exercise. Generated once per suite run.
+  TEST_RSA_PRIVATE_KEY = OpenSSL::PKey::RSA.generate(2048).to_pem.freeze
+
   describe ".app_configured?" do
     context "when GitHub App ID and private key are configured" do
       before do
@@ -63,7 +68,7 @@ RSpec.describe Orchestrator::GitHubAppAuth do
   describe ".installation_token_for" do
     let(:workspace_root) { "/path/to/repo" }
     let(:app_id) { "12345" }
-    let(:private_key) { "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----" }
+    let(:private_key) { TEST_RSA_PRIVATE_KEY }
     let(:installation_id) { "67890" }
     let(:mock_token) { "ghu_test_token_abc123" }
 
@@ -71,6 +76,10 @@ RSpec.describe Orchestrator::GitHubAppAuth do
       ENV["GITHUB_APP_ID"] = app_id
       ENV["GITHUB_APP_PRIVATE_KEY"] = private_key
       ENV["GITHUB_APP_INSTALLATION_ID"] = installation_id
+      # The test environment's cache_store is :null_store (config/environments/test.rb),
+      # which never actually stores anything -- swap in a real backing store for
+      # this describe block since caching is exactly what it exercises.
+      allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
     end
 
     after do
@@ -132,7 +141,7 @@ RSpec.describe Orchestrator::GitHubAppAuth do
   describe ".fresh_installation_token_for" do
     let(:workspace_root) { "/path/to/repo" }
     let(:app_id) { "12345" }
-    let(:private_key) { "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----" }
+    let(:private_key) { TEST_RSA_PRIVATE_KEY }
     let(:installation_id) { "67890" }
     let(:mock_token) { "ghu_test_token_xyz789" }
 

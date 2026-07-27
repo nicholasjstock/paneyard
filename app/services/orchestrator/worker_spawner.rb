@@ -1,3 +1,4 @@
+require "open3"
 require "shellwords"
 require "tmpdir"
 
@@ -148,12 +149,11 @@ module Orchestrator
         "WORKFLOW_WORKER_SCOPE" => scope,
         "WORKFLOW_WORKER_TOKEN" => capability_token,
         "WORKFLOW_CHAPERONE_TOKEN" => mcp_override&.dig(:token),
-        "GH_TOKEN" => github_app_token_for_run(run),
         # Tools such as RuboCop initialize caches before reading command-line
         # options. Keep disposable caches out of the sandboxed user's
         # ~/.cache and the target repository.
         "XDG_CACHE_HOME" => cache_dir
-      )
+      ).merge(git_worker_env(role, run))
 
       File.write(prompt_path, enriched_prompt)
       File.write(log_path, "")
@@ -613,6 +613,64 @@ module Orchestrator
       worker_env
     end
 
+    # `gh` and plain `git push`/`fetch` normally authenticate via the OS
+    # keychain (gh's own credential store, or git's osxkeychain helper on
+    # macOS) -- both need Keychain Services access a sandboxed child process
+    # cannot get non-interactively. Confirmed live: even after granting the
+    # git role real .git write access, its actual gh/git commands still
+    # failed once genuinely spawned in the sandbox ("gh CLI token invalid").
+    # Scoped to the git role alone -- every other role stays exactly as
+    # git-blind as WorkerExecutionPolicy already makes them; nothing else
+    # should ever receive a git/gh credential at all.
+    #
+    # Prefers a GitHub App installation token (GitHubAppAuth) when one is
+    # configured -- scoped to this one repository/installation, not the
+    # operator's own identity -- falling back to the operator's ambient
+    # `gh auth token` (exactly like read_codex_auth_api_key already does for
+    # OPENAI_API_KEY) when the App isn't configured or a token request fails,
+    # so publication keeps working either way. Either way, GH_TOKEN lets gh
+    # skip the keychain entirely -- it always prefers GH_TOKEN/GITHUB_TOKEN
+    # over a stored credential. The GIT_CONFIG_* pair appends gh's own
+    # credential helper (which likewise honors GH_TOKEN) so plain git
+    # push/fetch authenticate the same way; it appends rather than replaces
+    # the host's existing helper(s), so GIT_TERMINAL_PROMPT=0 guarantees that
+    # if an earlier, keychain-backed helper can't run in this sandbox, git
+    # treats that as a fast failure and falls through instead of blocking on
+    # an interactive prompt nothing can answer.
+    def git_worker_env(role, run)
+      return {} unless role == "git"
+
+      token = git_worker_token(run)
+      return {} if token.blank?
+
+      {
+        "GH_TOKEN" => token,
+        "GIT_TERMINAL_PROMPT" => "0",
+        "GIT_CONFIG_COUNT" => "1",
+        "GIT_CONFIG_KEY_0" => "credential.helper",
+        "GIT_CONFIG_VALUE_0" => "!gh auth git-credential"
+      }
+    end
+
+    def git_worker_token(run)
+      if GitHubAppAuth.app_configured?
+        begin
+          return GitHubAppAuth.installation_token_for(workspace_root: run.target_root)
+        rescue GitHubAppAuth::Error => e
+          Rails.logger.warn("WorkerSpawner: GitHub App token unavailable, falling back to ambient gh auth: #{e.message}")
+        end
+      end
+
+      gh_auth_token
+    end
+
+    def gh_auth_token
+      output, _error, status = Open3.capture3("gh", "auth", "token")
+      status.success? ? output.strip.presence : nil
+    rescue Errno::ENOENT
+      nil
+    end
+
     def build_worker_env_snapshot(worker_env)
       resolved = ->(key) { worker_env.key?(key) ? worker_env[key] : ENV[key] }
       {
@@ -637,18 +695,6 @@ module Orchestrator
       }
     end
 
-    # Get GitHub App installation token for this run's repository.
-    # Falls back to empty string if app is not configured, allowing gh CLI
-    # to use any existing local auth.
-    def github_app_token_for_run(run)
-      return "" unless GitHubAppAuth.app_configured?
-
-      GitHubAppAuth.installation_token_for(workspace_root: run.target_root)
-    rescue GitHubAppAuth::Error => e
-      Rails.logger.warn "Failed to get GitHub App token for worker: #{e.message}"
-      ""
-    end
-    private_class_method :github_app_token_for_run
 
     def append_lifecycle_line(log_path, event:, worker_id:, run_id:, role:, nickname:, pid:, scope:, reason:, command:, status:, stop_reason: nil)
       details = {
