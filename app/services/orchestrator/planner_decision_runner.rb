@@ -31,18 +31,26 @@ module Orchestrator
     CODEX_PROMOTED_MODEL = WorkerSpawner::CODEX_PROMOTED_MODEL
     OUTPUT_LIMIT = 50_000
 
-    def call(run:, request:, decision:, model_tier: :small, command_runner: Open3.method(:capture3))
+    # High by default -- the planner's own decision quality gates everything
+    # downstream (which worker gets dispatched, whether a stall recovers),
+    # so it gets the same "spend more to think it through" treatment as the
+    # chaperone rather than defaulting to whatever each CLI's own baseline
+    # effort happens to be. Still a real, independent knob from model_tier
+    # (see WorkerSpawner#claude_args/codex_args): a caller can override it.
+    DEFAULT_EFFORT = "high".freeze
+
+    def call(run:, request:, decision:, model_tier: :small, effort: DEFAULT_EFFORT, command_runner: Open3.method(:capture3))
       raise ArgumentError, "Unknown planner model tier: #{model_tier}" unless MODEL_TIERS.include?(model_tier)
 
       prompt = PlannerBrief.build(run:, request:, model_tier:)
       if run.launcher_variant == "claude"
-        run_claude(run:, decision:, prompt:, model_tier:, command_runner:)
+        run_claude(run:, decision:, prompt:, model_tier:, effort:, command_runner:)
       else
-        run_codex(run:, decision:, prompt:, model_tier:, command_runner:)
+        run_codex(run:, decision:, prompt:, model_tier:, effort:, command_runner:)
       end
     end
 
-    def run_claude(run:, decision:, prompt:, model_tier:, command_runner:)
+    def run_claude(run:, decision:, prompt:, model_tier:, effort:, command_runner:)
       selected_model = CLAUDE_MODELS.fetch(model_tier)
       token = PlannerDecisionCapability.issue(decision)
       Tempfile.create([ "planner-decision-mcp", ".json" ]) do |mcp_file|
@@ -55,7 +63,9 @@ module Orchestrator
         }))
         mcp_file.flush
         args = [
-          "claude", "--model", selected_model, "--print", "--output-format", "json",
+          "claude", "--model", selected_model,
+          *(effort ? [ "--effort", effort ] : []),
+          "--print", "--output-format", "json",
           "--mcp-config", mcp_file.path, "--strict-mcp-config",
           "--allowedTools", "mcp__planner_decision__submit_planner_decision",
           "--disable-slash-commands", "--no-session-persistence", "--max-budget-usd", "0.25", "--", prompt
@@ -73,14 +83,16 @@ module Orchestrator
       raise Error.new("Planner model returned invalid JSON: #{e.message}", output: bounded_output(stdout))
     end
 
-    def run_codex(run:, decision:, prompt:, model_tier:, command_runner:)
+    def run_codex(run:, decision:, prompt:, model_tier:, effort:, command_runner:)
       token = PlannerDecisionCapability.issue(decision)
       env = WorkerSpawner.build_worker_env.merge("PLANNER_DECISION_TOKEN" => token)
       Tempfile.create([ "planner-decision", ".txt" ]) do |output_file|
         selected_model = model_tier == :strong ? CODEX_PROMOTED_MODEL : CODEX_SMALL_MODEL
         args = [
           "codex", "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
+          "--skip-git-repo-check",
           "--model", selected_model,
+          *(effort ? [ "-c", %(model_reasoning_effort="#{effort}") ] : []),
           "-c", %(mcp_servers.planner_decision.url=#{"#{WorkerSpawner.rails_mcp_url}/planner-decision".to_json}),
           "-c", 'mcp_servers.planner_decision.bearer_token_env_var="PLANNER_DECISION_TOKEN"',
           "-c", 'mcp_servers.planner_decision.default_tools_approval_mode="approve"',

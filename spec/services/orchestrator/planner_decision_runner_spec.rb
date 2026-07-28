@@ -31,6 +31,24 @@ RSpec.describe Orchestrator::PlannerDecisionRunner do
     assert_includes mcp_config.dig("mcpServers", "planner_decision", "url"), "/mcp/planner-decision"
     assert_equal "haiku", captured[:args][captured[:args].index("--model") + 1]
     assert_equal run.target_root, captured[:chdir]
+    # The planner's own decision quality gates everything downstream, so it
+    # defaults to high effort rather than each CLI's own baseline.
+    assert_equal "high", captured[:args][captured[:args].index("--effort") + 1]
+  end
+
+  it "lets a caller override or disable the planner's default high effort" do
+    run, request, decision = build_run_request_and_decision
+    captured = nil
+    runner = lambda do |_env, *args, chdir:|
+      captured = args
+      [ JSON.generate({ "usage" => {}, "modelUsage" => {} }), "", fake_status(true) ]
+    end
+
+    Orchestrator::PlannerDecisionRunner.call(run:, request:, decision:, effort: "low", command_runner: runner)
+    assert_equal "low", captured[captured.index("--effort") + 1]
+
+    Orchestrator::PlannerDecisionRunner.call(run:, request:, decision:, effort: nil, command_runner: runner)
+    refute_includes captured, "--effort"
   end
 
   it "runs Codex with the submit_planner_decision MCP server wired in via -c overrides" do
@@ -51,10 +69,18 @@ RSpec.describe Orchestrator::PlannerDecisionRunner do
     assert_includes overrides, 'mcp_servers.planner_decision.bearer_token_env_var="PLANNER_DECISION_TOKEN"'
     assert_includes overrides, 'mcp_servers.planner_decision.default_tools_approval_mode="approve"'
     assert captured[:env]["PLANNER_DECISION_TOKEN"].present?
+    # target_root is a real git worktree for every actual run, so this
+    # rarely bites in production, but confirmed live it's required whenever
+    # it isn't one (e.g. a throwaway test directory) -- "Not inside a
+    # trusted directory and --skip-git-repo-check was not specified."
+    assert_includes captured[:args], "--skip-git-repo-check"
     # The prompt goes over stdin, not argv -- matches
     # WorkerSpawner's own codex path, and keeps it out of `ps` output.
     assert_equal "-", captured[:args].last
     assert_includes captured[:stdin_data], "submit_planner_decision"
+    # Codex has no dedicated --effort flag -- confirmed it's set the same
+    # way any other config value is, via -c model_reasoning_effort=.
+    assert_includes overrides, 'model_reasoning_effort="high"'
   end
 
   it "uses Codex's small tier by default and its strong tier only for a promoted planner retry" do
