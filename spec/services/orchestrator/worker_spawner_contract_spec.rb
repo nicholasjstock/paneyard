@@ -87,6 +87,20 @@ RSpec.describe Orchestrator::WorkerSpawner do
     assert_includes effort_args, %(model_reasoning_effort="high")
   end
 
+  it "reads a role's declared effort from its persona frontmatter, falling back to nil if it has none" do
+    assert_equal "high", Orchestrator::WorkerSpawner.send(:persona_declared_effort, "chaperone")
+    assert_nil Orchestrator::WorkerSpawner.send(:persona_declared_effort, "worker")
+  end
+
+  it "strips the persona frontmatter out of the prompt actually sent to the model" do
+    prompt = Orchestrator::WorkerSpawner.send(
+      :build_prompt_with_persona, driver: "claude", role: "chaperone", prompt: "task"
+    )
+    refute_includes prompt, "effort: high"
+    refute_includes prompt, "---"
+    assert_includes prompt, "bounded review process"
+  end
+
   it "fails closed when legacy Codex sandbox configuration would disable the exact profile" do
     root = Dir.mktmpdir("worker-policy")
     FileUtils.mkdir_p(File.join(root, ".codex"))

@@ -138,17 +138,21 @@ module Orchestrator
       cache_dir = File.join(Dir.tmpdir, "workflow-worker-cache", worker_id)
       FileUtils.mkdir_p(cache_dir)
 
+      # An explicit effort: argument (e.g. the chaperone spawn) always wins;
+      # otherwise fall back to the role's own persona-declared default.
+      effective_effort = effort || persona_declared_effort(role)
+
       command, args =
         if driver == "claude"
           [ "claude", claude_args(
             enriched_prompt, role:, mode:, mcp_config_path:, settings_path: claude_settings_path,
             target_root: root_dir, policy:, model_tier:, mcp_override:,
-            resume_session_id:, effort:
+            resume_session_id:, effort: effective_effort
           ) ]
         else
           validate_codex_permission_profile_compatibility!(root_dir)
           [ "codex", codex_args(
-            root_dir:, last_message_path:, policy:, model_tier:, mcp_override:, resume_session_id:, effort:
+            root_dir:, last_message_path:, policy:, model_tier:, mcp_override:, resume_session_id:, effort: effective_effort
           ) ]
         end
 
@@ -544,9 +548,15 @@ module Orchestrator
     # genuinely different: near-identical or verbatim content, manually
     # kept in sync by hand, which already caused real drift once (a stale
     # pre-Rails-orchestrator instruction block existed only in the .md
-    # copy). Neither driver ever read the other per-driver metadata these
-    # used to carry (model, model_reasoning_effort, sandbox_mode) --
-    # confirmed nothing here does anything but File.read the body text.
+    # copy). The old per-driver metadata these used to carry (model,
+    # model_reasoning_effort, sandbox_mode) was confirmed never read by
+    # anything -- this one exception (a leading `---\neffort: ...\n---`
+    # block) is deliberately real: persona_declared_effort below actually
+    # parses it and threads it into the real --effort/-c
+    # model_reasoning_effort flags, so a role's default effort lives in one
+    # place its own persona file, not hardcoded per call site.
+    PERSONA_FRONTMATTER = /\A---\n(.*?)\n---\n+/m
+
     def build_prompt_with_persona(driver:, role:, prompt:)
       persona_paths = [ agent_prompt_path(role) ]
       if role == "infrastructure"
@@ -560,10 +570,28 @@ module Orchestrator
         # discipline.
         persona_paths.unshift(agent_prompt_path("worker"))
       end
-      instructions = persona_paths.filter_map { |path| File.read(path) if File.exist?(path) }
+      instructions = persona_paths.filter_map { |path| persona_body(path) }
       return prompt if instructions.empty?
 
       "#{instructions.join("\n\n")}\n\nCurrent task:\n#{prompt}"
+    end
+
+    # Only ever read from the role's own file, never a folded-in base (e.g.
+    # verifier/infrastructure also fold in worker.md) -- a base persona's
+    # own effort declaration, if it ever has one, describes that base role,
+    # not every role layered on top of it.
+    def persona_declared_effort(role)
+      path = agent_prompt_path(role)
+      return nil unless File.exist?(path)
+
+      frontmatter = File.read(path)[PERSONA_FRONTMATTER, 1]
+      frontmatter&.[](/^effort:\s*(\S+)/, 1)
+    end
+
+    def persona_body(path)
+      return nil unless File.exist?(path)
+
+      File.read(path).sub(PERSONA_FRONTMATTER, "")
     end
 
     def agent_prompt_path(role)

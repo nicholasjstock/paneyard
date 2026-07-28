@@ -49,7 +49,10 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
 
     assert_equal "chaperone", spawned[:role]
     assert_equal "strong", spawned[:model_tier]
-    assert_equal "high", spawned[:effort]
+    # No explicit effort: is passed anymore -- agent_personas/chaperone.md
+    # declares it itself (see worker_spawner_spec.rb for real coverage of
+    # that resolution, since spawn_worker is stubbed here).
+    assert_nil spawned[:effort]
     assert_equal review.lineage_key, spawned[:scope]
     expect(spawned[:mcp_override][:token]).not_to eq(original_token)
     expect(ChaperoneReview.authenticate(spawned[:mcp_override][:token])).to eq(review)

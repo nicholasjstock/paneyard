@@ -193,8 +193,10 @@ module Orchestrator
         WorkerSpawner.spawn_worker(
           run: run, role: "chaperone", nickname: "chaperone-#{SecureRandom.hex(3)}",
           reason: "Chaperone review: #{review.trigger_reason || review.summary}",
+          # No explicit effort: -- agent_personas/chaperone.md declares
+          # `effort: high` itself now (WorkerSpawner#persona_declared_effort),
+          # a single source of truth instead of hardcoding it here too.
           scope: request.scope, prompt: "Begin.", worker_id: worker_id, model_tier: "strong",
-          effort: "high",
           mcp_override: {
             url: "#{WorkerSpawner.rails_mcp_url}/chaperone", token: token,
             allowed_tools: Orchestrator::ChaperoneMcpServer::TOOL_NAMES

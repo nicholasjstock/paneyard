@@ -360,6 +360,9 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(worker.args[allowed_tools_index + 1]).to eq(
         "mcp__chaperone__get_chaperone_state,mcp__chaperone__read_chaperone_artifact,mcp__chaperone__submit_chaperone_decision"
       )
+      # No explicit effort: was passed -- agent_personas/chaperone.md's own
+      # frontmatter (`effort: high`) is the sole source of this default.
+      expect(worker.args[worker.args.index("--effort") + 1]).to eq("high")
 
       mcp_config = JSON.parse(File.read(worker.mcp_config_path))
       expect(mcp_config.dig("mcpServers", "chaperone", "url")).to eq("http://127.0.0.1:3000/mcp/chaperone")
@@ -455,6 +458,10 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(worker.args).to include(%(mcp_servers.chaperone.url=#{"http://127.0.0.1:3000/mcp/chaperone".to_json}))
       expect(worker.args).to include(%(mcp_servers.chaperone.bearer_token_env_var="WORKFLOW_CHAPERONE_TOKEN"))
       expect(JSON.parse(File.read(worker.env_path)).fetch("WORKFLOW_CHAPERONE_TOKEN")).to eq("[set]")
+      # No explicit effort: was passed -- agent_personas/chaperone.md's own
+      # frontmatter (`effort: high`) is the sole source of this default,
+      # threaded through Codex's -c override since it has no dedicated flag.
+      expect(worker.args).to include(%(model_reasoning_effort="high"))
       expect(stdin_write.string).to include("get_chaperone_state")
     end
 
