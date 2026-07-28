@@ -45,11 +45,20 @@ module Orchestrator
         stderr.to_s.match?(SESSION_MISSING_PATTERN)
       end
 
+      # --skip-git-repo-check is required here, not optional hardening:
+      # Workspace#root_path (this driver's chdir, see Runner) is deliberately
+      # not a git repository itself -- it holds the main checkout alongside
+      # sibling run worktrees -- so codex's own trusted-directory heuristic
+      # refuses to start at all without it ("Not inside a trusted directory
+      # and --skip-git-repo-check was not specified"), confirmed live: every
+      # codex-provider admin-chat turn against a real workspace failed this
+      # way before this flag was added. Write scope is already governed by
+      # this sandbox_mode/Rails, not codex's own trust heuristic.
       def build_args(session_id:, model:, prompt:)
         if session_id.present?
-          [ "codex", "exec", "resume", session_id, "--json", "--model", model, prompt ]
+          [ "codex", "exec", "resume", session_id, "--json", "--model", model, "--skip-git-repo-check", prompt ]
         else
-          [ "codex", "exec", "--json", "--model", model, "--sandbox", SANDBOX_MODE, prompt ]
+          [ "codex", "exec", "--json", "--model", model, "--sandbox", SANDBOX_MODE, "--skip-git-repo-check", prompt ]
         end
       end
 
