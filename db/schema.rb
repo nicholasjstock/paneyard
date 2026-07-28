@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_27_154400) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_28_115623) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -70,23 +70,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_27_154400) do
     t.index ["run_id", "status"], name: "index_chaperone_reviews_on_run_id_and_status"
     t.index ["subject_type", "subject_id", "status"], name: "index_chaperone_reviews_on_subject_and_status"
     t.index ["token_digest"], name: "index_chaperone_reviews_on_token_digest", unique: true
-  end
-
-  create_table "memory_candidates", force: :cascade do |t|
-    t.text "approach", null: false
-    t.string "candidate_id", null: false
-    t.datetime "created_at", null: false
-    t.string "lineage_key", null: false
-    t.text "next_approach"
-    t.text "reason", null: false
-    t.string "role"
-    t.string "run_id", null: false
-    t.string "status", default: "proposed", null: false
-    t.datetime "updated_at", null: false
-    t.string "worker_id"
-    t.index ["candidate_id"], name: "index_memory_candidates_on_candidate_id", unique: true
-    t.index ["run_id", "lineage_key"], name: "index_memory_candidates_on_run_id_and_lineage_key"
-    t.index ["status"], name: "index_memory_candidates_on_status"
   end
 
   create_table "orchestrator_ticks", force: :cascade do |t|

@@ -31,7 +31,6 @@ class Run < ApplicationRecord
   has_many :acceptance_criteria, class_name: "AcceptanceCriterion", foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :planner_decisions, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :step_attempts, foreign_key: :run_id, primary_key: :run_id, dependent: :destroy
-  has_many :memory_candidates, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :chaperone_reviews, foreign_key: :run_id, primary_key: :run_id, dependent: :destroy
   has_many :run_commands, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :review_assets, class_name: "RunReviewAsset", foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
