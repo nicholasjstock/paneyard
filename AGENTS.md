@@ -6,6 +6,21 @@ This repository is a Rails 8 application organized around `Workspace` as the top
 ## Build, Test, and Development Commands
 Run `bin/setup` to install gems, prepare the database, and clear stale logs/tmp files. Use `bin/dev` for local development; it starts both the Rails server and the Solid Queue worker process so recurring jobs fire. Use `bin/rails db:prepare` after schema changes, and `bin/rails console` for local inspection. Run `bin/ci` before opening a PR; it executes setup, RuboCop, `bundler-audit`, `bin/importmap audit`, and Brakeman.
 
+### Restarting the long-running production instance
+
+`bin/production` (real `storage/production.sqlite3`, real workspaces) is normally kept running continuously, not launched fresh per session. `config/queue.yml` (worker/thread pool shape) and `config/recurring.yml` (the static recurring-job schedule) are both read once at Solid Queue's boot and are **not** picked up by `WORKFLOW_HOT_RELOAD`'s code reloading -- a change to either requires restarting the Solid Queue process, and `bin/production` ties Puma and Solid Queue together as one unit (killing either child stops both).
+
+Don't start `bin/production` directly and don't kill its pid by hand -- use `bin/service` instead, which daemonizes it (detached from any terminal, logs to `log/production_service.log`, tracks its pid in `tmp/pids/production.pid`):
+
+```bash
+bin/service start    # no-ops if already running
+bin/service stop
+bin/service restart  # apply a queue.yml/recurring.yml/credentials change
+bin/service status
+```
+
+Any agent session (including this one) should run `bin/service restart` directly after a config change that needs it, rather than asking the operator to manage a foreground terminal pane.
+
 ## Coding Style & Naming Conventions
 Follow the default Rails Omakase style configured in `.rubocop.yml`; run `bin/rubocop` to check formatting. Use two-space indentation in Ruby and keep class and module names `CamelCase` with file names in `snake_case`. Match existing Rails naming patterns such as `*_controller.rb`, `*_job.rb`, and service objects under `app/services/...`. Keep JavaScript controllers in `app/javascript/controllers` with Stimulus-style names like `hello_controller.js`.
 
