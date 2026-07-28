@@ -3,9 +3,21 @@ default: &default
     - polling_interval: 1
       batch_size: 500
   workers:
-    - queues: "*"
+    # Everything except the chat queue below: TickRunJob, the reconcilers,
+    # BroadcastWorkerLogsJob, and the Telegram pollers. These are all
+    # short, frequent jobs -- naming the queue explicitly (rather than "*")
+    # keeps them from sharing a thread pool with WorkspaceAdminChatTurnJob,
+    # which blocks a thread for an entire CLI subprocess turn.
+    - queues: default
       threads: 3
       processes: <%= ENV.fetch("JOB_CONCURRENCY", 1) %>
+      polling_interval: 0.1
+    # WorkspaceAdminChatTurnJob only -- isolated so a long-running (or
+    # hung, see HANDOFF.md) claude/codex turn can't starve the pollers,
+    # tick, or log-streaming threads above.
+    - queues: chat
+      threads: 2
+      processes: 1
       polling_interval: 0.1
 
 development:
