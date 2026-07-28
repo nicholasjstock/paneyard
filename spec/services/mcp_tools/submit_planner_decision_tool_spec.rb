@@ -69,6 +69,39 @@ RSpec.describe McpTools::SubmitPlannerDecisionTool do
     expect(response.error?).to be(true)
   end
 
+  it "threads humanSummary through to the plan-approval question's text" do
+    root = Dir.mktmpdir("submit-planner-decision-summary-tool")
+    workspace = Workspace.create!(name: "submit-planner-decision-summary-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "submit-planner-decision-summary-#{SecureRandom.hex(4)}", task: "Exercise humanSummary",
+      target_root: root, launcher_variant: "claude", status: "running",
+      worktree_name: "summary-a1b2", branch_name: "workflow/summary-a1b2"
+    )
+    request = run.spawn_requests.create!(
+      asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",
+      requested_role: "planner", priority: "blocking"
+    )
+    AcceptanceCriterion.create!(run_id: run.run_id, key: "cache-lookups", status: "pending", content: "Cache lookups instead of hitting the database.")
+    decision = PlannerDecision.create!(run:, spawn_request: request, status: "running")
+
+    response = described_class.call(
+      outcome: "decision", summary: "Implement the fix.",
+      nextStep: {
+        "owner" => "worker", "artifact" => "fix.md", "successCheck" => "Confirm the fix works.",
+        "mode" => "implementation", "writeScope" => "scoped_changes", "allowedPaths" => [ "app/models/example.rb" ],
+        "evidenceRefs" => [ "diagnosis.md" ], "addressesCriteria" => [ "cache-lookups" ],
+        "humanSummary" => "We're adding a cache column so repeated lookups don't hit the database every time."
+      },
+      followingSteps: [], contextRequest: nil, acceptanceCriteria: [], acceptanceUpdates: [],
+      memoryEntries: [],
+      server_context: { decision_id: decision.decision_id }
+    )
+
+    expect(response.error?).to be_falsey
+    question = UserQuestion.plan_approval.find_by!(run_id: run.run_id)
+    expect(question.text).to start_with("We're adding a cache column")
+  end
+
   def build_decision
     root = Dir.mktmpdir("submit-planner-decision-tool")
     workspace = Workspace.create!(name: "submit-planner-decision-#{SecureRandom.hex(4)}", root_path: root)

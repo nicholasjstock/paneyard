@@ -27,7 +27,7 @@ module Orchestrator
       UserQuestion.create!(
         run_id: run.run_id, asked_by: "planner", priority: "blocking",
         scope: next_step[:artifact].presence || "run",
-        text: question_text, context: build_context(run:, next_step:), tags: [ TAG ]
+        text: question_text(next_step:), context: build_context(run:, next_step:), tags: [ TAG ]
       )
     end
 
@@ -41,13 +41,28 @@ module Orchestrator
       return false unless run.managed_worktree?
       return false if run.open_blocking_question?
 
-      !UserQuestion.where(run_id: run.run_id).plan_approval.exists?
+      # Not "has a plan-approval question ever existed" -- a reply_received
+      # explain/revise round answers one without granting approval (see
+      # Orchestrator::ApplyReplyReceivedDecision), and the gate must be able
+      # to re-fire on the resulting revised plan. Only an explicit approval
+      # (tagged "granted" by ApplyReplyReceivedDecision.apply_approved!)
+      # permanently satisfies this gate for the run's lifetime.
+      !UserQuestion.where(run_id: run.run_id).plan_approval.where("tags LIKE ?", "%\"#{Orchestrator::ApplyReplyReceivedDecision::GRANTED_TAG}\"%").exists?
     end
     private_class_method :applicable?
 
-    def question_text
-      "Before any code is written on this run: does the plan below still match what you actually " \
-      "asked for? Reply `approved` to continue, or reply with the correction."
+    # Leads with the planner's own plain-language humanSummary when present
+    # (see McpTools::SubmitPlannerDecisionTool::STEP_SCHEMA) so the operator
+    # reads a sentence about what's about to happen and why, not a raw
+    # field dump, before ever reaching the technical detail in build_context
+    # below. Falls back to the old generic wording for a decision that
+    # didn't populate it (e.g. one submitted before this field existed).
+    def question_text(next_step:)
+      summary = next_step[:human_summary].presence
+      return "Before any code is written on this run: does the plan below still match what you actually " \
+        "asked for? Reply `approved` to continue, or reply with the correction." unless summary
+
+      "#{summary}\n\nDoes this match what you actually asked for? Reply `approved` to continue, or reply with the correction."
     end
     private_class_method :question_text
 

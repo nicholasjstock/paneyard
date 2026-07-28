@@ -177,7 +177,7 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
       expect(PublishUserQuestionJob).to have_been_enqueued.with(question.id)
     end
 
-    it "does not re-ask once the first plan-approval question has been answered, and dispatches the next scoped_changes step" do
+    it "does not re-ask once the first plan-approval question has been granted real approval, and dispatches the next scoped_changes step" do
       run, _request, decision = build_decision(managed: true)
       described_class.call(
         decision:, params: decision_params(
@@ -185,7 +185,12 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
           next_step: step("fix.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [ "diagnosis.md" ])
         )
       )
-      UserQuestion.plan_approval.find_by!(run_id: run.run_id).update!(status: "answered", answered_by: "operator", answer_text: "approved")
+      # Only Orchestrator::ApplyReplyReceivedDecision's "approved" action
+      # ever adds this tag (see Orchestrator::PlanApprovalQuestion.applicable?)
+      # -- merely being answered is not enough since an explain/revise round
+      # answers a question too without granting the gate.
+      question = UserQuestion.plan_approval.find_by!(run_id: run.run_id)
+      question.update!(status: "answered", answered_by: "reply_received", answer_text: "approved", tags: question.tags + [ "granted" ])
 
       next_request = run.spawn_requests.create!(
         asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",

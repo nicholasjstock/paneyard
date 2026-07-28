@@ -135,7 +135,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
     )
     chaperone_args = Orchestrator::WorkerSpawner.send(
       :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:, model_tier: "strong",
-      mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone" }
+      mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone", server_name: "chaperone" }
     )
 
     assert_equal "gpt-5.6-terra", ordinary_args[ordinary_args.index("--model") + 1]
@@ -183,7 +183,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
     args = Orchestrator::WorkerSpawner.send(
       :claude_args, "Review this.", role: "chaperone", mcp_config_path: "/tmp/mcp.json",
       settings_path: "/tmp/settings.json", target_root: root, policy:,
-      resume_session_id: "prior-id", mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone", allowed_tools: [] }
+      resume_session_id: "prior-id", mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone", server_name: "chaperone", allowed_tools: [] }
     )
 
     assert_includes args, "--no-session-persistence"
@@ -226,7 +226,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
     )
     args = Orchestrator::WorkerSpawner.send(
       :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:,
-      resume_session_id: "prior-id", mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone" }
+      resume_session_id: "prior-id", mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone", server_name: "chaperone" }
     )
 
     assert_includes args, "--ephemeral"

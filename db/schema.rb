@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_28_131543) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_28_203714) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -72,6 +72,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_28_131543) do
     t.index ["token_digest"], name: "index_chaperone_reviews_on_token_digest", unique: true
   end
 
+  create_table "guarded_command_executions", force: :cascade do |t|
+    t.json "args", default: [], null: false
+    t.string "command", null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.string "cwd", null: false
+    t.string "execution_id", null: false
+    t.integer "exit_code"
+    t.string "exit_status_path", null: false
+    t.string "log_path", null: false
+    t.string "operation", null: false
+    t.integer "pid", default: 0, null: false
+    t.string "run_id", null: false
+    t.datetime "started_at"
+    t.string "status", default: "launching", null: false
+    t.datetime "updated_at", null: false
+    t.string "worker_id", null: false
+    t.index ["execution_id"], name: "index_guarded_command_executions_on_execution_id", unique: true
+    t.index ["run_id", "operation"], name: "index_guarded_command_executions_on_run_id_and_operation"
+    t.index ["worker_id", "status"], name: "index_guarded_command_executions_on_worker_id_and_status"
+  end
+
   create_table "orchestrator_ticks", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.json "following_steps", default: [], null: false
@@ -125,6 +147,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_28_131543) do
     t.index ["decision_id"], name: "index_planner_decisions_on_decision_id", unique: true
     t.index ["run_id", "status"], name: "index_planner_decisions_on_run_id_and_status"
     t.index ["spawn_request_id"], name: "index_planner_decisions_on_spawn_request_id", unique: true
+  end
+
+  create_table "reply_received_reviews", force: :cascade do |t|
+    t.string "action"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.text "explanation"
+    t.string "github_comment_author"
+    t.text "github_comment_body"
+    t.string "github_comment_id", null: false
+    t.string "review_id", null: false
+    t.string "run_id", null: false
+    t.string "status", default: "queued", null: false
+    t.text "summary"
+    t.string "token_digest", null: false
+    t.json "tool_calls", default: [], null: false
+    t.datetime "updated_at", null: false
+    t.string "user_question_id", null: false
+    t.index ["review_id"], name: "index_reply_received_reviews_on_review_id", unique: true
+    t.index ["run_id", "status"], name: "index_reply_received_reviews_on_run_id_and_status"
+    t.index ["token_digest"], name: "index_reply_received_reviews_on_token_digest", unique: true
   end
 
   create_table "run_commands", force: :cascade do |t|

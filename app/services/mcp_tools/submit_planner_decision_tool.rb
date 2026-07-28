@@ -13,7 +13,17 @@ module McpTools
         evidenceRefs: { type: "array", items: { type: "string" } },
         addressesCriteria: { type: "array", items: { type: "string" }, maxItems: 8 },
         operatorApprovalQuestionId: { type: [ "string", "null" ] },
-        lineageKey: { type: [ "string", "null" ] }
+        lineageKey: { type: [ "string", "null" ] },
+        humanSummary: {
+          type: [ "string", "null" ],
+          description: "Required when writeScope is scoped_changes (the step that will trigger the operator " \
+            "plan-approval gate, see Orchestrator::PlanApprovalQuestion): one or two plain-language sentences " \
+            "explaining what this step will do and why it follows from the operator's original request, addressed " \
+            "directly to the operator -- not a restatement of the fields above (artifact, writeScope, " \
+            "addressesCriteria, ...) and not internal jargon. This is what the operator actually reads to decide " \
+            "whether to approve; the structured fields are reference detail underneath it. Leave null for any " \
+            "step that will not itself trigger that gate (diagnosis, verification, non-scoped_changes work)."
+        }
       },
       required: %w[owner artifact successCheck mode writeScope allowedPaths evidenceRefs addressesCriteria]
     }.freeze

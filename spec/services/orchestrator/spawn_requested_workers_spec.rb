@@ -60,6 +60,61 @@ RSpec.describe Orchestrator::SpawnRequestedWorkers do
     assert_equal "fulfilled", request.reload.status
   end
 
+  it "spawns a reply_received worker with a reissued capability against the matching pending review" do
+    workspace = Workspace.create!(name: "spawn-reply-received-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "spawn-reply-received-#{SecureRandom.hex(4)}", task: "Add a feature",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    question = run.user_questions.create!(
+      asked_by: "planner", scope: "run", priority: "blocking", status: "open",
+      text: "Approve?", context: "The plan.", tags: [ "plan-approval" ]
+    )
+    review, original_token = ReplyReceivedReview.issue!(
+      run:, user_question: question, comment: { "id" => 1, "user" => { "login" => "op" }, "body" => "approved" }
+    )
+    request = run.spawn_requests.create!(
+      asked_by: "github_pr_comment", scope: review.review_id, lineage_key: review.review_id,
+      text: "Classify the reply.", requested_role: "reply_received", priority: "blocking"
+    )
+
+    spawned = nil
+    expect(Orchestrator::WorkerSpawner).to receive(:spawn_worker) do |**kwargs|
+      spawned = kwargs
+      instance_double(Worker, worker_id: kwargs[:worker_id])
+    end
+
+    Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    assert_equal "reply_received", spawned[:role]
+    assert_equal "strong", spawned[:model_tier]
+    assert_equal review.review_id, spawned[:scope]
+    expect(spawned[:mcp_override][:token]).not_to eq(original_token)
+    expect(ReplyReceivedReview.authenticate(spawned[:mcp_override][:token])).to eq(review)
+    expect(spawned[:mcp_override][:server_name]).to eq("reply_received")
+    expect(spawned[:mcp_override][:allowed_tools]).to eq(Orchestrator::ReplyReceivedMcpServer::TOOL_NAMES)
+    assert_equal "fulfilled", request.reload.status
+  end
+
+  it "dismisses a reply_received spawn request when no matching pending review is found" do
+    workspace = Workspace.create!(name: "spawn-reply-received-missing-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "spawn-reply-received-missing-#{SecureRandom.hex(4)}", task: "Add a feature",
+      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
+    )
+    request = run.spawn_requests.create!(
+      asked_by: "github_pr_comment", scope: "stale-review", lineage_key: "stale-review",
+      text: "Classify the reply.", requested_role: "reply_received", priority: "blocking"
+    )
+
+    expect(Orchestrator::WorkerSpawner).not_to receive(:spawn_worker)
+
+    spawned = Orchestrator::SpawnRequestedWorkers.call(run:)
+
+    assert_empty spawned
+    assert_equal "dismissed", request.reload.status
+  end
+
   it "spawns a verifier worker through the generic dispatch path with a read-only, source-protected sandbox" do
     workspace = Workspace.create!(name: "spawn-verifier-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(

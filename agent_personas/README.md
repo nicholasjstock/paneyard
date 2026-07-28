@@ -17,6 +17,7 @@ At most one worker is active per run at a time — Rails dispatches strictly seq
 | `verifier` | [verifier.md](./verifier.md) | An independent, fresh reproduction of one acceptance criterion's evidence before Rails allows it to close. |
 | `project_init` | [project_init.md](./project_init.md) | Once per workspace: discovers how to start the local dev environment and which source paths are protected. |
 | `chaperone` | [chaperone.md](./chaperone.md) | A repeated failure under the same lineage escalates to a strong-model review that decides `continue_small`, `promote`, or `stop`. |
+| `reply_received` | [reply_received.md](./reply_received.md) | An operator reply lands on a run's `plan-approval` question (GitHub issue or PR) and classifies it as `approved`, `explain`, or `revise`. |
 | `seeder` | [seeder.md](./seeder.md) | Run finalization, stage 1: inspects the completed diff and adds/updates whatever seed or fixture data this workspace's own convention needs to demonstrate a new human-visible state, then reports the concrete verification steps a reviewer should follow. |
 | `reporter` | [reporter.md](./reporter.md) | Run finalization, stage 2: audits persisted run history (including the seeder's verification steps) and writes the reviewer-facing `run-summary.md`. |
 | `curator` | [curator.md](./curator.md) | Run finalization, stage 3: selects real local deliverables for upload as review evidence via `select_review_assets`. |
@@ -36,7 +37,7 @@ When subagents are running, look for these role-based nicknames (see `build_work
 | Role | Nickname to look for |
 |---|---|
 | `worker` | `worker` (or `worker-2`, `worker-3`, ... for concurrent instances across runs) |
-| any other role | the role name itself (`seeder`, `reporter`, `curator`, `demo`, `git`, `verifier`, `chaperone`, `project_init`, `infrastructure`), suffixed `-1`, `-2`, ... only if a name collision occurs |
+| any other role | the role name itself (`seeder`, `reporter`, `curator`, `demo`, `git`, `verifier`, `chaperone`, `reply_received`, `project_init`, `infrastructure`), suffixed `-1`, `-2`, ... only if a name collision occurs |
 
 ## Key Files
 

@@ -12,6 +12,7 @@ Rails.application.routes.draw do
   # orchestrator/{worker,chaperone,planner_decision}_mcp_server.rb); there is
   # deliberately no unscoped bare /mcp endpoint anymore.
   mount Orchestrator::ChaperoneMcpEndpoint.new => "/mcp/chaperone"
+  mount Orchestrator::ReplyReceivedMcpEndpoint.new => "/mcp/reply_received"
   mount Orchestrator::WorkerMcpEndpoint.new => "/mcp/worker"
   mount Orchestrator::PlannerDecisionMcpEndpoint.new => "/mcp/planner-decision"
 

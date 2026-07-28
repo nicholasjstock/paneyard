@@ -343,7 +343,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
         run: run, role: "chaperone", nickname: "chaperone-test", reason: "Chaperone review: repeated failure.",
         scope: "diagnose-it", prompt: "You must begin by calling get_chaperone_state.", model_tier: "strong",
         mcp_override: {
-          url: "http://127.0.0.1:3000/mcp/chaperone", token: "chaperone-token",
+          url: "http://127.0.0.1:3000/mcp/chaperone", token: "chaperone-token", server_name: "chaperone",
           allowed_tools: %w[get_chaperone_state read_chaperone_artifact submit_chaperone_decision]
         }
       )
@@ -419,7 +419,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
         run: run, role: "chaperone", nickname: "chaperone-test", reason: "Chaperone review: repeated failure.",
         scope: "diagnose-it", prompt: "You must begin by calling get_chaperone_state.", model_tier: "strong",
         mcp_override: {
-          url: "http://127.0.0.1:3000/mcp/chaperone", token: "chaperone-token",
+          url: "http://127.0.0.1:3000/mcp/chaperone", token: "chaperone-token", server_name: "chaperone",
           allowed_tools: %w[get_chaperone_state read_chaperone_artifact submit_chaperone_decision]
         }
       )
@@ -446,7 +446,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
         run: run, role: "chaperone", nickname: "chaperone-codex-test", reason: "Chaperone review: repeated failure.",
         scope: "diagnose-it", prompt: "You must begin by calling get_chaperone_state.", model_tier: "strong",
         mcp_override: {
-          url: "http://127.0.0.1:3000/mcp/chaperone", token: "chaperone-token",
+          url: "http://127.0.0.1:3000/mcp/chaperone", token: "chaperone-token", server_name: "chaperone",
           allowed_tools: %w[get_chaperone_state read_chaperone_artifact submit_chaperone_decision]
         }
       )
@@ -697,7 +697,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       chaperone = described_class.spawn_worker(
         run: run, role: "chaperone", nickname: "chaperone", reason: "Review.", scope: "impl.md",
         prompt: "Review it.", model_tier: "strong", lineage_key: "shared-lineage",
-        mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone", token: "tok", allowed_tools: [] }
+        mcp_override: { url: "http://127.0.0.1:3000/mcp/chaperone", token: "tok", server_name: "chaperone", allowed_tools: [] }
       )
 
       expect(chaperone.args).to include("--no-session-persistence")

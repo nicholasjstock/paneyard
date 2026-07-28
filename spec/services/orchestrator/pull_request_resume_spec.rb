@@ -44,6 +44,33 @@ RSpec.describe Orchestrator::PullRequestResume do
     expect(run.spawn_requests.find_by!(asked_by: "github_pr_comment").context).to include("Retry it.")
   end
 
+  it "routes a reply answering an open plan-approval question to ReplyReceivedTrigger instead of the mechanical answer path" do
+    workspace = Workspace.create!(name: "pr-resume-plan-approval-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "pr-resume-plan-approval-#{SecureRandom.hex(4)}", task: "Add a feature",
+      target_root: workspace.root_path, launcher_variant: "codex", status: "running",
+      worktree_name: "plan-approval-resume-a1b2", branch_name: "workflow/plan-approval-resume-a1b2",
+      github_issue_url: "https://github.com/example/repo/issues/9"
+    )
+    question = run.user_questions.create!(
+      asked_by: "planner", scope: "run", priority: "blocking", status: "open",
+      text: "Approve?", context: "The plan.", tags: [ "plan-approval" ]
+    )
+    comment = { "id" => 321, "body" => "why is this needed?", "user" => { "login" => "nicholasjstock" } }
+
+    described_class.resume!(run, comment)
+
+    review = ReplyReceivedReview.find_by(user_question_id: question.question_id)
+    expect(review).to be_present
+    expect(review.github_comment_body).to eq("why is this needed?")
+    expect(SpawnRequest.find_by(run_id: run.run_id, requested_role: "reply_received", lineage_key: review.review_id)).to be_present
+
+    # Never mechanically answered -- the reply_received review, not this
+    # method, decides whether it counts as approval.
+    expect(question.reload.status).to eq("open")
+    expect(run.reload.last_pull_request_comment_id).to eq("321")
+  end
+
   it "does not reprocess an already-recorded comment" do
     workspace = Workspace.create!(name: "pr-resume-repeat-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(

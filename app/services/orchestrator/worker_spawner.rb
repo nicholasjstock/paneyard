@@ -90,7 +90,7 @@ module Orchestrator
       # (confirmed: referenced nowhere outside this file) ever reads back.
       if mcp_override
         write_worker_mcp_config(
-          mcp_config_path, mcp_override[:token], server_name: "chaperone", url: mcp_override[:url]
+          mcp_config_path, mcp_override[:token], server_name: mcp_override[:server_name], url: mcp_override[:url]
         ) if driver == "claude"
       else
         capability_token, capability_token_digest = Worker.issue_capability
@@ -163,7 +163,7 @@ module Orchestrator
         "WORKFLOW_WORKER_NICKNAME" => nickname,
         "WORKFLOW_WORKER_SCOPE" => scope,
         "WORKFLOW_WORKER_TOKEN" => capability_token,
-        "WORKFLOW_CHAPERONE_TOKEN" => mcp_override&.dig(:token),
+        **(mcp_override ? { mcp_override_token_env_var(mcp_override) => mcp_override[:token] } : {}),
         # Tools such as RuboCop initialize caches before reading command-line
         # options. Keep disposable caches out of the sandboxed user's
         # ~/.cache and the target repository.
@@ -360,7 +360,7 @@ module Orchestrator
           "--print",
           "--mcp-config", mcp_config_path,
           "--strict-mcp-config",
-          "--allowedTools", mcp_override[:allowed_tools].map { |name| "mcp__chaperone__#{name}" }.join(","),
+          "--allowedTools", mcp_override[:allowed_tools].map { |name| "mcp__#{mcp_override[:server_name]}__#{name}" }.join(","),
           "--no-session-persistence",
           "--output-format", "stream-json",
           "--include-partial-messages",
@@ -416,9 +416,9 @@ module Orchestrator
         return [
           "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
           *model_args, *effort_args,
-          "-c", %(mcp_servers.chaperone.url=#{mcp_override[:url].to_json}),
-          "-c", %(mcp_servers.chaperone.bearer_token_env_var="WORKFLOW_CHAPERONE_TOKEN"),
-          "-c", %(mcp_servers.chaperone.default_tools_approval_mode="approve"),
+          "-c", %(mcp_servers.#{mcp_override[:server_name]}.url=#{mcp_override[:url].to_json}),
+          "-c", %(mcp_servers.#{mcp_override[:server_name]}.bearer_token_env_var="#{mcp_override_token_env_var(mcp_override)}"),
+          "-c", %(mcp_servers.#{mcp_override[:server_name]}.default_tools_approval_mode="approve"),
           "-C", root_dir, "-o", last_message_path, "-"
         ]
       end
@@ -469,6 +469,13 @@ module Orchestrator
     def rails_mcp_url
       base = ENV.fetch("WORKFLOW_RAILS_URL", "http://127.0.0.1:#{ENV.fetch('PORT', 3000)}")
       "#{base}/mcp"
+    end
+
+    # Every mcp_override-based role (chaperone, reply_received, ...) gets its
+    # own bearer token env var derived from its server_name, so two such
+    # roles spawned by different code paths never collide on one shared name.
+    def mcp_override_token_env_var(mcp_override)
+      "WORKFLOW_#{mcp_override[:server_name].upcase}_TOKEN"
     end
 
     def write_worker_mcp_config(path, token, server_name: "workflow", url: nil)
@@ -762,6 +769,7 @@ module Orchestrator
         WORKFLOW_WORKER_SCOPE: resolved.call("WORKFLOW_WORKER_SCOPE"),
         WORKFLOW_WORKER_TOKEN: resolved.call("WORKFLOW_WORKER_TOKEN").present? ? "[set]" : nil,
         WORKFLOW_CHAPERONE_TOKEN: resolved.call("WORKFLOW_CHAPERONE_TOKEN").present? ? "[set]" : nil,
+        WORKFLOW_REPLY_RECEIVED_TOKEN: resolved.call("WORKFLOW_REPLY_RECEIVED_TOKEN").present? ? "[set]" : nil,
         GH_TOKEN: resolved.call("GH_TOKEN").present? ? "[set]" : nil,
         OPENAI_API_KEY: resolved.call("OPENAI_API_KEY").present? ? "[set]" : nil,
         OPENAI_BASE_URL: resolved.call("OPENAI_BASE_URL")

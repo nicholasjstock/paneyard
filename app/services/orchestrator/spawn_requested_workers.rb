@@ -74,6 +74,11 @@ module Orchestrator
           next
         end
 
+        if role == "reply_received"
+          dispatch_reply_received_request(run: run, request: request)
+          next
+        end
+
         # Validate required artifacts exist before spawning
         artifact_validation = validate_required_artifacts(run:, request:)
         if artifact_validation.is_a?(String)
@@ -152,6 +157,13 @@ module Orchestrator
         candidates.select! { |request| request.requested_role == "chaperone" }
       end
 
+      # Same boundary for a queued/running reply_received review: the run is
+      # blocked on classifying one specific reply, so nothing else may
+      # dispatch ahead of it.
+      if ReplyReceivedReview.where(run_id: run_id, status: %w[queued running]).exists?
+        candidates.select! { |request| request.requested_role == "reply_received" }
+      end
+
       # One request per tick (and per run) is the intentional concurrency
       # limit. The next tick observes the resulting active worker or planner
       # decision before considering subsequent queued work.
@@ -198,7 +210,7 @@ module Orchestrator
           # a single source of truth instead of hardcoding it here too.
           scope: request.scope, prompt: "Begin.", worker_id: worker_id, model_tier: "strong",
           mcp_override: {
-            url: "#{WorkerSpawner.rails_mcp_url}/chaperone", token: token,
+            url: "#{WorkerSpawner.rails_mcp_url}/chaperone", token: token, server_name: "chaperone",
             allowed_tools: Orchestrator::ChaperoneMcpServer::TOOL_NAMES
           }
         )
@@ -211,6 +223,43 @@ module Orchestrator
       end
     end
 
+
+    def dispatch_reply_received_request(run:, request:)
+      review = ReplyReceivedReview.find_by(run_id: run.run_id, review_id: request.lineage_key, status: %w[queued running])
+      unless review
+        request.update!(
+          status: "dismissed", dismissed_by: "tick_run_job",
+          dismissal_note: "No pending reply_received review found for #{request.lineage_key}."
+        )
+        return
+      end
+
+      token = review.reissue_token!
+      worker_id = SecureRandom.uuid
+
+      request.update!(
+        status: "fulfilled", fulfilled_by: "tick_run_job", fulfilled_at: Time.current,
+        fulfillment_note: "Spawned reply_received review #{review.review_id}.", fulfilled_worker_id: worker_id
+      )
+
+      begin
+        WorkerSpawner.spawn_worker(
+          run: run, role: "reply_received", nickname: "reply_received-#{SecureRandom.hex(3)}",
+          reason: "Classify operator reply to plan-approval question #{review.user_question_id}.",
+          scope: request.scope, prompt: "Begin.", worker_id: worker_id, model_tier: "strong",
+          mcp_override: {
+            url: "#{WorkerSpawner.rails_mcp_url}/reply_received", token: token, server_name: "reply_received",
+            allowed_tools: Orchestrator::ReplyReceivedMcpServer::TOOL_NAMES
+          }
+        )
+      rescue => e
+        request.update!(
+          status: "dismissed", dismissed_by: "tick_run_job",
+          dismissal_note: "Claimed reply_received review #{review.review_id} failed to spawn: #{e.message}"
+        )
+        raise
+      end
+    end
 
     def build_worker_nickname(role)
       case role

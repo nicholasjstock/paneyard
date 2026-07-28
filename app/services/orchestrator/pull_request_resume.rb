@@ -62,6 +62,25 @@ module Orchestrator
 
         author = comment.dig("user", "login") || "unknown"
         body = comment.fetch("body")
+
+        # A reply answering the run's plan-approval question is never
+        # mechanically "answered" the way an ordinary blocking question is:
+        # unblocking dispatch here is itself the consequential action this
+        # gate exists to protect (see agent_personas/reply_received.md), so
+        # the reply's content must be classified by that bounded review
+        # before anything unblocks -- never inferred from a magic phrase.
+        plan_approval_question = run.user_questions.open_only.where(priority: "blocking").plan_approval.first
+        if plan_approval_question
+          Orchestrator::ReplyReceivedTrigger.call(question: plan_approval_question, comment: comment)
+          RunContext.upsert!(
+            run_id: run.run_id, entry_key: "conversation-comment-#{comment_id}", kind: "operator_decision", status: "confirmed",
+            content: "GitHub comment from #{author}: #{body}", evidence_ref: comment["html_url"], created_by: "github_pr_comment"
+          )
+          run.update!(last_pull_request_comment_id: comment_id)
+          Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=routed_to_reply_received")
+          return
+        end
+
         answered_any, unmatched_ids = apply_comment_to_questions!(run, body, author)
 
         RunContext.upsert!(
@@ -173,7 +192,9 @@ module Orchestrator
     rescue JSON::ParserError, KeyError => error
       raise Error, "GitHub returned an invalid posted comment: #{error.message}"
     end
-    private_class_method :post_reply!
+    # Not private: Orchestrator::ApplyReplyReceivedDecision also posts to a
+    # run's conversation (an explain reply), reusing the same gh/token/URL
+    # plumbing instead of duplicating it.
 
     def repository_and_number(url)
       GitHubUrl.repository_and_number(url)
