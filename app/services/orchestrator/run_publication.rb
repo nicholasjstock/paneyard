@@ -149,7 +149,9 @@ module Orchestrator
         Just reply to answer and resume the run. If more than one question is open at once, reference this one explicitly with `Question #{question.question_id}: <your answer>` so it's clear which one you're answering.
       MARKDOWN
     end
-    private_class_method :build_question_body
+    # Not private: Orchestrator::PlanApprovalQuestion re-renders this same
+    # format to PATCH an already-posted plan-approval comment once its
+    # question.text is upgraded with the reporter's plain-language summary.
 
     # An issue needs no branch or commit -- it exists purely to carry
     # conversation before there's anything to diff yet. finalize! closes it

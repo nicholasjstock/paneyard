@@ -12,6 +12,7 @@ module Orchestrator
     module_function
 
     TAG = "plan-approval"
+    SUMMARY_APPLIED_TAG = "summary_applied"
     TASK_LIMIT = 4_000
     DIAGNOSIS_LIMIT = 1_500
     DIAGNOSIS_ATTEMPTS = 2
@@ -24,12 +25,86 @@ module Orchestrator
       run = decision.run
       return unless applicable?(run:, next_step:)
 
-      UserQuestion.create!(
+      question = UserQuestion.create!(
         run_id: run.run_id, asked_by: "planner", priority: "blocking",
         scope: next_step[:artifact].presence || "run",
-        text: question_text(next_step:), context: build_context(run:, next_step:), tags: [ TAG ]
+        text: question_text, context: build_context(run:, next_step:), tags: [ TAG ]
+      )
+      request_plan_summary!(run:, question:)
+      question
+    end
+
+    # A reporter worker (the same role/persona that already writes
+    # run-summary.md at finalization, see agent_personas/reporter.md)
+    # translates the technical step above into plain language for the
+    # operator. Scoped uniquely per question (not a fixed "plan-summary.md")
+    # so a later explain/revise round's own reporter never collides with an
+    # earlier one, and so TickRunJob's finalization-stage guard (scoped by
+    # role+scope, see queue_finalization_worker) never confuses this with
+    # the real end-of-run reporter. Orchestrator::TickRunJob#tick_run polls
+    # for its completion and upgrades the question in place once it's done
+    # -- this never blocks question creation itself, which is what
+    # suppresses worker dispatch (see this method's header comment above).
+    def request_plan_summary!(run:, question:)
+      SpawnRequest.create!(
+        run_id: run.run_id, asked_by: "planner", requested_role: "reporter", priority: "blocking",
+        scope: plan_summary_scope(question), execution_mode: "diagnosis", write_scope: "source_protected",
+        text: "Follow agent_personas/reporter.md's instructions.",
+        tags: %w[reporter plan-summary]
       )
     end
+    private_class_method :request_plan_summary!
+
+    PLAN_SUMMARY_SCOPE_PREFIX = "plan-summary-"
+
+    def plan_summary_scope(question)
+      "#{PLAN_SUMMARY_SCOPE_PREFIX}#{question.question_id}.md"
+    end
+
+    # The single source of truth for recognizing a plan-summary scope --
+    # McpTools::GetReporterContextTool uses this to compute its `stage`
+    # field server-side, so agent_personas/reporter.md never has to infer
+    # its own job by pattern-matching a filename convention itself.
+    def plan_summary_scope?(scope)
+      scope.to_s.start_with?(PLAN_SUMMARY_SCOPE_PREFIX)
+    end
+
+    # Polled from TickRunJob#tick_run every tick: cheap (at most one open
+    # plan-approval question per run, see UserQuestion's own one-blocking-
+    # question invariant), and idempotent via SUMMARY_APPLIED_TAG so a
+    # reporter that finishes between ticks is only ever applied once. Never
+    # blocks on the reporter -- if it hasn't completed yet, this is a no-op
+    # and the question sits with its original generic wording until the
+    # next tick finds it done.
+    def apply_pending_summaries!(run)
+      run.user_questions.open_only.plan_approval.each do |question|
+        next if question.tags.include?(SUMMARY_APPLIED_TAG)
+
+        reporter = Worker.where(run_id: run.run_id, role: "reporter", scope: plan_summary_scope(question))
+          .where.not(handoff_completed_at: nil).first
+        next unless reporter
+
+        summary = read_plan_summary(run:, scope: plan_summary_scope(question))
+        next if summary.blank?
+
+        question.update!(text: "#{summary}\n\n#{question_text}", tags: (question.tags + [ SUMMARY_APPLIED_TAG ]).uniq)
+        patch_github_comment!(run:, question:) if question.github_comment_id.present?
+      end
+    end
+
+    def read_plan_summary(run:, scope:)
+      Orchestrator::ArtifactStore.read(run.target_root, run.run_id, scope).strip
+    rescue Errno::ENOENT
+      nil
+    end
+    private_class_method :read_plan_summary
+
+    def patch_github_comment!(run:, question:)
+      Orchestrator::PullRequestResume.patch_comment!(run, question.github_comment_id, Orchestrator::RunPublication.build_question_body(question))
+    rescue Orchestrator::PullRequestResume::Error => error
+      Rails.logger.warn("PlanApprovalQuestion: failed to patch GitHub comment for question #{question.question_id}: #{error.message}")
+    end
+    private_class_method :patch_github_comment!
 
     def applicable?(run:, next_step:)
       return false unless next_step.present?
@@ -51,18 +126,9 @@ module Orchestrator
     end
     private_class_method :applicable?
 
-    # Leads with the planner's own plain-language humanSummary when present
-    # (see McpTools::SubmitPlannerDecisionTool::STEP_SCHEMA) so the operator
-    # reads a sentence about what's about to happen and why, not a raw
-    # field dump, before ever reaching the technical detail in build_context
-    # below. Falls back to the old generic wording for a decision that
-    # didn't populate it (e.g. one submitted before this field existed).
-    def question_text(next_step:)
-      summary = next_step[:human_summary].presence
-      return "Before any code is written on this run: does the plan below still match what you actually " \
-        "asked for? Reply `approved` to continue, or reply with the correction." unless summary
-
-      "#{summary}\n\nDoes this match what you actually asked for? Reply `approved` to continue, or reply with the correction."
+    def question_text
+      "Before any code is written on this run: does the plan below still match what you actually " \
+      "asked for? Reply `approved` to continue, or reply with the correction."
     end
     private_class_method :question_text
 

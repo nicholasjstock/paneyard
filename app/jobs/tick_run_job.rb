@@ -33,6 +33,7 @@ class TickRunJob < ApplicationJob
     end
 
     Orchestrator::SpawnRequestedWorkers.call(run: run)
+    Orchestrator::PlanApprovalQuestion.apply_pending_summaries!(run)
     clear_expired_capacity_phase(run)
     request_recovery_planner_if_dead_end(run, previous_state)
   end
@@ -89,9 +90,15 @@ class TickRunJob < ApplicationJob
     end
   end
 
+  # Scoped by (role, scope), not role alone: a "reporter" worker can also be
+  # dispatched mid-run, before any finalization stage exists, to translate a
+  # pending plan-approval step into plain language (scope
+  # "plan-summary-<questionId>.md" -- see Orchestrator::PlanApprovalQuestion).
+  # Checking role alone would let that earlier, unrelated completion satisfy
+  # this guard and silently skip the real run-summary.md finalization stage.
   def queue_finalization_worker(run, role, scope, text, write_scope: "source_protected", execution_mode: "diagnosis")
-    return true if Worker.active.exists?(run_id: run.run_id, role: role) || SpawnRequest.where(run_id: run.run_id, requested_role: role, status: "open").exists?
-    return false if Worker.where(run_id: run.run_id, role: role).where.not(handoff_completed_at: nil).exists?
+    return true if Worker.active.exists?(run_id: run.run_id, role: role, scope: scope) || SpawnRequest.where(run_id: run.run_id, requested_role: role, scope: scope, status: "open").exists?
+    return false if Worker.where(run_id: run.run_id, role: role, scope: scope).where.not(handoff_completed_at: nil).exists?
 
     run.update!(publication_status: "commit_pending", publication_error: nil)
     SpawnRequest.create!(run_id: run.run_id, asked_by: "orchestrator", requested_role: role, priority: "blocking", scope:, execution_mode:, write_scope:, text:)

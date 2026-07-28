@@ -196,6 +196,18 @@ module Orchestrator
     # run's conversation (an explain reply), reusing the same gh/token/URL
     # plumbing instead of duplicating it.
 
+    # Edits an already-posted comment in place -- used by
+    # Orchestrator::PlanApprovalQuestion to upgrade a plan-approval question
+    # with its reporter's plain-language summary once that finishes, without
+    # waiting on it to post the question in the first place.
+    def patch_comment!(run, comment_id, body)
+      token = gh_token(run)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
+      repository, = repository_and_number(run.conversation_url)
+      _output, error, status = Open3.capture3(env, "gh", "api", "--method", "PATCH", "repos/#{repository}/issues/comments/#{comment_id}", "-f", "body=#{body}")
+      raise Error, "gh api comment edit failed: #{error.presence}" unless status.success?
+    end
+
     def repository_and_number(url)
       GitHubUrl.repository_and_number(url)
     rescue ArgumentError => error

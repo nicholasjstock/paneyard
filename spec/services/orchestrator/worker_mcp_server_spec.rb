@@ -25,16 +25,16 @@ RSpec.describe Orchestrator::WorkerMcpServer do
     seeder_tools = described_class.build(server_context: { worker_id: seeder.worker_id }).tools.keys
     git_tools = described_class.build(server_context: { worker_id: git_worker.worker_id }).tools.keys
 
-    expect(reporter_tools).to include("get_run_audit", "complete_run_finalization")
+    expect(reporter_tools).to include("get_reporter_context", "complete_worker_task")
     expect(reporter_tools).not_to include("select_review_assets", "finalize_run_publication", "worker_turn", "start_run_command")
-    expect(curator_tools).to include("select_review_assets", "complete_run_finalization")
-    expect(curator_tools).not_to include("get_run_audit", "finalize_run_publication", "worker_turn", "start_run_command")
-    expect(demo_tools).to include("start_run_command", "stop_run_command", "complete_run_finalization")
-    expect(demo_tools).not_to include("get_run_audit", "select_review_assets", "finalize_run_publication", "worker_turn")
-    expect(seeder_tools).to include("write_scoped_file", "get_run_context", "complete_run_finalization")
-    expect(seeder_tools).not_to include("get_run_audit", "select_review_assets", "finalize_run_publication", "worker_turn", "start_run_command")
+    expect(curator_tools).to include("select_review_assets", "complete_worker_task")
+    expect(curator_tools).not_to include("get_reporter_context", "finalize_run_publication", "worker_turn", "start_run_command")
+    expect(demo_tools).to include("start_run_command", "stop_run_command", "complete_worker_task")
+    expect(demo_tools).not_to include("get_reporter_context", "select_review_assets", "finalize_run_publication", "worker_turn")
+    expect(seeder_tools).to include("write_scoped_file", "get_run_context", "complete_worker_task")
+    expect(seeder_tools).not_to include("get_reporter_context", "select_review_assets", "finalize_run_publication", "worker_turn", "start_run_command")
     expect(git_tools).to include("finalize_run_publication", "worker_turn", "get_run_context", "write_workflow_artifact")
-    expect(git_tools).not_to include("get_run_audit", "select_review_assets", "complete_run_finalization", "start_run_command")
+    expect(git_tools).not_to include("get_reporter_context", "select_review_assets", "complete_worker_task", "start_run_command")
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end

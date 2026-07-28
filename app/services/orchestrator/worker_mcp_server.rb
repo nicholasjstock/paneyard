@@ -6,19 +6,19 @@ module Orchestrator
       worker = Worker.find_by(worker_id: server_context[:worker_id])
       tools = case worker&.role
       when "reporter"
-        [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::GetRunAuditTool, ::McpTools::CompleteRunFinalizationTool ]
+        [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::GetReporterContextTool, ::McpTools::CompleteWorkerTaskTool ]
       when "curator"
-        [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::SelectReviewAssetsTool, ::McpTools::CompleteRunFinalizationTool ]
+        [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::SelectReviewAssetsTool, ::McpTools::CompleteWorkerTaskTool ]
       when "seeder"
         [
           ::McpTools::PingTool, ::McpTools::GetRunContextTool, ::McpTools::WriteScopedFileTool,
-          ::McpTools::WriteWorkflowArtifactTool, ::McpTools::CompleteRunFinalizationTool
+          ::McpTools::WriteWorkflowArtifactTool, ::McpTools::CompleteWorkerTaskTool
         ]
       when "demo"
         [
           ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::StartRunCommandTool,
           ::McpTools::StopRunCommandTool, ::McpTools::GetRunCommandTool, ::McpTools::ListRunCommandsTool,
-          ::McpTools::ReadRunCommandLogTool, ::McpTools::CompleteRunFinalizationTool
+          ::McpTools::ReadRunCommandLogTool, ::McpTools::CompleteWorkerTaskTool
         ]
       when "git"
         [

@@ -4,11 +4,11 @@ RSpec.describe "terminal finalization tools" do
   it "lets a reporter complete only after writing its assigned summary" do
     workspace, run, reporter = finalization_worker("reporter", "run-summary.md")
 
-    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: reporter.worker_id })
+    response = McpTools::CompleteWorkerTaskTool.call(runId: run.run_id, server_context: { worker_id: reporter.worker_id })
     expect(tool_payload(response).fetch("message")).to include("Write run-summary.md")
 
     Orchestrator::ArtifactStore.write(run.target_root, run.run_id, reporter.scope, "## Outcome\n\nCompleted.")
-    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: reporter.worker_id })
+    response = McpTools::CompleteWorkerTaskTool.call(runId: run.run_id, server_context: { worker_id: reporter.worker_id })
 
     expect(tool_payload(response).fetch("outcome")).to eq("completed")
     expect(reporter.reload.handoff_completed_at).to be_present
@@ -37,7 +37,7 @@ RSpec.describe "terminal finalization tools" do
     workspace, run, demo = finalization_worker("demo", "demo-notes.md")
     Orchestrator::ArtifactStore.write(run.target_root, run.run_id, demo.scope, "Started the dev server on the default port.")
 
-    response = McpTools::CompleteRunFinalizationTool.call(
+    response = McpTools::CompleteWorkerTaskTool.call(
       runId: run.run_id, clickPath: "Open /schedule and click Publish.", server_context: { worker_id: demo.worker_id }
     )
 
@@ -48,10 +48,10 @@ RSpec.describe "terminal finalization tools" do
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
-  it "rejects complete_run_finalization from a role outside reporter, curator, seeder, or demo" do
+  it "rejects complete_worker_task from a role outside reporter, curator, seeder, or demo" do
     workspace, run, git_worker = finalization_worker("git", "publish-worktree.md")
 
-    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: git_worker.worker_id })
+    response = McpTools::CompleteWorkerTaskTool.call(runId: run.run_id, server_context: { worker_id: git_worker.worker_id })
 
     expect(tool_payload(response).fetch("message")).to include("reporter, curator, seeder, or demo")
   ensure
@@ -61,11 +61,11 @@ RSpec.describe "terminal finalization tools" do
   it "lets a seeder complete only after writing its assigned artifact" do
     workspace, run, seeder = finalization_worker("seeder", "seed-data.md")
 
-    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: seeder.worker_id })
+    response = McpTools::CompleteWorkerTaskTool.call(runId: run.run_id, server_context: { worker_id: seeder.worker_id })
     expect(tool_payload(response).fetch("message")).to include("Write seed-data.md")
 
     Orchestrator::ArtifactStore.write(run.target_root, run.run_id, seeder.scope, "Seeded one demo record.")
-    response = McpTools::CompleteRunFinalizationTool.call(runId: run.run_id, server_context: { worker_id: seeder.worker_id })
+    response = McpTools::CompleteWorkerTaskTool.call(runId: run.run_id, server_context: { worker_id: seeder.worker_id })
 
     expect(tool_payload(response).fetch("outcome")).to eq("completed")
     expect(seeder.reload.handoff_completed_at).to be_present

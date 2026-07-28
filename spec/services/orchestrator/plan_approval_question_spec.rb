@@ -41,50 +41,26 @@ RSpec.describe Orchestrator::PlanApprovalQuestion do
     expect(question.tags).to eq([ "plan-approval" ])
   end
 
-  it "leads the question text with the planner's plain-language humanSummary when present" do
-    workspace = Workspace.create!(name: "plan-approval-summary-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
+  it "requests a plan-summary reporter, uniquely scoped per question, alongside the blocking question" do
+    workspace = Workspace.create!(name: "plan-approval-reporter-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
     run = workspace.runs.create!(
-      run_id: "plan-approval-summary-#{SecureRandom.hex(4)}", task: "Task",
+      run_id: "plan-approval-reporter-#{SecureRandom.hex(4)}", task: "Task",
       target_root: workspace.root_path, launcher_variant: "claude", status: "running",
-      worktree_name: "plan-approval-summary-a1b2", branch_name: "workflow/plan-approval-summary-a1b2"
+      worktree_name: "plan-approval-reporter-a1b2", branch_name: "workflow/plan-approval-reporter-a1b2"
     )
     request = run.spawn_requests.create!(
       asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",
       requested_role: "planner", priority: "blocking", status: "fulfilled", fulfilled_by: "planner_decision_job"
     )
     decision = PlannerDecision.create!(run:, spawn_request: request, status: "running")
-    next_step = {
-      artifact: "fix.md", mode: "implementation", write_scope: "scoped_changes",
-      allowed_paths: [], addresses_criteria: [], success_check: "check",
-      human_summary: "We're adding a parent_run_id column so a child investigation run can inherit its parent's artifacts."
-    }
+    next_step = { artifact: "fix.md", mode: "implementation", write_scope: "scoped_changes", allowed_paths: [], addresses_criteria: [], success_check: "check" }
 
     question = described_class.ask!(decision:, next_step:)
 
-    expect(question.text).to start_with("We're adding a parent_run_id column")
-    expect(question.text).to include("Reply `approved` to continue")
-  end
-
-  it "falls back to the generic wording when humanSummary is absent" do
-    workspace = Workspace.create!(name: "plan-approval-nosummary-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
-    run = workspace.runs.create!(
-      run_id: "plan-approval-nosummary-#{SecureRandom.hex(4)}", task: "Task",
-      target_root: workspace.root_path, launcher_variant: "claude", status: "running",
-      worktree_name: "plan-approval-nosummary-a1b2", branch_name: "workflow/plan-approval-nosummary-a1b2"
-    )
-    request = run.spawn_requests.create!(
-      asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",
-      requested_role: "planner", priority: "blocking", status: "fulfilled", fulfilled_by: "planner_decision_job"
-    )
-    decision = PlannerDecision.create!(run:, spawn_request: request, status: "running")
-    next_step = {
-      artifact: "fix.md", mode: "implementation", write_scope: "scoped_changes",
-      allowed_paths: [], addresses_criteria: [], success_check: "check"
-    }
-
-    question = described_class.ask!(decision:, next_step:)
-
-    expect(question.text).to start_with("Before any code is written on this run")
+    reporter_request = run.spawn_requests.find_by!(requested_role: "reporter")
+    expect(reporter_request.scope).to eq("plan-summary-#{question.question_id}.md")
+    expect(reporter_request.priority).to eq("blocking")
+    expect(reporter_request.write_scope).to eq("source_protected")
   end
 
   it "truncates long values at the declared constants" do
@@ -111,6 +87,59 @@ RSpec.describe Orchestrator::PlanApprovalQuestion do
     refute_includes question.context, "b" * (described_class::DIAGNOSIS_LIMIT + 1)
     assert_includes question.context, "a" * described_class::TASK_LIMIT
     assert_includes question.context, "b" * described_class::DIAGNOSIS_LIMIT
+  end
+
+  describe ".apply_pending_summaries!" do
+    it "upgrades an open plan-approval question's text once its reporter completes, and patches the posted GitHub comment" do
+      root = Dir.mktmpdir("plan-approval-apply-summary")
+      workspace = Workspace.create!(name: "plan-approval-apply-#{SecureRandom.hex(4)}", root_path: root)
+      run = workspace.runs.create!(
+        run_id: "plan-approval-apply-#{SecureRandom.hex(4)}", task: "Task", target_root: root,
+        launcher_variant: "claude", status: "running", worktree_name: "apply-a1b2", branch_name: "workflow/apply-a1b2",
+        github_issue_url: "https://github.com/example/repo/issues/9"
+      )
+      question = run.user_questions.create!(
+        asked_by: "planner", scope: "run", priority: "blocking", status: "open",
+        text: "Before any code is written...", context: "The plan.", tags: [ "plan-approval" ],
+        github_comment_id: "555"
+      )
+      scope = Orchestrator::PlanApprovalQuestion.plan_summary_scope(question)
+      Orchestrator::ArtifactStore.write(root, run.run_id, scope, "We're adding a way to attach files a worker can read.")
+      run.workers.create!(
+        worker_id: SecureRandom.uuid, role: "reporter", nickname: "reporter", reason: "Explain the plan.", scope:,
+        status: "stopped", pid: 123, command: "claude", args: [], handoff_completed_at: 1.minute.ago,
+        prompt_path: Rails.root.join("tmp/plan-summary-apply.prompt.txt").to_s,
+        log_path: Rails.root.join("tmp/plan-summary-apply.log").to_s,
+        last_message_path: Rails.root.join("tmp/plan-summary-apply.last.txt").to_s,
+        env_path: Rails.root.join("tmp/plan-summary-apply.env").to_s
+      )
+      expect(Orchestrator::PullRequestResume).to receive(:patch_comment!).with(run, "555", a_string_including("We're adding a way to attach files"))
+
+      Orchestrator::PlanApprovalQuestion.apply_pending_summaries!(run)
+
+      question.reload
+      expect(question.text).to start_with("We're adding a way to attach files a worker can read.")
+      expect(question.tags).to include("summary_applied")
+    end
+
+    it "is a no-op while the reporter has not completed yet" do
+      root = Dir.mktmpdir("plan-approval-apply-summary-pending")
+      workspace = Workspace.create!(name: "plan-approval-apply-pending-#{SecureRandom.hex(4)}", root_path: root)
+      run = workspace.runs.create!(
+        run_id: "plan-approval-apply-pending-#{SecureRandom.hex(4)}", task: "Task", target_root: root,
+        launcher_variant: "claude", status: "running", worktree_name: "apply-pending-a1b2", branch_name: "workflow/apply-pending-a1b2"
+      )
+      question = run.user_questions.create!(
+        asked_by: "planner", scope: "run", priority: "blocking", status: "open",
+        text: "Before any code is written...", context: "The plan.", tags: [ "plan-approval" ]
+      )
+      expect(Orchestrator::PullRequestResume).not_to receive(:patch_comment!)
+
+      Orchestrator::PlanApprovalQuestion.apply_pending_summaries!(run)
+
+      expect(question.reload.text).to eq("Before any code is written...")
+      expect(question.tags).not_to include("summary_applied")
+    end
   end
 
   describe ".applicable?" do

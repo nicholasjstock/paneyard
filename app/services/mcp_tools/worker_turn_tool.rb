@@ -55,7 +55,7 @@ module McpTools
       # preplanned followingSteps queue promotes the next step without ever
       # recording the free-text result anywhere the reporter can read it
       # later (see Turn.run_worker_turn's fast path), so this cannot ride
-      # along inside `result` and still reach get_run_audit reliably.
+      # along inside `result` and still reach get_reporter_context reliably.
       worker.update!(click_path: clickPath) if clickPath.present?
       previous_state = Orchestrator::TickState.latest(runId)
       structured = Orchestrator::Turn.run_worker_turn(
