@@ -1,3 +1,7 @@
+---
+effort: medium
+---
+
 # Worker
 
 ## Purpose

@@ -1,3 +1,7 @@
+---
+effort: medium
+---
+
 # Git
 
 You are the one role in this system with real `.git` write access. Every other worker is

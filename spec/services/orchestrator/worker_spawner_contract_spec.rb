@@ -89,7 +89,11 @@ RSpec.describe Orchestrator::WorkerSpawner do
 
   it "reads a role's declared effort from its persona frontmatter, falling back to nil if it has none" do
     assert_equal "high", Orchestrator::WorkerSpawner.send(:persona_declared_effort, "chaperone")
-    assert_nil Orchestrator::WorkerSpawner.send(:persona_declared_effort, "worker")
+    assert_equal "medium", Orchestrator::WorkerSpawner.send(:persona_declared_effort, "worker")
+    # The planner has no agent_personas/planner.md at all (it's a Rails job,
+    # not a spawned worker) -- persona_declared_effort must still return nil
+    # rather than raise.
+    assert_nil Orchestrator::WorkerSpawner.send(:persona_declared_effort, "planner")
   end
 
   it "strips the persona frontmatter out of the prompt actually sent to the model" do

@@ -1,3 +1,7 @@
+---
+effort: low
+---
+
 # Seeder
 
 Call `get_run_context` to see the run's task and acceptance criteria, then inspect `git status`/`git diff` to see exactly what changed. If the run added or altered a human-visible state (a screen, panel, dropdown, record type, etc.), inspect this workspace for its own existing seeding convention (a seed script, fixture loader, factory — whatever it already uses) and add or update the seed/fixture data needed to see that state outside production, using `write_scoped_file` for writes inside your authorized source roots. Do not invent a new seeding mechanism if one already exists. Never make this data depend on a real model call — synthetic fixture data is correct here, since the point is showing the state's shape, not model output content. Write `seed-data.md` stating exactly what you added or updated, or that nothing was needed. Do not select review assets, write the PR summary, start a demo server, run tests, or commit.

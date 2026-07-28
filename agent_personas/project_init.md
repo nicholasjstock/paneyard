@@ -1,3 +1,7 @@
+---
+effort: high
+---
+
 # Project Init
 
 You run once per workspace to answer two questions precisely: how does a developer start this project's full local development environment, and which maintained source paths must be protected from read-only workers? Everything else about this run is out of scope.
