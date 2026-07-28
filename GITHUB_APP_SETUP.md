@@ -4,13 +4,20 @@ This orchestrator uses GitHub App authentication for all GitHub operations (PR c
 
 ## Prerequisites
 
-- A GitHub App created in your target repository's organization
-- GitHub App installed on the target repository
+- A GitHub App created under your organization or your personal account
+- GitHub App installed on the target repository (or repositories)
 - The app's private key in PEM format
 
 ## Creating a GitHub App
 
-1. Go to your organization's settings: `https://github.com/organizations/{ORG}/settings/apps`
+Where you create the app determines which repositories it can ever be installed on — pick based on who owns the target repos, not where you happen to be clicking from:
+
+- **Personal account repos** (e.g. `github.com/{your-username}/{repo}`): create it at `https://github.com/settings/apps/new`.
+- **Organization-owned repos**: create it at `https://github.com/organizations/{ORG}/settings/apps/new`.
+
+An app created under one can't be installed on repos owned by the other — if your repos are split between your personal account and an org, either create one app per owner, or move the repos under a single owner first.
+
+1. Go to the URL above for your chosen owner.
 2. Click "New GitHub App"
 3. Fill in the form:
    - **App name**: `Workflow Orchestrator` (or similar)
@@ -20,11 +27,10 @@ This orchestrator uses GitHub App authentication for all GitHub operations (PR c
 
 4. Under "Permissions", select **Repository permissions**:
    - **Pull requests**: Read & write
-   - **Contents**: Read & write (only needed if committing)
-   - **Releases**: Read & write
+   - **Contents**: Read & write — this also covers release management (`gh release create`/`delete`, used to attach/clean up review evidence); GitHub Apps have no separate "Releases" permission, it's folded into Contents.
 
 5. Under **Where can this GitHub App be installed?**:
-   - Select "Only on this account" (or "Any account" if you want multi-org support)
+   - Select "Only on this account" for a single-owner setup (recommended — this just restricts *who can install it*, it does not make the app public or listed anywhere; that only happens if you separately publish it to the GitHub Marketplace, a distinct opt-in step this guide doesn't cover). Select "Any account" only if you need to install the same app across multiple, unrelated owners.
 
 6. Click "Create GitHub App"
 
@@ -36,9 +42,16 @@ This orchestrator uses GitHub App authentication for all GitHub operations (PR c
 
 ## Installing the App
 
-1. On the app's settings page, go to "Install App" tab
-2. Click "Install" next to your target repository/organization
-3. Note the **installation ID** from the URL: `https://github.com/settings/installations/{INSTALLATION_ID}`
+1. On the app's settings page (`https://github.com/settings/apps` → click the app), go to the **"Install App"** tab in the left sidebar.
+2. Your allowed owner (personal account or org, per how you restricted it above) is listed with an **Install** button — click it.
+3. Choose repository access:
+   - **"Only select repositories"**: pick the specific repos this orchestrator will run against. Recommended — the app's token can then only ever be minted for those repos.
+   - **"All repositories"**: also works with no code changes, but grants the app (and thus any orchestrator process using its token) access to every current and future repo under that account/org. Functionally identical to Rails — `Orchestrator::GitHubAppAuth` resolves one installation per account/org regardless of which repos it covers — but it's a broader security scope than most setups need.
+4. Click **Install**.
+
+You'll land on `https://github.com/settings/installations/{INSTALLATION_ID}` — that's the installation ID, but see the note under `GITHUB_APP_INSTALLATION_ID` below before setting it.
+
+To change repo access later (add/remove repos), go to `https://github.com/settings/installations` (or your org's equivalent) and click **Configure** next to the app — no need to reinstall or recreate anything.
 
 ## Configuring the Orchestrator
 
@@ -51,8 +64,10 @@ export GITHUB_APP_ID=12345                    # Numeric app ID
 export GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
 ...
 -----END RSA PRIVATE KEY-----"
-export GITHUB_APP_INSTALLATION_ID=98765       # Optional, for faster token generation
+export GITHUB_APP_INSTALLATION_ID=98765       # Optional -- see note below before setting this
 ```
+
+**Leave `GITHUB_APP_INSTALLATION_ID` unset if the orchestrator will operate against more than one repository or owner.** When unset, `Orchestrator::GitHubAppAuth` looks up the correct installation per repository automatically from `remote.origin.url`, so one app install covers every repo it's granted access to. Setting this variable pins every token request to that one specific installation, regardless of which repo a given run actually targets — correct only if the orchestrator will only ever run against a single, fixed repo.
 
 ### Option 2: Rails Credentials (Recommended for Development)
 
