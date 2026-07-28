@@ -84,9 +84,14 @@ module Orchestrator
           "-c", %(mcp_servers.planner_decision.url=#{"#{WorkerSpawner.rails_mcp_url}/planner-decision".to_json}),
           "-c", 'mcp_servers.planner_decision.bearer_token_env_var="PLANNER_DECISION_TOKEN"',
           "-c", 'mcp_servers.planner_decision.default_tools_approval_mode="approve"',
-          "--output-last-message", output_file.path, "--cd", run.target_root, prompt
+          "--output-last-message", output_file.path, "--cd", run.target_root, "-"
         ]
-        stdout, stderr, status = command_runner.call(env, *args, chdir: run.target_root)
+        # Prompt goes over stdin, not argv -- matches
+        # WorkerSpawner's own codex path, and keeps this bounded-decision
+        # prompt out of `ps` output the same way. Nothing forced this to
+        # differ; it only ever did because this call site and the worker
+        # path were ported from the original TS scripts independently.
+        stdout, stderr, status = command_runner.call(env, *args, chdir: run.target_root, stdin_data: prompt)
         raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: bounded_output("#{stdout}\n#{stderr}")) unless status.success?
 
         { usage: {}, model: selected_model, cli_output: bounded_output(stdout) }

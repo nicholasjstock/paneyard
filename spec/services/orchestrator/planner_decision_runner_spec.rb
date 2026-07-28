@@ -36,8 +36,8 @@ RSpec.describe Orchestrator::PlannerDecisionRunner do
   it "runs Codex with the submit_planner_decision MCP server wired in via -c overrides" do
     run, request, decision = build_run_request_and_decision(launcher_variant: "codex")
     captured = nil
-    runner = lambda do |env, *args, chdir:|
-      captured = { env:, args:, chdir: }
+    runner = lambda do |env, *args, chdir:, stdin_data:|
+      captured = { env:, args:, chdir:, stdin_data: }
       [ "", "", fake_status(true) ]
     end
 
@@ -51,12 +51,16 @@ RSpec.describe Orchestrator::PlannerDecisionRunner do
     assert_includes overrides, 'mcp_servers.planner_decision.bearer_token_env_var="PLANNER_DECISION_TOKEN"'
     assert_includes overrides, 'mcp_servers.planner_decision.default_tools_approval_mode="approve"'
     assert captured[:env]["PLANNER_DECISION_TOKEN"].present?
+    # The prompt goes over stdin, not argv -- matches
+    # WorkerSpawner's own codex path, and keeps it out of `ps` output.
+    assert_equal "-", captured[:args].last
+    assert_includes captured[:stdin_data], "submit_planner_decision"
   end
 
   it "uses Codex's small tier by default and its strong tier only for a promoted planner retry" do
     run, request, decision = build_run_request_and_decision(launcher_variant: "codex")
     captured = []
-    runner = lambda do |_env, *args, chdir:|
+    runner = lambda do |_env, *args, chdir:, stdin_data:|
       captured << args
       [ "", "", fake_status(true) ]
     end
