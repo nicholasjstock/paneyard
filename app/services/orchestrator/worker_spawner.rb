@@ -77,7 +77,7 @@ module Orchestrator
       unless mcp_override
         enriched_prompt = worker_identity_prompt(
           run_id: run.run_id, worker_id:, nickname:, role:, scope:, mode:, write_scope:, allowed_paths:,
-          target_root: root_dir
+          target_root: root_dir, driver:
         ) + enriched_prompt
         enriched_prompt = workspace_memory_prompt(run) + enriched_prompt
       end
@@ -448,7 +448,7 @@ module Orchestrator
     end
 
     def worker_identity_prompt(run_id:, worker_id:, nickname:, role:, scope:, mode:, write_scope:, allowed_paths:,
-      target_root:)
+      target_root:, driver:)
       <<~PROMPT
         # Runtime identity (authoritative)
 
@@ -470,7 +470,7 @@ module Orchestrator
         imply that you called a tool you did not actually invoke; if a required tool cannot be loaded or
         called, say exactly that in your final message instead of narrating a call that never happened.
         The target workspace root is `#{target_root}`. Start repository commands with `cd #{Shellwords.escape(target_root)}`.
-        Bash is available under a launcher-enforced filesystem policy. Writes to tracked repository source are limited
+        #{"This process did not start inside #{target_root} (it only has read/tool access to it, granted separately) -- so CLAUDE.md is not auto-loaded the way it would be from a normal session there. Read #{target_root}/CLAUDE.md before making any repository changes.\n" if driver == "claude"}Bash is available under a launcher-enforced filesystem policy. Writes to tracked repository source are limited
         to the authorized source roots above -- source-protected workers have none. Gitignored paths (caches, build
         output, node_modules, etc.) stay writable regardless, since tooling needs them and they aren't source. Run
         bounded commands (they

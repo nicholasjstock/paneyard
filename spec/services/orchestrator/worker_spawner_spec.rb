@@ -105,6 +105,59 @@ RSpec.describe Orchestrator::WorkerSpawner do
       )
     end
 
+    # Confirmed live (2026-07-28): a real claude worker's cwd is the
+    # scratch runtime_dir, not the worktree -- Bash otherwise gets implicit
+    # write access to wherever cwd is, regardless of any Edit/Write
+    # allow-list, which would silently defeat write_scope for a
+    # source_protected worker. --add-dir only grants read/tool access to
+    # target_root, so CLAUDE.md is never auto-loaded there; a claude worker
+    # must be told explicitly where to find it. Codex's own --sandbox is a
+    # real write restriction rather than a cwd trick, so it chdirs straight
+    # into root_dir and already auto-loads AGENTS.md -- no prompt note
+    # needed there, and adding one would be redundant.
+    it "tells a claude worker explicitly where to find CLAUDE.md, since its cwd isn't the worktree" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-claude-md")
+      workspace = Workspace.create!(name: "claude-md-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Do some work",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(34_568)
+      allow(Process).to receive(:detach)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "worker-1",
+        reason: "Do some work.", scope: "task.md", prompt: "Do the work."
+      )
+
+      expect(File.read(worker.prompt_path)).to include("Read #{workspace.root_path}/CLAUDE.md")
+    end
+
+    it "does not add a CLAUDE.md note for a codex worker, which already chdirs into the real worktree" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-codex-md")
+      workspace = Workspace.create!(name: "codex-md-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Do some work",
+        target_root: workspace.root_path, launcher_variant: "codex", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(34_569)
+      allow(Process).to receive(:detach)
+      stdin_read = instance_double(IO, close: true)
+      stdin_write = StringIO.new
+      allow(IO).to receive(:pipe).and_return([ stdin_read, stdin_write ])
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "worker-1",
+        reason: "Do some work.", scope: "task.md", prompt: "Do the work."
+      )
+
+      expect(File.read(worker.prompt_path)).not_to include("CLAUDE.md")
+    end
+
     # Regression: a linked git worktree's own .git is just a one-line
     # pointer file -- the real metadata (and the shared objects/refs every
     # worktree writes into) lives back in the source checkout's .git/,
