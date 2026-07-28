@@ -104,6 +104,50 @@ RSpec.describe Orchestrator::WorkspaceAdminChatDriver::Runner do
     expect(FakeProvider.run_turn_calls.first[:workspace_path]).not_to eq(chat.workspace.source_root)
   end
 
+  # Confirmed empirically (2026-07-28): a bare `claude -p`/`codex exec` run
+  # from a workspace root -- the exact cwd this driver uses -- does not
+  # auto-discover CLAUDE.md/AGENTS.md the way it would from inside the
+  # source checkout, since that root has no .git of its own and the
+  # instructions live one level down in Workspace#source_root. A fresh
+  # session must be told explicitly where to look.
+  it "tells a fresh Claude session to read CLAUDE.md, not AGENTS.md" do
+    chat = create_chat
+    FakeProvider.result = { session_id: "sess-1", cancelled: false, error: false }
+    assistant_message = described_class.start_turn!(chat:, content: "hello")
+
+    described_class.perform_turn(assistant_message)
+
+    sent_prompt = FakeProvider.run_turn_calls.first[:prompt]
+    expect(sent_prompt).to include("#{chat.workspace.source_root}/CLAUDE.md")
+    expect(sent_prompt).not_to include("AGENTS.md")
+    expect(sent_prompt).to end_with("hello")
+  end
+
+  it "tells a fresh Codex session to read AGENTS.md, not CLAUDE.md" do
+    chat = create_chat
+    chat.update!(active_provider: "codex")
+    FakeProvider.result = { session_id: "sess-1", cancelled: false, error: false }
+    assistant_message = described_class.start_turn!(chat:, content: "hello")
+
+    described_class.perform_turn(assistant_message)
+
+    sent_prompt = FakeProvider.run_turn_calls.first[:prompt]
+    expect(sent_prompt).to include("#{chat.workspace.source_root}/AGENTS.md")
+    expect(sent_prompt).not_to include("CLAUDE.md")
+    expect(sent_prompt).to end_with("hello")
+  end
+
+  it "does not repeat the orientation note on a session that's already resuming" do
+    chat = create_chat
+    chat.set_session_id!("claude", "existing-session")
+    FakeProvider.result = { session_id: "existing-session", cancelled: false, error: false }
+    assistant_message = described_class.start_turn!(chat:, content: "hello again")
+
+    described_class.perform_turn(assistant_message)
+
+    expect(FakeProvider.run_turn_calls.first[:prompt]).to eq("hello again")
+  end
+
   it "resumes with the chat's persisted session id on the next turn" do
     chat = create_chat
     chat.set_session_id!("claude", "existing-session")

@@ -12,6 +12,32 @@ module Orchestrator
 
       PROVIDERS = { "claude" => ClaudeProvider, "codex" => CodexProvider }.freeze
 
+      # The admin chat's own cwd (Workspace#root_path) is deliberately the
+      # workspace root, not the main checkout -- it needs to see every
+      # active run's worktree, not just main. That root has no .git of its
+      # own, so neither CLI's project-instructions convention is
+      # auto-discovered the way it would be from inside a real checkout:
+      # confirmed empirically (2026-07-28) via a bare `claude -p`/`codex
+      # exec` from a workspace root -- both answered "no" when asked
+      # whether they already had that content loaded. Each provider reads a
+      # different file by its own native convention (Claude: CLAUDE.md,
+      # confirmed via this very tool's own system prompt; Codex: AGENTS.md,
+      # confirmed live -- a bare `codex exec` from inside the real checkout
+      # quoted content back unprompted), so tell each the one it actually
+      # consults rather than hedging with both. Told once per fresh session
+      # (a resumed session already has it in context from the first turn;
+      # CodexProvider's own module comment notes a resumed turn otherwise
+      # behaves identically).
+      PROJECT_INSTRUCTIONS_FILE = { "claude" => "CLAUDE.md", "codex" => "AGENTS.md" }.freeze
+
+      def worktree_orientation(workspace, provider_name)
+        "This directory (#{workspace.root_path}) is this workspace's root -- it holds #{Pathname(workspace.source_root).basename} " \
+          "(the durable source checkout) alongside sibling worktrees for any runs in flight. It is not a git repository itself, " \
+          "so #{PROJECT_INSTRUCTIONS_FILE.fetch(provider_name)} is not auto-discovered from here the way it would be from inside " \
+          "a checkout. Read #{workspace.source_root}/#{PROJECT_INSTRUCTIONS_FILE.fetch(provider_name)} before making any " \
+          "repository changes.\n\n"
+      end
+
       # Creates the user/assistant message pair and enqueues the turn job
       # inside one lock+transaction, so two racing requests for the same chat
       # can't both observe active_turn_id blank and both start a turn.
@@ -60,8 +86,9 @@ module Orchestrator
         session_id = chat.session_id_for(provider_name)
         on_spawn = ->(pid) { assistant_message.update!(pid:, process_group_id: pid) }
 
+        cli_prompt = session_id.blank? ? worktree_orientation(chat.workspace, provider_name) + prompt : prompt
         result = provider.run_turn(
-          workspace_path: chat.workspace.root_path, prompt:, session_id:,
+          workspace_path: chat.workspace.root_path, prompt: cli_prompt, session_id:,
           model: chat.model_for(provider_name), on_spawn:
         ) { |event| assistant_message.apply_event!(event) }
 
@@ -104,7 +131,7 @@ module Orchestrator
 
         reconstructed_prompt = reconstruction_prompt(chat:, provider_name:, assistant_message:, latest_prompt: prompt)
         provider.run_turn(
-          workspace_path: chat.workspace.root_path, prompt: reconstructed_prompt, session_id: nil,
+          workspace_path: chat.workspace.root_path, prompt: worktree_orientation(chat.workspace, provider_name) + reconstructed_prompt, session_id: nil,
           model: chat.model_for(provider_name), on_spawn:
         ) { |event| assistant_message.apply_event!(event) }
       end
