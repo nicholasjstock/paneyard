@@ -18,7 +18,6 @@ RSpec.describe TickRunJob do
     expect(request.scope).to eq("seed-data.md")
     expect(request.execution_mode).to eq("implementation")
     expect(request.write_scope).to eq("scoped_changes")
-    expect(request.text).to include("seed")
     expect(run.spawn_requests.where(requested_role: %w[reporter curator demo git])).to be_empty
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
@@ -44,8 +43,6 @@ RSpec.describe TickRunJob do
 
     request = run.spawn_requests.find_by!(requested_role: "reporter")
     expect(request.scope).to eq("run-summary.md")
-    expect(request.text).to include("get_run_audit")
-    expect(request.text).to include("Do not run tests")
     expect(run.spawn_requests.where(requested_role: %w[curator demo git])).to be_empty
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
@@ -106,7 +103,6 @@ RSpec.describe TickRunJob do
 
     request = run.spawn_requests.find_by!(requested_role: "demo")
     expect(request.scope).to eq("demo-notes.md")
-    expect(request.text).to include("start_run_command")
     expect(run.spawn_requests.where(requested_role: "git")).to be_empty
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)

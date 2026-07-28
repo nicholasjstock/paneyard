@@ -7,7 +7,7 @@ module Orchestrator
     module_function
 
     # Commit, conflict repair, rebase, and push/PR creation are owned by the
-    # terminal "git" worker (see .claude/agents/git.md) -- the one role with
+    # terminal "git" worker (see agent_personas/git.md) -- the one role with
     # real .git write access, driving those git/gh commands itself instead of
     # Rails guessing on its behalf. This module now only persists the outcome
     # that worker reports (via McpTools::FinalizeRunPublicationTool) and owns
@@ -43,12 +43,15 @@ module Orchestrator
 
       validated_root!(run)
       run.update!(publication_status: "commit_pending", publication_error: nil)
+      # "Begin." is deliberate -- agent_personas/git.md is auto-prepended to
+      # every git-role spawn and already states the full commit/rebase/push/
+      # publish sequence in far more detail than fit here; this used to
+      # restate a condensed version of it by hand, with nothing keeping the
+      # two in sync.
       SpawnRequest.create!(
         run_id: run.run_id, asked_by: "orchestrator", requested_role: "git", priority: "blocking",
         scope: "publish-#{run.worktree_name}.md", execution_mode: "implementation", write_scope: "git_managed",
-        allowed_paths: [ "**/*" ], model_tier: "small",
-        text: "Commit this run's changes, rebase onto origin/main (resolving any conflicts yourself with real git " \
-          "access), push, and create or update the pull request. Call finalize_run_publication exactly once when done."
+        allowed_paths: [ "**/*" ], model_tier: "small", text: "Begin."
       )
       run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "The git worker is committing, rebasing, and publishing this run.")
     end

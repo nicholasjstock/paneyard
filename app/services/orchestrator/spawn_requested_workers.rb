@@ -193,7 +193,8 @@ module Orchestrator
         WorkerSpawner.spawn_worker(
           run: run, role: "chaperone", nickname: "chaperone-#{SecureRandom.hex(3)}",
           reason: "Chaperone review: #{review.trigger_reason || review.summary}",
-          scope: request.scope, prompt: chaperone_prompt(review), worker_id: worker_id, model_tier: "strong",
+          scope: request.scope, prompt: "Begin.", worker_id: worker_id, model_tier: "strong",
+          effort: "high",
           mcp_override: {
             url: "#{WorkerSpawner.rails_mcp_url}/chaperone", token: token,
             allowed_tools: Orchestrator::ChaperoneMcpServer::TOOL_NAMES
@@ -208,21 +209,6 @@ module Orchestrator
       end
     end
 
-    def chaperone_prompt(review)
-      if review.subject_type == "planner"
-        "You must begin by calling get_chaperone_state. Review the bounded small-model planner attempt and its failure using only the chaperone MCP tools. " \
-          "Choose continue_small when the failure can be corrected by a bounded retry with clearer context, including invalid verification evidence, an unverified service or endpoint, or an unnecessary protected-path proposal. " \
-          "Choose promote only for a genuine reasoning-capability gap. Choose stop only when no safe in-scope retry exists and a real external decision is unavoidable; never stop merely because the planner proposed unauthorized work when an in-scope alternative remains. " \
-          "When evidence identifies a concrete, fixable condition that would change the next attempt, provide revisedInstruction with the replacement instruction; otherwise leave it null. " \
-          "Your summary must state the concrete next action. You must finish by calling submit_chaperone_decision exactly once; a text-only answer is a failure."
-      else
-        "You must begin by calling get_chaperone_state. Review repeated diagnosis attempts using only the chaperone MCP tools. Determine semantic similarity and progress. " \
-          "Choose continue_small or promote only when the same execution envelope can succeed with a corrected instruction or stronger worker. " \
-          "When the evidence shows the envelope itself cannot solve the blocker (for example a source-protected recording must first change an exact configuration or source file), choose stop WITH plannerTier=small or strong, a blockerKey, and one or more contextRequests. This means REPLACE the failed envelope: Rails starts one selected-tier planner that may create a new mode, owner, writable-path scope, artifact, and follow-up sequence. It does not ask the user. Choose small when the evidence makes the replacement obvious and strong only for real repair-scope uncertainty. blockerKey is a short lowercase-hyphenated slug naming the specific blocking condition (e.g. 'stale-recorder-assertion', 'docker-unavailable'). get_chaperone_state's priorBlockers lists every blockerKey already used for this lineage -- check it before choosing one: if the current blocker is the same underlying condition as an entry there, reuse that exact key even if you would phrase it differently, so Rails recognizes the repeat and asks the user instead of replanning the same fix again; pick a new key only when the evidence shows a genuinely different blocker, even within the same lineage, including a small-tier replan that failed only because it was scoped too narrowly. Context requests may name only artifact, run_context, or worker_log windows; use the smallest useful windows. " \
-          "Choose stop WITHOUT plannerTier only when no safe bounded repair plan exists and a real external decision is unavoidable. " \
-          "You must finish by calling submit_chaperone_decision exactly once; a text-only answer is a failure."
-      end
-    end
 
     def build_worker_nickname(role)
       case role

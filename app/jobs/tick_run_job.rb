@@ -49,10 +49,14 @@ class TickRunJob < ApplicationJob
       # correct and costs nothing once the whole chain is done, at which
       # point RunPublication.queue_worker! itself no-ops behind its own
       # open-SpawnRequest guard.
-      queue_finalization_worker(run, "seeder", "seed-data.md", "Inspect git status/diff, get_run_context, and this workspace's own seed/fixture convention (a seed script, fixture loader, factory -- do not invent a new mechanism). If the run added or altered a human-visible state, add or update the seed/fixture data needed to see it outside production; never depend on a real model call for that data. Write seed-data.md stating what you added or that nothing was needed, then call complete_run_finalization with a clickPath describing the concrete verification steps a reviewer should follow, naming any seeded record. Do not select review assets, write a run summary, start a demo server, run tests, or commit.", write_scope: "scoped_changes", execution_mode: "implementation") ||
-        queue_finalization_worker(run, "reporter", "run-summary.md", "Audit the persisted run with get_run_audit and write the reviewer-facing PR audit to run-summary.md. Do not run tests, select files, commit, or publish.") ||
-        queue_finalization_worker(run, "curator", "review-assets.md", "Inspect real local deliverables only. Select useful reviewer files with select_review_assets, or write that no review assets were selected. Do not audit the run, run tests, commit, or publish.") ||
-        queue_finalization_worker(run, "demo", "demo-notes.md", "Start (or reuse) this workspace's dev/demo server with start_run_command if one isn't already running and verify it is actually serving, then call complete_run_finalization. Do not edit source, run tests, select review assets, or commit.") ||
+      # The task text below is deliberately minimal -- agent_personas/<role>.md
+      # is auto-prepended to every spawn of that role (WorkerSpawner#build_prompt_with_persona)
+      # and already states the complete behavior; repeating it here used to
+      # duplicate that file by hand, with no mechanism keeping the two in sync.
+      queue_finalization_worker(run, "seeder", "seed-data.md", "Begin.", write_scope: "scoped_changes", execution_mode: "implementation") ||
+        queue_finalization_worker(run, "reporter", "run-summary.md", "Begin.") ||
+        queue_finalization_worker(run, "curator", "review-assets.md", "Begin.") ||
+        queue_finalization_worker(run, "demo", "demo-notes.md", "Begin.") ||
         Orchestrator::RunPublication.queue_worker!(run)
       Orchestrator::SpawnRequestedWorkers.call(run: run)
     else

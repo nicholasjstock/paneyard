@@ -20,6 +20,25 @@ RSpec.describe Orchestrator::WorkerSpawner do
     assert_equal "Do the work.", args.last
   end
 
+  it "omits --effort when none is given, and passes it through when it is" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
+    )
+
+    plain_args = Orchestrator::WorkerSpawner.send(
+      :claude_args, "Do the work.", role: "worker", mcp_config_path: "/tmp/mcp.json",
+      settings_path: "/tmp/settings.json", target_root: root, policy:
+    )
+    refute_includes plain_args, "--effort"
+
+    effort_args = Orchestrator::WorkerSpawner.send(
+      :claude_args, "Do the work.", role: "worker", mcp_config_path: "/tmp/mcp.json",
+      settings_path: "/tmp/settings.json", target_root: root, policy:, effort: "high"
+    )
+    assert_equal "high", effort_args[effort_args.index("--effort") + 1]
+  end
+
   it "keeps Bash for writing workers and adds only policy-backed edit tools" do
     root = Dir.mktmpdir("worker-policy")
     policy = Orchestrator::WorkerExecutionPolicy.new(
@@ -48,6 +67,24 @@ RSpec.describe Orchestrator::WorkerSpawner do
     assert_includes args, 'default_permissions="worker-123"'
     assert args.any? { |arg| arg.include?('"config/queue.yml"="write"') }
     refute_includes args, "--dangerously-bypass-approvals-and-sandbox"
+  end
+
+  it "codex has no dedicated effort flag -- passes it as a -c model_reasoning_effort override instead" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "infrastructure", write_scope: "scoped_changes",
+      allowed_paths: [ "config/queue.yml" ], profile_name: "worker-123"
+    )
+
+    plain_args = Orchestrator::WorkerSpawner.send(
+      :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:
+    )
+    refute plain_args.any? { |arg| arg.include?("model_reasoning_effort") }
+
+    effort_args = Orchestrator::WorkerSpawner.send(
+      :codex_args, root_dir: root, last_message_path: "/tmp/last.txt", policy:, effort: "high"
+    )
+    assert_includes effort_args, %(model_reasoning_effort="high")
   end
 
   it "fails closed when legacy Codex sandbox configuration would disable the exact profile" do
@@ -254,10 +291,8 @@ RSpec.describe Orchestrator::WorkerSpawner do
   end
 
   it "infrastructure workers receive the generic worker contract and skill" do
-    assert_equal Rails.root.join(".claude", "skills", "infrastructure", "SKILL.md"),
-      Orchestrator::WorkerSpawner.send(:infrastructure_skill_path, "claude")
-    assert_equal Rails.root.join(".codex", "skills", "infrastructure", "SKILL.md"),
-      Orchestrator::WorkerSpawner.send(:infrastructure_skill_path, "codex")
+    assert_equal Rails.root.join("agent_personas", "infrastructure_skill.md"),
+      Orchestrator::WorkerSpawner.send(:infrastructure_skill_path)
 
     prompt = Orchestrator::WorkerSpawner.send(
       :build_prompt_with_persona, driver: "claude", role: "infrastructure", prompt: "Diagnose the outage."

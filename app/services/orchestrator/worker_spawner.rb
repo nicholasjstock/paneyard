@@ -33,7 +33,7 @@ module Orchestrator
 
     def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil,
       write_scope: nil, allowed_paths: [], model_tier: "small", mcp_override: nil, inherited_artifacts: [],
-      lineage_key: nil)
+      lineage_key: nil, effort: nil)
       raise ArgumentError, "Planner processes were removed; queue a PlannerDecisionJob instead" if role == "planner"
 
       # nickname flows straight into file paths under workers_dir below --
@@ -143,12 +143,12 @@ module Orchestrator
           [ "claude", claude_args(
             enriched_prompt, role:, mode:, mcp_config_path:, settings_path: claude_settings_path,
             target_root: root_dir, policy:, model_tier:, mcp_override:,
-            resume_session_id:
+            resume_session_id:, effort:
           ) ]
         else
           validate_codex_permission_profile_compatibility!(root_dir)
           [ "codex", codex_args(
-            root_dir:, last_message_path:, policy:, model_tier:, mcp_override:, resume_session_id:
+            root_dir:, last_message_path:, policy:, model_tier:, mcp_override:, resume_session_id:, effort:
           ) ]
         end
 
@@ -337,11 +337,11 @@ module Orchestrator
     # Print mode normally writes only a final response. Stream JSON with
     # partial messages gives the file-backed worker log incremental progress
     # for the run dashboard's five-second Turbo refreshes.
-    # Agent instructions are plain prompt text, so Claude does not read the
-    # YAML front matter in .claude/agents/*.md as model configuration. Keep
+    # Agent instructions are plain prompt text, so Claude does not read any
+    # front matter in agent_personas/*.md as model configuration. Keep
     # cost routing here at the actual CLI boundary instead.
     def claude_args(prompt, role: "worker", mode: nil, mcp_config_path:, settings_path:, target_root:, policy:,
-      model_tier: "small", mcp_override: nil, resume_session_id: nil)
+      model_tier: "small", mcp_override: nil, resume_session_id: nil, effort: nil)
       if mcp_override
         # Without an explicit --output-format, --print defaults to plain
         # text -- not the structured JSON stream Orchestrator::LogReader.
@@ -352,6 +352,7 @@ module Orchestrator
         # it just was never captured.
         return [
           "--model", claude_model_for(role, mode:, model_tier:),
+          *(effort ? [ "--effort", effort ] : []),
           "--print",
           "--mcp-config", mcp_config_path,
           "--strict-mcp-config",
@@ -366,6 +367,7 @@ module Orchestrator
 
       [
         "--model", claude_model_for(role, mode:, model_tier:),
+        *(effort ? [ "--effort", effort ] : []),
         # "dontAsk" silently denies (rather than approves) any action the
         # CLI's own automated safety classifier flags as needing
         # confirmation -- e.g. an edit that looks like it's deleting a test
@@ -400,12 +402,16 @@ module Orchestrator
       model_tier.to_s == "strong" ? CODEX_PROMOTED_MODEL : CODEX_SMALL_MODEL
     end
 
-    def codex_args(root_dir:, last_message_path:, policy:, model_tier: "small", mcp_override: nil, resume_session_id: nil)
+    def codex_args(root_dir:, last_message_path:, policy:, model_tier: "small", mcp_override: nil, resume_session_id: nil, effort: nil)
       model_args = [ "--model", codex_model_for(model_tier:) ]
+      # No dedicated --reasoning-effort/--effort flag exists for codex --
+      # confirmed against `codex exec --help` -- it's set the same way any
+      # other config value is, via -c model_reasoning_effort="...".
+      effort_args = effort ? [ "-c", %(model_reasoning_effort="#{effort}") ] : []
       if mcp_override
         return [
           "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
-          *model_args,
+          *model_args, *effort_args,
           "-c", %(mcp_servers.chaperone.url=#{mcp_override[:url].to_json}),
           "-c", %(mcp_servers.chaperone.bearer_token_env_var="WORKFLOW_CHAPERONE_TOKEN"),
           "-c", %(mcp_servers.chaperone.default_tools_approval_mode="approve"),
@@ -426,9 +432,9 @@ module Orchestrator
       # does not accept -C/--add-dir (confirmed against `codex exec resume
       # --help`); the resumed session keeps whatever cwd it started with.
       if resume_session_id
-        [ "exec", "resume", resume_session_id, *model_args, "--json", *config_args, "-o", last_message_path, "-" ]
+        [ "exec", "resume", resume_session_id, *model_args, *effort_args, "--json", *config_args, "-o", last_message_path, "-" ]
       else
-        [ "exec", *model_args, "--json", *config_args, "-C", root_dir, "-o", last_message_path, "-" ]
+        [ "exec", *model_args, *effort_args, "--json", *config_args, "-C", root_dir, "-o", last_message_path, "-" ]
       end
     end
 
@@ -533,18 +539,26 @@ module Orchestrator
       PROMPT
     end
 
+    # One persona file per role, shared by both drivers (agent_personas/) --
+    # confirmed the .claude/.codex copies of these were duplicated, not
+    # genuinely different: near-identical or verbatim content, manually
+    # kept in sync by hand, which already caused real drift once (a stale
+    # pre-Rails-orchestrator instruction block existed only in the .md
+    # copy). Neither driver ever read the other per-driver metadata these
+    # used to carry (model, model_reasoning_effort, sandbox_mode) --
+    # confirmed nothing here does anything but File.read the body text.
     def build_prompt_with_persona(driver:, role:, prompt:)
-      persona_paths = [ agent_prompt_path(driver: driver, role: role) ]
+      persona_paths = [ agent_prompt_path(role) ]
       if role == "infrastructure"
         # Infrastructure keeps the normal worker bus contract and layers on
-        # the launcher-specific, repository-owned reliability workflow.
-        persona_paths.unshift(agent_prompt_path(driver: driver, role: "worker"))
-        persona_paths << infrastructure_skill_path(driver)
+        # the repository-owned reliability workflow.
+        persona_paths.unshift(agent_prompt_path("worker"))
+        persona_paths << infrastructure_skill_path
       elsif role == "verifier"
         # A verifier keeps the normal worker bus contract (worker_turn,
         # get_run_context, etc.) and layers on its own independent-review
         # discipline.
-        persona_paths.unshift(agent_prompt_path(driver: driver, role: "worker"))
+        persona_paths.unshift(agent_prompt_path("worker"))
       end
       instructions = persona_paths.filter_map { |path| File.read(path) if File.exist?(path) }
       return prompt if instructions.empty?
@@ -552,13 +566,12 @@ module Orchestrator
       "#{instructions.join("\n\n")}\n\nCurrent task:\n#{prompt}"
     end
 
-    def agent_prompt_path(driver:, role:)
-      extension = driver == "claude" ? "md" : "toml"
-      File.join(Rails.root, ".#{driver}", "agents", "#{role}.#{extension}")
+    def agent_prompt_path(role)
+      File.join(Rails.root, "agent_personas", "#{role}.md")
     end
 
-    def infrastructure_skill_path(driver)
-      Rails.root.join(".#{driver}", "skills", "infrastructure", "SKILL.md")
+    def infrastructure_skill_path
+      Rails.root.join("agent_personas", "infrastructure_skill.md")
     end
 
     def resolve_codex_home

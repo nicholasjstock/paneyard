@@ -1,17 +1,19 @@
-# Agent Roster
+# Agent Persona Roster
 
-Rails owns orchestration, planning, retries, and process dispatch — see [AGENTS.md](../../AGENTS.md) and [CLAUDE.md](../../CLAUDE.md) at the repo root for the authoritative description of that model. This directory holds the persona prompts for every process Rails can spawn as a Claude subagent. There is deliberately no `planner.md`, `supervisor.md`, or `orchestrator.md` here: planning is a bounded, stateless decision function (`PlannerDecisionJob`), not a spawnable agent, and "orchestrator" is Rails' own dispatch logic (`TickRunJob` + `Orchestrator::SpawnRequestedWorkers`), not a subagent either.
+Rails owns orchestration, planning, retries, and process dispatch — see [AGENTS.md](../AGENTS.md) and [CLAUDE.md](../CLAUDE.md) at the repo root for the authoritative description of that model. This directory holds the one persona prompt per role that Rails spawns as a subagent, shared by both the Claude and Codex launcher paths (`Orchestrator::WorkerSpawner#build_prompt_with_persona`) — they share the same `workflow` MCP server (registered in [`.mcp.json`](../.mcp.json)) and the same bus/worker/artifact state, so a run is interchangeable mid-run regardless of which CLI it's using. There is deliberately no `planner.md`, `supervisor.md`, or `orchestrator.md` here: planning is a bounded, stateless decision function (`PlannerDecisionJob`), not a spawnable agent, and "orchestrator" is Rails' own dispatch logic (`TickRunJob` + `Orchestrator::SpawnRequestedWorkers`), not a subagent either.
 
-> Codex note: the parallel Codex-native personas live in [`.codex/agents`](../../.codex/agents/README.md), sharing the same `workflow` MCP server (registered in [`.mcp.json`](../../.mcp.json)) and the same bus/worker/artifact state, so runs from either CLI path are interchangeable mid-run.
+These used to be two per-driver copies (`.claude/agents/*.md`, `.codex/agents/*.toml`) manually kept in sync by hand — confirmed the actual instructional content was identical or near-identical between them, and that duplication already caused real drift once (a stale pre-Rails-orchestrator instruction block existed only in one copy). Neither driver's frontmatter/TOML metadata fields (`model`, `model_reasoning_effort`, `sandbox_mode`) were ever read by `WorkerSpawner` either — it only ever does `File.read` on the body text; real model/tier/effort selection lives entirely in `WorkerSpawner` and `spawn_requested_workers.rb`.
+
+Codex detail worth keeping in mind even though it's shared: keep `multi_agent` enabled so Codex can still fan out its own built-in subagents for read-only research or bounded edits within a single agent's own turn — that's a Codex implementation detail local to one turn, separate from the sequential role dispatch described below.
 
 ## Roles
 
-At most one worker is active per run at a time — Rails dispatches strictly sequentially (see `Orchestrator::SpawnRequestedWorkers`).
+At most one worker is active per run at a time — Rails dispatches strictly sequentially (see `Orchestrator::SpawnRequestedWorkers`), so there is no dependency graph to manage, only ever one thing in flight.
 
 | Role | File | Spawned when |
 |------|------|---------------|
 | `worker` | [worker.md](./worker.md) | A generic bus request: run a workspace operation, verify/analyze evidence, or apply a scoped fix. What it actually does comes from the task prompt, not a fixed identity. |
-| `infrastructure` | *(worker.md + [../skills/infrastructure/SKILL.md](../skills/infrastructure/SKILL.md))* | Same worker contract, layered with the repository-owned reliability workflow for fixing runtime/environment/tooling problems. |
+| `infrastructure` | *(worker.md + [infrastructure_skill.md](./infrastructure_skill.md))* | Same worker contract, layered with the repository-owned reliability workflow for fixing runtime/environment/tooling problems. |
 | `verifier` | [verifier.md](./verifier.md) | An independent, fresh reproduction of one acceptance criterion's evidence before Rails allows it to close. |
 | `project_init` | [project_init.md](./project_init.md) | Once per workspace: discovers how to start the local dev environment and which source paths are protected. |
 | `chaperone` | [chaperone.md](./chaperone.md) | A repeated failure under the same lineage escalates to a strong-model review that decides `continue_small`, `promote`, or `stop`. |
@@ -27,12 +29,20 @@ Every other role is git-blind by design (`WorkerExecutionPolicy` unconditionally
 
 Planning itself has no agent file: a worker's `[DONE]`/`[BLOCKED]`/`[FAILED]` result either promotes an already-planned `followingSteps` item directly, or queues one bounded `PlannerDecisionJob` call (tools disabled, structured output only) — never a spawned planner process.
 
+## Running Nicknames
+
+When subagents are running, look for these role-based nicknames (see `build_worker_nickname` in `app/services/orchestrator/spawn_requested_workers.rb`):
+
+| Role | Nickname to look for |
+|---|---|
+| `worker` | `worker` (or `worker-2`, `worker-3`, ... for concurrent instances across runs) |
+| any other role | the role name itself (`seeder`, `reporter`, `curator`, `demo`, `git`, `verifier`, `chaperone`, `project_init`, `infrastructure`), suffixed `-1`, `-2`, ... only if a name collision occurs |
+
 ## Key Files
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — system design: the run lifecycle, planner context protocol, and finalization pipeline
-- [MESSAGING_PROTOCOL.md](./MESSAGING_PROTOCOL.md) — structured logging format all agents use
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — system design: the run lifecycle, planner context protocol, and finalization pipeline
 - [worker.md](./worker.md) — the generic task worker persona, reused as the base for `infrastructure` and `verifier`
 
 ## MCP Tools
 
-The workflow is powered by the `workflow` MCP server (registered at [`.mcp.json`](../../.mcp.json)). Tool access per role is enforced in `app/services/orchestrator/worker_mcp_server.rb`; individual tools additionally self-check the authenticated worker's role (e.g. `app/services/mcp_tools/complete_run_finalization_tool.rb`).
+The workflow is powered by the `workflow` MCP server (registered at [`.mcp.json`](../.mcp.json)). Tool access per role is enforced in `app/services/orchestrator/worker_mcp_server.rb`; individual tools additionally self-check the authenticated worker's role (e.g. `app/services/mcp_tools/complete_run_finalization_tool.rb`).

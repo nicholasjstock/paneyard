@@ -1,8 +1,3 @@
----
-name: infrastructure
-description: "Diagnose and repair runtime reliability problems in any repository: background workers, job queues, process lifetime, service connectivity, streaming logs, deployment tooling, and test or development environments. Use when work is stalled, repeatedly fails, exits unexpectedly, has missing or delayed logs, or depends on local, container, or remote services."
----
-
 # Infrastructure
 
 Treat infrastructure work as an evidence-driven reliability investigation. Preserve user work, limit blast radius, and leave the system measurably healthier than it was.

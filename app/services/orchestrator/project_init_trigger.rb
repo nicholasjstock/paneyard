@@ -9,21 +9,12 @@ module Orchestrator
 
     PRIMARY_ENTRY_KEY = "dev-environment"
 
-    PROMPT = <<~TEXT.squish
-      Explore this repository (read-only) and determine exactly how to start its full local development
-      environment. Prefer a single unified command if the project has one (for example a script that starts every
-      needed service together). If no single command exists, identify the exact separate commands required and
-      state that clearly instead of leaving it to be guessed later. Call record_project_setup with your findings
-      before finishing; your primary finding must use key "#{PRIMARY_ENTRY_KEY}". You may add up to 4 more findings
-      for other clearly load-bearing commands (running tests, building for production) only if you find them with
-      the same evidence standard. Also call record_protected_paths exactly once with the workspace-relative glob list
-      that represents every maintained source, configuration, and test path in this repository. Do not use "." or a
-      catch-all glob or negated pattern: list only positive safe patterns. Exclude dependency directories and caches (for example node_modules, vendor/bundle, .git), build
-      output, runtime state, logs, and generated artifacts. Read-only workers cannot modify these paths; implementation
-      workers receive the complete recorded glob list so they can make all changes genuinely required by a task without
-      a planner predicting individual files. These calls are required,
-      not optional: no real task run can start on this workspace until they land. Do not modify any files.
-    TEXT
+    # "Begin." is deliberate -- agent_personas/project_init.md is
+    # auto-prepended to every project_init spawn and already states this
+    # role's complete behavior (including the "dev-environment" key by name)
+    # in more detail than fit here; this used to restate a condensed version
+    # of it by hand, with nothing keeping the two in sync.
+    PROMPT = "Begin."
 
     def call(run:, force: false)
       workspace = run.workspace

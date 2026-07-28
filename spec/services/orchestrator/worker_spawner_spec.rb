@@ -33,7 +33,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       end.to raise_error(ArgumentError, /Planner processes were removed/)
     end
 
-    it "inlines the Codex persona from this repository instead of depending on target-workspace agent files" do
+    it "inlines the shared persona from this repository instead of depending on target-workspace agent files" do
       workspace_root = Dir.mktmpdir("workflow-worker-spawner-codex")
       workspace = Workspace.create!(name: "planner-#{SecureRandom.hex(4)}", root_path: workspace_root)
       run = workspace.runs.create!(
@@ -67,7 +67,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(worker.args).not_to include("--ask-for-approval")
       expect(JSON.parse(File.read(worker.env_path)).fetch("WORKER_LOG_PATH")).to eq(worker.log_path)
       expect(JSON.parse(File.read(worker.env_path)).fetch("XDG_CACHE_HOME")).to start_with(Dir.tmpdir)
-      expect(File.read(worker.prompt_path)).to include('name = "worker"')
+      expect(File.read(worker.prompt_path)).to include("# Worker")
       expect(File.read(worker.prompt_path)).to include("Current task:\nVerify the issue and report back.")
     end
 
