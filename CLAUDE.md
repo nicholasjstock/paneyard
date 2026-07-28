@@ -1,6 +1,6 @@
 # Claude Project Guide
 
-Read [AGENTS.md](./AGENTS.md) before changing this repository. It is the shared source of truth for structure, commands, testing, and orchestration behavior.
+Read [AGENTS.md](./AGENTS.md) before changing this repository. It is the shared source of truth for structure, commands, testing, and orchestration behavior -- read its "Operating Context" section first: this is a single-operator local tool that edits its own source (this repo is one of its own registered `Workspace`s) alongside other, unrelated target repos, with no runtime auth and a real remote-control surface (Telegram, GitHub App). If you are a worker spawned by this very system, that context applies to you directly, not just hypothetically.
 
 The most important architectural rule is that orchestration belongs to Rails. Do not recreate `.claude/agents/planner.md`, spawn a stateful planner process, or move queue coordination back into an agent loop. `PlannerDecisionJob` prepares a compact brief, requests one structured model response, and transactionally persists and dispatches the result.
 

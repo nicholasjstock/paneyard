@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+## Operating Context
+
+This is not a typical multi-tenant web app under normal clone/test/deploy development. It is a single-operator local tool: one person runs it continuously on their own machine (`bin/service`, wrapping `bin/production`) and there is deliberately no authentication (`ApplicationController#current_operator`'s own comment: "No auth in v1 (single-user local tool)") -- the operator is always the person at the keyboard, or a Telegram user on the configured allow-list (`Telegram::Configuration`, `README.md`'s "Telegram admin chat" section).
+
+**It edits its own source.** This repository is itself registered as one of its own `Workspace` rows -- a run launched from this instance's own UI can hand an autonomous agent write access to the orchestrator's own codebase, which that same running process then supervises, publishes as a PR, and may need to restart itself for (`bin/service restart`, see below). There is no runtime sandbox protecting this repository from itself the way there is for a target app's protected paths; the safety net is entirely human PR review before merge, same as any other workspace. Keep this in mind for anything touching process supervision, `config/queue.yml`/`config/recurring.yml`, or the git-worktree lifecycle: a bug here can affect the very process trying to fix it.
+
+**It also edits other, unrelated repos side by side.** The same running instance manages arbitrary target projects as separate `Workspace` rows (each with its own `main` checkout plus sibling run worktrees, its own GitHub repo/owner, its own protected-path config) -- there is nothing workflow-orchestrator-specific baked into how a run operates; workspace-scoping is the whole point of the `Workspace` model (see below).
+
+**Remote control is a real, load-bearing surface, not a side feature.** Beyond the local web UI, an operator can drive any workspace's admin chat from Telegram (`Telegram::UpdateProcessor`, `Orchestrator::WorkspaceAdminChatDriver`), and GitHub operations across every managed repo (regardless of which account owns it) authenticate through one GitHub App installation (`Orchestrator::GitHubAppAuth`, `GITHUB_APP_SETUP.md`) rather than per-repo credentials.
+
 ## Project Structure & Module Organization
 This repository is a Rails 8 application organized around `Workspace` as the top-level boundary. New work should start from a specific workspace, and related runs, workers, questions, events, and orchestration artifacts should stay nested under that workspace in code and UI flow. Core server code lives in `app/`: controllers in `app/controllers`, persistence models in `app/models`, background jobs in `app/jobs`, and orchestration logic in `app/services/orchestrator` and `app/services/mcp_tools`. Frontend code uses importmap + Stimulus under `app/javascript`, with views in `app/views` and static assets in `public/`. Database schema and migrations live in `db/`. Operational notes and handoff material belong in root-level docs such as `HANDOFF.md`.
 
