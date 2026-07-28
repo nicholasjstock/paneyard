@@ -92,6 +92,15 @@ class Run < ApplicationRecord
     worktree_name.present?
   end
 
+  # The single GitHub object currently carrying this run's conversation: a
+  # PR once real code exists, an issue before that. A run only ever has one
+  # active surface at a time, so last_pull_request_comment_id's dedupe
+  # counter is unambiguous even though it now tracks comments on whichever
+  # of the two this resolves to.
+  def conversation_url
+    pull_request_url.presence || github_issue_url
+  end
+
   # branch_name is only ever set by GitWorktree.provision! after it actually
   # succeeds -- worktree_name alone is not proof of that: it's assigned
   # eagerly at run creation (RunsController#create), before LaunchRunJob

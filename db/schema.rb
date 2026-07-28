@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_28_115623) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_28_131543) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -185,6 +185,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_28_115623) do
     t.datetime "capacity_available_at"
     t.string "conversation_pr_status"
     t.datetime "created_at", null: false
+    t.string "github_issue_status"
+    t.string "github_issue_url"
     t.string "last_pull_request_comment_id"
     t.string "launched_by"
     t.string "launcher_variant", default: "claude", null: false

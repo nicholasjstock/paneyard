@@ -1,5 +1,4 @@
 require "open3"
-require "uri"
 
 module Orchestrator
   module PullRequestResume
@@ -16,7 +15,7 @@ module Orchestrator
     def comments_after(run)
       token = gh_token(run)
       env = token.present? ? { "GH_TOKEN" => token } : {}
-      repository, number = repository_and_number(run)
+      repository, number = repository_and_number(run.conversation_url)
       endpoint = "repos/#{repository}/issues/#{number}/comments?per_page=100"
       output, error, status = Open3.capture3(env, "gh", "api", endpoint)
       Rails.logger.info(
@@ -66,8 +65,8 @@ module Orchestrator
         answered_any, unmatched_ids = apply_comment_to_questions!(run, body, author)
 
         RunContext.upsert!(
-          run_id: run.run_id, entry_key: "pr-comment-#{comment_id}", kind: "operator_decision", status: "confirmed",
-          content: "Pull request comment from #{author}: #{body}", evidence_ref: comment["html_url"], created_by: "github_pr_comment"
+          run_id: run.run_id, entry_key: "conversation-comment-#{comment_id}", kind: "operator_decision", status: "confirmed",
+          content: "GitHub comment from #{author}: #{body}", evidence_ref: comment["html_url"], created_by: "github_pr_comment"
         )
         run.update!(last_pull_request_comment_id: comment_id)
 
@@ -166,7 +165,7 @@ module Orchestrator
     def post_reply!(run, body)
       token = gh_token(run)
       env = token.present? ? { "GH_TOKEN" => token } : {}
-      repository, number = repository_and_number(run)
+      repository, number = repository_and_number(run.conversation_url)
       output, error, status = Open3.capture3(env, "gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}")
       raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
 
@@ -176,14 +175,10 @@ module Orchestrator
     end
     private_class_method :post_reply!
 
-    def repository_and_number(run)
-      uri = URI.parse(run.pull_request_url)
-      parts = uri.path.split("/").reject(&:blank?)
-      raise Error, "Invalid pull request URL: #{run.pull_request_url}" unless parts.length >= 4 && parts[-2] == "pull"
-
-      [ parts.first(2).join("/"), parts.last ]
-    rescue URI::InvalidURIError
-      raise Error, "Invalid pull request URL: #{run.pull_request_url}"
+    def repository_and_number(url)
+      GitHubUrl.repository_and_number(url)
+    rescue ArgumentError => error
+      raise Error, error.message
     end
     private_class_method :repository_and_number
 

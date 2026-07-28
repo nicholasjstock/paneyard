@@ -157,6 +157,107 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
     end
   end
 
+  describe "plan approval gate" do
+    it "opens a blocking plan-approval question instead of dispatching the first scoped_changes step, and suppresses jobs" do
+      run, _request, decision = build_decision(managed: true)
+      params = decision_params(
+        summary: "Implement the fix.",
+        next_step: step("fix.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [ "diagnosis.md" ])
+      )
+
+      result = described_class.call(decision:, params:)
+
+      expect(result).to eq({ accepted: true })
+      assert_equal "completed", decision.reload.status
+      question = UserQuestion.plan_approval.find_by!(run_id: run.run_id)
+      expect(question).to have_attributes(priority: "blocking", status: "open")
+      expect(question.context).to include("Complete the workflow").and include("fix.md")
+      assert_empty run.spawn_requests.open_only.where(requested_role: "worker")
+      assert_equal "awaiting_user_feedback", Orchestrator::TickState.latest(run.run_id)[:phase]
+      expect(PublishUserQuestionJob).to have_been_enqueued.with(question.id)
+    end
+
+    it "does not re-ask once the first plan-approval question has been answered, and dispatches the next scoped_changes step" do
+      run, _request, decision = build_decision(managed: true)
+      described_class.call(
+        decision:, params: decision_params(
+          summary: "Implement the fix.",
+          next_step: step("fix.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [ "diagnosis.md" ])
+        )
+      )
+      UserQuestion.plan_approval.find_by!(run_id: run.run_id).update!(status: "answered", answered_by: "operator", answer_text: "approved")
+
+      next_request = run.spawn_requests.create!(
+        asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",
+        requested_role: "planner", priority: "blocking", status: "fulfilled", fulfilled_by: "planner_decision_job"
+      )
+      next_decision = PlannerDecision.create!(run:, spawn_request: next_request, status: "running")
+      result = described_class.call(
+        decision: next_decision, params: decision_params(
+          summary: "Continue implementing.",
+          next_step: step("fix-2.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [ "diagnosis.md" ])
+        )
+      )
+
+      expect(result).to eq({ accepted: true })
+      assert_equal 1, UserQuestion.plan_approval.where(run_id: run.run_id).count
+      assert_equal "fix-2.md", run.spawn_requests.open_only.find_by!(requested_role: "worker").scope
+    end
+
+    it "never gates a diagnosis or verification step" do
+      run, _request, decision = build_decision(managed: true)
+
+      described_class.call(decision:, params: decision_params(summary: "Diagnose.", next_step: step("diagnosis.md", mode: "diagnosis")))
+
+      assert_empty UserQuestion.plan_approval.where(run_id: run.run_id)
+      assert_equal "diagnosis.md", run.spawn_requests.open_only.find_by!(requested_role: "worker").scope
+    end
+
+    it "does not gate an unmanaged run (no answer channel exists)" do
+      run, _request, decision = build_decision(managed: false)
+      params = decision_params(
+        summary: "Implement the fix.",
+        next_step: step("fix.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [ "diagnosis.md" ])
+      )
+
+      result = described_class.call(decision:, params:)
+
+      expect(result).to eq({ accepted: true })
+      assert_empty UserQuestion.plan_approval.where(run_id: run.run_id)
+      assert_equal "fix.md", run.spawn_requests.open_only.find_by!(requested_role: "worker").scope
+    end
+
+    it "does not raise or double-block when a blocking question is already open for another reason" do
+      run, _request, decision = build_decision(managed: true)
+      UserQuestion.create!(run_id: run.run_id, asked_by: "chaperone", scope: "workflow-plan.md", priority: "blocking", text: "Continue or stop?")
+      params = decision_params(
+        summary: "Implement the fix.",
+        next_step: step("fix.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [ "diagnosis.md" ])
+      )
+
+      result = described_class.call(decision:, params:)
+
+      expect(result).to eq({ accepted: true })
+      assert_equal 1, run.user_questions.open_only.where(priority: "blocking").count
+      assert_empty UserQuestion.plan_approval.where(run_id: run.run_id)
+    end
+
+    it "pins the acceptance branch even though the gated step is never dispatched" do
+      run, _request, decision = build_decision(managed: true, with_acceptance: false)
+      AcceptanceCriterion.create!(run_id: run.run_id, key: "pending-outcome", status: "pending", content: "Pending outcome")
+      params = decision_params(
+        summary: "Implement the fix.",
+        next_step: step("fix.md", mode: "implementation", write_scope: "scoped_changes", evidence_refs: [ "diagnosis.md" ], addresses_criteria: [ "pending-outcome" ])
+      )
+
+      described_class.call(decision:, params:)
+
+      criterion = run.acceptance_criteria.find_by!(key: "pending-outcome")
+      expect(criterion.status).to eq("in_progress")
+      expect(run.reload.active_branch_key).to eq("pending-outcome")
+    end
+  end
+
   describe "outcome: needs_context" do
     it "resolves and returns the requested context" do
       run, _request, decision = build_decision
@@ -259,12 +360,15 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
     { owner: "worker", artifact:, success_check:, mode:, write_scope:, allowed_paths:, evidence_refs:, addresses_criteria: }
   end
 
-  def build_decision(with_acceptance: true)
+  def build_decision(with_acceptance: true, managed: false)
     workspace = Workspace.create!(name: "planner-submission-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
-    run = workspace.runs.create!(
-      run_id: "planner-submission-#{SecureRandom.hex(4)}", task: "Complete the workflow",
-      target_root: workspace.root_path, launcher_variant: "claude", status: "running"
-    )
+    run_attrs = { run_id: "planner-submission-#{SecureRandom.hex(4)}", task: "Complete the workflow",
+                  target_root: workspace.root_path, launcher_variant: "claude", status: "running" }
+    if managed
+      suffix = SecureRandom.hex(4)
+      run_attrs.merge!(worktree_name: "submission-#{suffix}", branch_name: "workflow/submission-#{suffix}")
+    end
+    run = workspace.runs.create!(run_attrs)
     request = run.spawn_requests.create!(
       asked_by: "worker", scope: "workflow-plan.md", text: "Choose the next step.",
       requested_role: "planner", priority: "blocking", status: "fulfilled", fulfilled_by: "planner_decision_job"

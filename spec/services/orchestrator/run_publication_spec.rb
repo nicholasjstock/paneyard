@@ -135,7 +135,7 @@ RSpec.describe Orchestrator::RunPublication do
     end
   end
 
-  it "posts each question as a marked PR comment" do
+  it "opens an issue and posts a question there when the run has no PR yet" do
     root = Dir.mktmpdir
     workspace = Workspace.create!(name: "question-publication-#{SecureRandom.hex(4)}", root_path: root)
     run = workspace.runs.create!(
@@ -144,16 +144,71 @@ RSpec.describe Orchestrator::RunPublication do
       branch_name: "workflow/question-publication-a1b2"
     )
     question = UserQuestion.create!(run_id: run.run_id, asked_by: "worker", scope: "config", text: "Choose a setting?", priority: "blocking")
-    allow(described_class).to receive(:ensure_conversation_pr!).and_return("https://github.com/example/repo/pull/42")
-    allow(described_class).to receive(:validated_root!).and_return(Pathname(root))
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).with(anything, "gh", "issue", "create", any_args)
+      .and_return([ "https://github.com/example/repo/issues/9\n", "", status ])
+    allow(Open3).to receive(:capture3).with(anything, "gh", "api", any_args)
+      .and_return([ { id: 123, html_url: "https://github.com/example/repo/issues/9#issuecomment-123" }.to_json, "", status ])
+
+    expect(described_class.publish_question!(question)).to eq(:published)
+    expect(question.reload).to have_attributes(
+      github_comment_id: "123", github_comment_url: "https://github.com/example/repo/issues/9#issuecomment-123"
+    )
+    expect(run.reload).to have_attributes(github_issue_url: "https://github.com/example/repo/issues/9", github_issue_status: "open")
+    expect(Open3).to have_received(:capture3).with(anything, "gh", "issue", "create", any_args)
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
+  it "posts a question directly to the PR without opening an issue once one already exists" do
+    root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "question-publication-pr-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "question-publication-pr-#{SecureRandom.hex(4)}", task: "Ask on GitHub", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "question-publication-pr-a1b2",
+      branch_name: "workflow/question-publication-pr-a1b2", pull_request_url: "https://github.com/example/repo/pull/42"
+    )
+    question = UserQuestion.create!(run_id: run.run_id, asked_by: "worker", scope: "config", text: "Choose a setting?", priority: "blocking")
     status = instance_double(Process::Status, success?: true)
     allow(Open3).to receive(:capture3).and_return([ { id: 123, html_url: "https://github.com/example/repo/pull/42#issuecomment-123" }.to_json, "", status ])
 
     expect(described_class.publish_question!(question)).to eq(:published)
-    expect(question.reload).to have_attributes(
-      github_comment_id: "123", github_comment_url: "https://github.com/example/repo/pull/42#issuecomment-123"
+    expect(run.reload.github_issue_url).to be_nil
+    expect(Open3).not_to have_received(:capture3).with(anything, "gh", "issue", "create", any_args)
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
+  it "closes the conversation issue once the run publishes a real PR" do
+    root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "publication-close-issue-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "publication-close-issue-#{SecureRandom.hex(4)}", task: "Finalize with an open issue", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "close-issue-a1b2", branch_name: "workflow/close-issue-a1b2",
+      github_issue_url: "https://github.com/example/repo/issues/9", github_issue_status: "open"
     )
-    expect(Open3).to have_received(:capture3).with(anything, *a_string_starting_with("gh"), any_args)
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).with(anything, "gh", "issue", "close", any_args).and_return([ "", "", status ])
+
+    described_class.finalize!(run, outcome: "published", pull_request_url: "https://github.com/example/repo/pull/42")
+
+    expect(run.reload.github_issue_status).to eq("closed")
+    expect(Open3).to have_received(:capture3).with(anything, "gh", "issue", "close", "https://github.com/example/repo/issues/9", any_args)
+  ensure
+    FileUtils.remove_entry(root) if root && File.exist?(root)
+  end
+
+  it "does not attempt to close an issue when the run never opened one" do
+    root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "publication-no-issue-#{SecureRandom.hex(4)}", root_path: root)
+    run = workspace.runs.create!(
+      run_id: "publication-no-issue-#{SecureRandom.hex(4)}", task: "Finalize with no issue", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "no-issue-a1b2", branch_name: "workflow/no-issue-a1b2"
+    )
+
+    described_class.finalize!(run, outcome: "published", pull_request_url: "https://github.com/example/repo/pull/42")
+
+    expect(run.reload.github_issue_status).to be_nil
   ensure
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end
@@ -162,27 +217,22 @@ RSpec.describe Orchestrator::RunPublication do
     root = Dir.mktmpdir
     workspace = Workspace.create!(name: "gh-token-#{SecureRandom.hex(4)}", root_path: root)
     run = workspace.runs.create!(
-      run_id: "gh-token-#{SecureRandom.hex(4)}", task: "Create PR with GitHub App", target_root: root,
-      launcher_variant: "codex", status: "running", worktree_name: "test-a1b2", branch_name: "workflow/test-a1b2",
-      base_sha: "abc123"
+      run_id: "gh-token-#{SecureRandom.hex(4)}", task: "Create issue with GitHub App", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "test-a1b2", branch_name: "workflow/test-a1b2"
     )
 
     allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(true)
     allow(Orchestrator::GitHubAppAuth).to receive(:installation_token_for)
       .with(workspace_root: root).and_return("ghu_test_token")
-    allow(described_class).to receive(:build_pr_body).and_return("PR body")
 
     status = instance_double(Process::Status, success?: true)
     allow(Open3).to receive(:capture3).with(
-      { "GH_TOKEN" => "ghu_test_token" }, "gh", "pr", "create",
-      "--base", "main", "--head", "workflow/test-a1b2",
-      "--title", anything,
-      "--body", anything,
-      chdir: root
-    ).and_return([ "https://github.com/example/repo/pull/42\n", "", status ])
+      { "GH_TOKEN" => "ghu_test_token" }, "gh", "issue", "create",
+      "--title", anything, "--body", anything, chdir: root
+    ).and_return([ "https://github.com/example/repo/issues/9\n", "", status ])
 
-    result = described_class.send(:create_pr, Pathname(root), run)
-    expect(result).to eq("https://github.com/example/repo/pull/42")
+    result = described_class.send(:create_issue, Pathname(root), run)
+    expect(result).to eq("https://github.com/example/repo/issues/9")
     expect(Open3).to have_received(:capture3).with(hash_including("GH_TOKEN" => "ghu_test_token"), any_args)
   ensure
     FileUtils.remove_entry(root) if root && File.exist?(root)
@@ -192,34 +242,21 @@ RSpec.describe Orchestrator::RunPublication do
     root = Dir.mktmpdir
     workspace = Workspace.create!(name: "no-gh-token-#{SecureRandom.hex(4)}", root_path: root)
     run = workspace.runs.create!(
-      run_id: "no-gh-token-#{SecureRandom.hex(4)}", task: "Create PR without GitHub App", target_root: root,
-      launcher_variant: "codex", status: "running", worktree_name: "test-a1b2", branch_name: "workflow/test-a1b2",
-      base_sha: "abc123"
+      run_id: "no-gh-token-#{SecureRandom.hex(4)}", task: "Create issue without GitHub App", target_root: root,
+      launcher_variant: "codex", status: "running", worktree_name: "test-a1b2", branch_name: "workflow/test-a1b2"
     )
 
     allow(Orchestrator::GitHubAppAuth).to receive(:app_configured?).and_return(false)
-    allow(described_class).to receive(:build_pr_body).and_return("PR body")
 
     status = instance_double(Process::Status, success?: true)
     allow(Open3).to receive(:capture3).with(
-      {}, "gh", "pr", "create",
-      "--base", "main", "--head", "workflow/test-a1b2",
-      "--title", anything,
-      "--body", anything,
-      chdir: root
-    ).and_return([ "https://github.com/example/repo/pull/42\n", "", status ])
+      {}, "gh", "issue", "create", "--title", anything, "--body", anything, chdir: root
+    ).and_return([ "https://github.com/example/repo/issues/9\n", "", status ])
 
-    result = described_class.send(:create_pr, Pathname(root), run)
-    expect(result).to eq("https://github.com/example/repo/pull/42")
+    result = described_class.send(:create_issue, Pathname(root), run)
+    expect(result).to eq("https://github.com/example/repo/issues/9")
   ensure
     FileUtils.remove_entry(root) if root && File.exist?(root)
-  end
-
-  it "states that no review evidence was uploaded without listing local artifacts" do
-    section = described_class.send(:review_assets_section, [])
-
-    expect(section).to eq("## Review evidence\n\nNo review assets were selected for upload.")
-    expect(section).not_to include("run-summary.md")
   end
 
   it "does not let a missing historical worktree raise during merge detection" do

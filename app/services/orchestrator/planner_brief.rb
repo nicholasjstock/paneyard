@@ -24,6 +24,12 @@ module Orchestrator
         project_memory: ProjectMemory.snapshot(run_id: run.run_id),
         acceptance_criteria: AcceptanceCriteria.tree(run_id: run.run_id),
         open_questions: run.user_questions.where(status: "open").order(:asked_at).limit(3).map(&:as_diagnostic_json),
+        # Not load-bearing -- the operator's reply already reaches this brief
+        # twice via other channels (RunContext's pr-comment/issue-comment
+        # entry and the resume SpawnRequest's own context), see
+        # PullRequestResume#resume!. This just re-attaches the answer to the
+        # specific question it answered.
+        recent_answered_questions: run.user_questions.where(status: "answered").order(answered_at: :desc).limit(2).map(&:as_diagnostic_json),
         recent_attempts: run.step_attempts.order(created_at: :desc).limit(5).reverse.map do |attempt|
           {
             lineage_key: attempt.lineage_key,

@@ -1,5 +1,4 @@
 require "open3"
-require "uri"
 
 module Orchestrator
   module RunPublication
@@ -12,7 +11,9 @@ module Orchestrator
     # Rails guessing on its behalf. This module now only persists the outcome
     # that worker reports (via McpTools::FinalizeRunPublicationTool) and owns
     # the git operations that are unrelated to that finalize lifecycle: the
-    # mid-run blocking-question draft PR, and post-merge cleanup.
+    # mid-run blocking-question conversation (an issue before real code
+    # exists, moved to the PR once one does -- see ensure_conversation_issue!/
+    # publish_question!/close_conversation_issue!), and post-merge cleanup.
 
     # Single dispatch point for the git worker -- used by TickRunJob once a
     # run's other finalization workers (seeder/reporter/curator/demo) are
@@ -68,6 +69,7 @@ module Orchestrator
             status: "completed", stopped_at: run.stopped_at || Time.current
           )
           apply_review_asset_urls!(run, review_assets)
+          close_conversation_issue!(run) if run.github_issue_url.present?
           open_review_question!(run)
         when "no_changes"
           run.update!(
@@ -110,32 +112,12 @@ module Orchestrator
     end
     private_class_method :apply_review_asset_urls!
 
-    # A question is sufficient reason to establish the run's shared GitHub
-    # conversation. A clean branch receives an empty commit because GitHub
-    # cannot open a PR for a branch identical to its base. This is a small,
-    # low-risk git write (unlike commit/rebase/publish) that stays Rails-owned
-    # since it can happen mid-run, independent of the terminal git worker.
-    def ensure_conversation_pr!(run)
-      return run.pull_request_url if run.pull_request_url.present?
-
-      run.with_lock do
-        return run.reload.pull_request_url if run.pull_request_url.present?
-
-        root = validated_root!(run)
-        checkpoint_for_conversation!(run, root)
-        run.update!(conversation_pr_status: "publishing", publication_error: nil)
-        git!(root, "push", "-u", "origin", run.branch_name)
-        url = existing_pr_url(root, run.branch_name) || create_pr(root, run, draft: true)
-        run.update!(pull_request_url: url, conversation_pr_status: "draft")
-        url
-      end
-    rescue StandardError => error
-      run.update!(conversation_pr_status: "failed", publication_error: error.message) if run.persisted?
-      raise error if error.is_a?(Error)
-
-      raise Error, error.message
-    end
-
+    # Posts to whichever GitHub object currently carries this run's
+    # conversation: the PR if one already exists, otherwise an issue (opened
+    # on demand -- see ensure_conversation_issue!). A run's conversation
+    # never needs a PR just to ask a question; only real code changes
+    # warrant one, and finalize! moves the conversation there itself once
+    # that happens.
     def publish_question!(question)
       return :unmanaged unless question.run&.managed_worktree?
 
@@ -143,18 +125,9 @@ module Orchestrator
         return :published if question.github_comment_id.present?
 
         run = question.run
-        url = ensure_conversation_pr!(run)
+        url = run.pull_request_url.presence || ensure_conversation_issue!(run)
         root = validated_root!(run)
-        body = <<~MARKDOWN
-          ## Workflow question #{question.question_id}
-
-          #{question.text}
-
-          #{question.context.presence || "No additional context was supplied."}
-
-          Just reply on this PR to answer and resume the run. If more than one question is open at once, reference this one explicitly with `Question #{question.question_id}: <your answer>` so it's clear which one you're answering.
-        MARKDOWN
-        comment = post_pr_comment!(root, url, body)
+        comment = post_comment!(root, url, build_question_body(question))
         question.update!(github_comment_id: comment.fetch("id").to_s, github_comment_url: comment["html_url"], github_published_at: Time.current, github_publication_error: nil)
         :published
       end
@@ -165,16 +138,73 @@ module Orchestrator
       raise Error, error.message
     end
 
-    def existing_pr_url(root, branch)
+    def build_question_body(question)
+      <<~MARKDOWN
+        ## Workflow question #{question.question_id}
+
+        #{question.text}
+
+        #{question.context.presence || "No additional context was supplied."}
+
+        Just reply to answer and resume the run. If more than one question is open at once, reference this one explicitly with `Question #{question.question_id}: <your answer>` so it's clear which one you're answering.
+      MARKDOWN
+    end
+    private_class_method :build_question_body
+
+    # An issue needs no branch or commit -- it exists purely to carry
+    # conversation before there's anything to diff yet. finalize! closes it
+    # once a real PR takes over (see close_conversation_issue!).
+    def ensure_conversation_issue!(run)
+      return run.github_issue_url if run.github_issue_url.present?
+
+      run.with_lock do
+        return run.reload.github_issue_url if run.github_issue_url.present?
+
+        root = validated_root!(run)
+        run.update!(github_issue_status: "publishing", publication_error: nil)
+        url = create_issue(root, run)
+        run.update!(github_issue_url: url, github_issue_status: "open")
+        url
+      end
+    rescue StandardError => error
+      run.update!(github_issue_status: "failed", publication_error: error.message) if run.persisted?
+      raise error if error.is_a?(Error)
+
+      raise Error, error.message
+    end
+
+    def create_issue(root, run)
       token = gh_token(root)
       env = token.present? ? { "GH_TOKEN" => token } : {}
-      output, _error, status = Open3.capture3(
-        env,
-        "gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url",
-        chdir: root.to_s
-      )
-      status.success? ? output.strip.presence : nil
+      args = [ "gh", "issue", "create", "--title", run.task.to_s.truncate(120), "--body", build_issue_body(run) ]
+      output, error, status = Open3.capture3(env, *args, chdir: root.to_s)
+      raise Error, "gh issue create failed: #{error.presence || output}" unless status.success?
+
+      output.strip
     end
+    private_class_method :create_issue
+
+    def build_issue_body(run)
+      "Automated workflow run: #{run.run_id}\n\nWorktree: #{run.worktree_name}\n\n" \
+      "This conversation will move to a pull request once real code changes exist."
+    end
+    private_class_method :build_issue_body
+
+    # Best-effort only -- a failed issue close must never block the PR
+    # publication that's reacting to it.
+    def close_conversation_issue!(run)
+      return if run.github_issue_status == "closed"
+
+      root = validated_root!(run)
+      token = gh_token(root)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
+      _output, error, status = Open3.capture3(
+        env, "gh", "issue", "close", run.github_issue_url, "--comment", "Continuing in #{run.pull_request_url}", chdir: root.to_s
+      )
+      Rails.logger.warn("RunPublication.close_conversation_issue! run=#{run.run_id} failed: #{error}") unless status.success?
+      run.update!(github_issue_status: "closed")
+    end
+    private_class_method :close_conversation_issue!
 
     def merged?(run)
       token = gh_token(Pathname(run.target_root))
@@ -208,32 +238,7 @@ module Orchestrator
       raise Error, error.message
     end
 
-    def build_pr_body(run, root, assets: [])
-      [
-        "Automated workflow run: #{run.run_id}",
-        "Worktree: #{run.worktree_name}",
-        "Base: #{run.base_sha}",
-        run_summary(run, root),
-        review_assets_section(assets)
-      ].compact.join("\n\n")
-    end
-    private_class_method :build_pr_body
-
-    def create_pr(root, run, draft: false, assets: [])
-      token = gh_token(root)
-      env = token.present? ? { "GH_TOKEN" => token } : {}
-      args = [
-        "gh", "pr", "create", "--base", "main", "--head", run.branch_name,
-        "--title", run.task.to_s.truncate(120), "--body", build_pr_body(run, root, assets:)
-      ]
-      args << "--draft" if draft
-      output, error, status = Open3.capture3(env, *args, chdir: root.to_s)
-      raise Error, "gh pr create failed: #{error.presence || output}" unless status.success?
-
-      output.strip
-    end
-
-    def post_pr_comment!(root, url, body)
+    def post_comment!(root, url, body)
       token = gh_token(root)
       env = token.present? ? { "GH_TOKEN" => token } : {}
       repository, number = repository_and_number(url)
@@ -242,7 +247,7 @@ module Orchestrator
 
       JSON.parse(output)
     end
-    private_class_method :post_pr_comment!
+    private_class_method :post_comment!
 
     def delete_review_release!(root, run)
       token = gh_token(root)
@@ -262,29 +267,10 @@ module Orchestrator
     end
     private_class_method :rebase_main_onto_origin!
 
-    def review_assets_section(assets)
-      return "## Review evidence\n\nNo review assets were selected for upload." if assets.empty?
-
-      "## Review evidence\n\n" + assets.map { |asset| "- [#{asset[:label]}](#{asset[:url]})" }.join("\n")
-    end
-    private_class_method :review_assets_section
-
-    def checkpoint_for_conversation!(run, root)
-      stage_for_publication!(root)
-      dirty = !git_success?(root, "diff", "--cached", "--quiet")
-      message = dirty ? "Checkpoint before workflow question" : "Start workflow conversation"
-      git!(root, "commit", "--allow-empty", "-m", message)
-    end
-    private_class_method :checkpoint_for_conversation!
-
     def repository_and_number(url)
-      uri = URI.parse(url)
-      parts = uri.path.split("/").reject(&:blank?)
-      raise Error, "Invalid pull request URL: #{url}" unless parts.length >= 4 && parts[-2] == "pull"
-
-      [ parts.first(2).join("/"), parts.last ]
-    rescue URI::InvalidURIError
-      raise Error, "Invalid pull request URL: #{url}"
+      GitHubUrl.repository_and_number(url)
+    rescue ArgumentError => error
+      raise Error, error.message
     end
     private_class_method :repository_and_number
 
@@ -305,64 +291,12 @@ module Orchestrator
     end
     private_class_method :record_failure!
 
-    # Runtime output stays local -- used only by the mid-run question
-    # checkpoint commit above, which (unlike the terminal git worker) never
-    # needs to reconcile exclusion requests: it always stages every source
-    # change as-is.
-    def stage_for_publication!(root)
-      runtime_root = relative_path(root, ArtifactStore.output_dir(root))
-      git!(root, "reset", "--", runtime_root) if runtime_root.present?
-      source_paths = git_status_paths(root).reject do |path|
-        status_path = path.delete_suffix("/")
-        runtime_root.present? && (
-          status_path == runtime_root ||
-          status_path.start_with?("#{runtime_root}/") ||
-          runtime_root.start_with?("#{status_path}/")
-        )
-      end
-      git!(root, "add", "--", *source_paths) if source_paths.any?
-    end
-    private_class_method :stage_for_publication!
-
-    def git_status_paths(root)
-      entries = git!(root, "status", "--porcelain", "-z").split("\0")
-      entries.each_with_object([]) do |entry, paths|
-        next if entry.blank?
-
-        paths << entry.byteslice(3..)
-        entries.shift if entry.start_with?("R", "C", " R", " C", "R ", "C ")
-      end
-    end
-    private_class_method :git_status_paths
-
-    def run_summary(run, root)
-      ArtifactStore.read(root, run.run_id, "run-summary.md").presence
-    rescue Errno::ENOENT
-      nil
-    end
-    private_class_method :run_summary
-
-    def relative_path(root, path)
-      expanded_root = root.expand_path.to_s
-      expanded_path = Pathname(path).expand_path.to_s
-      return unless expanded_path.start_with?("#{expanded_root}#{File::SEPARATOR}")
-
-      expanded_path.delete_prefix("#{expanded_root}#{File::SEPARATOR}")
-    end
-    private_class_method :relative_path
-
     def git!(root, *args)
       output, error, status = Open3.capture3("git", "-C", root.to_s, *args)
       return output if status.success?
 
       raise Error, "git #{args.join(' ')} failed: #{error.presence || output}"
     end
-
-    def git_success?(root, *args)
-      _output, _error, status = Open3.capture3("git", "-C", root.to_s, *args)
-      status.success?
-    end
-    private_class_method :git_success?
 
     # Ported verbatim from the "open_review_question!" step of the removed
     # FinalizeRunPublicationJob: a published PR has nothing open to answer

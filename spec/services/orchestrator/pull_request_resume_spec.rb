@@ -20,7 +20,7 @@ RSpec.describe Orchestrator::PullRequestResume do
 
     expect(run.reload).to have_attributes(status: "running", publication_status: "commit_pending", last_pull_request_comment_id: "123")
     expect(review_question.reload).to have_attributes(status: "answered", answered_by: "github:reviewer", answer_text: "Please add a test.")
-    expect(run.run_context_entries.find_by!(entry_key: "pr-comment-123").content).to include("Please add a test.")
+    expect(run.run_context_entries.find_by!(entry_key: "conversation-comment-123").content).to include("Please add a test.")
     expect(run.spawn_requests.find_by!(asked_by: "github_pr_comment").context).to include("Please add a test.")
     expect(run.spawn_requests.find_by(requested_role: "git")).to have_attributes(write_scope: "git_managed")
   end
@@ -171,6 +171,28 @@ RSpec.describe Orchestrator::PullRequestResume do
     expect(advisory_question.reload.status).to eq("answered")
     expect(blocking_question.reload.status).to eq("open")
     expect(run.reload.status).to eq("completed")
+  end
+
+  it "polls and answers against an issue when the run has no PR yet" do
+    workspace = Workspace.create!(name: "issue-resume-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "issue-resume-#{SecureRandom.hex(4)}", task: "Approve the plan", target_root: workspace.root_path,
+      launcher_variant: "codex", status: "completed", worktree_name: "issue-resume-a1b2", branch_name: "workflow/issue-resume-a1b2",
+      github_issue_url: "https://github.com/example/repo/issues/9", github_issue_status: "open"
+    )
+    question = UserQuestion.create!(run_id: run.run_id, asked_by: "planner", scope: "run", text: "Approve the plan?", priority: "blocking")
+    status = instance_double(Process::Status, success?: true, exitstatus: 0)
+    comments_json = [ { "id" => 456, "body" => "approved", "user" => { "login" => "operator" } } ].to_json
+    allow(Open3).to receive(:capture3).with(anything, "gh", "api", "repos/example/repo/issues/9/comments?per_page=100")
+      .and_return([ comments_json, "", status ])
+
+    comments = described_class.comments_after(run)
+    expect(comments.map { |c| c["id"] }).to eq([ 456 ])
+
+    described_class.resume!(run, comments.first)
+
+    expect(question.reload.status).to eq("answered")
+    expect(run.reload).to have_attributes(status: "running", last_pull_request_comment_id: "456")
   end
 
   it "ignores system-posted question comments while advancing the cursor" do

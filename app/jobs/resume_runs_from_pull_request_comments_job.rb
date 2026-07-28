@@ -2,7 +2,12 @@ class ResumeRunsFromPullRequestCommentsJob < ApplicationJob
   queue_as :default
 
   def perform
-    Run.where.not(pull_request_url: nil).where.not(publication_status: "merged").find_each do |run|
+    # publication_status is often still nil for a run whose conversation is
+    # only an issue so far (ensure_conversation_issue! never touches it) --
+    # a plain .where.not(publication_status: "merged") would silently drop
+    # those rows, since SQL's != never matches NULL.
+    Run.where("pull_request_url IS NOT NULL OR github_issue_url IS NOT NULL")
+      .where("publication_status IS NULL OR publication_status != ?", "merged").find_each do |run|
       comments = Orchestrator::PullRequestResume.comments_after(run)
       Rails.logger.info(
         "ResumeRunsFromPullRequestCommentsJob run=#{run.run_id} comments_to_process=#{comments.size} " \

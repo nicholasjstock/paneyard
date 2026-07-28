@@ -75,7 +75,16 @@ module Orchestrator
       end
 
       attempt.update!(disposition: "accepted")
-      persist_decision!(decision:, params:)
+      # Gate the first step that will actually write code. Creating the
+      # blocking question *before* persist_decision! is what suppresses
+      # dispatch: Turn.run_planner_turn's own has_open_blocking_question
+      # check (turn.rb) then sees it already open and publishes no jobs.
+      # Both run in one transaction so a raise from run_planner_turn (e.g.
+      # branch progression) can't leave an orphan question blocking the run.
+      PlannerDecision.transaction do
+        PlanApprovalQuestion.ask!(decision:, next_step: params[:next_step])
+        persist_decision!(decision:, params:)
+      end
       { accepted: true }
     end
     private_class_method :handle_decision

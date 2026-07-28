@@ -22,6 +22,7 @@ class UserQuestion < ApplicationRecord
   after_update_commit :publish_answered_event
 
   scope :open_only, -> { where(status: "open") }
+  scope :plan_approval, -> { where("tags LIKE ?", "%\"#{Orchestrator::PlanApprovalQuestion::TAG}\"%") }
 
   def as_json(*)
     {
