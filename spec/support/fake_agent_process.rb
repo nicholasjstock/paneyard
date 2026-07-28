@@ -32,29 +32,7 @@ module FakeAgentProcess
     append_log(worker.log_path, "[fake-agent] starting role=#{role} run_id=#{run_id} scope=#{scope}") if worker
     File.write(worker.last_message_path, "fake #{role} handled #{scope}\n") if worker
 
-    McpTools::PublishRunStatusTool.call(
-      runId: run_id,
-      phase: role == "planner" ? "planning" : "working",
-      owner: role,
-      summary: "Fake #{role} processed #{scope}.",
-      server_context: nil
-    )
-
-    if role == "planner"
-      McpTools::WriteWorkflowArtifactTool.call(
-        runId: run_id,
-        artifactName: scope,
-        content: "# Fake plan\n\nProcessed #{scope} for #{run_id}.\n",
-        server_context: nil
-      )
-      McpTools::PlannerTurnTool.call(
-        runId: run_id,
-        summary: "Fake planner completed the run.",
-        nextStep: nil,
-        followingSteps: [],
-        server_context: nil
-      )
-    elsif role == "verifier"
+    if role == "verifier"
       worker ||= wait_for_worker(run_id: run_id, role: role)
       criterion_key = scope.delete_prefix("acceptance-verify-")
       evidence_name = "verifier-evidence-#{criterion_key}.md"

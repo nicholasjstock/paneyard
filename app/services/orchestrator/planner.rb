@@ -1,40 +1,10 @@
 module Orchestrator
-  # Ports scripts/workflow-mcp.ts's planning functions: planWorkflowIteration,
-  # buildStalledWorkerRecoveryPlan, publishPlannerJobs, buildPendingSpawnKeys.
-  # Snake_case throughout -- camelizing for the wire only happens at each
-  # MCP tool's McpTools::ToolResponse.structured call.
+  # Ports scripts/workflow-mcp.ts's planning functions: buildStalledWorkerRecoveryPlan,
+  # publishPlannerJobs, buildPendingSpawnKeys. Snake_case throughout --
+  # camelizing for the wire only happens at each MCP tool's
+  # McpTools::ToolResponse.structured call.
   module Planner
     module_function
-
-    # stall_finding is accepted but intentionally unused -- matches
-    # scripts/workflow-mcp.ts's planWorkflowIteration exactly, which also
-    # accepts stallFinding without reading it in the routing logic
-    # (findingText is built from verifierFinding only). Not a bug to fix
-    # here; this is a faithful port.
-    def plan_workflow_iteration(task:, verifier_finding: nil, stall_finding: nil)
-      fix_step = {
-        owner: "worker", artifact: "fix-summary.md",
-        success_check: "Reproduce the reported failure and identify the confirmed boundary with direct evidence; keep repository files read-only."
-      }
-
-      verify_step = {
-        owner: "worker",
-        artifact: "verifier-report.md",
-        success_check: "Confirms the change addresses the task and cites positive evidence from generated artifacts.",
-        mode: "verification", write_scope: "source_protected", allowed_paths: [], evidence_refs: []
-      }
-
-      fix_step.merge!(
-        mode: "diagnosis", write_scope: "source_protected", allowed_paths: [],
-        evidence_refs: [ verifier_finding ].compact
-      )
-
-      {
-        summary: "#{task}.",
-        next_step: fix_step,
-        following_steps: [ verify_step ]
-      }
-    end
 
     # Used both for a worker that's stalled (still running, idle too long)
     # and for a run that's gone dead (no active workers, no open requests,

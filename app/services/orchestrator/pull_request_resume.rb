@@ -106,11 +106,11 @@ module Orchestrator
     end
 
     # Explicit references (`Question <uuid>: ...`) are matched against every
-    # open question, not only blocking ones -- an advisory question (see
-    # McpTools::AppendUserQuestionTool) is still answerable by id. Only
-    # open blocking questions are eligible for the implicit, no-id-given
-    # fallback: answering "the" question a comment is obviously replying to
-    # only makes sense when there is exactly one candidate.
+    # open question, not only blocking ones -- an advisory (non-blocking)
+    # question is still answerable by id. Only open blocking questions are
+    # eligible for the implicit, no-id-given fallback: answering "the"
+    # question a comment is obviously replying to only makes sense when
+    # there is exactly one candidate.
     def apply_comment_to_questions!(run, body, author)
       explicit_ids = body.to_s.scan(/\bQuestion\s+([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\s*:/i).flatten.uniq
       answered_any = false

@@ -5,15 +5,15 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "health#show", as: :rails_health_check
 
-  # MCP endpoint worker/planner CLI subprocesses connect to (see
-  # app/services/orchestrator/mcp_server.rb, app/mcp_tools/) -- Streamable
-  # HTTP, hosted inside this already-running process rather than spawned
-  # fresh per worker like the old scripts/workflow-mcp-server.ts did.
+  # MCP endpoints worker/chaperone/planner-decision CLI subprocesses connect
+  # to -- Streamable HTTP, hosted inside this already-running process rather
+  # than spawned fresh per worker like the old scripts/workflow-mcp-server.ts
+  # did. Each role gets its own scoped, tokenized server (app/services/
+  # orchestrator/{worker,chaperone,planner_decision}_mcp_server.rb); there is
+  # deliberately no unscoped bare /mcp endpoint anymore.
   mount Orchestrator::ChaperoneMcpEndpoint.new => "/mcp/chaperone"
   mount Orchestrator::WorkerMcpEndpoint.new => "/mcp/worker"
   mount Orchestrator::PlannerDecisionMcpEndpoint.new => "/mcp/planner-decision"
-  mcp_transport = MCP::Server::Transports::StreamableHTTPTransport.new(Orchestrator::McpServer.build)
-  mount mcp_transport => "/mcp"
 
   mount ActionCable.server => "/cable"
 
