@@ -43,6 +43,24 @@ RSpec.describe Orchestrator::PlannerContextResolver do
     refute empty_memory[:available]
   end
 
+  it "resolves a full project_memory entry by key beyond the brief's truncated preview" do
+    run = build_run
+    Orchestrator::ProjectMemory.record!(
+      run_id: run.run_id, entry_key: "known_hazard_key", kind: "known_hazard",
+      content: "a" * 5_000, evidence_ref: "diagnosis.md", recorded_by: "planner"
+    )
+
+    context = Orchestrator::PlannerContextResolver.resolve(
+      run:, context_request: {
+        source: "project_memory", reference: "known_hazard_key", question: "What is the hazard?",
+        offset: 0, max_chars: 10_000
+      }
+    )
+
+    assert context[:available]
+    assert_includes context[:content], "a" * 5_000
+  end
+
   it "rejects workspace file traversal" do
     run = build_run
 

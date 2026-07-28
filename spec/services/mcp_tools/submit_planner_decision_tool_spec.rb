@@ -12,6 +12,7 @@ RSpec.describe McpTools::SubmitPlannerDecisionTool do
         "addressesCriteria" => [ "existing-outcome" ]
       },
       followingSteps: [], contextRequest: nil, acceptanceCriteria: [], acceptanceUpdates: [],
+      memoryEntries: [],
       server_context: { decision_id: decision.decision_id }
     )
 
@@ -21,10 +22,36 @@ RSpec.describe McpTools::SubmitPlannerDecisionTool do
     assert_equal "verify.md", run.spawn_requests.open_only.find_by!(requested_role: "worker").scope
   end
 
+  it "records a durable project memory entry alongside a decision" do
+    run, decision = build_decision
+
+    response = described_class.call(
+      outcome: "decision", summary: "Run the verification.",
+      nextStep: {
+        "owner" => "worker", "artifact" => "verify.md", "successCheck" => "Confirm the expected behavior.",
+        "mode" => "verification", "writeScope" => "source_protected", "allowedPaths" => [], "evidenceRefs" => [],
+        "addressesCriteria" => [ "existing-outcome" ]
+      },
+      followingSteps: [], contextRequest: nil, acceptanceCriteria: [], acceptanceUpdates: [],
+      memoryEntries: [
+        {
+          "key" => "ambient_bundler_env_leak", "kind" => "known_hazard",
+          "content" => "BUNDLE_GEMFILE leaks into spawned test processes.", "evidenceRef" => "verify.md"
+        }
+      ],
+      server_context: { decision_id: decision.decision_id }
+    )
+
+    expect(response.error?).to be_falsey
+    entry = run.workspace.workspace_memory_entries.current.find_by!(entry_key: "ambient_bundler_env_leak")
+    expect(entry).to have_attributes(kind: "known_hazard", recorded_by: "planner", evidence_ref: "verify.md")
+  end
+
   it "errors when there is no authenticated planner decision capability" do
     response = described_class.call(
       outcome: "needs_stronger_model", summary: "Need more reasoning.",
       nextStep: nil, followingSteps: [], contextRequest: nil, acceptanceCriteria: [], acceptanceUpdates: [],
+      memoryEntries: [],
       server_context: nil
     )
 
@@ -35,6 +62,7 @@ RSpec.describe McpTools::SubmitPlannerDecisionTool do
     response = described_class.call(
       outcome: "needs_stronger_model", summary: "Need more reasoning.",
       nextStep: nil, followingSteps: [], contextRequest: nil, acceptanceCriteria: [], acceptanceUpdates: [],
+      memoryEntries: [],
       server_context: { decision_id: "unknown-decision" }
     )
 

@@ -4,7 +4,7 @@ module Orchestrator
   module PlannerContextResolver
     module_function
 
-    SOURCES = %w[artifact run_context worker_log file].freeze
+    SOURCES = %w[artifact run_context worker_log file project_memory].freeze
 
     def resolve(run:, context_request:)
       source = context_request.fetch(:source)
@@ -29,6 +29,10 @@ module Orchestrator
         { content: content.last(max_chars), truncated: content.length > max_chars, available: content.present? }
       when "file"
         read_workspace_file(run.target_root, reference, offset:, max_chars:)
+      when "project_memory"
+        snapshot = ProjectMemory.snapshot(run_id: run.run_id, entry_keys: [ reference ])
+        content = JSON.pretty_generate(snapshot)
+        { content: content.first(max_chars), truncated: content.length > max_chars, available: snapshot[:entries].present? }
       end
 
       {

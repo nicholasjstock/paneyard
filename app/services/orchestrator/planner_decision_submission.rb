@@ -207,6 +207,7 @@ module Orchestrator
         AcceptanceCriteria.apply!(
           run: decision.run, criteria: Array(params[:acceptance_criteria]), updates: Array(params[:acceptance_updates])
         )
+        record_memory_entries!(decision:, memory_entries: Array(params[:memory_entries]))
         # record_step! now happens inside Turn.run_planner_turn itself, so it
         # also covers Rails auto-promoting a followingSteps item without a
         # second planner call -- see Turn.run_planner_turn.
@@ -221,6 +222,16 @@ module Orchestrator
       TickRunJob.perform_later
     end
     private_class_method :persist_decision!
+
+    def record_memory_entries!(decision:, memory_entries:)
+      memory_entries.each do |entry|
+        ProjectMemory.record!(
+          run_id: decision.run_id, entry_key: entry[:key], kind: entry[:kind],
+          content: entry[:content], evidence_ref: entry[:evidence_ref], recorded_by: "planner"
+        )
+      end
+    end
+    private_class_method :record_memory_entries!
 
     def create_attempt!(decision, params, model_tier)
       decision.with_lock do

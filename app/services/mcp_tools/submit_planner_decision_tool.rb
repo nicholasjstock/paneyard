@@ -37,12 +37,24 @@ module McpTools
       required: %w[key status evidenceRef]
     }.freeze
 
+    MEMORY_ENTRY_SCHEMA = {
+      type: "object", additionalProperties: false,
+      properties: {
+        key: { type: "string" },
+        kind: { type: "string", enum: WorkspaceMemoryEntry::KINDS },
+        content: { type: "string" },
+        evidenceRef: { type: "string" }
+      },
+      required: %w[key kind content evidenceRef]
+    }.freeze
+
     tool_name "submit_planner_decision"
     description "Submit exactly one bounded orchestration decision: a plan (decision), a request for more " \
       "evidence (needs_context), or a request for stronger reasoning (needs_stronger_model). A rejected decision " \
       "returns accepted=false with the exact reason -- fix it and call this again. Call as many times as needed " \
       "for needs_context; exactly once to finish with decision or needs_stronger_model. A text-only response " \
-      "without ever calling this is a failure."
+      "without ever calling this is a failure. Only a decision outcome persists memoryEntries -- an entry with " \
+      "the same key supersedes the prior one and must cite evidenceRef."
     input_schema(
       properties: {
         outcome: { type: "string", enum: %w[decision needs_context needs_stronger_model] },
@@ -62,12 +74,13 @@ module McpTools
           required: %w[source reference question offset maxChars]
         },
         acceptanceCriteria: { type: "array", maxItems: 8, items: ACCEPTANCE_CRITERION_SCHEMA },
-        acceptanceUpdates: { type: "array", maxItems: 8, items: ACCEPTANCE_UPDATE_SCHEMA }
+        acceptanceUpdates: { type: "array", maxItems: 8, items: ACCEPTANCE_UPDATE_SCHEMA },
+        memoryEntries: { type: "array", maxItems: 5, items: MEMORY_ENTRY_SCHEMA }
       },
-      required: %w[outcome summary nextStep followingSteps contextRequest acceptanceCriteria acceptanceUpdates]
+      required: %w[outcome summary nextStep followingSteps contextRequest acceptanceCriteria acceptanceUpdates memoryEntries]
     )
 
-    def self.call(outcome:, summary:, nextStep:, followingSteps:, contextRequest:, acceptanceCriteria:, acceptanceUpdates:, server_context:)
+    def self.call(outcome:, summary:, nextStep:, followingSteps:, contextRequest:, acceptanceCriteria:, acceptanceUpdates:, memoryEntries:, server_context:)
       decision = server_context && PlannerDecision.find_by(decision_id: server_context[:decision_id])
       raise ArgumentError, "submit_planner_decision requires an authenticated planner decision capability" unless decision
 
@@ -77,7 +90,8 @@ module McpTools
         following_steps: Orchestrator::WireFormat.underscore_keys(followingSteps),
         context_request: Orchestrator::WireFormat.underscore_keys(contextRequest),
         acceptance_criteria: Orchestrator::WireFormat.underscore_keys(acceptanceCriteria),
-        acceptance_updates: Orchestrator::WireFormat.underscore_keys(acceptanceUpdates)
+        acceptance_updates: Orchestrator::WireFormat.underscore_keys(acceptanceUpdates),
+        memory_entries: Orchestrator::WireFormat.underscore_keys(memoryEntries)
       }
       result = Orchestrator::PlannerDecisionSubmission.call(decision: decision, params: params)
       ToolResponse.structured(result)

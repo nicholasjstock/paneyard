@@ -21,6 +21,7 @@ module Orchestrator
           completion_blockers: AcceptanceCriteria.completion_blockers(run_id: run.run_id)
         },
         run_context: RunContext.snapshot(run_id: run.run_id),
+        project_memory: ProjectMemory.snapshot(run_id: run.run_id),
         acceptance_criteria: AcceptanceCriteria.tree(run_id: run.run_id),
         open_questions: run.user_questions.where(status: "open").order(:asked_at).limit(3).map(&:as_diagnostic_json),
         recent_attempts: run.step_attempts.order(created_at: :desc).limit(5).reverse.map do |attempt|
@@ -48,11 +49,18 @@ module Orchestrator
 
       <<~PROMPT
         You are a workflow planner. Make exactly one bounded orchestration decision from the Rails-prepared evidence below.
-        Do not inspect files, update memory, or execute work. You must submit your decision by calling
+        Do not inspect files or execute work directly. You must submit your decision by calling
         submit_planner_decision -- it is your only way to finish this turn; a text-only response is a failure.
         If it returns accepted=false, read the error, correct your proposal, and call submit_planner_decision again.
         Call it as many times as needed for outcome=needs_context (its response includes the fetched context you asked
         for); call it exactly once to finish with outcome=decision or outcome=needs_stronger_model.
+        The project_memory brief below lists durable, evidence-backed facts about the target project itself (its
+        architecture, conventions, operational rules, known hazards) that outlive any one run -- not this run's status.
+        On a decision outcome, you may optionally add or correct entries via memoryEntries, but only for something this
+        run's own evidence directly established, citing it in evidenceRef; a new entry reusing an existing key supersedes
+        it, so only do this when you have new or corrected information, never to re-state a fact already listed below.
+        Request source=project_memory with a specific key via needs_context if the brief's truncated content or
+        available_entry_keys leaves a specific entry's full detail unclear before relying on it.
         Choose at most one nextStep. Keep followingSteps ordered and limited to concrete work already justified by the evidence.
         Rails executes acceptance work depth-first: every handoff must address one root acceptance branch (a child may address its root branch), and later branches remain pending until the active branch resolves. When a verifier rejects evidence or a worker discovers follow-up work, propose the next child in that same branch; do not jump to another criterion's verifier.
         On the initial decision, define a concise top-level acceptanceCriteria contract (parentKey=null for each) derived
