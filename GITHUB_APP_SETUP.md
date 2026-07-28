@@ -28,6 +28,7 @@ An app created under one can't be installed on repos owned by the other — if y
 4. Under "Permissions", select **Repository permissions**:
    - **Pull requests**: Read & write
    - **Contents**: Read & write — this also covers release management (`gh release create`/`delete`, used to attach/clean up review evidence); GitHub Apps have no separate "Releases" permission, it's folded into Contents.
+   - **Issues**: Read & write — required for the operator plan-approval gate (`Orchestrator::RunPublication`), which opens a GitHub issue per run to carry the first-step approval conversation and closes it once the run's PR is up. Without this, `gh issue create` fails with `GraphQL: Resource not accessible by integration (createIssue)` and the run sits retrying `PublishUserQuestionJob` indefinitely instead of surfacing the plan for approval.
 
 5. Under **Where can this GitHub App be installed?**:
    - Select "Only on this account" for a single-owner setup (recommended — this just restricts *who can install it*, it does not make the app public or listed anywhere; that only happens if you separately publish it to the GitHub Marketplace, a distinct opt-in step this guide doesn't cover). Select "Any account" only if you need to install the same app across multiple, unrelated owners.
@@ -203,6 +204,14 @@ Make sure:
 - The app is installed on the target organization/repository
 - The `GITHUB_APP_INSTALLATION_ID` environment variable (if set) is correct
 - The repository's `remote.origin.url` is correctly configured
+
+### "Resource not accessible by integration (createIssue)"
+
+The installation is missing the **Issues: Read & write** permission (see step 4 above). This can happen even to an already-installed app if it predates this permission being added:
+
+1. On the app's settings page, under **Permissions & events**, set **Issues** to **Read & write** and save.
+2. GitHub will queue a permission-update request rather than applying it immediately. Go to `https://github.com/settings/installations` (or your org's equivalent), find this app's installation, and approve the pending permission request.
+3. No orchestrator restart is needed — `Orchestrator::GitHubAppAuth` mints a fresh installation token per request, so the next retry of `PublishUserQuestionJob` picks up the new scope automatically.
 
 ### "Failed to get GitHub App token"
 
