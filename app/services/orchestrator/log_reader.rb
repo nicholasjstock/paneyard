@@ -33,13 +33,15 @@ module Orchestrator
       tail.empty? ? nil : "#{tail.join("\n")}\n"
     end
 
-    # Codex mints its own session id (claude's is caller-chosen up front via
-    # --session-id, but codex has no equivalent incoming flag) -- confirmed
-    # against a real historical codex rollout file that its very first
-    # emitted event is always `session_meta`, carrying that id. Read from
-    # the head, not the tail like every other helper here: that line never
-    # moves once written, while a long-running worker's log can grow
-    # arbitrarily large by the time it stops.
+    # Neither driver is given a session id up front anymore (see
+    # WorkerSpawner) -- both mint their own on a fresh spawn, so Rails only
+    # learns it after the fact by reading it back out of the worker's own
+    # captured log. Codex's very first emitted event is always
+    # `session_meta`, carrying that id -- confirmed against a real
+    # historical codex rollout file. Read from the head, not the tail like
+    # every other helper here: that line never moves once written, while a
+    # long-running worker's log can grow arbitrarily large by the time it
+    # stops.
     def codex_session_id(path)
       return nil unless File.exist?(path)
 
@@ -48,6 +50,26 @@ module Orchestrator
         next unless event.is_a?(Hash) && event["type"] == "session_meta"
 
         return event.dig("payload", "session_id")
+      rescue JSON::ParserError
+        next
+      end
+
+      nil
+    end
+
+    # Claude's own equivalent: its very first stream-json event is always
+    # {"type":"system","subtype":"init",...,"session_id":...} -- confirmed
+    # directly against a real worker log (--output-format stream-json
+    # --include-partial-messages --verbose, exactly what WorkerSpawner
+    # passes).
+    def claude_session_id(path)
+      return nil unless File.exist?(path)
+
+      File.foreach(path).first(20).each do |line|
+        event = JSON.parse(line)
+        next unless event.is_a?(Hash) && event["type"] == "system" && event["subtype"] == "init"
+
+        return event["session_id"]
       rescue JSON::ParserError
         next
       end

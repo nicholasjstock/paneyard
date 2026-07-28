@@ -30,6 +30,40 @@ RSpec.describe Orchestrator::LogReader do
     file&.close!
   end
 
+  it "extracts a claude worker's own minted session id from its first init event" do
+    file = Tempfile.new("worker-log")
+    # Real shape confirmed live (2026-07-28) against `claude --output-format
+    # stream-json --include-partial-messages --verbose -p`: only the
+    # fields this method reads are included here, the rest omitted.
+    file.write({ type: "system", subtype: "init", session_id: "05ca79c4-3063-4ace-8192-3a8e340a8a88" }.to_json << "\n")
+    file.write({ type: "stream_event", event: { type: "message_start" } }.to_json << "\n")
+    file.flush
+
+    expect(described_class.claude_session_id(file.path)).to eq("05ca79c4-3063-4ace-8192-3a8e340a8a88")
+  ensure
+    file&.close!
+  end
+
+  it "returns nil for claude_session_id when no init event is present" do
+    file = Tempfile.new("worker-log")
+    file.write({ type: "assistant", message: { content: [] } }.to_json << "\n")
+    file.flush
+
+    expect(described_class.claude_session_id(file.path)).to be_nil
+  ensure
+    file&.close!
+  end
+
+  it "extracts a codex worker's own minted session id from its session_meta event" do
+    file = Tempfile.new("worker-log")
+    file.write({ type: "session_meta", payload: { session_id: "codex-session-abc" } }.to_json << "\n")
+    file.flush
+
+    expect(described_class.codex_session_id(file.path)).to eq("codex-session-abc")
+  ensure
+    file&.close!
+  end
+
   it "ignores non-object JSON emitted in a Codex log" do
     file = Tempfile.new("worker-log")
     file.write("null\n")

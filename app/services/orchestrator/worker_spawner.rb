@@ -81,14 +81,23 @@ module Orchestrator
         ) + enriched_prompt
         enriched_prompt = workspace_memory_prompt(run) + enriched_prompt
       end
+      # write_worker_mcp_config's output (a .mcp.json-shaped file) is only
+      # ever read by claude, via --mcp-config below -- codex_args wires the
+      # same MCP server(s) entirely through inline -c overrides instead
+      # (see this file's own header comment on why the two CLIs can't share
+      # one config format/mechanism at all). Skipping the write for codex
+      # avoids persisting a file neither the process nor anything else
+      # (confirmed: referenced nowhere outside this file) ever reads back.
       if mcp_override
         write_worker_mcp_config(
           mcp_config_path, mcp_override[:token], server_name: "chaperone", url: mcp_override[:url]
-        )
+        ) if driver == "claude"
       else
         capability_token, capability_token_digest = Worker.issue_capability
-        write_worker_mcp_config(mcp_config_path, capability_token)
-        write_claude_settings(claude_settings_path, policy) if driver == "claude"
+        if driver == "claude"
+          write_worker_mcp_config(mcp_config_path, capability_token)
+          write_claude_settings(claude_settings_path, policy)
+        end
       end
       # A resumed session picks up wherever its predecessor's conversation
       # left off (same codebase understanding, same discovered context) --
@@ -97,28 +106,30 @@ module Orchestrator
       # spawn, which always gets a fully fresh, non-persisted session.
       resume_from = prior_worker_for_resume(run_id: run.run_id, role:, driver:) unless mcp_override
       resume_session_id = resume_from&.cli_session_id
-      cli_session_id =
-        if mcp_override
-          nil
-        elsif driver == "claude"
-          resume_session_id || SecureRandom.uuid
-        else
-          # codex mints its own session id; a fresh spawn's id is unknown
-          # until WorkerReconcileJob captures it from the log after the
-          # process exits (see Orchestrator::LogReader.codex_session_id).
-          resume_session_id
-        end
+      # One path for both drivers: neither pre-assigns a session id anymore.
+      # Claude mints its own on a fresh spawn, same as codex always has --
+      # WorkerReconcileJob captures it from the log afterward (see
+      # Orchestrator::LogReader.claude_session_id/codex_session_id) unless
+      # this spawn is itself resuming a known prior one.
+      cli_session_id = mcp_override ? nil : resume_session_id
 
-      # Keyed on cli_session_id, not worker_id: Claude Code's own session
-      # storage is scoped to the working directory a session was created
-      # in, so a --resume from a different (fresh, per-spawn) directory
-      # can never find it -- this is what produced "No conversation found
-      # with session ID" on every resumed spawn, 100% reproducing and
-      # cascading forever since every subsequent same-role worker resumed
-      # the same now-marked-dead session. cli_session_id is always present
-      # for claude (freshly minted or resumed); this only matters for
-      # claude, since codex spawns chdir into root_dir instead (see below).
-      runtime_dir = Rails.root.join("tmp", "workers", cli_session_id || worker_id).to_s
+      # Keyed on (run_id, role), not cli_session_id/worker_id: Claude Code's
+      # own session storage is scoped to the working directory a session
+      # was created in, so a --resume from a different directory can never
+      # find it -- this is what produced "No conversation found with
+      # session ID" on every resumed spawn before e4440f9 keyed this on
+      # worker_id's successor, cli_session_id. That fix broke again the
+      # moment cli_session_id stopped being pre-assigned (above): a fresh
+      # claude spawn now has no session id yet, so cli_session_id || worker_id
+      # would fall through to worker_id -- a fresh, different value on
+      # every single spawn, reproducing the exact original bug. (run_id,
+      # role) is the one thing guaranteed identical between the spawn that
+      # creates a session and any later spawn that resumes it --
+      # prior_worker_for_resume already scopes its own lookup the same way,
+      # and Orchestrator::SpawnRequestedWorkers.call_locked guarantees at
+      # most one worker is ever active per run, so this directory is never
+      # contended between two live processes either.
+      runtime_dir = Rails.root.join("tmp", "workers", "#{ArtifactStore.sanitize_run_id(run.run_id)}-#{role}").to_s
       FileUtils.mkdir_p(runtime_dir)
       # XDG_CACHE_HOME is a cross-tool cache-location standard. Use a unique
       # directory beneath the OS temporary root: every worker sandbox grants
@@ -132,7 +143,7 @@ module Orchestrator
           [ "claude", claude_args(
             enriched_prompt, role:, mode:, mcp_config_path:, settings_path: claude_settings_path,
             target_root: root_dir, policy:, model_tier:, mcp_override:,
-            cli_session_id:, resume_session_id:
+            resume_session_id:
           ) ]
         else
           validate_codex_permission_profile_compatibility!(root_dir)
@@ -237,6 +248,7 @@ module Orchestrator
     # above only diagnoses a session that has genuinely gone bad; it was
     # never what breaks the dead session out of rotation.
     def prior_worker_for_resume(run_id:, role:, driver: "claude")
+      reconcile_pending_session_ids!(run_id:, role:, driver:)
       Worker.where(run_id:, role:, command: driver)
         .where.not(cli_session_id: nil)
         # A session id can be captured before the first worker_turn. Such a
@@ -247,6 +259,26 @@ module Orchestrator
         .where("status = ? OR handoff_completed_at IS NOT NULL", "running")
         .order(created_at: :desc)
         .first
+    end
+
+    # Neither driver receives an incoming session id anymore -- both mint
+    # their own on a fresh spawn, so it's only knowable after the fact, from
+    # the worker's own log. WorkerReconcileJob's recurring tick used to be
+    # the only thing that ever backfilled this, which meant a same-role
+    # worker spawned before that tick ran would find no eligible resume
+    # candidate at all, even though its predecessor's session was perfectly
+    # resumable -- a real, accepted-at-the-time race. Reconciling
+    # synchronously right here, exactly when this decision actually needs
+    # it, closes that gap; WorkerReconcileJob no longer does this at all.
+    def reconcile_pending_session_ids!(run_id:, role:, driver:)
+      Worker.where(run_id:, role:, command: driver, status: "stopped", cli_session_id: nil).find_each do |worker|
+        session_id = begin
+          driver == "codex" ? Orchestrator::LogReader.codex_session_id(worker.log_path) : Orchestrator::LogReader.claude_session_id(worker.log_path)
+        rescue Errno::ENOENT, Errno::EACCES
+          nil
+        end
+        worker.update_column(:cli_session_id, session_id) if session_id.present?
+      end
     end
 
     def stop_worker(worker:, reason:)
@@ -309,7 +341,7 @@ module Orchestrator
     # YAML front matter in .claude/agents/*.md as model configuration. Keep
     # cost routing here at the actual CLI boundary instead.
     def claude_args(prompt, role: "worker", mode: nil, mcp_config_path:, settings_path:, target_root:, policy:,
-      model_tier: "small", mcp_override: nil, cli_session_id: nil, resume_session_id: nil)
+      model_tier: "small", mcp_override: nil, resume_session_id: nil)
       if mcp_override
         # Without an explicit --output-format, --print defaults to plain
         # text -- not the structured JSON stream Orchestrator::LogReader.
@@ -352,7 +384,7 @@ module Orchestrator
         "--mcp-config", mcp_config_path,
         "--strict-mcp-config",
         "--disable-slash-commands",
-        *(resume_session_id ? [ "--resume", resume_session_id ] : [ "--session-id", cli_session_id ]),
+        *(resume_session_id ? [ "--resume", resume_session_id ] : []),
         "--output-format", "stream-json",
         "--include-partial-messages",
         "--verbose",

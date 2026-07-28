@@ -87,17 +87,20 @@ RSpec.describe Orchestrator::WorkerSpawner do
     assert_equal "gpt-5.6-terra", chaperone_args[chaperone_args.index("--model") + 1]
   end
 
-  it "claude workers mint a fresh --session-id and drop --no-session-persistence" do
+  # Neither driver is pre-assigned a session id anymore -- claude mints its
+  # own on a fresh spawn, same as codex always has, so --session-id is
+  # dropped entirely rather than passed a value chosen up front.
+  it "claude workers on a fresh spawn omit --session-id, letting claude mint its own" do
     root = Dir.mktmpdir("worker-policy")
     policy = Orchestrator::WorkerExecutionPolicy.new(
       root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
     )
     args = Orchestrator::WorkerSpawner.send(
       :claude_args, "Do the work.", role: "worker", mcp_config_path: "/tmp/mcp.json",
-      settings_path: "/tmp/settings.json", target_root: root, policy:, cli_session_id: "fresh-id"
+      settings_path: "/tmp/settings.json", target_root: root, policy:
     )
 
-    assert_equal "fresh-id", args[args.index("--session-id") + 1]
+    refute_includes args, "--session-id"
     refute_includes args, "--resume"
     refute_includes args, "--no-session-persistence"
   end
@@ -110,7 +113,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
     args = Orchestrator::WorkerSpawner.send(
       :claude_args, "Do the work.", role: "worker", mcp_config_path: "/tmp/mcp.json",
       settings_path: "/tmp/settings.json", target_root: root, policy:,
-      cli_session_id: "fresh-id", resume_session_id: "prior-id"
+      resume_session_id: "prior-id"
     )
 
     assert_equal "prior-id", args[args.index("--resume") + 1]

@@ -368,6 +368,62 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(File.exist?(claude_settings_path)).to be false
     end
 
+    # write_worker_mcp_config's output is only ever read by
+    # claude (via --mcp-config) -- codex_args wires the same MCP server(s)
+    # entirely through inline -c overrides instead, so the file must not be
+    # written at all for a codex worker (confirmed nothing else reads it
+    # back either). Covers both the normal worker path and the chaperone
+    # mcp_override path, since both used to write it unconditionally.
+    it "does not write an unused .mcp.json file for a codex worker" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-codex-mcp")
+      workspace = Workspace.create!(name: "codex-mcp-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Do some work",
+        target_root: workspace.root_path, launcher_variant: "codex", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(45_679)
+      allow(Process).to receive(:detach)
+      stdin_read = instance_double(IO, close: true)
+      stdin_write = StringIO.new
+      allow(IO).to receive(:pipe).and_return([ stdin_read, stdin_write ])
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "worker-1",
+        reason: "Do some work.", scope: "task.md", prompt: "Do the work."
+      )
+
+      expect(File.exist?(worker.mcp_config_path)).to be false
+    end
+
+    it "does not write an unused .mcp.json file for a codex chaperone worker either" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-codex-chaperone-mcp")
+      workspace = Workspace.create!(name: "codex-chaperone-mcp-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Review a repeated failure",
+        target_root: workspace.root_path, launcher_variant: "codex", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      allow(Process).to receive(:spawn).and_return(45_680)
+      allow(Process).to receive(:detach)
+      stdin_read = instance_double(IO, close: true)
+      stdin_write = StringIO.new
+      allow(IO).to receive(:pipe).and_return([ stdin_read, stdin_write ])
+
+      worker = described_class.spawn_worker(
+        run: run, role: "chaperone", nickname: "chaperone-test", reason: "Chaperone review: repeated failure.",
+        scope: "diagnose-it", prompt: "You must begin by calling get_chaperone_state.", model_tier: "strong",
+        mcp_override: {
+          url: "http://127.0.0.1:3000/mcp/chaperone", token: "chaperone-token",
+          allowed_tools: %w[get_chaperone_state read_chaperone_artifact submit_chaperone_decision]
+        }
+      )
+
+      expect(File.exist?(worker.mcp_config_path)).to be false
+    end
+
     it "spawns a chaperone worker on a Codex run through the codex CLI instead of forcing Claude" do
       workspace_root = Dir.mktmpdir("workflow-worker-spawner-chaperone-codex")
       workspace = Workspace.create!(name: "chaperone-codex-#{SecureRandom.hex(4)}", root_path: workspace_root)
@@ -422,7 +478,17 @@ RSpec.describe Orchestrator::WorkerSpawner do
         run: run, role: "worker", nickname: "worker", reason: "Phase 1.", scope: "phase-1.md",
         prompt: "Implement phase 1.", lineage_key: "phase-1-lineage"
       )
-      expect(first.cli_session_id).to be_present
+      # Neither driver is pre-assigned a session id anymore -- claude mints
+      # its own now, same as codex always has, so it's
+      # only known once WorkerReconcileJob reads it back from the log
+      # after the process actually runs. Simulate that reconciliation
+      # having already happened by the time a same-role worker resumes --
+      # in production this depends on WorkerReconcileJob's recurring tick
+      # beating the next spawn, an accepted (and improvable) timing gap:
+      # worst case is a fresh session instead of a resumed one, never a
+      # crash or a wrong resume.
+      expect(first.cli_session_id).to be_nil
+      first.update!(cli_session_id: SecureRandom.uuid)
       expect(first.lineage_key).to eq("phase-1-lineage")
 
       second = described_class.spawn_worker(
@@ -439,6 +505,44 @@ RSpec.describe Orchestrator::WorkerSpawner do
       # one per spawn -- otherwise the CLI reports "No conversation found"
       # even though the session id is correct.
       expect(spawn_calls[1][:chdir]).to eq(spawn_calls[0][:chdir])
+    end
+
+    # A same-role worker spawned before WorkerReconcileJob's recurring tick
+    # has backfilled its predecessor's cli_session_id used to find no
+    # eligible resume candidate at all, even though the predecessor's
+    # session was perfectly resumable -- an accepted race, closed by having
+    # prior_worker_for_resume reconcile it lazily, right here, instead of
+    # only ever depending on that job's cadence.
+    it "resumes a same-role predecessor whose session id was never reconciled by WorkerReconcileJob" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-lazy-reconcile")
+      workspace = Workspace.create!(name: "lazy-reconcile-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Implement the feature",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+      log_path = File.join(workspace_root, "predecessor.log")
+      File.write(log_path, <<~LOG)
+        {"type":"system","subtype":"init","session_id":"05ca79c4-3063-4ace-8192-3a8e340a8a88"}
+        {"type":"assistant","message":{"content":[]}}
+      LOG
+      predecessor = run.workers.create!(
+        worker_id: SecureRandom.uuid, role: "worker", nickname: "worker", reason: "test", scope: "artifact.md",
+        status: "stopped", pid: 12_345, command: "claude", args: [],
+        prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path,
+        cli_session_id: nil, handoff_completed_at: 2.minutes.ago
+      )
+
+      allow(Process).to receive(:spawn).and_return(45_681)
+      allow(Process).to receive(:detach)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "worker-1", reason: "Continue.", scope: "artifact.md",
+        prompt: "Continue the work."
+      )
+
+      expect(worker.args).to include("--resume", "05ca79c4-3063-4ace-8192-3a8e340a8a88")
+      expect(predecessor.reload.cli_session_id).to eq("05ca79c4-3063-4ace-8192-3a8e340a8a88")
     end
 
     it "prior_worker_for_resume skips a same-role session that crashed with zero turns, falling back further in history" do
@@ -552,6 +656,9 @@ RSpec.describe Orchestrator::WorkerSpawner do
         run: run, role: "worker", nickname: "worker", reason: "Implement.", scope: "impl.md",
         prompt: "Implement it.", lineage_key: "shared-lineage"
       )
+      # Simulate WorkerReconcileJob having already backfilled this -- see
+      # the identical note on the resume test above.
+      implementer.update!(cli_session_id: SecureRandom.uuid)
 
       verifier = described_class.spawn_worker(
         run: run, role: "verifier", nickname: "verifier", reason: "Verify.", scope: "impl.md",
