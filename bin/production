@@ -13,8 +13,8 @@ unless system("bundle", "check", out: File::NULL)
   exit 1
 end
 
-unless system("./bin/rails", "db:abort_if_pending_migrations", out: File::NULL)
-  warn "bin/production: the database is not prepared. Run RAILS_ENV=production bin/rails db:prepare, then retry bin/production."
+unless system("./bin/rails", "db:prepare", out: File::NULL)
+  warn "bin/production: database preparation failed. Run RAILS_ENV=production bin/rails db:prepare, then retry bin/production."
   exit 1
 end
 
