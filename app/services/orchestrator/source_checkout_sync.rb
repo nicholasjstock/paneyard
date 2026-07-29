@@ -25,6 +25,16 @@ module Orchestrator
     def queue_worker!(run, root)
       return :queued if SpawnRequest.open_only.exists?(run_id: run.run_id, requested_role: "git", scope: "source-sync.md")
 
+      # A merge may race a queued publish retry. That request targets the
+      # worktree we just removed, so it must not consume the run's one-worker
+      # dispatch slot ahead of the source-sync handoff.
+      SpawnRequest.open_only.where(run_id: run.run_id).find_each do |request|
+        request.update!(
+          status: "dismissed", dismissed_by: "post_merge_sync",
+          dismissal_note: "Superseded by merged-run source synchronization."
+        )
+      end
+
       SpawnRequest.create!(
         run_id: run.run_id, asked_by: "post_merge_sync", requested_role: "git", priority: "blocking",
         scope: "source-sync.md", execution_mode: "implementation", write_scope: "git_managed", allowed_paths: [ "**/*" ],
