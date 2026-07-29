@@ -20,7 +20,7 @@ class DeliverTelegramBlockingQuestionNotificationJob < ApplicationJob
   end
 
   def message_text(question)
-    link = question.run&.conversation_url.presence || question.github_comment_url
+    link = question.github_comment_url.presence || question.run&.conversation_url
     [
       "Blocking question needs your attention:",
       question.text,
