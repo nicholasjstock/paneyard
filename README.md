@@ -23,6 +23,8 @@ If the port is occupied, stop the owning service or choose an explicit orchestra
 PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev
 ```
 
+For the detached production-like service, use `bin/service start`; it defaults to port `3001` and also accepts an explicit `PORT` override.
+
 The health endpoint returns `{"status":"ok","service":"workflow-orchestrator"}` and the `X-Workflow-Service: workflow-orchestrator` header, so it cannot be mistaken for a target Rails application merely because both expose `/up`.
 
 ## Verification
