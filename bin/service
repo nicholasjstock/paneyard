@@ -15,6 +15,7 @@ LOG_FILE = File.join(ROOT_DIR, "log/production_service.log")
 STOP_GRACE_PERIOD = 15
 STARTUP_GRACE_PERIOD = 1
 STARTUP_POLL_INTERVAL = 0.2
+DEFAULT_PORT = "3001"
 
 def running_pid
   return nil unless File.exist?(PID_FILE)
@@ -39,7 +40,8 @@ def start
 
   log = File.open(LOG_FILE, "a")
   pid = Process.spawn(
-    { "RAILS_ENV" => "production" }, File.join(ROOT_DIR, "bin/production"),
+    { "RAILS_ENV" => "production", "PORT" => ENV.fetch("PORT", DEFAULT_PORT) },
+    File.join(ROOT_DIR, "bin/production"),
     chdir: ROOT_DIR, pgroup: true, out: log, err: log, in: File::NULL
   )
   Process.detach(pid)
