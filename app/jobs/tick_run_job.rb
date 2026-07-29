@@ -40,6 +40,10 @@ class TickRunJob < ApplicationJob
 
   def finalize_completed_run(run)
     if run.worktree_name.present?
+      if Orchestrator::FinalizationRecovery.paused?(run)
+        Orchestrator::SpawnRequestedWorkers.call(run: run)
+        return
+      end
       # Each queue_finalization_worker call (seeder/reporter/curator/demo)
       # marks publication_status "commit_pending" as soon as it dispatches
       # that role -- not only once the whole chain reaches the git worker --
@@ -57,7 +61,7 @@ class TickRunJob < ApplicationJob
       queue_finalization_worker(run, "seeder", "seed-data.md", "Begin.", write_scope: "scoped_changes", execution_mode: "implementation") ||
         queue_finalization_worker(run, "reporter", "run-summary.md", "Begin.") ||
         queue_finalization_worker(run, "curator", "review-assets.md", "Begin.") ||
-        queue_finalization_worker(run, "demo", "demo-notes.md", "Begin.") ||
+        queue_finalization_worker(run, "demo", "demo-notes.md", "Begin.", execution_mode: "recording") ||
         Orchestrator::RunPublication.queue_worker!(run)
       Orchestrator::SpawnRequestedWorkers.call(run: run)
     else

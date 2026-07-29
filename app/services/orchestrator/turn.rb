@@ -39,6 +39,9 @@ module Orchestrator
       end
 
       run = Run.find_by!(run_id: run_id)
+      if completed_result?(result) && FinalizationRecovery.resume_after_repair?(run:, role:)
+        return { planner_request: nil, next_state: TickState.default_state(run_id).merge(phase: "completed", last_updated_at: now.utc.iso8601(3)) }
+      end
       active_branch_open = run.active_branch_key.present? && !AcceptanceCriteria.branch_resolved?(run:, branch_key: run.active_branch_key)
 
       # A completed node may only promote its next sibling after the current
@@ -180,6 +183,7 @@ module Orchestrator
       # identical carve-out.
       return VerifierRecovery.call(attempt) if VerifierRecovery.applicable?(attempt)
       return GitPublicationRecovery.call(attempt) if GitPublicationRecovery.applicable?(attempt)
+      return FinalizationRecovery.call(attempt) if FinalizationRecovery.applicable?(attempt)
 
       ChaperoneTrigger.call(attempt)
     end

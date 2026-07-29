@@ -18,7 +18,7 @@ module Orchestrator
         [
           ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::StartRunCommandTool,
           ::McpTools::StopRunCommandTool, ::McpTools::GetRunCommandTool, ::McpTools::ListRunCommandsTool,
-          ::McpTools::ReadRunCommandLogTool, ::McpTools::CompleteWorkerTaskTool
+          ::McpTools::ReadRunCommandLogTool, ::McpTools::CompleteWorkerTaskTool, ::McpTools::WorkerTurnTool
         ]
       when "git"
         [
