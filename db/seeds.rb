@@ -62,8 +62,8 @@ if Rails.env.development?
   Orchestrator::ArtifactStore.write(launch_artifact_run.target_root, launch_artifact_run.run_id,
                                     "sample-data.json", '{"source":"synthetic demo fixture","records":2}' + "\n")
 
-  # A synthetic blocker keeps the notifications screen visible during local
-  # review without depending on a live planner or worker.
+  # Synthetic blockers keep the global notifications drawer visible across
+  # workspaces without depending on a live planner or worker.
   notification_run = Run.find_by!(run_id: "demo-long-title")
   notification_question = UserQuestion.find_or_create_by!(question_id: "demo-blocking-question") do |question|
     question.run = notification_run
@@ -82,6 +82,37 @@ if Rails.env.development?
       title: "Blocking question needs your attention",
       body: notification_question.text,
       link_url: notification_run.conversation_url
+    )
+  end
+
+  second_demo_workspace = Workspace.find_or_create_by!(root_path: "/tmp/workflow-demo/inventory-service") do |workspace|
+    workspace.name = "demo: inventory-service"
+  end
+  second_notification_run = Run.find_or_create_by!(run_id: "demo-inventory-review") do |run|
+    run.workspace = second_demo_workspace
+    run.task = "Review inventory synchronization"
+    run.target_root = File.join(second_demo_workspace.root_path, "review-inventory-sync")
+    run.launcher_variant = "claude"
+    run.status = "running"
+    run.worktree_name = "review-inventory-sync"
+  end
+  second_notification_question = UserQuestion.find_or_create_by!(question_id: "demo-inventory-question") do |question|
+    question.run = second_notification_run
+    question.asked_by = "planner"
+    question.scope = "plan"
+    question.text = "Should inventory sync retry after a timeout?"
+    question.priority = "blocking"
+    question.status = "open"
+  end
+
+  if second_notification_question.notification.nil?
+    Notification.create!(
+      workspace: second_demo_workspace,
+      user_question: second_notification_question,
+      kind: "blocking_question",
+      title: "Inventory review needs your attention",
+      body: second_notification_question.text,
+      link_url: second_notification_run.conversation_url
     )
   end
 end

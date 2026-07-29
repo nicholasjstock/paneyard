@@ -2,11 +2,11 @@ class NotificationsController < ApplicationController
   before_action :require_workspace
 
   def index
-    @notifications = current_workspace.notifications.recent_first
+    @notifications = Notification.recent_first
   end
 
   def mark_read
-    notification = current_workspace.notifications.find(params[:id])
+    notification = Notification.find(params[:id])
     notification.mark_read!
 
     redirect_to notifications_redirect_path(notification), notice: "Notification marked as read."

@@ -90,17 +90,36 @@ body {
   min-height: 44px;
 }
 
-.notification-dropdown { position: relative; }
-.notification-dropdown summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 0.35rem; color: var(--muted); }
-.notification-dropdown summary:hover { color: var(--text); }
-.notification-badge { min-width: 1.25rem; padding: 0.05rem 0.35rem; border-radius: 999px; background: var(--danger); color: white; text-align: center; font-size: 0.7rem; }
-.notification-menu { position: absolute; z-index: 5; right: 0; top: 100%; width: min(22rem, 90vw); padding: 0.65rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.35); }
-.notification-item { padding: 0.55rem; border-bottom: 1px solid var(--border); }
-.notification-item.unread { border-left: 3px solid var(--accent); }
-.notification-item a, .notification-all { color: var(--text); font-weight: 600; }
-.notification-item p { margin: 0.25rem 0 0.5rem; color: var(--muted); font-size: 0.8rem; }
-.notification-all { display: block; padding: 0.65rem 0.55rem 0.25rem; font-size: 0.85rem; }
+.notification-launcher { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 2.5rem; min-width: 44px; min-height: 44px; padding: 0.35rem; border: 1px solid transparent; border-radius: 0.65rem; background: transparent; color: var(--muted); cursor: pointer; transition: background 140ms ease, border-color 140ms ease, color 140ms ease; }
+.notification-launcher:hover, .notification-launcher:focus-visible, .notification-open .notification-launcher { border-color: var(--border); background: var(--bg); color: var(--text); }
+.notification-launcher svg { width: 1.2rem; height: 1.2rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.notification-badge { position: absolute; top: 0.15rem; right: 0.05rem; min-width: 1.15rem; padding: 0.05rem 0.3rem; border: 2px solid var(--panel); border-radius: 999px; background: var(--danger); color: white; text-align: center; font-size: 0.65rem; font-weight: 700; line-height: 1.1; }
+.notification-all { color: var(--text); font-weight: 600; font-size: 0.85rem; }
 .notification-card.unread { border-color: var(--accent); }
+
+.notification-backdrop { position: fixed; inset: 0; z-index: 999; background: rgba(0, 0, 0, 0.6); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 160ms ease, visibility 160ms ease; }
+.notification-drawer { position: fixed; inset: 0 0 0 auto; z-index: 1000; width: min(100%, 27rem); border: 0; border-left: 1px solid var(--border); background: var(--panel); color: inherit; box-shadow: -1rem 0 3rem rgba(0, 0, 0, 0.35); transform: translateX(100%); visibility: hidden; pointer-events: none; transition: transform 180ms ease, visibility 180ms ease; outline: none; }
+.notification-open .notification-backdrop { opacity: 1; visibility: visible; pointer-events: auto; }
+.notification-open .notification-drawer { transform: translateX(0); visibility: visible; pointer-events: auto; }
+.notification-drawer-shell { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
+.notification-drawer-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.25rem 1.25rem 1rem; border-bottom: 1px solid var(--border); }
+.notification-drawer-header h2 { margin: 0.2rem 0 0; }
+.notification-drawer-header p { margin: 0.15rem 0 0; }
+.notification-drawer-list { overflow-y: auto; padding: 0.75rem; }
+.notification-drawer-item { padding: 0.9rem; border-bottom: 1px solid var(--border); }
+.notification-drawer-item.unread { border-left: 3px solid var(--accent); padding-left: calc(0.9rem - 3px); }
+.notification-drawer-meta { display: flex; justify-content: space-between; gap: 0.75rem; color: var(--muted); font-size: 0.75rem; }
+.notification-drawer-workspace { overflow: hidden; color: var(--accent); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.notification-drawer-title { display: block; margin-top: 0.3rem; color: var(--text); font-weight: 650; }
+.notification-drawer-item p { margin: 0.3rem 0; color: var(--muted); }
+.notification-drawer-run { display: block; margin-bottom: 0.6rem; font-size: 0.75rem; }
+.notification-mark-read { margin-top: 0.15rem; }
+.notification-empty { margin: 20vh 1rem; color: var(--muted); text-align: center; }
+.notification-drawer-footer { padding: 1rem 1.25rem; border-top: 1px solid var(--border); }
+
+@media (max-width: 480px) {
+  .notification-drawer { width: 100%; }
+}
 
 @media (min-width: 768px) {
   .topbar {

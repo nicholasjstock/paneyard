@@ -27,4 +27,35 @@ RSpec.describe "workspace notifications", type: :request do
     expect(response.body).to include("read")
     expect(response.body).not_to include("1 unread notifications")
   end
+
+  it "shows notifications from every workspace in the global stream" do
+    first_workspace = Workspace.create!(name: "notification-global-a-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-global-a-#{SecureRandom.hex(4)}")
+    second_workspace = Workspace.create!(name: "notification-global-b-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-global-b-#{SecureRandom.hex(4)}")
+    first_run = Run.create!(run_id: SecureRandom.uuid, task: "First review", workspace: first_workspace, target_root: first_workspace.root_path, launcher_variant: "codex", status: "running")
+    second_run = Run.create!(run_id: SecureRandom.uuid, task: "Second review", workspace: second_workspace, target_root: second_workspace.root_path, launcher_variant: "codex", status: "running")
+    first_question = first_run.user_questions.create!(asked_by: "planner", scope: "plan", text: "First question", priority: "blocking")
+    second_question = second_run.user_questions.create!(asked_by: "planner", scope: "plan", text: "Second question", priority: "blocking")
+
+    get workspace_notifications_path(second_workspace)
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include(first_question.text, second_question.text, "2 unread notifications")
+  end
+
+  it "marks a notification from another workspace read without changing other rows" do
+    first_workspace = Workspace.create!(name: "notification-global-read-a-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-global-read-a-#{SecureRandom.hex(4)}")
+    second_workspace = Workspace.create!(name: "notification-global-read-b-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-global-read-b-#{SecureRandom.hex(4)}")
+    first_run = Run.create!(run_id: SecureRandom.uuid, task: "First review", workspace: first_workspace, target_root: first_workspace.root_path, launcher_variant: "codex", status: "running")
+    second_run = Run.create!(run_id: SecureRandom.uuid, task: "Second review", workspace: second_workspace, target_root: second_workspace.root_path, launcher_variant: "codex", status: "running")
+    first_question = first_run.user_questions.create!(asked_by: "planner", scope: "plan", text: "First question", priority: "blocking")
+    second_question = second_run.user_questions.create!(asked_by: "planner", scope: "plan", text: "Second question", priority: "blocking")
+    first_notification = Notification.find_by!(user_question: first_question)
+    second_notification = Notification.find_by!(user_question: second_question)
+
+    patch mark_read_workspace_notification_path(second_workspace, first_notification)
+
+    expect(response).to redirect_to(workspace_notifications_path(second_workspace))
+    expect(first_notification.reload).not_to be_unread
+    expect(second_notification.reload).to be_unread
+  end
 end
