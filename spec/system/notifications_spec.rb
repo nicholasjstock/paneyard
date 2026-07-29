@@ -22,6 +22,19 @@ RSpec.describe "global notifications", type: :system do
     expect(page).to have_link("Blocking question needs your attention", href: run.github_issue_url)
   end
 
+  it "renders the global launcher on the workspace selection page" do
+    workspace, = create_notification_fixture
+
+    visit workspaces_path
+
+    expect(page).to have_css("button[aria-label='Open notifications'][data-action='notification-drawer#open']")
+    expect(page).to have_css("aside[aria-label='Global notifications'][aria-hidden='true']")
+    expect(page).to have_css("span[aria-label='1 unread notifications']")
+    expect(page).to have_text(workspace.name)
+    expect(page).to have_link("View all notifications", href: notifications_path)
+    expect(page).to have_button("Mark read", count: 1)
+  end
+
   it "opens and closes the notification drawer", js: true do
     workspace, = create_notification_fixture
 

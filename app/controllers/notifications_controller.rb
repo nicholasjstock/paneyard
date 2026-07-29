@@ -1,5 +1,5 @@
 class NotificationsController < ApplicationController
-  before_action :require_workspace
+  before_action :set_workspace, if: -> { params[:workspace_id].present? }
 
   def index
     @notifications = Notification.recent_first
@@ -17,6 +17,10 @@ class NotificationsController < ApplicationController
   def notifications_redirect_path(notification)
     return notification.target_url if notification.target_url.present?
 
-    workspace_notifications_path(current_workspace)
+    current_workspace ? workspace_notifications_path(current_workspace) : notifications_path
+  end
+
+  def set_workspace
+    @current_workspace = Workspace.find(params[:workspace_id])
   end
 end

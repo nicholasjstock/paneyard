@@ -1,6 +1,30 @@
 require "rails_helper"
 
 RSpec.describe "workspace notifications", type: :request do
+  it "shows the global stream without a selected workspace" do
+    workspace = Workspace.create!(name: "notification-root-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-root-#{SecureRandom.hex(4)}")
+    run = Run.create!(run_id: SecureRandom.uuid, task: "Need review", workspace:, target_root: workspace.root_path, launcher_variant: "codex", status: "running")
+    question = run.user_questions.create!(asked_by: "planner", scope: "plan", text: "Root question", priority: "blocking")
+
+    get notifications_path
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include(question.text, "Mark read")
+    expect(response.body).to include(mark_read_notification_path(Notification.find_by!(user_question: question)))
+  end
+
+  it "marks a notification read from the global route" do
+    workspace = Workspace.create!(name: "notification-root-read-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-root-read-#{SecureRandom.hex(4)}")
+    run = Run.create!(run_id: SecureRandom.uuid, task: "Need review", workspace:, target_root: workspace.root_path, launcher_variant: "codex", status: "running")
+    question = run.user_questions.create!(asked_by: "planner", scope: "plan", text: "Root approve?", priority: "blocking")
+    notification = Notification.find_by!(user_question: question)
+
+    patch mark_read_notification_path(notification)
+
+    expect(response).to redirect_to(notifications_path)
+    expect(notification.reload).not_to be_unread
+  end
+
   it "shows unread count, notification body, and the relevant pull request" do
     workspace = Workspace.create!(name: "notification-ui-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-ui-#{SecureRandom.hex(4)}")
     run = Run.create!(run_id: SecureRandom.uuid, task: "Need review", workspace:, target_root: workspace.root_path, launcher_variant: "codex", status: "running", pull_request_url: "https://github.com/example/app/pull/13")

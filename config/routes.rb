@@ -25,6 +25,10 @@ Rails.application.routes.draw do
   # Defines the root path route ("/")
   root "workspaces#index"
 
+  resources :notifications, only: %i[index] do
+    member { patch :mark_read }
+  end
+
   resources :workspaces, only: %i[index show new create edit update destroy] do
     resource :project_setup, only: %i[create]
 

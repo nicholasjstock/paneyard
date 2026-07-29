@@ -35,7 +35,8 @@
           <%= link_to "Workers", workspace_workers_path(current_workspace), class: current_page?(workspace_workers_path(current_workspace)) ? "active" : nil %>
           <%= link_to "Questions", workspace_questions_path(current_workspace), class: current_page?(workspace_questions_path(current_workspace)) ? "active" : nil %>
           <%= link_to "Events", workspace_events_path(current_workspace), class: current_page?(workspace_events_path(current_workspace)) ? "active" : nil %>
-          <button type="button" class="notification-launcher" aria-label="Open notifications" aria-expanded="false" title="Open notifications" data-action="notification-drawer#open" data-notification-drawer-target="launcher">
+        <% end %>
+        <button type="button" class="notification-launcher" aria-label="Open notifications" aria-expanded="false" title="Open notifications" data-action="notification-drawer#open" data-notification-drawer-target="launcher">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" />
             </svg>
@@ -43,8 +44,7 @@
               <% if unread_notification_count.positive? %>
                 <span class="notification-badge" aria-label="<%= unread_notification_count %> unread notifications"><%= unread_notification_count %></span>
               <% end %>
-          </button>
-        <% end %>
+        </button>
         <% if current_runs.any? %>
           <label class="current-runs-picker">
             <span class="sr-only">Current runs</span>
@@ -63,8 +63,7 @@
       </nav>
     </header>
 
-    <% if current_workspace %>
-      <div class="notification-launcher-root">
+    <div class="notification-launcher-root">
         <div class="notification-backdrop" data-action="click->notification-drawer#close"></div>
           <aside class="notification-drawer" role="dialog" aria-modal="true" aria-label="Global notifications"
                aria-hidden="true" tabindex="-1" data-notification-drawer-target="panel">
@@ -92,7 +91,7 @@
                     <p><%= notification.body %></p>
                     <span class="muted notification-drawer-run"><%= notification.user_question.run&.worktree_name.presence || notification.user_question.run&.run_id || "Workspace activity" %></span>
                     <% if notification.unread? %>
-                      <%= button_to "Mark read", mark_read_workspace_notification_path(current_workspace, notification), method: :patch, class: "btn btn-small notification-mark-read" %>
+                      <%= button_to "Mark read", current_workspace ? mark_read_workspace_notification_path(current_workspace, notification) : mark_read_notification_path(notification), method: :patch, class: "btn btn-small notification-mark-read" %>
                     <% end %>
                   </article>
                 <% end %>
@@ -101,12 +100,11 @@
               <% end %>
             </section>
             <footer class="notification-drawer-footer">
-              <%= link_to "View all notifications", workspace_notifications_path(current_workspace), class: "notification-all" %>
+              <%= link_to "View all notifications", current_workspace ? workspace_notifications_path(current_workspace) : notifications_path, class: "notification-all" %>
             </footer>
           </div>
         </aside>
-      </div>
-    <% end %>
+    </div>
 
     <% if current_workspace %>
       <%= render "shared/admin_chat_launcher" %>
