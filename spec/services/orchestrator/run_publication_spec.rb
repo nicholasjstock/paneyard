@@ -92,7 +92,14 @@ RSpec.describe Orchestrator::RunPublication do
 
       described_class.finalize!(run, outcome: "published")
 
-      expect(run.reload.pull_request_url).to eq("https://github.com/example/repo/pull/42")
+      expect(run.reload).to have_attributes(
+        pull_request_url: "https://github.com/example/repo/pull/42",
+        publication_status: "awaiting_approval",
+        status: "running",
+        phase: "awaiting_user_feedback"
+      )
+      expect(run.open_blocking_question?).to be(true)
+      expect(run.user_questions.where(scope: "pull_request_review").count).to eq(1)
       expect(Open3).to have_received(:capture3).with(
         anything, "gh", "pr", "create", "--base", "main", "--head", "workflow/rails-pr-a1b2",
         "--title", "Publish a readable pull request", "--body", "# Summary\n\nA real Markdown body.", chdir: root
@@ -375,12 +382,34 @@ RSpec.describe Orchestrator::RunPublication do
     allow(Open3).to receive(:capture3).with(
       anything, "gh", "issue", "close", "https://github.com/example/repo/issues/9", "--comment", "Merged in ", chdir: worktree_root
     ).and_return([ "", "", status ])
+    allow(described_class).to receive(:merged?).with(run).and_return(true)
 
     expect(described_class.cleanup_merged_run!(run)).to eq(:merged)
     expect(File).not_to exist(worktree_root)
-    expect(run.reload).to have_attributes(publication_status: "merged", github_issue_status: "closed")
+    expect(run.reload).to have_attributes(
+      publication_status: "merged", github_issue_status: "closed", status: "completed", phase: "completed"
+    )
   ensure
     FileUtils.remove_entry(source_root) if source_root && File.exist?(source_root)
+  end
+
+  it "does not clean up or terminalize a run before GitHub confirms the merge" do
+    source_root = Dir.mktmpdir
+    worktree_root = Dir.mktmpdir
+    workspace = Workspace.create!(name: "publication-unmerged-#{SecureRandom.hex(4)}", root_path: source_root)
+    run = workspace.runs.create!(
+      run_id: "publication-unmerged-#{SecureRandom.hex(4)}", task: "Do not clean unmerged run",
+      target_root: worktree_root, source_root:, launcher_variant: "codex", worktree_name: "unmerged-a1b2",
+      branch_name: "workflow/unmerged-a1b2", publication_status: "awaiting_approval", status: "running"
+    )
+    allow(described_class).to receive(:merged?).with(run).and_return(false)
+
+    expect(described_class.cleanup_merged_run!(run)).to eq(:awaiting_confirmation)
+    expect(run.reload).to have_attributes(publication_status: "awaiting_approval", status: "running")
+    expect(File).to exist(worktree_root)
+  ensure
+    FileUtils.remove_entry(source_root) if source_root && File.exist?(source_root)
+    FileUtils.remove_entry(worktree_root) if worktree_root && File.exist?(worktree_root)
   end
 
   def git(root, *args)
