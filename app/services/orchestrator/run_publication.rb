@@ -356,7 +356,6 @@ module Orchestrator
 
         root = validated_root!(run)
         source_root = Pathname(run.source_root)
-        rebase_main_onto_origin!(source_root)
         close_conversation_issue!(run)
         delete_review_release!(root, run) if run.review_assets.any?
         git!(source_root, "worktree", "remove", "--force", root.to_s)
@@ -390,15 +389,6 @@ module Orchestrator
       raise Error, "gh release delete failed" unless status.success?
     end
     private_class_method :delete_review_release!
-
-    def rebase_main_onto_origin!(source_root)
-      branch = git!(source_root, "branch", "--show-current").strip
-      raise Error, "Source checkout must be on main before cleanup; found #{branch.presence || "detached HEAD"}" unless branch == "main"
-
-      git!(source_root, "fetch", "origin", "main")
-      git!(source_root, "rebase", "origin/main")
-    end
-    private_class_method :rebase_main_onto_origin!
 
     def repository_and_number(url)
       GitHubUrl.repository_and_number(url)

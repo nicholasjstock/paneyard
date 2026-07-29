@@ -359,6 +359,10 @@ RSpec.describe Orchestrator::RunPublication do
     git(source_root, "branch", "-M", "main")
     git(source_root, "remote", "add", "origin", source_root)
     git(source_root, "worktree", "add", "-b", "workflow/merged-a1b2", worktree_root)
+    # Merged-run cleanup must not synchronize the shared source checkout.
+    # A normal local edit must not prevent removal of this independent
+    # worktree; the old cleanup-time rebase incorrectly made it do so.
+    File.write(File.join(source_root, "README.md"), "source with a local edit\n")
     workspace = Workspace.create!(name: "publication-cleanup-#{SecureRandom.hex(4)}", root_path: source_root)
     run = workspace.runs.create!(
       run_id: "publication-cleanup-#{SecureRandom.hex(4)}", task: "Clean merged run",
