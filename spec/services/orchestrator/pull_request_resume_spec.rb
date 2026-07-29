@@ -222,6 +222,20 @@ RSpec.describe Orchestrator::PullRequestResume do
     expect(run.reload).to have_attributes(status: "running", last_pull_request_comment_id: "456")
   end
 
+  it "skips a deleted issue response without raising" do
+    workspace = Workspace.create!(name: "issue-deleted-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "issue-deleted-#{SecureRandom.hex(4)}", task: "Deleted issue", target_root: workspace.root_path,
+      launcher_variant: "codex", status: "completed", worktree_name: "issue-deleted-a1b2", branch_name: "workflow/issue-deleted-a1b2",
+      github_issue_url: "https://github.com/example/repo/issues/9", github_issue_status: "open"
+    )
+    status = instance_double(Process::Status, success?: false, exitstatus: 1)
+    allow(Open3).to receive(:capture3).with(anything, "gh", "api", "repos/example/repo/issues/9/comments?per_page=100")
+      .and_return([ { "message" => "Not Found", "status" => "404" }.to_json, "", status ])
+
+    expect(described_class.comments_after(run)).to eq([])
+  end
+
   it "ignores system-posted question comments while advancing the cursor" do
     workspace = Workspace.create!(name: "pr-system-question-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(

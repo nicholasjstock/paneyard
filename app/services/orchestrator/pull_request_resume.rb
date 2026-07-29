@@ -22,16 +22,22 @@ module Orchestrator
         "PullRequestResume.comments_after run=#{run.run_id} last_comment_id=#{run.last_pull_request_comment_id.inspect} " \
         "gh_exit=#{status.exitstatus} gh_stderr=#{error.presence.inspect} raw_comment_ids=#{safe_comment_ids(output)}"
       )
+      parsed_output = JSON.parse(output)
+      unless parsed_output.is_a?(Array)
+        Rails.logger.warn("PullRequestResume.comments_after run=#{run.run_id}: GitHub returned a non-array comments response; skipping")
+        return []
+      end
+
       raise Error, "gh api comments failed: #{error}" unless status.success?
 
-      comments = JSON.parse(output)
-      comments.select { |comment| comment.fetch("id").to_i > run.last_pull_request_comment_id.to_i }.sort_by { |comment| comment.fetch("id").to_i }
+      parsed_output.select { |comment| comment.fetch("id").to_i > run.last_pull_request_comment_id.to_i }.sort_by { |comment| comment.fetch("id").to_i }
     rescue JSON::ParserError => error
       raise Error, "GitHub returned invalid PR comments: #{error.message}"
     end
 
     def safe_comment_ids(output)
-      JSON.parse(output).map { |comment| comment["id"] }
+      comments = JSON.parse(output)
+      comments.is_a?(Array) ? comments.map { |comment| comment["id"] } : "<non-array>"
     rescue JSON::ParserError
       "<unparsable>"
     end
