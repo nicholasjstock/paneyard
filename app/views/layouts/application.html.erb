@@ -34,6 +34,30 @@
           <%= link_to "Workers", workspace_workers_path(current_workspace), class: current_page?(workspace_workers_path(current_workspace)) ? "active" : nil %>
           <%= link_to "Questions", workspace_questions_path(current_workspace), class: current_page?(workspace_questions_path(current_workspace)) ? "active" : nil %>
           <%= link_to "Events", workspace_events_path(current_workspace), class: current_page?(workspace_events_path(current_workspace)) ? "active" : nil %>
+          <details class="notification-dropdown" <%= "open" if current_page?(workspace_notifications_path(current_workspace)) %>>
+            <summary aria-label="Notifications">
+              Notifications
+              <% if unread_notification_count.positive? %>
+                <span class="notification-badge" aria-label="<%= unread_notification_count %> unread notifications"><%= unread_notification_count %></span>
+              <% end %>
+            </summary>
+            <div class="notification-menu">
+              <% if current_notifications.any? %>
+                <% current_notifications.each do |notification| %>
+                  <div class="notification-item <%= "unread" if notification.unread? %>">
+                    <%= link_to notification.title, notification.target_url || workspace_notifications_path(current_workspace) %>
+                    <p><%= notification.body %></p>
+                    <% if notification.unread? %>
+                      <%= button_to "Mark read", mark_read_workspace_notification_path(current_workspace, notification), method: :patch, class: "btn btn-small" %>
+                    <% end %>
+                  </div>
+                <% end %>
+              <% else %>
+                <p class="muted">No notifications.</p>
+              <% end %>
+              <%= link_to "View all notifications", workspace_notifications_path(current_workspace), class: "notification-all" %>
+            </div>
+          </details>
         <% end %>
         <% if current_runs.any? %>
           <label class="current-runs-picker">

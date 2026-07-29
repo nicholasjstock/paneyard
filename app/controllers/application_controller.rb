@@ -10,6 +10,8 @@ class ApplicationController < ActionController::Base
   helper_method :current_workspace_admin_chat
   helper_method :current_runs
   helper_method :background_job_warning
+  helper_method :current_notifications
+  helper_method :unread_notification_count
 
   private
 
@@ -54,5 +56,17 @@ class ApplicationController < ActionController::Base
 
   def background_job_warning
     @background_job_warning ||= BackgroundJobHealth.warning
+  end
+
+  def current_notifications
+    return Notification.none unless current_workspace
+
+    @current_notifications ||= current_workspace.notifications.recent_first.limit(5)
+  end
+
+  def unread_notification_count
+    return 0 unless current_workspace
+
+    @unread_notification_count ||= current_workspace.notifications.unread.count
   end
 end
