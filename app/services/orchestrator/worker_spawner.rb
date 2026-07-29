@@ -149,7 +149,6 @@ module Orchestrator
             resume_session_id:, effort: effective_effort
           ) ]
         else
-          validate_codex_permission_profile_compatibility!(root_dir)
           [ "codex", codex_args(
             root_dir:, last_message_path:, policy:, model_tier:, mcp_override:, resume_session_id:, effort: effective_effort
           ) ]
@@ -427,7 +426,17 @@ module Orchestrator
         %(mcp_servers.workflow.bearer_token_env_var="WORKFLOW_WORKER_TOKEN"),
         %(mcp_servers.workflow.default_tools_approval_mode="approve")
       ]
-      config_args = (policy.codex_config_overrides + mcp_overrides).flat_map { |override| [ "-c", override ] }
+      config_args = mcp_overrides.flat_map { |override| [ "-c", override ] }
+
+      # Decision (2026-07-29): this single-operator tool relies on orchestration
+      # and human PR review, not Codex's host sandbox, as its safety boundary.
+      # Normal workers deliberately bypass that sandbox. We first enabled local
+      # binding, but browser specs still failed because macOS Seatbelt blocks
+      # Chromium's global Mach-port IPC; the same spec passed once bypassed.
+      # Upstream context: https://github.com/openai/codex/issues/35768 and
+      # https://github.com/openai/codex/issues/21292. Do not restore Codex's
+      # sandbox here unless those capabilities are available and verified.
+      bypass_sandbox_args = [ "--dangerously-bypass-approvals-and-sandbox" ]
 
       # --json is what makes the session_meta line (containing codex's own
       # generated session id) actually appear in the captured worker log --
@@ -435,27 +444,10 @@ module Orchestrator
       # does not accept -C/--add-dir (confirmed against `codex exec resume
       # --help`); the resumed session keeps whatever cwd it started with.
       if resume_session_id
-        [ "exec", "resume", resume_session_id, *model_args, *effort_args, "--json", *config_args, "-o", last_message_path, "-" ]
+        [ "exec", "resume", resume_session_id, *model_args, *effort_args, *bypass_sandbox_args, "--json", *config_args, "-o", last_message_path, "-" ]
       else
-        [ "exec", *model_args, *effort_args, "--json", *config_args, "-C", root_dir, "-o", last_message_path, "-" ]
+        [ "exec", *model_args, *effort_args, *bypass_sandbox_args, "--json", *config_args, "-C", root_dir, "-o", last_message_path, "-" ]
       end
-    end
-
-    # Codex permission profiles and the legacy sandbox_mode setting are
-    # mutually exclusive. If any active user or project config still declares
-    # sandbox_mode, Codex would ignore our exact-path profile. Fail closed
-    # rather than launch a worker with broader access than its persisted policy.
-    def validate_codex_permission_profile_compatibility!(root_dir)
-      config_paths = [ File.join(root_dir, ".codex", "config.toml") ]
-      codex_home = resolve_codex_home
-      config_paths << File.join(codex_home, "config.toml") if codex_home.present?
-      incompatible = config_paths.select do |path|
-        File.exist?(path) && File.foreach(path).any? { |line| line.match?(/^\s*sandbox_mode\s*=/) }
-      end
-      return if incompatible.empty?
-
-      raise ArgumentError,
-        "Codex worker policy cannot coexist with legacy sandbox_mode in #{incompatible.join(', ')}"
     end
 
     # The shell remains the tracked process while the CLI runs. It records the

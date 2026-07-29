@@ -53,7 +53,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
       "Edit(/#{File.join(root, 'app/services/example.rb').delete_prefix('/')})"
   end
 
-  it "gives Codex exact write grants without bypassing its sandbox" do
+  it "runs normal Codex workers without the host sandbox" do
     root = Dir.mktmpdir("worker-policy")
     policy = Orchestrator::WorkerExecutionPolicy.new(
       root_dir: root, mode: "infrastructure", write_scope: "scoped_changes",
@@ -64,9 +64,7 @@ RSpec.describe Orchestrator::WorkerSpawner do
     )
 
     refute_includes args, "--ask-for-approval"
-    assert_includes args, 'default_permissions="worker-123"'
-    assert args.any? { |arg| arg.include?('"config/queue.yml"="write"') }
-    refute_includes args, "--dangerously-bypass-approvals-and-sandbox"
+    assert_includes args, "--dangerously-bypass-approvals-and-sandbox"
   end
 
   it "codex has no dedicated effort flag -- passes it as a -c model_reasoning_effort override instead" do
@@ -103,16 +101,6 @@ RSpec.describe Orchestrator::WorkerSpawner do
     refute_includes prompt, "effort: high"
     refute_includes prompt, "---"
     assert_includes prompt, "bounded review process"
-  end
-
-  it "fails closed when legacy Codex sandbox configuration would disable the exact profile" do
-    root = Dir.mktmpdir("worker-policy")
-    FileUtils.mkdir_p(File.join(root, ".codex"))
-    File.write(File.join(root, ".codex", "config.toml"), "sandbox_mode = \"workspace-write\"\n")
-
-    expect do
-      Orchestrator::WorkerSpawner.send(:validate_codex_permission_profile_compatibility!, root)
-    end.to raise_error(ArgumentError, /cannot coexist with legacy sandbox_mode/)
   end
 
   it "uses the small tier by default and only uses the strong tier after promotion" do
