@@ -59,14 +59,10 @@ class ApplicationController < ActionController::Base
   end
 
   def current_notifications
-    return Notification.none unless current_workspace
-
-    @current_notifications ||= current_workspace.notifications.recent_first.limit(5)
+    @current_notifications ||= Notification.recent_first.limit(5)
   end
 
   def unread_notification_count
-    return 0 unless current_workspace
-
-    @unread_notification_count ||= current_workspace.notifications.unread.count
+    @unread_notification_count ||= Notification.unread.count
   end
 end
