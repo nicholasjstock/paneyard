@@ -6,6 +6,7 @@ class UserQuestion < ApplicationRecord
   DIAGNOSTIC_TEXT_LIMIT = 600
 
   belongs_to :run, foreign_key: :run_id, primary_key: :run_id, optional: true, inverse_of: :user_questions
+  has_one :notification, dependent: :destroy
 
   validates :question_id, presence: true, uniqueness: true
   validates :run_id, :asked_by, :text, presence: true
@@ -18,6 +19,7 @@ class UserQuestion < ApplicationRecord
   before_validation :assign_asked_at, on: :create
 
   after_create_commit :publish_created_event
+  after_create_commit :create_blocking_notification
   after_create_commit :enqueue_github_publication
   after_update_commit :publish_answered_event
 
@@ -104,6 +106,20 @@ class UserQuestion < ApplicationRecord
 
   def enqueue_github_publication
     PublishUserQuestionJob.perform_later(id) if run&.managed_worktree?
+  end
+
+  def create_blocking_notification
+    return unless priority == "blocking" && run&.workspace
+
+    Notification.create!(
+      workspace: run.workspace,
+      user_question: self,
+      kind: "blocking_question",
+      title: "Blocking question needs your attention",
+      body: text,
+      link_url: github_comment_url.presence || run.conversation_url
+    )
+    DeliverTelegramBlockingQuestionNotificationJob.perform_later(id)
   end
 
   def publish_answered_event

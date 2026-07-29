@@ -61,4 +61,27 @@ if Rails.env.development?
                                     "requirements.txt", "Uploaded at launch\n- artifact manifest\n")
   Orchestrator::ArtifactStore.write(launch_artifact_run.target_root, launch_artifact_run.run_id,
                                     "sample-data.json", '{"source":"synthetic demo fixture","records":2}' + "\n")
+
+  # A synthetic blocker keeps the notifications screen visible during local
+  # review without depending on a live planner or worker.
+  notification_run = Run.find_by!(run_id: "demo-long-title")
+  notification_question = UserQuestion.find_or_create_by!(question_id: "demo-blocking-question") do |question|
+    question.run = notification_run
+    question.asked_by = "planner"
+    question.scope = "plan"
+    question.text = "Which deployment target should this run use?"
+    question.priority = "blocking"
+    question.status = "open"
+  end
+
+  if notification_question.notification.nil?
+    Notification.create!(
+      workspace: demo_workspace,
+      user_question: notification_question,
+      kind: "blocking_question",
+      title: "Blocking question needs your attention",
+      body: notification_question.text,
+      link_url: notification_run.conversation_url
+    )
+  end
 end

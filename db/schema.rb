@@ -94,6 +94,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_29_120000) do
     t.index ["worker_id", "status"], name: "index_guarded_command_executions_on_worker_id_and_status"
   end
 
+  create_table "notifications", force: :cascade do |t|
+    t.text "body", null: false
+    t.datetime "created_at", null: false
+    t.string "kind", null: false
+    t.string "link_url"
+    t.datetime "read_at"
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_question_id", null: false
+    t.integer "workspace_id", null: false
+    t.index ["user_question_id"], name: "index_notifications_on_user_question_id", unique: true
+    t.index ["workspace_id", "read_at"], name: "index_notifications_on_workspace_id_and_read_at"
+    t.index ["workspace_id"], name: "index_notifications_on_workspace_id"
+  end
+
   create_table "orchestrator_ticks", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.json "following_steps", default: [], null: false
@@ -512,6 +527,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_29_120000) do
 
   add_foreign_key "acceptance_criteria", "acceptance_criteria", column: "parent_id"
   add_foreign_key "acceptance_criterion_steps", "acceptance_criteria"
+  add_foreign_key "notifications", "user_questions"
+  add_foreign_key "notifications", "workspaces"
   add_foreign_key "planner_decision_attempts", "planner_decisions"
   add_foreign_key "runs", "runs", column: "parent_run_id"
   add_foreign_key "runs", "workspaces"

@@ -90,6 +90,18 @@ body {
   min-height: 44px;
 }
 
+.notification-dropdown { position: relative; }
+.notification-dropdown summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 0.35rem; color: var(--muted); }
+.notification-dropdown summary:hover { color: var(--text); }
+.notification-badge { min-width: 1.25rem; padding: 0.05rem 0.35rem; border-radius: 999px; background: var(--danger); color: white; text-align: center; font-size: 0.7rem; }
+.notification-menu { position: absolute; z-index: 5; right: 0; top: 100%; width: min(22rem, 90vw); padding: 0.65rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.35); }
+.notification-item { padding: 0.55rem; border-bottom: 1px solid var(--border); }
+.notification-item.unread { border-left: 3px solid var(--accent); }
+.notification-item a, .notification-all { color: var(--text); font-weight: 600; }
+.notification-item p { margin: 0.25rem 0 0.5rem; color: var(--muted); font-size: 0.8rem; }
+.notification-all { display: block; padding: 0.65rem 0.55rem 0.25rem; font-size: 0.85rem; }
+.notification-card.unread { border-color: var(--accent); }
+
 @media (min-width: 768px) {
   .topbar {
     flex-direction: row;

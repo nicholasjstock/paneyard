@@ -56,6 +56,9 @@ Rails.application.routes.draw do
     end
 
     resources :questions, only: %i[index]
+    resources :notifications, only: %i[index] do
+      member { patch :mark_read }
+    end
 
     resources :events, only: %i[index]
   end
