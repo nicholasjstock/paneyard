@@ -1,21 +1,6 @@
 require "rails_helper"
 
-RSpec.describe "workspace workers", type: :system do
-  it "lists only workers for the selected workspace" do
-    workspace, run = create_workspace_with_run("alpha")
-    create_worker(run:, nickname: "planner-alpha", pid: 111_111)
-
-    other_workspace, other_run = create_workspace_with_run("beta")
-    create_worker(run: other_run, nickname: "planner-beta", pid: 222_222)
-
-    visit workspace_workers_path(workspace)
-
-    within("#workers") do
-      expect(page).to have_text("planner-alpha")
-      expect(page).to have_no_text("planner-beta")
-    end
-  end
-
+RSpec.describe "worker detail", type: :system do
   it "shows a worker detail page with the latest message and log content" do
     workspace, run = create_workspace_with_run("alpha")
     worker = create_worker(run:, nickname: "planner-alpha", pid: 111_111)
@@ -28,45 +13,6 @@ RSpec.describe "workspace workers", type: :system do
     expect(page).to have_text("latest update")
     expect(page).to have_text("second line")
     expect(page).to have_link("Back to run", href: workspace_run_path(workspace, run))
-  end
-
-  it "stops a running worker from the workers index" do
-    workspace, run = create_workspace_with_run("alpha")
-    worker = create_worker(run:, nickname: "planner-alpha", pid: 999_999)
-
-    visit workspace_workers_path(workspace)
-    click_button "Stop worker"
-
-    expect(page).to have_text("Worker stopped.")
-    expect(worker.reload.status).to eq("stopped")
-    expect(worker.stopped_at).to be_present
-  end
-
-  it "shows the empty state when a workspace has no workers" do
-    workspace, = create_workspace_with_run("alpha")
-
-    visit workspace_workers_path(workspace)
-
-    expect(page).to have_text("No workers recorded.")
-  end
-
-  it "updates the worker index live when a worker is created", :js do
-    workspace, run = create_workspace_with_run("alpha")
-
-    visit workspace_workers_path(workspace)
-    expect(page).to have_text("No workers recorded.")
-
-    creator = Thread.new do
-      ActiveRecord::Base.connection_pool.with_connection do
-        sleep 0.5
-        create_worker(run: run, nickname: "planner-live", pid: 333_333)
-      end
-    end
-
-    expect(page).to have_text("planner-live")
-    expect(page).to have_text(run.run_id)
-
-    creator.join
   end
 
   def create_workspace_with_run(prefix)

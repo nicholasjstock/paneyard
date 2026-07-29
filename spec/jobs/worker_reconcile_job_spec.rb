@@ -1,6 +1,33 @@
 require "rails_helper"
 
 RSpec.describe WorkerReconcileJob do
+  it "retries a reply_received worker once when it exits before submitting its decision" do
+    workspace = Workspace.create!(name: "reconcile-reply-retry-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(workspace:, run_id: "reconcile-reply-retry-#{SecureRandom.hex(4)}", task: "Classify a reply", target_root: workspace.root_path, launcher_variant: "codex", status: "running")
+    question = run.user_questions.create!(asked_by: "orchestrator", scope: "pull_request_review", priority: "blocking", text: "Review this PR")
+    review, = ReplyReceivedReview.issue!(run:, user_question: question, comment: { "id" => 1, "body" => "Please revise", "user" => { "login" => "operator" } })
+    log_path = File.join(workspace.root_path, "reply.log")
+    File.write(log_path, "The required MCP tools are unavailable.\n")
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "reply_received", nickname: "reply-retry",
+      reason: "Classify reply", scope: review.review_id, status: "running", pid: 999_999_999,
+      prompt_path: log_path, log_path:, last_message_path: log_path, env_path: log_path, command: "codex"
+    )
+    run.spawn_requests.create!(
+      asked_by: "github_pr_comment", requested_role: "reply_received", priority: "blocking", scope: review.review_id,
+      lineage_key: review.review_id, text: "Classify reply", status: "fulfilled", fulfilled_worker_id: worker.worker_id
+    )
+
+    described_class.perform_now
+
+    retry_request = run.spawn_requests.find_by!(asked_by: "reply_received_recovery")
+    expect(retry_request).to have_attributes(requested_role: "reply_received", scope: review.review_id, lineage_key: review.review_id, status: "open")
+    expect(review.reload.status).to eq("queued")
+    expect(run.reload.phase).to eq("planning")
+  ensure
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "classifies a Claude session-limit exit from the worker log" do
     workspace = Workspace.create!(name: "reconcile-test-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(

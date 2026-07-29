@@ -11,6 +11,21 @@ Rails.application.configure do
   config.enable_reloading = local_hot_reload
   config.eager_load = !local_hot_reload
 
+  # This process is the operator's local, continuously running instance --
+  # not a deployed production server. In its hot-reload mode, serve Propshaft
+  # assets directly from app/assets as well. A stale public/assets manifest
+  # otherwise wins asset_path resolution and leaves newly merged CSS/JS
+  # invisible until someone remembers to precompile it.
+  #
+  # The temporary, deliberately absent manifest selects Propshaft's dynamic
+  # resolver; assets:precompile continues to use public/assets/.manifest.json
+  # for normal production deployments.
+  if local_hot_reload
+    config.assets.server = true
+    config.assets.sweep_cache = true
+    config.assets.manifest_path = Rails.root.join("tmp/propshaft-live-manifest.json")
+  end
+
   # Full error reports are disabled.
   config.consider_all_requests_local = false
 

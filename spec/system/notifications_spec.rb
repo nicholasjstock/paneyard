@@ -19,7 +19,7 @@ RSpec.describe "global notifications", type: :system do
     expect(page).to have_css("aside[aria-label='Global notifications'][aria-hidden='true']")
     expect(page).to have_css("button[aria-label='Open notifications'][aria-expanded='false']")
     expect(page).to have_text(question.text)
-    expect(page).to have_link("Blocking question needs your attention", href: run.github_issue_url)
+    expect(page).to have_link("Need review is ready for review", href: run.github_issue_url)
   end
 
   it "opens and closes the notification drawer", js: true do

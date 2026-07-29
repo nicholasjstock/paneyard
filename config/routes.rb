@@ -43,7 +43,7 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :workers, only: %i[index show] do
+    resources :workers, only: %i[show] do
       member do
         post :stop
       end

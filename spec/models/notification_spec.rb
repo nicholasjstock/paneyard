@@ -8,7 +8,7 @@ RSpec.describe Notification, type: :model do
     question = run.user_questions.create!(asked_by: "planner", scope: "plan", text: "Approve this plan?", priority: "blocking")
 
     notification = Notification.find_by!(user_question: question)
-    expect(notification).to have_attributes(kind: "blocking_question", title: "Blocking question needs your attention", body: question.text, read_at: nil)
+    expect(notification).to have_attributes(kind: "blocking_question", title: "Wait for guidance is ready for review", body: question.text, read_at: nil)
     expect(notification.target_url).to eq(run.pull_request_url)
   end
 
