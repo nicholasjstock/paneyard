@@ -33,20 +33,22 @@ RSpec.describe Orchestrator::WorkerActivity do
     )
   end
 
-  it "prefers the latest agent message and reports its activity time" do
+  it "shows the full worker log and reports its activity time" do
     worker = create_worker
-    File.write(worker.log_path, "older log line\n")
+    File.write(worker.log_path, "first log line\nsecond log line\n")
     File.write(worker.last_message_path, "Investigating the failing request.\n")
 
     activity = described_class.for_workers([ worker ]).first
 
     expect(activity[:display_status]).to eq("running")
-    expect(activity[:output_source]).to eq("Latest agent message")
-    expect(activity[:output_preview]).to eq("Investigating the failing request.\n")
+    expect(activity[:output_source]).to eq("Full worker log")
+    expect(activity[:output_preview]).to include("first log line")
+    expect(activity[:output_preview]).to include("second log line")
+    expect(activity[:output_preview]).to include("Investigating the failing request.")
     expect(activity[:last_activity_at]).to be_within(2.seconds).of(File.mtime(worker.last_message_path))
   end
 
-  it "uses a bounded log tail and flags an unexpected stop" do
+  it "keeps the complete log and flags an unexpected stop" do
     worker = create_worker(status: "stopped", stop_reason: "Process no longer running after reconciliation.")
     File.write(worker.log_path, (1..10).map { |number| "line #{number}" }.join("\n"))
 
@@ -54,9 +56,9 @@ RSpec.describe Orchestrator::WorkerActivity do
 
     expect(activity[:display_status]).to eq("attention")
     expect(activity[:status_label]).to eq("needs attention")
-    expect(activity[:output_source]).to eq("Latest log output")
+    expect(activity[:output_source]).to eq("Full worker log")
     expect(activity[:output_preview]).to include("line 10")
-    expect(activity[:output_preview]).not_to include("line 1\n")
+    expect(activity[:output_preview]).to include("line 1")
   end
 
   it "surfaces the fulfilling spawn request's instructions as the assignment" do
@@ -82,7 +84,7 @@ RSpec.describe Orchestrator::WorkerActivity do
     expect(activity[:assignment_text]).to be_nil
   end
 
-  it "sorts workers by descending activity time regardless of status" do
+  it "prioritizes active workers, then attention-needed workers, before stopped history" do
     running = create_worker
     attention = create_worker(status: "stopped", stop_reason: "Process no longer running.")
     stopped = create_worker(status: "stopped", stop_reason: "Manually stopped from ops hub")
@@ -93,7 +95,7 @@ RSpec.describe Orchestrator::WorkerActivity do
 
     activities = described_class.for_workers([ stopped, attention, running ])
 
-    expect(activities.map { |activity| activity[:worker] }).to eq([ attention, stopped, running ])
+    expect(activities.map { |activity| activity[:worker] }).to eq([ running, attention, stopped ])
   end
 
   it "normalizes planner decisions into the worker activity entry shape" do

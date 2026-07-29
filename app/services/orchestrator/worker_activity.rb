@@ -2,14 +2,10 @@ module Orchestrator
   # View-facing worker state. The worker registry remains the source of truth;
   # this only adds bounded, local filesystem observations for the ops UI.
   class WorkerActivity
-    PREVIEW_MAX_CHARS = 600
-    RAW_TAIL_LINES = 120
-    DISPLAY_TAIL_LINES = 6
-
     def self.for_workers(workers)
       assignments = SpawnRequest.where(fulfilled_worker_id: workers.map(&:worker_id)).index_by(&:fulfilled_worker_id)
       workers.map { |worker| new(worker, assignment: assignments[worker.worker_id]).as_json.merge(entry_type: :worker) }
-        .sort_by { |activity| activity_sort_key(activity) }
+        .sort_by { |activity| [ activity[:sort_rank], activity_sort_key(activity) ] }
     end
 
     def self.for_planner_entries(planner_activities, decisions)
@@ -93,16 +89,12 @@ module Orchestrator
 
     def output_preview
       @output_preview ||= begin
-        message = read_file(@worker.last_message_path)
-        if message.present?
-          @output_source = "Latest agent message"
-          truncate(message)
+        log = Orchestrator::LogReader.read_full_content(@worker.log_path)[:content]
+        if log.present?
+          @output_source = "Full worker log"
+          [ Orchestrator::LogReader.format_for_display(log), read_file(@worker.last_message_path) ].compact_blank.join("\n")
         else
-          tail = Orchestrator::LogReader.read_tail_lines(@worker.log_path, RAW_TAIL_LINES)
-          if tail.present?
-            @output_source = "Latest log output"
-            truncate(display_tail(Orchestrator::LogReader.format_for_display(tail)))
-          end
+          read_last_message
         end
       end
     end
@@ -121,18 +113,18 @@ module Orchestrator
       nil
     end
 
+    def read_last_message
+      message = read_file(@worker.last_message_path)
+      return unless message.present?
+
+      @output_source = "Latest agent message (worker log unavailable)"
+      message
+    end
+
     def file_mtime(path)
       File.mtime(path) if File.file?(path)
     rescue Errno::ENOENT, Errno::EACCES
       nil
-    end
-
-    def truncate(text)
-      text.length > PREVIEW_MAX_CHARS ? "#{text.first(PREVIEW_MAX_CHARS).rstrip}\n..." : text
-    end
-
-    def display_tail(text)
-      text.lines.last(DISPLAY_TAIL_LINES).join
     end
   end
 end

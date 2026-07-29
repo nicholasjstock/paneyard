@@ -8,6 +8,7 @@ RSpec.describe Orchestrator::CapacityFailure do
 
   it "detects Codex's capacity wording" do
     expect(described_class.detected?("ERROR: You've hit your usage limit. ... try again at Jul 28th, 2026 7:03 PM.")).to be true
+    expect(described_class.detected?("Selected model is at capacity. Please try a different model.")).to be true
   end
 
   it "does not detect an unrelated failure" do
@@ -25,6 +26,9 @@ RSpec.describe Orchestrator::CapacityFailure do
       )
       expect(described_class.stop_reason_message("hit your usage limit")).to eq(
         "Codex usage limit reached; worker exited before completing its handoff."
+      )
+      expect(described_class.stop_reason_message("Selected model is at capacity.")).to eq(
+        "Codex model capacity unavailable; worker exited before completing its handoff."
       )
       expect(described_class.stop_reason_message("429 Too Many Requests")).to eq(
         "Claude rate limit reached; worker exited before completing its handoff."
@@ -50,7 +54,7 @@ RSpec.describe Orchestrator::CapacityFailure do
     expect(reset_at.min).to eq(3)
   end
 
-  it "falls back to a 30-minute default when no reset time is present" do
-    expect(described_class.reset_at("hit your usage limit")).to be_within(1.second).of(30.minutes.from_now)
+  it "falls back to a 10-minute default when no reset time is present" do
+    expect(described_class.reset_at("hit your usage limit")).to be_within(1.second).of(10.minutes.from_now)
   end
 end

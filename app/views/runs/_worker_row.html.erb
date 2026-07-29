@@ -63,8 +63,10 @@
       </p>
     <% end %>
     <% if activity[:output_preview].present? %>
-      <p class="muted"><%= activity[:output_source] %></p>
-      <pre class="log compact"><%= activity[:output_preview] %></pre>
+      <section data-controller="live-log">
+        <p class="muted"><%= activity[:output_source] %>. Scroll up to pause tail-follow.</p>
+        <pre class="log live-log" data-live-log-target="output"><%= activity[:output_preview] %></pre>
+      </section>
     <% else %>
       <p class="empty">No agent output captured yet.</p>
     <% end %>

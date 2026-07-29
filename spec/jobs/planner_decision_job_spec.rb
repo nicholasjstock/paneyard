@@ -91,10 +91,11 @@ RSpec.describe PlannerDecisionJob do
 
   it "reopens the request and blocks the run for capacity on a Codex usage-limit failure instead of hard-failing the run" do
     run, request, record = build_decision
+    retry_at = 2.hours.from_now.change(sec: 0)
     error = Orchestrator::PlannerDecisionRunner::Error.new(
       "Planner model failed with exit 1: ERROR: You've hit your usage limit. Upgrade to Pro " \
       "(https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more " \
-      "credits or try again at Jul 28th, 2026 7:03 PM."
+      "credits or try again at #{retry_at.strftime('%b %-d, %Y %-I:%M %p')}."
     )
 
     with_stubbed_runner(->(**) { raise error }) do
@@ -106,6 +107,24 @@ RSpec.describe PlannerDecisionJob do
     assert_equal "running", run.reload.status
     assert_operator run.capacity_available_at, :>, Time.current
     assert_equal "waiting_on_capacity", run.phase
+  end
+
+  it "pauses and retries when Codex's selected model pool is temporarily at capacity" do
+    run, request, record = build_decision
+    error = Orchestrator::PlannerDecisionRunner::Error.new(
+      "Selected model is at capacity. Please try a different model."
+    )
+
+    with_stubbed_runner(->(**) { raise error }) do
+      assert_raises(Orchestrator::PlannerDecisionRunner::Error) { PlannerDecisionJob.perform_now(record.id) }
+    end
+
+    assert_equal "failed", record.reload.status
+    assert_equal "open", request.reload.status
+    assert_equal "running", run.reload.status
+    assert_operator run.capacity_available_at, :>, Time.current
+    assert_equal "waiting_on_capacity", run.phase
+    assert_includes run.phase_summary, "Planner capacity unavailable"
   end
 
   private

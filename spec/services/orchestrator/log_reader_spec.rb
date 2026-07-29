@@ -75,4 +75,21 @@ RSpec.describe Orchestrator::LogReader do
   ensure
     file&.close!
   end
+
+  it "renders the complete readable history from Codex item events" do
+    log = [
+      { type: "item.completed", item: { type: "agent_message", text: "I am inspecting the current UI." } },
+      { type: "item.started", item: { type: "mcp_tool_call", tool: "get_run_context" } },
+      { type: "item.completed", item: { type: "mcp_tool_call", tool: "get_run_context" } },
+      { type: "item.started", item: { type: "command_execution", command: "bin/rails test" } },
+      { type: "item.completed", item: { type: "agent_message", text: "The focused test passed." } }
+    ].map(&:to_json).join("\n")
+
+    expect(described_class.format_for_display(log)).to eq(<<~DISPLAY.strip)
+      I am inspecting the current UI.
+      [tool] get_run_context
+      $ bin/rails test
+      The focused test passed.
+    DISPLAY
+  end
 end

@@ -19,6 +19,11 @@ module Orchestrator
     SIGNALS = [
       [ /hit your session limit/i, "Claude session limit reached" ],
       [ /hit your usage limit/i, "Codex usage limit reached" ],
+      # Codex can reject an individual model pool even when the account has
+      # not exhausted its broader usage allowance. This is still transient:
+      # keep the current handoff open and let the run tick retry it, rather
+      # than treating a healthy plan as a terminal planner failure.
+      [ /selected model is at capacity/i, "Codex model capacity unavailable" ],
       # \b429\b, not a bare substring: log output is full of UUIDs (session
       # ids, worker ids) and a bare "429" matches any of them that happen to
       # contain that digit sequence (e.g. a session id containing "...4295...")
@@ -41,7 +46,7 @@ module Orchestrator
     end
 
     def reset_at(output)
-      claude_reset_at(output) || codex_reset_at(output) || 30.minutes.from_now
+      claude_reset_at(output) || codex_reset_at(output) || 10.minutes.from_now
     end
 
     # Claude's wording states only a wall-clock time and zone ("resets 5pm

@@ -172,7 +172,7 @@ module Orchestrator
 
     def format_json_event(event, output, text_buffers, tool_calls)
       stream_event = event["event"] if event["type"] == "stream_event"
-      return format_system_event(event, output) unless stream_event
+      return format_non_claude_event(event, output) unless stream_event
 
       index = stream_event["index"]
       case stream_event["type"]
@@ -188,6 +188,26 @@ module Orchestrator
         output << text_buffers.delete(index).to_s.strip if text_buffers[index].present?
         tool_call = tool_calls.delete(index)
         output << format_tool_call(tool_call) if tool_call
+      end
+    end
+
+    # Codex emits structured item lifecycle events rather than Claude's
+    # stream_event blocks. Keep its complete readable history on the run page
+    # by rendering agent messages and the start of every tool/command once;
+    # the matching completed event is only a status transition and would
+    # duplicate the line.
+    def format_non_claude_event(event, output)
+      item = event["item"]
+      return format_system_event(event, output) unless item.is_a?(Hash)
+
+      case [ event["type"], item["type"] ]
+      when [ "item.completed", "agent_message" ]
+        output << item["text"].to_s.strip if item["text"].present?
+      when [ "item.started", "command_execution" ]
+        output << "$ #{item["command"]}" if item["command"].present?
+      when [ "item.started", "mcp_tool_call" ], [ "item.started", "function_call" ]
+        tool = item["tool"].presence || item["name"].presence || item["server"].presence || item["type"]
+        output << "[tool] #{tool}"
       end
     end
 
