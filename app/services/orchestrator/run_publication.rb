@@ -194,7 +194,8 @@ module Orchestrator
         _output, error, status = Open3.capture3(env, "gh", "pr", "ready", url, chdir: root.to_s)
         raise Error, "gh pr ready failed: #{error}" unless status.success?
       else
-        post_comment!(root, url, "## Run finished again\n\n#{body}")
+        comment = post_comment!(root, url, "## Run finished again\n\n#{body}")
+        RunOutboundComment.record!(run:, github_comment_id: comment.fetch("id"), kind: "publication_update")
       end
     end
     private_class_method :update_existing_pull_request!
@@ -228,6 +229,7 @@ module Orchestrator
         url = run.pull_request_url.presence || ensure_conversation_issue!(run)
         root = validated_root!(run)
         comment = post_comment!(root, url, build_question_body(question))
+        RunOutboundComment.record!(run:, github_comment_id: comment.fetch("id"), kind: "question")
         question.update!(github_comment_id: comment.fetch("id").to_s, github_comment_url: comment["html_url"], github_published_at: Time.current, github_publication_error: nil)
         :published
       end

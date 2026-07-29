@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_29_000100) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_29_000200) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -210,6 +210,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_29_000100) do
     t.datetime "updated_at", null: false
     t.index ["run_id", "entry_key"], name: "index_run_context_entries_on_run_id_and_entry_key", unique: true
     t.index ["run_id", "kind"], name: "index_run_context_entries_on_run_id_and_kind"
+  end
+
+  create_table "run_outbound_comments", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "github_comment_id", null: false
+    t.string "kind", null: false
+    t.string "run_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["run_id", "github_comment_id"], name: "index_run_outbound_comments_on_run_id_and_github_comment_id", unique: true
   end
 
   create_table "run_review_assets", force: :cascade do |t|

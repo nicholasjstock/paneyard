@@ -54,9 +54,18 @@ module Orchestrator
         raise Error, "Cannot resume a merged run" if run.publication_status == "merged"
 
         comment_id = comment.fetch("id").to_s
+        if RunOutboundComment.exists?(run_id: run.run_id, github_comment_id: comment_id)
+          run.update!(last_pull_request_comment_id: comment_id)
+          Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=outbound_comment_skipped")
+          return
+        end
+
+        # Questions posted before the outbound-comment ledger existed have no
+        # corresponding row. Retain this narrow compatibility guard until
+        # those old runs have naturally aged out.
         if UserQuestion.exists?(run_id: run.run_id, github_comment_id: comment_id)
           run.update!(last_pull_request_comment_id: comment_id)
-          Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=system_question_skipped")
+          Rails.logger.info("PullRequestResume.resume run=#{run.run_id} comment=#{comment_id} outcome=legacy_system_question_skipped")
           return
         end
 
@@ -188,7 +197,9 @@ module Orchestrator
       output, error, status = Open3.capture3(env, "gh", "api", "--method", "POST", "repos/#{repository}/issues/#{number}/comments", "-f", "body=#{body}")
       raise Error, "gh api comment failed: #{error.presence || output}" unless status.success?
 
-      JSON.parse(output).fetch("id").to_s
+      comment_id = JSON.parse(output).fetch("id").to_s
+      RunOutboundComment.record!(run:, github_comment_id: comment_id, kind: "reply")
+      comment_id
     rescue JSON::ParserError, KeyError => error
       raise Error, "GitHub returned an invalid posted comment: #{error.message}"
     end

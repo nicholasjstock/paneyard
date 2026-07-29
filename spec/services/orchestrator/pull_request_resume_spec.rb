@@ -236,6 +236,23 @@ RSpec.describe Orchestrator::PullRequestResume do
     expect(run.reload.last_pull_request_comment_id).to eq("125")
   end
 
+  it "ignores any ledgered outbound comment even when it uses the operator's personal GitHub account" do
+    workspace = Workspace.create!(name: "pr-ledgered-comment-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = workspace.runs.create!(
+      run_id: "pr-ledgered-comment-#{SecureRandom.hex(4)}", task: "Ignore outbound comment", target_root: workspace.root_path,
+      launcher_variant: "codex", status: "completed", worktree_name: "ledgered-a1b2", branch_name: "workflow/ledgered-a1b2",
+      pull_request_url: "https://github.com/example/repo/pull/42", publication_status: "awaiting_approval"
+    )
+    question = UserQuestion.create!(run_id: run.run_id, asked_by: "orchestrator", scope: "pull_request_review", priority: "blocking", text: "Ready for review.")
+    RunOutboundComment.record!(run:, github_comment_id: "126", kind: "publication_update")
+
+    expect { described_class.resume!(run, { "id" => 126, "body" => "## Run finished again", "user" => { "login" => "operator" } }) }
+      .not_to change(SpawnRequest, :count)
+
+    expect(question.reload.status).to eq("open")
+    expect(run.reload.last_pull_request_comment_id).to eq("126")
+  end
+
   private
 
   # UserQuestion enforces at most one open blocking question per run (see
