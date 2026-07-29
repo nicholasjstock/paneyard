@@ -1,4 +1,4 @@
-class AddGithubQuestionPublication < ActiveRecord::Migration[8.1]
+class AddGitHubQuestionPublication < ActiveRecord::Migration[8.1]
   def change
     add_column :runs, :conversation_pr_status, :string
     add_column :user_questions, :github_comment_id, :string

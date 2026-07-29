@@ -68,7 +68,6 @@ module Orchestrator
           run.update!(
             publication_status: "awaiting_approval", pull_request_url: pull_request_url,
             conversation_pr_status: "ready", publication_completed_at: Time.current, publication_error: nil,
-            status: "completed", stopped_at: run.stopped_at || Time.current
           )
           link_conversation_issue!(run) if run.github_issue_url.present?
           open_review_question!(run)
@@ -89,7 +88,11 @@ module Orchestrator
     end
 
     def finalize_phase(outcome)
-      outcome.to_s == "failed" ? "failed" : "completed"
+      case outcome.to_s
+      when "published" then "awaiting_user_feedback"
+      when "failed" then "failed"
+      else "completed"
+      end
     end
     private_class_method :finalize_phase
 
@@ -351,8 +354,15 @@ module Orchestrator
     end
 
     def cleanup_merged_run!(run)
+      merged = false
       run.with_lock do
-        return :merged if run.publication_status == "merged"
+        if run.publication_status == "merged"
+          run.update!(status: "completed", stopped_at: run.stopped_at || Time.current)
+          merged = true
+          next
+        end
+
+        next unless merged?(run)
 
         root = validated_root!(run)
         source_root = Pathname(run.source_root)
@@ -360,10 +370,12 @@ module Orchestrator
         delete_review_release!(root, run) if run.review_assets.any?
         git!(source_root, "worktree", "remove", "--force", root.to_s)
         git!(source_root, "worktree", "prune")
-        run.update!(publication_status: "merged", publication_error: nil)
+        run.update!(publication_status: "merged", publication_error: nil, status: "completed", stopped_at: run.stopped_at || Time.current)
         SourceCheckoutSync.after_merge!(run)
-        :merged
+        merged = true
       end
+      run.publish_phase!(phase: "completed", owner: "orchestrator", summary: "Pull request merged; run completed.") if merged
+      merged ? :merged : :awaiting_confirmation
     rescue StandardError => error
       record_failure!(run, error)
       raise error if error.is_a?(Error)

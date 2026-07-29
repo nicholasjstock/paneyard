@@ -19,6 +19,11 @@ module Orchestrator
     end
     private_class_method :activity_sort_key
 
+    def self.worker_sort_key(activity)
+      [ activity[:sort_rank] || 2, activity_sort_key(activity) ]
+    end
+    private_class_method :worker_sort_key
+
     def self.planner_decision_entry(decision)
       {
         entry_type: :planner_decision,
