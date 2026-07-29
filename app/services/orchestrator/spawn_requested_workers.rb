@@ -280,20 +280,25 @@ module Orchestrator
     end
 
     def build_inherited_artifacts_section(run:, request:)
-      inherited = Array(request.inherited_artifacts)
+      inherited = (Array(request.inherited_artifacts) + run.available_launch_artifacts.map { |artifact| artifact["name"] }).compact.uniq
       return nil if inherited.empty?
 
-      artifacts = ArtifactStore.collect(run.target_root, run.run_id, inherited)[:artifacts]
+      artifacts = inherited.filter_map do |name|
+        source = run.artifact_source_run(name)
+        ArtifactStore.collect(source.target_root, source.run_id, [ name ])[:artifacts].first&.merge(source_run_id: source.run_id)
+      end
       existing_artifacts = artifacts.select { |a| a[:exists] }
       return nil if existing_artifacts.empty?
 
       artifact_lines = existing_artifacts.map do |artifact|
         size_kb = (artifact[:size_bytes].to_f / 1024).round(1)
-        "- `#{artifact[:name]}` (#{size_kb} KB, #{artifact[:updated_at]})"
+        origin = run.available_launch_artifacts.find { |entry| (entry["name"] || entry[:name]) == artifact[:name] }
+        origin_path = origin && (origin["source_path"] || origin[:source_path]) || "run artifact store"
+        "- `#{artifact[:name]}` (#{size_kb} KB, source run `#{artifact[:source_run_id]}`, originating location `#{origin_path}`)"
       end
 
-      artifact_section = "## Inherited Artifacts\n\n"
-      artifact_section += "The following artifacts from prior workers are available for your review:\n\n"
+      artifact_section = "## Inherited Artifacts — Artifact Manifest\n\n"
+      artifact_section += "The following read-only artifacts are available. Use the source run id when reading across worktrees:\n\n"
       artifact_section += artifact_lines.join("\n") + "\n\n"
       artifact_section += "Use `read_workflow_artifact` to read these files. All inherited artifacts are read-only."
 

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_28_203714) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_29_100000) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -232,9 +232,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_28_203714) do
     t.string "github_issue_status"
     t.string "github_issue_url"
     t.string "last_pull_request_comment_id"
+    t.json "launch_artifacts", default: [], null: false
     t.string "launched_by"
     t.string "launcher_variant", default: "claude", null: false
     t.string "log_path"
+    t.integer "parent_run_id"
     t.string "phase"
     t.string "phase_owner"
     t.text "phase_summary"
@@ -258,6 +260,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_28_203714) do
     t.index ["active_branch_key"], name: "index_runs_on_active_branch_key"
     t.index ["capacity_available_at"], name: "index_runs_on_capacity_available_at"
     t.index ["conversation_pr_status"], name: "index_runs_on_conversation_pr_status"
+    t.index ["parent_run_id"], name: "index_runs_on_parent_run_id"
     t.index ["publication_status"], name: "index_runs_on_publication_status"
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
@@ -498,6 +501,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_28_203714) do
   add_foreign_key "acceptance_criteria", "acceptance_criteria", column: "parent_id"
   add_foreign_key "acceptance_criterion_steps", "acceptance_criteria"
   add_foreign_key "planner_decision_attempts", "planner_decisions"
+  add_foreign_key "runs", "runs", column: "parent_run_id"
   add_foreign_key "runs", "workspaces"
   add_foreign_key "telegram_conversations", "workspaces"
   add_foreign_key "terminal_sessions", "workspaces"
