@@ -9,7 +9,7 @@ RSpec.describe DeliverTelegramBlockingQuestionNotificationJob do
     allow(Telegram::Configuration).to receive(:polling_configured?).and_return(true)
   end
 
-  it "sends the blocking question and its pull request link to the configured administrator" do
+  it "identifies the pull request title as ready for review and includes its link" do
     workspace = Workspace.create!(name: "Telegram question #{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(run_id: SecureRandom.uuid, task: "Wait for guidance", workspace:, target_root: workspace.root_path,
       launcher_variant: "codex", status: "running", pull_request_url: "https://github.com/example/app/pull/12")
@@ -21,13 +21,13 @@ RSpec.describe DeliverTelegramBlockingQuestionNotificationJob do
 
     expect(client).to have_received(:send_message).with(
       chat_id: "123",
-      text: "Blocking question needs your attention:\n\nApprove this plan?\n\nGitHub: https://github.com/example/app/pull/12#issuecomment-345"
+      text: "Wait for guidance is ready for review:\n\nApprove this plan?\n\nGitHub: https://github.com/example/app/pull/12#issuecomment-345"
     )
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && Dir.exist?(workspace.root_path)
   end
 
-  it "uses the run issue link when no pull request exists" do
+  it "identifies the issue title as ready for review when no pull request exists" do
     workspace = Workspace.create!(name: "Telegram issue #{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(run_id: SecureRandom.uuid, task: "Wait for guidance", workspace:, target_root: workspace.root_path,
       launcher_variant: "codex", status: "running", github_issue_url: "https://github.com/example/app/issues/7")
@@ -38,13 +38,13 @@ RSpec.describe DeliverTelegramBlockingQuestionNotificationJob do
 
     expect(client).to have_received(:send_message).with(
       chat_id: "123",
-      text: "Blocking question needs your attention:\n\nChoose a setting?\n\nGitHub: https://github.com/example/app/issues/7"
+      text: "Wait for guidance is ready for review:\n\nChoose a setting?\n\nGitHub: https://github.com/example/app/issues/7"
     )
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && Dir.exist?(workspace.root_path)
   end
 
-  it "omits the GitHub link when no conversation URL is available" do
+  it "keeps the review message concise when no conversation URL is available" do
     workspace = Workspace.create!(name: "Telegram no link #{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = Run.create!(run_id: SecureRandom.uuid, task: "Wait for guidance", workspace:, target_root: workspace.root_path,
       launcher_variant: "codex", status: "running")
@@ -55,8 +55,9 @@ RSpec.describe DeliverTelegramBlockingQuestionNotificationJob do
 
     expect(client).to have_received(:send_message).with(
       chat_id: "123",
-      text: "Blocking question needs your attention:\n\nProvide a decision?"
+      text: "Wait for guidance is ready for review:\n\nProvide a decision?"
     )
+    expect(client).not_to have_received(:send_message).with(hash_including(text: /blocking questions?/i))
     expect(client).not_to have_received(:send_message).with(hash_including(text: /GitHub:|https?:\/\//))
   ensure
     FileUtils.remove_entry(workspace.root_path) if workspace && Dir.exist?(workspace.root_path)

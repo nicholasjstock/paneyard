@@ -22,9 +22,13 @@ class DeliverTelegramBlockingQuestionNotificationJob < ApplicationJob
   def message_text(question)
     link = question.github_comment_url.presence || question.run&.conversation_url
     [
-      "Blocking question needs your attention:",
+      "#{review_title(question)} is ready for review:",
       question.text,
       ("GitHub: #{link}" if link.present?)
     ].compact.join("\n\n")
+  end
+
+  def review_title(question)
+    question.run&.task.to_s.squish.truncate(120)
   end
 end
