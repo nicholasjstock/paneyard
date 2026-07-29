@@ -115,7 +115,7 @@ class UserQuestion < ApplicationRecord
       workspace: run.workspace,
       user_question: self,
       kind: "blocking_question",
-      title: "Blocking question needs your attention",
+      title: Notification.review_title_for(run),
       body: text,
       link_url: github_comment_url.presence || run.conversation_url
     )

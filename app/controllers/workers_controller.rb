@@ -5,10 +5,6 @@ class WorkersController < ApplicationController
   # endpoint's defaults.
   DEFAULT_TAIL_LINES = 120
 
-  def index
-    @workers = workspace_workers.order(started_at: :desc).map { |worker| JSON.parse(worker.to_json) }
-  end
-
   def show
     @worker_id = params[:id]
     worker = workspace_workers.find_by(worker_id: @worker_id)
@@ -31,9 +27,9 @@ class WorkersController < ApplicationController
       end
       worker.update!(status: "stopped", stopped_at: Time.current, stop_reason: stop_reason)
     end
-    redirect_back fallback_location: workspace_workers_path(current_workspace), notice: "Worker stopped."
+    redirect_back fallback_location: workspace_runs_path(current_workspace), notice: "Worker stopped."
   rescue ActiveRecord::RecordNotFound
-    redirect_back fallback_location: workspace_workers_path(current_workspace), alert: "Failed to stop worker: unknown worker #{params[:id]}"
+    redirect_back fallback_location: workspace_runs_path(current_workspace), alert: "Failed to stop worker: unknown worker #{params[:id]}"
   end
 
   private

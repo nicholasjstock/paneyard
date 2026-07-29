@@ -81,7 +81,7 @@ if Rails.env.development?
       workspace: demo_workspace,
       user_question: notification_question,
       kind: "blocking_question",
-      title: "Blocking question needs your attention",
+      title: Notification.review_title_for(notification_run),
       body: notification_question.text,
       link_url: notification_question.github_comment_url
     )
@@ -112,7 +112,7 @@ if Rails.env.development?
       workspace: second_demo_workspace,
       user_question: second_notification_question,
       kind: "blocking_question",
-      title: "Inventory review needs your attention",
+      title: Notification.review_title_for(second_notification_run),
       body: second_notification_question.text,
       link_url: second_notification_run.conversation_url
     )

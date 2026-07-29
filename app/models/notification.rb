@@ -7,6 +7,10 @@ class Notification < ApplicationRecord
   scope :unread, -> { where(read_at: nil) }
   scope :recent_first, -> { order(created_at: :desc) }
 
+  def self.review_title_for(run)
+    "#{run&.task.to_s.squish.truncate(120).presence || "This run"} is ready for review"
+  end
+
   def unread?
     read_at.nil?
   end

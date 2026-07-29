@@ -20,18 +20,7 @@ RSpec.describe Orchestrator::GitWorktree do
     FileUtils.remove_entry(root.parent) if root&.parent&.exist?
   end
 
-  it "rejects a dirty source checkout" do
-    root = Pathname(Dir.mktmpdir).join("main")
-    FileUtils.mkdir_p(root)
-    system("git", "-C", root.to_s, "init", "--quiet", exception: true)
-    File.write(root.join("dirty.txt"), "dirty")
-
-    expect { described_class.validate_source!(root) }.to raise_error(Orchestrator::GitWorktree::Error, /uncommitted changes/)
-  ensure
-    FileUtils.remove_entry(root.parent) if root&.parent&.exist?
-  end
-
-  it "creates the run worktree from local main HEAD, not origin/main" do
+  it "creates the run worktree from local main HEAD while leaving dirty main changes behind" do
     project_root = Pathname(Dir.mktmpdir)
     source_root = project_root.join("main")
     remote_root = project_root.join("origin.git")
@@ -49,6 +38,7 @@ RSpec.describe Orchestrator::GitWorktree do
     command!("git", "-C", source_root.to_s, "add", "local-only.txt")
     command!("git", "-C", source_root.to_s, "commit", "-m", "Local only")
     local_head = `git -C #{Shellwords.escape(source_root.to_s)} rev-parse HEAD`.strip
+    File.write(source_root.join("operator-draft.txt"), "uncommitted on main\n")
 
     workspace = Workspace.create!(name: "git-worktree-#{SecureRandom.hex(4)}", root_path: project_root.to_s)
     run = workspace.runs.create!(
@@ -60,6 +50,7 @@ RSpec.describe Orchestrator::GitWorktree do
 
     expect(run.reload.base_sha).to eq(local_head)
     expect(File).to exist(File.join(run.target_root, "local-only.txt"))
+    expect(File).not_to exist(File.join(run.target_root, "operator-draft.txt"))
   ensure
     FileUtils.remove_entry(project_root) if project_root&.exist?
   end

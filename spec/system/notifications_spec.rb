@@ -19,7 +19,8 @@ RSpec.describe "global notifications", type: :system do
     expect(page).to have_css("aside[aria-label='Global notifications'][aria-hidden='true']")
     expect(page).to have_css("button[aria-label='Open notifications'][aria-expanded='false']")
     expect(page).to have_text(question.text)
-    expect(page).to have_link("Blocking question needs your attention", href: open_notification_path(Notification.find_by!(user_question: question)))
+    notification = Notification.find_by!(user_question: question)
+    expect(page).to have_link(notification.title, href: open_notification_path(notification))
   end
 
   it "opens a notification target in a new tab and marks it read", js: true do
@@ -29,18 +30,19 @@ RSpec.describe "global notifications", type: :system do
 
     click_button "Open notifications"
 
-    link = find_link("Blocking question needs your attention")
-    expect(link["href"]).to include(open_notification_path(Notification.find_by!(user_question: question)))
+    notification = Notification.find_by!(user_question: question)
+    link = find_link(notification.title)
+    expect(link["href"]).to include(open_notification_path(notification))
     expect(link["target"]).to eq("_blank")
     expect(link["rel"]).to include("noopener")
 
-    click_link "Blocking question needs your attention"
+    click_link notification.title
 
     expect(Notification.find_by!(user_question: question)).not_to be_unread
   end
 
   it "renders the global launcher on the workspace selection page" do
-    workspace, = create_notification_fixture
+    workspace, run, question = create_notification_fixture
 
     visit workspaces_path
 
@@ -49,7 +51,7 @@ RSpec.describe "global notifications", type: :system do
     expect(page).to have_css("span[aria-label='1 unread notifications']")
     expect(page).to have_text(workspace.name)
     expect(page).to have_link("View all notifications", href: notifications_path)
-    expect(page).to have_button("Mark read", count: 1)
+    expect(page).to have_link(Notification.review_title_for(run), href: open_notification_path(Notification.find_by!(user_question: question)))
   end
 
   it "opens and closes the notification drawer", js: true do

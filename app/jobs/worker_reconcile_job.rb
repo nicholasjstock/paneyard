@@ -12,6 +12,11 @@
 class WorkerReconcileJob < ApplicationJob
   queue_as :default
 
+  # A bounded review has no independent worker that can notice an abandoned
+  # reply classifier. Give a transient CLI/MCP failure one fresh capability
+  # and launch before surfacing it to the operator.
+  REPLY_RECEIVED_MAX_ATTEMPTS = 2
+
   def perform
     Worker.active.find_each do |worker|
       next if process_alive?(worker.pid)
@@ -32,6 +37,12 @@ class WorkerReconcileJob < ApplicationJob
 
       if worker.role == "chaperone"
         handle_chaperone_worker_stop(worker) unless capacity_failure
+        block_run_for_capacity!(worker, output) if capacity_failure
+        next
+      end
+
+      if worker.role == "reply_received"
+        handle_reply_received_worker_stop(worker) unless capacity_failure || worker.handoff_completed_at.present?
         block_run_for_capacity!(worker, output) if capacity_failure
         next
       end
@@ -168,6 +179,37 @@ class WorkerReconcileJob < ApplicationJob
 
     review.update!(status: "failed", summary: worker.stop_reason, completed_at: Time.current)
     Orchestrator::ApplyChaperoneDecision.handle_review_failure(review: review)
+  end
+
+  def handle_reply_received_worker_stop(worker)
+    request = SpawnRequest.find_by(fulfilled_worker_id: worker.worker_id)
+    return unless request
+
+    review = ReplyReceivedReview.find_by(run_id: worker.run_id, review_id: request.lineage_key, status: %w[queued running])
+    return unless review
+
+    attempts = Worker.where(run_id: worker.run_id, role: "reply_received", scope: review.review_id)
+      .where.not(stopped_at: nil).where(handoff_completed_at: nil).count
+    if attempts < REPLY_RECEIVED_MAX_ATTEMPTS
+      SpawnRequest.create!(
+        run_id: worker.run_id, asked_by: "reply_received_recovery", requested_role: "reply_received",
+        priority: "blocking", scope: review.review_id, lineage_key: review.review_id,
+        text: "Retry reply classification after a transient worker failure.",
+        context: "Previous reply classifier stopped before submitting a decision: #{worker.stop_reason}",
+        tags: %w[reply_received retry]
+      )
+      worker.run.publish_phase!(
+        phase: "planning", owner: "orchestrator",
+        summary: "Reply classifier stopped before deciding; retrying once with a fresh capability."
+      )
+      TickRunJob.perform_later
+    else
+      review.update!(status: "failed", summary: "Reply classifier stopped #{attempts} times without submitting a decision.", completed_at: Time.current)
+      worker.run.publish_phase!(
+        phase: "awaiting_user_feedback", owner: "orchestrator",
+        summary: "Could not classify the pull-request reply automatically. A new reply will start a fresh review."
+      )
+    end
   end
 
   # Whether the process died from success, a crash, or a bad discovery, the
