@@ -1,6 +1,6 @@
-<% content_for :title, "#{current_workspace.name} Notifications" %>
+<% content_for :title, current_workspace ? "#{current_workspace.name} Notifications" : "Notifications" %>
 
-<h1><%= current_workspace.name %> Notifications</h1>
+<h1><%= current_workspace ? "#{current_workspace.name} Notifications" : "Notifications" %></h1>
 
 <div id="notifications">
   <% if @notifications.empty? %>
@@ -9,13 +9,13 @@
     <% @notifications.each do |notification| %>
       <article class="card notification-card <%= "unread" if notification.unread? %>">
         <div class="card-title">
-          <%= link_to notification.title, notification.target_url || workspace_questions_path(current_workspace) %>
+          <%= link_to notification.title, open_notification_path(notification), target: "_blank", rel: "noopener" %>
           <% if notification.unread? %><span class="badge open">unread</span><% else %><span class="badge answered">read</span><% end %>
         </div>
         <p><%= notification.body %></p>
         <p class="muted"><%= time_ago_in_words(notification.created_at) %> ago</p>
         <% if notification.unread? %>
-          <%= button_to "Mark read", mark_read_workspace_notification_path(current_workspace, notification), method: :patch, class: "btn" %>
+          <%= button_to "Mark read", current_workspace ? mark_read_workspace_notification_path(current_workspace, notification) : mark_read_notification_path(notification), method: :patch, class: "btn" %>
         <% end %>
       </article>
     <% end %>
