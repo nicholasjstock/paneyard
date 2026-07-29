@@ -21,6 +21,8 @@ class Run < ApplicationRecord
   NON_TERMINAL_STATUSES = %w[launching running stopping].freeze
 
   belongs_to :workspace
+  belongs_to :parent_run, class_name: "Run", optional: true
+  has_many :child_runs, class_name: "Run", foreign_key: :parent_run_id, dependent: :nullify
 
   has_many :spawn_requests, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :user_questions, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
@@ -41,6 +43,19 @@ class Run < ApplicationRecord
   validates :target_root, presence: true
   validates :launcher_variant, inclusion: { in: LAUNCHER_VARIANTS }
   validates :status, inclusion: { in: STATUSES }
+  validate :launch_artifacts_are_safe
+
+  def available_launch_artifacts
+    inherited = parent_run ? parent_run.available_launch_artifacts : []
+    inherited = inherited.map { |artifact| artifact.merge("source_run_id" => (artifact["source_run_id"].presence || parent_run.run_id)) }
+    (inherited + Array(launch_artifacts)).uniq { |artifact| artifact["name"] || artifact[:name] }
+  end
+
+  def artifact_source_run(name)
+    artifact = available_launch_artifacts.find { |entry| (entry["name"] || entry[:name]) == name.to_s }
+    source_id = artifact && (artifact["source_run_id"] || artifact[:source_run_id])
+    source_id.present? ? Run.find_by(run_id: source_id) : self
+  end
 
   scope :active, -> { where(status: NON_TERMINAL_STATUSES) }
 
@@ -176,6 +191,16 @@ class Run < ApplicationRecord
   end
 
   private
+
+  def launch_artifacts_are_safe
+    Array(launch_artifacts).each do |artifact|
+      name = artifact["name"] || artifact[:name]
+      source_id = artifact["source_run_id"] || artifact[:source_run_id]
+      errors.add(:launch_artifacts, "contains an unsafe artifact name") if name.blank? || name.include?("/") || name.include?("\\") || [ ".", ".." ].include?(name)
+      source = Run.find_by(run_id: source_id) if source_id.present?
+      errors.add(:launch_artifacts, "source run is outside this workspace") if source && source.workspace_id != workspace_id
+    end
+  end
 
   def broadcast_workspace_refresh
     Turbo::StreamsChannel.broadcast_refresh_to("run_#{run_id}")

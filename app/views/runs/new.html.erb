@@ -4,6 +4,11 @@
 
 <%= form_with model: @run, url: workspace_runs_path(current_workspace), local: true do |form| %>
   <div class="field">
+    <%= form.label :launch_files, "Artifacts (optional)" %>
+    <%= form.file_field :launch_files, multiple: true %>
+  </div>
+
+  <div class="field">
     <%= form.label :task, "Task" %>
     <%= form.text_area :task, placeholder: "Fix the bug described in issue #42." %>
   </div>
