@@ -11,16 +11,10 @@ or a blind worker editing files it can't verify against real git state. Use that
 carefully — you are working directly on shared history (`origin/main` via a rebase, and the
 run's own remote branch), not a private scratch copy.
 
-### GitHub Authentication
+### GitHub boundary
 
-Your environment already includes `GH_TOKEN`, so `gh` and `git push`/`fetch` are authenticated
-without any action from you. Rails prefers a GitHub App installation token (scoped to this one
-repository, valid about an hour) when a GitHub App is configured for this workspace; if it isn't,
-Rails falls back to the operator's own ambient `gh` credential instead. Either way the token is
-already exported for you before you start — you never choose or generate it yourself.
-
-**You don't need to do anything special — just run `gh` commands as normal.** The token is already
-in your environment and will be used automatically.
+Rails owns all GitHub API and `gh` operations: PR creation and editing, issue linkage, comments,
+and releases. You only operate the local git worktree and push its branch. Do not run `gh`.
 
 ## Sequence
 
@@ -51,28 +45,15 @@ in your environment and will be used automatically.
      any other repeated failure. Do not leave a worktree mid-rebase across turns. You always start
      on the small model; a stronger model only gets involved if the chaperone judges a repeated
      failure actually needs it, never by default.
-4. `git push --force-with-lease -u origin <branch>` (the branch this run's worktree is already on). Both
-   `gh` and `git push`/`fetch` are already authenticated for you (see "GitHub Authentication" above) — do
-   not try to run `gh auth login`, edit git credential configuration, or otherwise work around an auth
-   failure yourself; if it still fails, report the exact error via `finalize_run_publication` with
+4. `git push --force-with-lease -u origin <branch>` (the branch this run's worktree is already on). Do
+   not edit git credential configuration or otherwise work around an authentication failure; if it still
+   fails, report the exact error via `finalize_run_publication` with
    `outcome: "failed"` rather than improvising a workaround.
-5. Publish via `gh`:
-   - If no PR exists yet for this branch, `gh pr create --base main --head <branch>` with a title
-     from the run's task and a body summarizing what changed (read the reporter's own
-     `run-summary.md` artifact if one exists — never commit that file itself, it's PR description
-     only).
-   - If a draft PR already exists for this branch (opened earlier for a blocking question), fill in
-     the real body and mark it ready with `gh pr ready`.
-   - If a real (non-draft) PR already exists and this is a rerun, post a "run finished again" comment
-     with the fresh summary instead of overwriting the body — the body is the PR's one settled
-     description; a rerun's outcome is new information for the timeline, not a replacement.
-   - If the run produced review assets (ask `get_run_context` / check the run's artifacts for a
-     curator's selection), attach them via a `gh release` tagged `workflow-evidence-<runId>`.
-6. Call `finalize_run_publication` exactly once with the outcome (`published`, `no_changes`, or
-   `failed`) and the PR URL if one exists. Rails persists run state and opens the reviewer
-   question from there — you do not call `worker_turn` with `[DONE]` for a successful finalize;
-   `finalize_run_publication` is the terminal signal for this role. Only use `worker_turn`/`[BLOCKED]`
-   for the abort-and-escalate case in step 3.
+5. Call `finalize_run_publication` exactly once with the outcome (`published`, `no_changes`, or
+   `failed`) after the push. Rails creates or finds the PR, writes its reviewer-facing body, links
+   its conversation issue, and opens the reviewer question. Do not supply or discover a PR URL; Rails
+   owns that GitHub state. `finalize_run_publication` is the terminal signal for this role. Only use
+   `worker_turn`/`[BLOCKED]` for the abort-and-escalate case in step 3.
 
 ## Rules
 

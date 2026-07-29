@@ -71,28 +71,95 @@ RSpec.describe Orchestrator::RunPublication do
   end
 
   describe ".finalize!" do
-    it "persists a published outcome, applies review asset URLs, and opens the reviewer question" do
-      workspace = Workspace.create!(name: "publication-finalize-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    it "creates the pull request in Rails from the reporter summary after the git worker pushes" do
+      root = Dir.mktmpdir
+      workspace = Workspace.create!(name: "publication-rails-pr-#{SecureRandom.hex(4)}", root_path: root)
       run = workspace.runs.create!(
-        run_id: "publication-finalize-#{SecureRandom.hex(4)}", task: "Finalize the run", target_root: workspace.root_path,
-        launcher_variant: "codex", status: "running", worktree_name: "finalize-a1b2", branch_name: "workflow/finalize-a1b2"
+        run_id: "publication-rails-pr-#{SecureRandom.hex(4)}", task: "Publish a readable pull request",
+        target_root: root, launcher_variant: "codex", status: "running", worktree_name: "rails-pr-a1b2",
+        branch_name: "workflow/rails-pr-a1b2"
       )
-      asset = run.review_assets.create!(workspace_path: "screenshot.png", label: "Screenshot")
+      Orchestrator::ArtifactStore.write(root, run.run_id, "run-summary.md", "# Summary\n\nA real Markdown body.")
+      missing_status = instance_double(Process::Status, success?: false)
+      success_status = instance_double(Process::Status, success?: true)
+      allow(Open3).to receive(:capture3).with(
+        anything, "gh", "pr", "view", "workflow/rails-pr-a1b2", "--json", "url,isDraft", chdir: root
+      ).and_return([ "", "", missing_status ])
+      allow(Open3).to receive(:capture3).with(
+        anything, "gh", "pr", "create", "--base", "main", "--head", "workflow/rails-pr-a1b2",
+        "--title", "Publish a readable pull request", "--body", "# Summary\n\nA real Markdown body.", chdir: root
+      ).and_return([ "https://github.com/example/repo/pull/42\n", "", success_status ])
 
-      outcome = described_class.finalize!(
-        run, outcome: "published", pull_request_url: "https://github.com/example/repo/pull/42",
-        review_assets: [ { workspacePath: "screenshot.png", githubUrl: "https://github.com/example/repo/releases/download/x/screenshot.png" } ]
-      )
+      described_class.finalize!(run, outcome: "published")
 
-      expect(outcome).to eq(:published)
-      expect(run.reload).to have_attributes(
-        publication_status: "awaiting_approval", pull_request_url: "https://github.com/example/repo/pull/42",
-        conversation_pr_status: "ready", status: "completed"
+      expect(run.reload.pull_request_url).to eq("https://github.com/example/repo/pull/42")
+      expect(Open3).to have_received(:capture3).with(
+        anything, "gh", "pr", "create", "--base", "main", "--head", "workflow/rails-pr-a1b2",
+        "--title", "Publish a readable pull request", "--body", "# Summary\n\nA real Markdown body.", chdir: root
       )
-      expect(asset.reload.github_url).to eq("https://github.com/example/repo/releases/download/x/screenshot.png")
-      expect(run.open_blocking_question?).to be(true)
     ensure
-      FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+      FileUtils.remove_entry(root) if root && File.exist?(root)
+    end
+
+    it "uploads curator-selected review assets from Rails before opening the PR" do
+      root = Dir.mktmpdir
+      workspace = Workspace.create!(name: "publication-rails-assets-#{SecureRandom.hex(4)}", root_path: root)
+      run = workspace.runs.create!(
+        run_id: "publication-rails-assets-#{SecureRandom.hex(4)}", task: "Publish evidence", target_root: root,
+        launcher_variant: "codex", status: "running", worktree_name: "rails-assets-a1b2",
+        branch_name: "workflow/rails-assets-a1b2"
+      )
+      File.binwrite(File.join(root, "demo.png"), "image")
+      asset = run.review_assets.create!(workspace_path: "demo.png", label: "Demo image")
+      missing_status = instance_double(Process::Status, success?: false)
+      success_status = instance_double(Process::Status, success?: true)
+      tag = "workflow-evidence-#{run.run_id}"
+      allow(Open3).to receive(:capture3).with(
+        anything, "gh", "release", "view", tag, "--json", "url", chdir: root
+      ).and_return([ "", "", missing_status ])
+      allow(Open3).to receive(:capture3).with(
+        anything, "gh", "release", "create", tag, "--draft", "--target", "workflow/rails-assets-a1b2", File.join(root, "demo.png"), chdir: root
+      ).and_return([ "", "", success_status ])
+      allow(Open3).to receive(:capture3).with(
+        anything, "gh", "release", "view", tag, "--json", "assets", chdir: root
+      ).and_return([ { assets: [ { name: "demo.png", url: "https://github.com/example/repo/releases/download/#{tag}/demo.png" } ] }.to_json, "", success_status ])
+
+      run.update!(pull_request_url: "https://github.com/example/repo/pull/42")
+      described_class.finalize!(run, outcome: "published")
+
+      expect(asset.reload.github_url).to eq("https://github.com/example/repo/releases/download/#{tag}/demo.png")
+      expect(Open3).to have_received(:capture3).with(
+        anything, "gh", "release", "create", tag, "--draft", "--target", "workflow/rails-assets-a1b2", File.join(root, "demo.png"), chdir: root
+      )
+    ensure
+      FileUtils.remove_entry(root) if root && File.exist?(root)
+    end
+
+    it "makes a pre-existing draft PR ready with the reporter summary from Rails" do
+      root = Dir.mktmpdir
+      workspace = Workspace.create!(name: "publication-rails-draft-#{SecureRandom.hex(4)}", root_path: root)
+      run = workspace.runs.create!(
+        run_id: "publication-rails-draft-#{SecureRandom.hex(4)}", task: "Finish the draft", target_root: root,
+        launcher_variant: "codex", status: "running", worktree_name: "rails-draft-a1b2",
+        branch_name: "workflow/rails-draft-a1b2"
+      )
+      Orchestrator::ArtifactStore.write(root, run.run_id, "run-summary.md", "# Final summary")
+      status = instance_double(Process::Status, success?: true)
+      url = "https://github.com/example/repo/pull/42"
+      allow(Open3).to receive(:capture3).with(
+        anything, "gh", "pr", "view", "workflow/rails-draft-a1b2", "--json", "url,isDraft", chdir: root
+      ).and_return([ { url:, isDraft: true }.to_json, "", status ])
+      allow(Open3).to receive(:capture3).with(anything, "gh", "pr", "edit", url, "--body", "# Final summary", chdir: root)
+        .and_return([ "", "", status ])
+      allow(Open3).to receive(:capture3).with(anything, "gh", "pr", "ready", url, chdir: root)
+        .and_return([ "", "", status ])
+
+      described_class.finalize!(run, outcome: "published")
+
+      expect(run.reload.pull_request_url).to eq(url)
+      expect(Open3).to have_received(:capture3).with(anything, "gh", "pr", "ready", url, chdir: root)
+    ensure
+      FileUtils.remove_entry(root) if root && File.exist?(root)
     end
 
     it "persists a no_changes outcome as completed without opening a review question" do
@@ -179,21 +246,27 @@ RSpec.describe Orchestrator::RunPublication do
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end
 
-  it "closes the conversation issue once the run publishes a real PR" do
+  it "links the conversation issue from the real PR and leaves it open until merge" do
     root = Dir.mktmpdir
     workspace = Workspace.create!(name: "publication-close-issue-#{SecureRandom.hex(4)}", root_path: root)
     run = workspace.runs.create!(
       run_id: "publication-close-issue-#{SecureRandom.hex(4)}", task: "Finalize with an open issue", target_root: root,
       launcher_variant: "codex", status: "running", worktree_name: "close-issue-a1b2", branch_name: "workflow/close-issue-a1b2",
-      github_issue_url: "https://github.com/example/repo/issues/9", github_issue_status: "open"
+      github_issue_url: "https://github.com/example/repo/issues/9", github_issue_status: "open",
+      pull_request_url: "https://github.com/example/repo/pull/42"
     )
     status = instance_double(Process::Status, success?: true)
-    allow(Open3).to receive(:capture3).with(anything, "gh", "issue", "close", any_args).and_return([ "", "", status ])
+    allow(Open3).to receive(:capture3).with(anything, "gh", "pr", "view", "https://github.com/example/repo/pull/42", "--json", "body", chdir: root)
+      .and_return([ { body: "# Summary" }.to_json, "", status ])
+    allow(Open3).to receive(:capture3).with(anything, "gh", "pr", "edit", "https://github.com/example/repo/pull/42", "--body", "# Summary\n\nCloses #9", chdir: root)
+      .and_return([ "", "", status ])
 
-    described_class.finalize!(run, outcome: "published", pull_request_url: "https://github.com/example/repo/pull/42")
+    described_class.finalize!(run, outcome: "published")
 
-    expect(run.reload.github_issue_status).to eq("closed")
-    expect(Open3).to have_received(:capture3).with(anything, "gh", "issue", "close", "https://github.com/example/repo/issues/9", any_args)
+    expect(run.reload.github_issue_status).to eq("open")
+    expect(Open3).to have_received(:capture3).with(
+      anything, "gh", "pr", "edit", "https://github.com/example/repo/pull/42", "--body", "# Summary\n\nCloses #9", chdir: root
+    )
   ensure
     FileUtils.remove_entry(root) if root && File.exist?(root)
   end
@@ -206,7 +279,8 @@ RSpec.describe Orchestrator::RunPublication do
       launcher_variant: "codex", status: "running", worktree_name: "no-issue-a1b2", branch_name: "workflow/no-issue-a1b2"
     )
 
-    described_class.finalize!(run, outcome: "published", pull_request_url: "https://github.com/example/repo/pull/42")
+    run.update!(pull_request_url: "https://github.com/example/repo/pull/42")
+    described_class.finalize!(run, outcome: "published")
 
     expect(run.reload.github_issue_status).to be_nil
   ensure
@@ -289,12 +363,18 @@ RSpec.describe Orchestrator::RunPublication do
     run = workspace.runs.create!(
       run_id: "publication-cleanup-#{SecureRandom.hex(4)}", task: "Clean merged run",
       target_root: worktree_root, source_root:, launcher_variant: "codex", worktree_name: "merged-a1b2",
-      branch_name: "workflow/merged-a1b2", publication_status: "awaiting_approval"
+      branch_name: "workflow/merged-a1b2", publication_status: "awaiting_approval",
+      github_issue_url: "https://github.com/example/repo/issues/9", github_issue_status: "open"
     )
+    status = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).and_call_original
+    allow(Open3).to receive(:capture3).with(
+      anything, "gh", "issue", "close", "https://github.com/example/repo/issues/9", "--comment", "Merged in ", chdir: worktree_root
+    ).and_return([ "", "", status ])
 
     expect(described_class.cleanup_merged_run!(run)).to eq(:merged)
     expect(File).not_to exist(worktree_root)
-    expect(run.reload.publication_status).to eq("merged")
+    expect(run.reload).to have_attributes(publication_status: "merged", github_issue_status: "closed")
   ensure
     FileUtils.remove_entry(source_root) if source_root && File.exist?(source_root)
   end

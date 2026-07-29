@@ -5,23 +5,23 @@ module Orchestrator
     class Error < StandardError; end
     module_function
 
-    # Commit, conflict repair, rebase, and push/PR creation are owned by the
+    # Commit, conflict repair, rebase, and push are owned by the
     # terminal "git" worker (see agent_personas/git.md) -- the one role with
-    # real .git write access, driving those git/gh commands itself instead of
-    # Rails guessing on its behalf. This module now only persists the outcome
-    # that worker reports (via McpTools::FinalizeRunPublicationTool) and owns
+    # real .git write access. The worker commits, rebases, and pushes; Rails
+    # owns GitHub publication so PR content and issue linkage are deterministic.
+    # This module persists the worker outcome (via McpTools::FinalizeRunPublicationTool) and owns
     # the git operations that are unrelated to that finalize lifecycle: the
     # mid-run blocking-question conversation (an issue before real code
-    # exists, moved to the PR once one does -- see ensure_conversation_issue!/
-    # publish_question!/close_conversation_issue!), and post-merge cleanup.
+    # exists, linked from the PR once one does -- see ensure_conversation_issue!/
+    # publish_question!/link_conversation_issue!), and post-merge cleanup.
 
     # Single dispatch point for the git worker -- used by TickRunJob once a
     # run's other finalization workers (seeder/reporter/curator/demo) are
     # done, by PullRequestResume's "fix the merge conflicts" comment
     # shortcut, by GitPublicationRecovery's direct requeue after a blocked
     # attempt, and by the operator's retry_publication action. One spawn
-    # drives the entire commit -> conflict repair -> rebase -> push -> PR
-    # sequence itself (see the persona), so there is nothing left for Rails
+    # drives the entire commit -> conflict repair -> rebase -> push sequence
+    # itself (see the persona), so there is nothing left for Rails
     # to loop on the way the old MergeConflictResolution state machine did.
     #
     # Always starts on the small model tier, same as any other planning/
@@ -45,8 +45,8 @@ module Orchestrator
       validated_root!(run)
       run.update!(publication_status: "commit_pending", publication_error: nil)
       # "Begin." is deliberate -- agent_personas/git.md is auto-prepended to
-      # every git-role spawn and already states the full commit/rebase/push/
-      # publish sequence in far more detail than fit here; this used to
+      # every git-role spawn and already states the full commit/rebase/push
+      # sequence in far more detail than fit here; this used to
       # restate a condensed version of it by hand, with nothing keeping the
       # two in sync.
       SpawnRequest.create!(
@@ -57,19 +57,20 @@ module Orchestrator
       run.publish_phase!(phase: "committing", owner: "orchestrator", summary: "The git worker is committing, rebasing, and publishing this run.")
     end
 
-    def finalize!(run, outcome:, pull_request_url: nil, error: nil, review_assets: [])
+    def finalize!(run, outcome:, error: nil)
       return :unmanaged if run.worktree_name.blank?
 
       run.with_lock do
         case outcome.to_s
         when "published"
+          upload_review_assets!(run)
+          pull_request_url = run.pull_request_url.presence || publish_pull_request!(run)
           run.update!(
             publication_status: "awaiting_approval", pull_request_url: pull_request_url,
             conversation_pr_status: "ready", publication_completed_at: Time.current, publication_error: nil,
             status: "completed", stopped_at: run.stopped_at || Time.current
           )
-          apply_review_asset_urls!(run, review_assets)
-          close_conversation_issue!(run) if run.github_issue_url.present?
+          link_conversation_issue!(run) if run.github_issue_url.present?
           open_review_question!(run)
         when "no_changes"
           run.update!(
@@ -101,16 +102,115 @@ module Orchestrator
     end
     private_class_method :finalize_summary
 
-    def apply_review_asset_urls!(run, review_assets)
-      Array(review_assets).each do |asset|
-        path = asset[:workspacePath] || asset["workspacePath"]
-        url = asset[:githubUrl] || asset["githubUrl"]
-        next if path.blank? || url.blank?
+    # The curator only selects local files. Rails performs the GitHub release
+    # upload after the git worker has pushed, so no worker needs `gh` access.
+    # A retried finalization uploads only assets that do not already have a
+    # persisted public URL.
+    def upload_review_assets!(run)
+      assets = run.review_assets.where(github_url: nil).to_a
+      return if assets.empty?
 
-        run.review_assets.where(workspace_path: path).update_all(github_url: url)
+      root = validated_root!(run)
+      paths = assets.map { |asset| review_asset_path!(root, asset) }
+      token = gh_token(root)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
+      tag = "workflow-evidence-#{run.run_id}"
+
+      _output, _error, view_status = Open3.capture3(env, "gh", "release", "view", tag, "--json", "url", chdir: root.to_s)
+      command = if view_status.success?
+        [ "gh", "release", "upload", tag, *paths ]
+      else
+        [ "gh", "release", "create", tag, "--draft", "--target", run.branch_name, *paths ]
+      end
+      output, error, status = Open3.capture3(env, *command, chdir: root.to_s)
+      raise Error, "gh release upload failed: #{error.presence || output}" unless status.success?
+
+      output, error, status = Open3.capture3(env, "gh", "release", "view", tag, "--json", "assets", chdir: root.to_s)
+      raise Error, "gh release view failed: #{error.presence || output}" unless status.success?
+
+      uploaded = JSON.parse(output).fetch("assets").index_by { |asset| asset.fetch("name") }
+      assets.each do |asset|
+        uploaded_asset = uploaded[File.basename(asset.workspace_path)]
+        url = uploaded_asset&.fetch("url", nil) || uploaded_asset&.fetch("downloadUrl", nil)
+        raise Error, "GitHub release did not return an upload URL for #{asset.workspace_path}" if url.blank?
+
+        asset.update!(github_url: url)
+      end
+    rescue JSON::ParserError, KeyError => error
+      raise Error, "gh release returned invalid asset metadata: #{error.message}"
+    end
+    private_class_method :upload_review_assets!
+
+    def review_asset_path!(root, asset)
+      path = root.join(asset.workspace_path).cleanpath
+      raise Error, "Review asset is missing: #{asset.workspace_path}" unless path.file?
+      raise Error, "Review asset is outside the run worktree: #{asset.workspace_path}" unless path.to_s.start_with?("#{root}/")
+
+      path.to_s
+    end
+    private_class_method :review_asset_path!
+
+    def publish_pull_request!(run)
+      root = validated_root!(run)
+      token = gh_token(root)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
+      existing_pull_request = existing_pull_request(root, run, env)
+      if existing_pull_request.present?
+        update_existing_pull_request!(root, run, existing_pull_request, env)
+        return existing_pull_request.fetch("url")
+      end
+
+      output, error, status = Open3.capture3(
+        env, "gh", "pr", "create", "--base", "main", "--head", run.branch_name,
+        "--title", pull_request_title(run), "--body", pull_request_body(run), chdir: root.to_s
+      )
+      raise Error, "gh pr create failed: #{error.presence || output}" unless status.success?
+
+      output.strip
+    end
+    private_class_method :publish_pull_request!
+
+    def existing_pull_request(root, run, env)
+      output, _error, status = Open3.capture3(env, "gh", "pr", "view", run.branch_name, "--json", "url,isDraft", chdir: root.to_s)
+      return nil unless status.success?
+
+      details = JSON.parse(output)
+      { "url" => details.fetch("url"), "isDraft" => details["isDraft"] }
+    rescue JSON::ParserError, KeyError
+      nil
+    end
+    private_class_method :existing_pull_request
+
+    # A pre-existing draft is a pre-code conversation vessel, so replace its
+    # provisional body and make it reviewable. A real PR keeps its settled
+    # description; a rerun adds fresh information as a timeline comment.
+    def update_existing_pull_request!(root, run, pull_request, env)
+      url = pull_request.fetch("url")
+      body = pull_request_body(run)
+      if pull_request["isDraft"]
+        _output, error, status = Open3.capture3(env, "gh", "pr", "edit", url, "--body", body, chdir: root.to_s)
+        raise Error, "gh pr edit failed: #{error}" unless status.success?
+
+        _output, error, status = Open3.capture3(env, "gh", "pr", "ready", url, chdir: root.to_s)
+        raise Error, "gh pr ready failed: #{error}" unless status.success?
+      else
+        post_comment!(root, url, "## Run finished again\n\n#{body}")
       end
     end
-    private_class_method :apply_review_asset_urls!
+    private_class_method :update_existing_pull_request!
+
+    def pull_request_title(run)
+      run.task.to_s.squish.truncate(120)
+    end
+    private_class_method :pull_request_title
+
+    def pull_request_body(run)
+      ArtifactStore.read(run.target_root, run.run_id, "run-summary.md").presence ||
+        "Automated workflow run: #{run.run_id}"
+    rescue Errno::ENOENT
+      "Automated workflow run: #{run.run_id}"
+    end
+    private_class_method :pull_request_body
 
     # Posts to whichever GitHub object currently carries this run's
     # conversation: the PR if one already exists, otherwise an issue (opened
@@ -154,8 +254,8 @@ module Orchestrator
     # question.text is upgraded with the reporter's plain-language summary.
 
     # An issue needs no branch or commit -- it exists purely to carry
-    # conversation before there's anything to diff yet. finalize! closes it
-    # once a real PR takes over (see close_conversation_issue!).
+    # conversation before there's anything to diff yet. finalize! links it
+    # from the PR, so GitHub closes it when that PR merges.
     def ensure_conversation_issue!(run)
       return run.github_issue_url if run.github_issue_url.present?
 
@@ -192,16 +292,44 @@ module Orchestrator
     end
     private_class_method :build_issue_body
 
-    # Best-effort only -- a failed issue close must never block the PR
-    # publication that's reacting to it.
+    # Add GitHub's closing keyword to the PR body. This creates the native
+    # issue↔PR relationship and leaves the issue open through review; GitHub
+    # closes it automatically when the PR merges. A transient edit failure
+    # must not invalidate an otherwise published PR.
+    def link_conversation_issue!(run)
+      root = validated_root!(run)
+      _repository, issue_number = repository_and_number(run.github_issue_url)
+      token = gh_token(root)
+      env = token.present? ? { "GH_TOKEN" => token } : {}
+      output, error, status = Open3.capture3(env, "gh", "pr", "view", run.pull_request_url, "--json", "body", chdir: root.to_s)
+      raise Error, "gh pr view failed: #{error.presence || output}" unless status.success?
+
+      body = JSON.parse(output).fetch("body").to_s
+      reference = "Closes ##{issue_number}"
+      return if body.match?(/\bcloses\s+##{Regexp.escape(issue_number)}\b/i)
+
+      _output, edit_error, edit_status = Open3.capture3(
+        env, "gh", "pr", "edit", run.pull_request_url, "--body", [ body.presence, reference ].compact.join("\n\n"), chdir: root.to_s
+      )
+      raise Error, "gh pr edit failed: #{edit_error}" unless edit_status.success?
+    rescue JSON::ParserError, KeyError => error
+      Rails.logger.warn("RunPublication.link_conversation_issue! run=#{run.run_id} returned an invalid pull request body: #{error.message}")
+    rescue Error => error
+      Rails.logger.warn("RunPublication.link_conversation_issue! run=#{run.run_id} failed: #{error.message}")
+    end
+    private_class_method :link_conversation_issue!
+
+    # Best-effort only -- GitHub normally closes the linked issue when the PR
+    # merges, but explicitly close it during post-merge cleanup as a fallback
+    # and keep Rails' stored issue state accurate.
     def close_conversation_issue!(run)
-      return if run.github_issue_status == "closed"
+      return if run.github_issue_url.blank? || run.github_issue_status == "closed"
 
       root = validated_root!(run)
       token = gh_token(root)
       env = token.present? ? { "GH_TOKEN" => token } : {}
       _output, error, status = Open3.capture3(
-        env, "gh", "issue", "close", run.github_issue_url, "--comment", "Continuing in #{run.pull_request_url}", chdir: root.to_s
+        env, "gh", "issue", "close", run.github_issue_url, "--comment", "Merged in #{run.pull_request_url}", chdir: root.to_s
       )
       Rails.logger.warn("RunPublication.close_conversation_issue! run=#{run.run_id} failed: #{error}") unless status.success?
       run.update!(github_issue_status: "closed")
@@ -227,6 +355,7 @@ module Orchestrator
         root = validated_root!(run)
         source_root = Pathname(run.source_root)
         rebase_main_onto_origin!(source_root)
+        close_conversation_issue!(run)
         delete_review_release!(root, run) if run.review_assets.any?
         git!(source_root, "worktree", "remove", "--force", root.to_s)
         git!(source_root, "worktree", "prune")
