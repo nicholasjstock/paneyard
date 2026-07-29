@@ -25,6 +25,7 @@
   </head>
 
   <body data-controller="notification-drawer"
+        data-notification-drawer-mark-all-read-url-value="<%= mark_all_read_notifications_path %>"
         data-action="keydown.esc@window->notification-drawer#close turbo:before-morph-element@document->notification-drawer#beforeMorph">
     <header class="topbar">
       <a class="brand" href="<%= root_path %>">Workflow Orchestrator</a>
@@ -87,7 +88,7 @@
                       <span class="notification-drawer-workspace"><%= notification.workspace.name %></span>
                       <time datetime="<%= notification.created_at.iso8601 %>"><%= time_ago_in_words(notification.created_at) %> ago</time>
                     </div>
-                    <%= link_to notification.title, notification.target_url || workspace_questions_path(notification.workspace), class: "notification-drawer-title" %>
+                    <%= link_to notification.title, open_notification_path(notification), class: "notification-drawer-title", target: "_blank", rel: "noopener" %>
                     <p><%= notification.body %></p>
                     <span class="muted notification-drawer-run"><%= notification.user_question.run&.worktree_name.presence || notification.user_question.run&.run_id || "Workspace activity" %></span>
                     <% if notification.unread? %>

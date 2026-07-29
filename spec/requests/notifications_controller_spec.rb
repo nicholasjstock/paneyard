@@ -25,6 +25,39 @@ RSpec.describe "workspace notifications", type: :request do
     expect(notification.reload).not_to be_unread
   end
 
+  it "marks every notification unread when the global drawer closes" do
+    workspace = Workspace.create!(name: "notification-close-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-close-#{SecureRandom.hex(4)}")
+    run = Run.create!(run_id: SecureRandom.uuid, task: "Need review", workspace:, target_root: workspace.root_path, launcher_variant: "codex", status: "running")
+    first_question = run.user_questions.create!(asked_by: "planner", scope: "plan", text: "First close?", priority: "blocking")
+    second_run = Run.create!(run_id: SecureRandom.uuid, task: "Need another review", workspace:, target_root: workspace.root_path, launcher_variant: "codex", status: "running")
+    second_question = second_run.user_questions.create!(asked_by: "planner", scope: "plan", text: "Second close?", priority: "blocking")
+    read_run = Run.create!(run_id: SecureRandom.uuid, task: "Already reviewed", workspace:, target_root: workspace.root_path, launcher_variant: "codex", status: "running")
+    read_question = read_run.user_questions.create!(asked_by: "planner", scope: "plan", text: "Already closed?", priority: "blocking")
+    first_notification = Notification.find_by!(user_question: first_question)
+    second_notification = Notification.find_by!(user_question: second_question)
+    already_read = Notification.find_by!(user_question: read_question)
+    already_read.mark_read!
+
+    patch mark_all_read_notifications_path
+
+    expect(response).to have_http_status(:no_content)
+    expect(first_notification.reload).not_to be_unread
+    expect(second_notification.reload).not_to be_unread
+    expect(already_read.reload).not_to be_unread
+  end
+
+  it "marks a notification read when opening its target" do
+    workspace = Workspace.create!(name: "notification-open-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-open-#{SecureRandom.hex(4)}")
+    run = Run.create!(run_id: SecureRandom.uuid, task: "Need review", workspace:, target_root: workspace.root_path, launcher_variant: "codex", status: "running", pull_request_url: "https://github.com/example/app/pull/14")
+    question = run.user_questions.create!(asked_by: "planner", scope: "plan", text: "Open target?", priority: "blocking")
+    notification = Notification.find_by!(user_question: question)
+
+    get open_notification_path(notification)
+
+    expect(response).to redirect_to(run.pull_request_url)
+    expect(notification.reload).not_to be_unread
+  end
+
   it "shows unread count, notification body, and the relevant pull request" do
     workspace = Workspace.create!(name: "notification-ui-#{SecureRandom.hex(4)}", root_path: "/tmp/notification-ui-#{SecureRandom.hex(4)}")
     run = Run.create!(run_id: SecureRandom.uuid, task: "Need review", workspace:, target_root: workspace.root_path, launcher_variant: "codex", status: "running", pull_request_url: "https://github.com/example/app/pull/13")
@@ -33,8 +66,10 @@ RSpec.describe "workspace notifications", type: :request do
     get workspace_notifications_path(workspace)
 
     expect(response).to have_http_status(:ok)
-    expect(response.body).to include("1 unread notifications", question.text, run.pull_request_url)
+    expect(response.body).to include("1 unread notifications", question.text, open_notification_path(Notification.find_by!(user_question: question)))
     expect(response.body).to include("Mark read")
+    expect(response.body).to include("target=\"_blank\"")
+    expect(response.body).to include("rel=\"noopener\"")
   end
 
   it "marks a notification read and removes it from the unread badge" do

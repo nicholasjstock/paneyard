@@ -2,6 +2,7 @@ import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
   static targets = ["panel", "launcher"]
+  static values = { markAllReadUrl: String }
 
   connect() {
     this.setOpen(sessionStorage.getItem(this.storageKey) === "open")
@@ -15,8 +16,10 @@ export default class extends Controller {
   }
 
   close() {
+    const wasOpen = this.element.classList.contains("notification-open")
     this.setOpen(false)
     sessionStorage.removeItem(this.storageKey)
+    if (wasOpen) this.markAllRead()
   }
 
   beforeMorph(event) {
@@ -36,5 +39,23 @@ export default class extends Controller {
 
   get storageKey() {
     return `notifications:${window.location.pathname}`
+  }
+
+  markAllRead() {
+    const token = document.querySelector("meta[name='csrf-token']")?.content
+
+    fetch(this.markAllReadUrlValue, {
+      method: "PATCH",
+      headers: { "X-CSRF-Token": token, Accept: "application/json" },
+      credentials: "same-origin"
+    }).then((response) => {
+      if (!response.ok) return
+
+      this.element.querySelectorAll(".notification-drawer-item.unread").forEach((item) => {
+        item.classList.remove("unread")
+        item.querySelector(".notification-mark-read")?.remove()
+      })
+      this.element.querySelector(".notification-badge")?.remove()
+    })
   }
 }

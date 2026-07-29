@@ -26,7 +26,13 @@ Rails.application.routes.draw do
   root "workspaces#index"
 
   resources :notifications, only: %i[index] do
-    member { patch :mark_read }
+    collection do
+      patch :mark_all_read
+    end
+    member do
+      get :open
+      patch :mark_read
+    end
   end
 
   resources :workspaces, only: %i[index show new create edit update destroy] do
@@ -61,7 +67,10 @@ Rails.application.routes.draw do
 
     resources :questions, only: %i[index]
     resources :notifications, only: %i[index] do
-      member { patch :mark_read }
+      member do
+        get :open
+        patch :mark_read
+      end
     end
 
     resources :events, only: %i[index]

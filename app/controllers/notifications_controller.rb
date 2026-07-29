@@ -12,6 +12,23 @@ class NotificationsController < ApplicationController
     redirect_to notifications_redirect_path(notification), notice: "Notification marked as read."
   end
 
+  def mark_all_read
+    Notification.unread.update_all(read_at: Time.current)
+
+    head :no_content
+  end
+
+  def open
+    notification = Notification.find(params[:id])
+    notification.mark_read!
+
+    if notification.target_url.present?
+      redirect_to notification.target_url, allow_other_host: true
+    else
+      redirect_to workspace_questions_path(notification.workspace)
+    end
+  end
+
   private
 
   def notifications_redirect_path(notification)

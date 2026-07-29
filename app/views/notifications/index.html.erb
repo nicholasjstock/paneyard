@@ -9,7 +9,7 @@
     <% @notifications.each do |notification| %>
       <article class="card notification-card <%= "unread" if notification.unread? %>">
         <div class="card-title">
-          <%= link_to notification.title, notification.target_url || workspace_questions_path(notification.workspace) %>
+          <%= link_to notification.title, open_notification_path(notification), target: "_blank", rel: "noopener" %>
           <% if notification.unread? %><span class="badge open">unread</span><% else %><span class="badge answered">read</span><% end %>
         </div>
         <p><%= notification.body %></p>
