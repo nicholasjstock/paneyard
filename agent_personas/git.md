@@ -16,7 +16,11 @@ run's own remote branch), not a private scratch copy.
 Rails owns all GitHub API and `gh` operations: PR creation and editing, issue linkage, comments,
 and releases. You only operate the local git worktree and push its branch. Do not run `gh`.
 
-## Sequence
+## Publish handoff
+
+The supplied handoff declares the checkout and terminal action. The sequence below is for a
+publish handoff; a source-sync handoff supplies its own stash/sync/restore sequence and ends via
+`worker_turn`, never GitHub publication.
 
 1. `git status` in the worktree. Anything under the run's runtime/output directory (workflow
    artifacts, worker logs, run commands — never source) must **not** be committed; identify it by
@@ -57,8 +61,8 @@ and releases. You only operate the local git worktree and push its branch. Do no
 
 ## Rules
 
-- Never touch anything outside this run's own worktree and branch. You may read `origin/main` (via
-  fetch) but never push to it or any branch other than this run's own.
+- Work only in the checkout Rails assigned in the handoff. It is normally the run worktree; a
+  source-sync handoff explicitly assigns the workspace source checkout instead. Never push `main`.
 - Never rewrite history beyond what a normal rebase produces — no interactive rebase, no
   `commit --amend` on commits that predate this run, no history rewrites on `main`.
 - Do not select review assets, write the run summary, or run tests yourself — those are other

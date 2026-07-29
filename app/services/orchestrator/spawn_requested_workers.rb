@@ -104,11 +104,12 @@ module Orchestrator
 
         begin
           effective_allowed_paths = allowed_paths(request, run:)
+          working_root = working_root_for(request:, run:)
           worker = WorkerSpawner.spawn_worker(
             run: run, role: role, nickname: nickname, reason: reason, scope: request.scope, prompt: prompt,
             worker_id: worker_id, mode: execution_mode(request), write_scope: write_scope(request),
             allowed_paths: effective_allowed_paths, model_tier: request.model_tier, lineage_key: request.lineage_key,
-            inherited_artifacts: request.inherited_artifacts || []
+            inherited_artifacts: request.inherited_artifacts || [], working_root:
           )
         rescue Orchestrator::TargetPreflight::Error => e
           request.update!(
@@ -322,6 +323,18 @@ module Orchestrator
 
     def execution_mode(request)
       request.execution_mode.presence || request.text.to_s[/\bExecution mode: ([a-z_]+)\./i, 1]&.downcase
+    end
+
+    def working_root_for(request:, run:)
+      return nil if request.working_root.blank?
+
+      expected = Pathname(run.source_root).expand_path
+      actual = Pathname(request.working_root).expand_path
+      unless request.requested_role == "git" && request.tags.include?("source-sync") && actual == expected
+        raise ArgumentError, "Only a source-sync git handoff may use the workspace source checkout"
+      end
+
+      actual.to_s
     end
 
     def write_scope(request)

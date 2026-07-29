@@ -35,6 +35,7 @@ class SpawnRequest < ApplicationRecord
       requestedRole: requested_role,
       executionMode: execution_mode,
       writeScope: write_scope,
+      workingRoot: working_root,
       allowedPaths: allowed_paths,
       evidenceRefs: evidence_refs,
       lineageKey: lineage_key,

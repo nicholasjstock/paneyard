@@ -361,6 +361,7 @@ module Orchestrator
         git!(source_root, "worktree", "remove", "--force", root.to_s)
         git!(source_root, "worktree", "prune")
         run.update!(publication_status: "merged", publication_error: nil)
+        SourceCheckoutSync.after_merge!(run)
         :merged
       end
     rescue StandardError => error

@@ -7,8 +7,8 @@ module Orchestrator
     # This boundary is intentionally source-agnostic. Repository commands run
     # inside the selected agent launcher's enforced sandbox; Rails checks only
     # that the workspace and launcher exist.
-    def check!(run:, mode:)
-      root = Pathname(run.target_root)
+    def check!(run:, mode:, root: run.target_root)
+      root = Pathname(root)
       raise Error, "Target workspace does not exist: #{root}" unless root.directory?
 
       require_command!(run.launcher_variant)

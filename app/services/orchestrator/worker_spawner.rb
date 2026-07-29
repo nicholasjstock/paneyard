@@ -33,7 +33,7 @@ module Orchestrator
 
     def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil,
       write_scope: nil, allowed_paths: [], model_tier: "small", mcp_override: nil, inherited_artifacts: [],
-      lineage_key: nil, effort: nil)
+      lineage_key: nil, effort: nil, working_root: nil)
       raise ArgumentError, "Planner processes were removed; queue a PlannerDecisionJob instead" if role == "planner"
 
       # nickname flows straight into file paths under workers_dir below --
@@ -44,9 +44,8 @@ module Orchestrator
       # on every spawn path (spawn_worker MCP tool, and the ops UI has no
       # server-side control over what a planner/worker asks for).
       validate_safe_path_segment!(nickname)
-      TargetPreflight.check!(run:, mode:)
-
-      root_dir = run.target_root
+      root_dir = working_root.presence || run.target_root
+      TargetPreflight.check!(run:, mode:, root: root_dir)
       workers_dir = File.join(ArtifactStore.output_dir(root_dir), "workers")
       FileUtils.mkdir_p(workers_dir)
 
