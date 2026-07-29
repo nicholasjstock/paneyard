@@ -82,7 +82,7 @@ module Orchestrator
       # Both run in one transaction so a raise from run_planner_turn (e.g.
       # branch progression) can't leave an orphan question blocking the run.
       PlannerDecision.transaction do
-        PlanApprovalQuestion.ask!(decision:, next_step: params[:next_step])
+        PlanApprovalQuestion.ask!(decision:, next_step: params[:next_step], following_steps: params[:following_steps])
         persist_decision!(decision:, params:)
       end
       { accepted: true }

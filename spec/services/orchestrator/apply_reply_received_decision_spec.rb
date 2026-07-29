@@ -2,9 +2,11 @@ require "rails_helper"
 
 RSpec.describe Orchestrator::ApplyReplyReceivedDecision do
   describe ".call" do
-    it "approved: grants the run's plan-approval gate a permanent 'granted' tag and resumes planning" do
+    it "approved: dispatches the exact gated step instead of asking a fresh planner to reconstruct it" do
       run = create_run
-      question = create_question(run)
+      next_step = gated_step("fix.md")
+      following_step = gated_step("verify.md", mode: "verification", write_scope: "source_protected")
+      question = create_question(run, next_step:, following_steps: [ following_step ])
       review = create_review(run:, question:, body: "approved")
 
       described_class.call(review:, action: "approved", summary: "The operator gave a clean sign-off.")
@@ -15,8 +17,10 @@ RSpec.describe Orchestrator::ApplyReplyReceivedDecision do
       expect(question.tags).to include("granted")
       expect(run.reload.publication_status).to eq("resume_requested")
       expect(run.phase).to eq("planning")
-      followup = SpawnRequest.find_by!(run_id: run.run_id, requested_role: "planner", asked_by: "reply_received")
-      expect(followup.tags).to include("resume")
+      worker = SpawnRequest.find_by!(run_id: run.run_id, requested_role: "worker", scope: "fix.md")
+      expect(worker).to have_attributes(execution_mode: "implementation", write_scope: "scoped_changes")
+      expect(SpawnRequest.where(run_id: run.run_id, requested_role: "planner", asked_by: "reply_received")).to be_empty
+      expect(Orchestrator::TickState.latest(run.run_id)[:following_steps]).to include(include(artifact: "verify.md"))
       expect(review.reload.status).to eq("completed")
       expect(review.action).to eq("approved")
 
@@ -27,6 +31,16 @@ RSpec.describe Orchestrator::ApplyReplyReceivedDecision do
           next_step: { write_scope: "scoped_changes", artifact: "x.md", mode: "implementation", allowed_paths: [], addresses_criteria: [], success_check: "x" }
         )
       ).to be(false)
+    end
+
+    it "approved: rejects a plan-approval question missing its durable gated step" do
+      run = create_run
+      question = create_question(run)
+      review = create_review(run:, question:, body: "approved")
+
+      expect {
+        described_class.call(review:, action: "approved", summary: "The operator gave a clean sign-off.")
+      }.to raise_error(ArgumentError, /has no gated next step/)
     end
 
     it "explain: closes the original question without granting approval and re-opens a fresh plan-approval question carrying the explanation" do
@@ -104,11 +118,22 @@ RSpec.describe Orchestrator::ApplyReplyReceivedDecision do
     )
   end
 
-  def create_question(run)
+  def create_question(run, next_step: nil, following_steps: [])
     run.user_questions.create!(
       asked_by: "planner", scope: "run", priority: "blocking", status: "open",
-      text: "Approve?", context: "The plan.", tags: [ "plan-approval" ]
+      text: "Approve?", context: "The plan.", tags: [ "plan-approval" ],
+      gated_next_step: next_step&.deep_stringify_keys || {},
+      gated_following_steps: following_steps.map(&:deep_stringify_keys)
     )
+  end
+
+  def gated_step(artifact, mode: "implementation", write_scope: "scoped_changes")
+    {
+      owner: "worker", artifact:, mode:, write_scope:,
+      allowed_paths: write_scope == "source_protected" ? [] : [ "app/models/user_question.rb" ],
+      evidence_refs: mode == "implementation" ? [ "diagnosis.md" ] : [],
+      addresses_criteria: [], lineage_key: artifact, success_check: "Exercise #{artifact}."
+    }
   end
 
   def create_review(run:, question:, body:)

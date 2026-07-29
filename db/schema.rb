@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_28_203714) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_29_000100) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -364,6 +364,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_28_203714) do
     t.string "asked_by", null: false
     t.text "context"
     t.datetime "created_at", null: false
+    t.json "gated_following_steps", default: [], null: false
+    t.json "gated_next_step", default: {}, null: false
     t.string "github_comment_id"
     t.string "github_comment_url"
     t.text "github_publication_error"

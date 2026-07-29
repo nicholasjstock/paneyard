@@ -198,7 +198,7 @@ module Orchestrator
     end
     private_class_method :step_attempt_outcome
 
-    def run_planner_turn(run_id:, summary:, next_step:, following_steps:, now: Time.current, previous_state: nil)
+    def run_planner_turn(run_id:, summary:, next_step:, following_steps:, now: Time.current, previous_state: nil, record_step: true)
       StepPolicy.validate_plan!(run_id:, next_step:, following_steps:)
       # Single source of truth for "next_step became the active step, so
       # record which criteria it addresses" -- covers both a live planner
@@ -210,7 +210,7 @@ module Orchestrator
       # AcceptanceCriteriaWorkers and to ChaperoneTrigger's criterion join.
       run = Run.find_by!(run_id: run_id)
       enforce_branch_progression!(run:, next_step:)
-      Orchestrator::AcceptanceCriteria.record_step!(run:, next_step: next_step)
+      Orchestrator::AcceptanceCriteria.record_step!(run:, next_step: next_step) if record_step
       planner_blockers = Orchestrator::AcceptanceCriteria.planner_blockers(run_id: run_id)
       if next_step.nil? && planner_blockers.any?
         raise ArgumentError, "Cannot complete run while acceptance criteria remain pending: #{planner_blockers.join(', ')}"

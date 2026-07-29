@@ -172,6 +172,8 @@ RSpec.describe Orchestrator::PlannerDecisionSubmission do
       question = UserQuestion.plan_approval.find_by!(run_id: run.run_id)
       expect(question).to have_attributes(priority: "blocking", status: "open")
       expect(question.context).to include("Complete the workflow").and include("fix.md")
+      expect(question.gated_next_step).to include("artifact" => "fix.md", "mode" => "implementation")
+      expect(question.gated_following_steps).to eq([])
       assert_empty run.spawn_requests.open_only.where(requested_role: "worker")
       assert_equal "awaiting_user_feedback", Orchestrator::TickState.latest(run.run_id)[:phase]
       expect(PublishUserQuestionJob).to have_been_enqueued.with(question.id)

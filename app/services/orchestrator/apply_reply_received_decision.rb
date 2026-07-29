@@ -42,16 +42,28 @@ module Orchestrator
         run.update!(publication_status: "resume_requested")
       end
 
-      SpawnRequest.create!(
-        run_id: run.run_id, asked_by: "reply_received", requested_role: "planner", priority: "blocking",
-        scope: Turn::PLANNER_FOLLOWUP_SCOPE,
-        text: "The operator approved the pending plan. Proceed with the next bounded step.",
-        context: "Plan-approval question #{question.question_id} approved: #{summary}",
-        tags: %w[github reply_received resume]
-      )
+      dispatch_gated_step!(run:, question:, summary:)
       run.publish_phase!(phase: "planning", owner: "reply_received", summary: "Operator approved the plan.")
     end
     private_class_method :apply_approved!
+
+    # PlanApprovalQuestion stores the exact first writable handoff because
+    # that handoff is deliberately suppressed while the operator question is
+    # open. Approval must dispatch this durable plan directly; asking a fresh
+    # planner to reconstruct it can skip its head and select a following step.
+    def dispatch_gated_step!(run:, question:, summary:)
+      next_step = Orchestrator::TickState.deep_symbolize(question.gated_next_step).presence
+      raise ArgumentError, "Plan-approval question #{question.question_id} has no gated next step" unless next_step
+
+      following_steps = Array(question.gated_following_steps).map { |step| Orchestrator::TickState.deep_symbolize(step) }
+      turn = Turn.run_planner_turn(
+        run_id: run.run_id,
+        summary: "Operator approved the gated plan: #{summary}",
+        next_step:, following_steps:, previous_state: TickState.latest(run.run_id), record_step: false
+      )
+      TickState.write(turn.fetch(:next_state))
+    end
+    private_class_method :dispatch_gated_step!
 
     def apply_explain!(run:, question:, review:, explanation:)
       question.update!(status: "answered", answered_by: "reply_received", answered_at: Time.current, answer_text: review.github_comment_body)

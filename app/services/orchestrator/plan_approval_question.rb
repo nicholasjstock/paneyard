@@ -21,14 +21,16 @@ module Orchestrator
     # persist_decision! -- Turn.run_planner_turn's own has_open_blocking_question
     # check must see this row already created (same transaction, same
     # connection) to suppress dispatch for the gated step.
-    def ask!(decision:, next_step:)
+    def ask!(decision:, next_step:, following_steps:)
       run = decision.run
       return unless applicable?(run:, next_step:)
 
       question = UserQuestion.create!(
         run_id: run.run_id, asked_by: "planner", priority: "blocking",
         scope: next_step[:artifact].presence || "run",
-        text: question_text, context: build_context(run:, next_step:), tags: [ TAG ]
+        text: question_text, context: build_context(run:, next_step:), tags: [ TAG ],
+        gated_next_step: next_step.deep_stringify_keys,
+        gated_following_steps: Array(following_steps).map(&:deep_stringify_keys)
       )
       request_plan_summary!(run:, question:)
       question
