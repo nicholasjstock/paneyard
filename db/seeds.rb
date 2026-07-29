@@ -72,7 +72,9 @@ if Rails.env.development?
     question.text = "Which deployment target should this run use?"
     question.priority = "blocking"
     question.status = "open"
+    question.github_comment_url = "https://github.com/example/simple-retail-planner/issues/42#issuecomment-123456789"
   end
+  notification_question.update!(github_comment_url: "https://github.com/example/simple-retail-planner/issues/42#issuecomment-123456789")
 
   if notification_question.notification.nil?
     Notification.create!(
@@ -81,7 +83,7 @@ if Rails.env.development?
       kind: "blocking_question",
       title: "Blocking question needs your attention",
       body: notification_question.text,
-      link_url: notification_run.conversation_url
+      link_url: notification_question.github_comment_url
     )
   end
 
