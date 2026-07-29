@@ -13,6 +13,8 @@ ROOT_DIR = File.expand_path("..", __dir__)
 PID_FILE = File.join(ROOT_DIR, "tmp/pids/production.pid")
 LOG_FILE = File.join(ROOT_DIR, "log/production_service.log")
 STOP_GRACE_PERIOD = 15
+STARTUP_GRACE_PERIOD = 1
+STARTUP_POLL_INTERVAL = 0.2
 
 def running_pid
   return nil unless File.exist?(PID_FILE)
@@ -42,6 +44,22 @@ def start
   )
   Process.detach(pid)
   File.write(PID_FILE, pid.to_s)
+
+  deadline = Time.now + STARTUP_GRACE_PERIOD
+  while Time.now < deadline && process_alive?(pid)
+    sleep(STARTUP_POLL_INTERVAL)
+  end
+
+  unless process_alive?(pid)
+    warn "bin/service: failed to start (pid #{pid} exited). See #{LOG_FILE}."
+    if File.exist?(LOG_FILE)
+      warn "Recent log output:"
+      warn File.readlines(LOG_FILE).last(100).join
+    end
+    File.delete(PID_FILE) if File.exist?(PID_FILE)
+    exit 1
+  end
+
   puts "bin/service: started (pid #{pid}). Logging to #{LOG_FILE}."
 end
 
