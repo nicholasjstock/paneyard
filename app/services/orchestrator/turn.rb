@@ -39,6 +39,9 @@ module Orchestrator
       end
 
       run = Run.find_by!(run_id: run_id)
+      if completed_result?(result) && scope == "source-sync.md"
+        return { planner_request: nil, next_state: TickState.default_state(run_id).merge(phase: "completed", last_updated_at: now.utc.iso8601(3)) }
+      end
       if completed_result?(result) && FinalizationRecovery.resume_after_repair?(run:, role:)
         return { planner_request: nil, next_state: TickState.default_state(run_id).merge(phase: "completed", last_updated_at: now.utc.iso8601(3)) }
       end
