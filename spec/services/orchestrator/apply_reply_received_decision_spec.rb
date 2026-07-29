@@ -97,6 +97,25 @@ RSpec.describe Orchestrator::ApplyReplyReceivedDecision do
       ).to be(true)
     end
 
+    it "pull-request review revise: resumes planning without re-publishing the unchanged pull request" do
+      run = create_run
+      run.update!(status: "completed", pull_request_url: "https://github.com/example/repo/pull/42", publication_status: "awaiting_approval")
+      question = run.user_questions.create!(
+        asked_by: "orchestrator", scope: "pull_request_review", priority: "blocking", status: "open",
+        text: "This run's work is ready for review."
+      )
+      review = create_review(run:, question:, body: "Use the issue title instead of this generic wording.")
+
+      described_class.call(review:, action: "revise", summary: "The review prompt needs the issue or PR title.")
+
+      expect(question.reload.status).to eq("answered")
+      expect(run.reload).to have_attributes(status: "running", publication_status: "resume_requested", phase: "planning")
+      expect(Orchestrator::TickState.latest(run.run_id)[:phase]).to eq("planning")
+      replan = SpawnRequest.find_by!(run_id: run.run_id, requested_role: "planner", asked_by: "reply_received")
+      expect(replan.context).to include("issue or PR title")
+      expect(run.spawn_requests.where(requested_role: "git")).to be_empty
+    end
+
     it "rejects explain without an explanation" do
       run = create_run
       question = create_question(run)

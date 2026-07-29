@@ -1,7 +1,7 @@
 module McpTools
   class ReplyReceivedDecisionTool < MCP::Tool
     tool_name "submit_reply_received_decision"
-    description "Classify the operator's reply to a plan-approval question as approved, explain (the plan stands, post this explanation and ask again), or revise (the plan is wrong, replan and ask again). Never grants code, shell, or filesystem access."
+    description "Classify the operator's reply to a plan-approval or pull-request-review question as approved, explain, or revise. Rails applies the outcome for that question kind; this tool never grants code, shell, or filesystem access."
     input_schema(
       properties: {
         action: { type: "string", enum: ReplyReceivedReview::ACTIONS },

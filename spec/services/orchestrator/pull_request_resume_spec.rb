@@ -3,7 +3,7 @@ require "rails_helper"
 RSpec.describe Orchestrator::PullRequestResume do
   before { Run.reset_column_information }
 
-  it "implicitly answers the sole open blocking question, reconciles a published run with main, and still queues a continuation planner request" do
+  it "routes a pull-request review reply to reply_received before changing publication state" do
     workspace = Workspace.create!(name: "pr-resume-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(
       run_id: "pr-resume-#{SecureRandom.hex(4)}", task: "Resume from PR", target_root: workspace.root_path,
@@ -18,11 +18,13 @@ RSpec.describe Orchestrator::PullRequestResume do
 
     described_class.resume!(run, comment)
 
-    expect(run.reload).to have_attributes(status: "running", publication_status: "commit_pending", last_pull_request_comment_id: "123")
-    expect(review_question.reload).to have_attributes(status: "answered", answered_by: "github:reviewer", answer_text: "Please add a test.")
+    expect(run.reload).to have_attributes(status: "running", publication_status: "resume_requested", last_pull_request_comment_id: "123")
+    expect(review_question.reload.status).to eq("open")
     expect(run.run_context_entries.find_by!(entry_key: "conversation-comment-123").content).to include("Please add a test.")
-    expect(run.spawn_requests.find_by!(asked_by: "github_pr_comment").context).to include("Please add a test.")
-    expect(run.spawn_requests.find_by(requested_role: "git")).to have_attributes(write_scope: "git_managed")
+    review = ReplyReceivedReview.find_by!(user_question_id: review_question.question_id)
+    expect(review.github_comment_body).to eq("Please add a test.")
+    expect(run.spawn_requests.find_by!(requested_role: "reply_received", lineage_key: review.review_id)).to be_present
+    expect(run.spawn_requests.where(requested_role: "git")).to be_empty
   end
 
   it "only queues the continuation planner request, without touching git, for a run that has not published a PR yet" do
@@ -83,7 +85,7 @@ RSpec.describe Orchestrator::PullRequestResume do
       .not_to change(SpawnRequest, :count)
   end
 
-  it "reconciles with main on any comment wording, not just an exact merge-conflict phrase" do
+  it "routes a merge-conflict request through reply classification before any git reconciliation" do
     workspace = Workspace.create!(name: "pr-merge-conflict-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
     run = workspace.runs.create!(
       run_id: "pr-merge-conflict-#{SecureRandom.hex(4)}", task: "Resolve conflict", target_root: workspace.root_path,
@@ -94,9 +96,11 @@ RSpec.describe Orchestrator::PullRequestResume do
 
     described_class.resume!(run, { "id" => 124, "body" => "Can you resolve the conflict with main?", "user" => { "login" => "reviewer" } })
 
-    expect(run.reload).to have_attributes(status: "running", publication_status: "commit_pending")
-    expect(run.spawn_requests.find_by(requested_role: "git")).to have_attributes(write_scope: "git_managed")
-    expect(run.spawn_requests.find_by!(requested_role: "planner").context).to include("Can you resolve the conflict with main?")
+    expect(run.reload).to have_attributes(status: "running", publication_status: "resume_requested")
+    review = ReplyReceivedReview.find_by!(user_question_id: run.user_questions.open_only.find_by!(scope: "pull_request_review").question_id)
+    expect(review.github_comment_body).to eq("Can you resolve the conflict with main?")
+    expect(run.spawn_requests.find_by!(requested_role: "reply_received", lineage_key: review.review_id)).to be_present
+    expect(run.spawn_requests.where(requested_role: "git")).to be_empty
   end
 
   it "answers only explicitly referenced questions and does not resume while another stays open" do

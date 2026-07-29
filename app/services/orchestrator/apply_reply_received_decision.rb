@@ -16,10 +16,14 @@ module Orchestrator
       run = review.run
 
       ReplyReceivedReview.transaction do
-        case action
-        when "approved" then apply_approved!(run:, question:, review:, summary:)
-        when "explain" then apply_explain!(run:, question:, review:, explanation:)
-        when "revise" then apply_revise!(run:, question:, review:, summary:)
+        if pull_request_review_question?(question)
+          apply_pull_request_review!(run:, question:, review:, action:, summary:, explanation:)
+        else
+          case action
+          when "approved" then apply_approved!(run:, question:, review:, summary:)
+          when "explain" then apply_explain!(run:, question:, review:, explanation:)
+          when "revise" then apply_revise!(run:, question:, review:, summary:)
+          end
         end
         review.update!(status: "completed", action:, summary:, completed_at: Time.current)
       end
@@ -92,5 +96,56 @@ module Orchestrator
       run.publish_phase!(phase: "planning", owner: "reply_received", summary: "Plan-approval objection sent back to the planner: #{summary}")
     end
     private_class_method :apply_revise!
+
+    def apply_pull_request_review!(run:, question:, review:, action:, summary:, explanation:)
+      question.update!(status: "answered", answered_by: "reply_received", answered_at: Time.current, answer_text: review.github_comment_body)
+
+      case action
+      when "approved"
+        run.update!(status: "completed", stopped_at: run.stopped_at || Time.current, publication_status: "awaiting_approval")
+        run.publish_phase!(phase: "completed", owner: "reply_received", summary: "Operator approved the pull request for merge.")
+      when "explain"
+        UserQuestion.create!(
+          run_id: run.run_id, asked_by: "reply_received", priority: "blocking", scope: "pull_request_review",
+          text: "#{explanation}\n\nDoes this resolve it? Reply `approved` to leave the pull request ready to merge, or reply with a correction.",
+          context: question.context
+        )
+        run.publish_phase!(phase: "awaiting_user_feedback", owner: "reply_received", summary: "Explained the pull request; awaiting operator review.")
+      when "revise"
+        run.update!(status: "running", stopped_at: nil, publication_status: "resume_requested")
+        resume_tick_state_for_revision!(run:, summary:)
+        SpawnRequest.create!(
+          run_id: run.run_id, asked_by: "reply_received", requested_role: "planner", priority: "blocking",
+          scope: Turn::PLANNER_FOLLOWUP_SCOPE,
+          text: "The operator's pull-request review reply requests a revision. Plan the smallest bounded change to address it before any further publication work. Do not queue git reconciliation or open another review question until the revised work is complete.",
+          context: "Pull-request review feedback: #{summary}",
+          tags: %w[planner reply_received revise pull-request-review]
+        )
+        run.publish_phase!(phase: "planning", owner: "reply_received", summary: "Pull-request review feedback sent to the planner: #{summary}")
+      end
+    end
+    private_class_method :apply_pull_request_review!
+
+    # A completed PR retains a completed TickState. If we only flip Run back
+    # to running, TickRunJob sees that stale state and re-enters finalization
+    # before it can dispatch the revision planner. Advance the state first so
+    # the next tick treats this as new planning work.
+    def resume_tick_state_for_revision!(run:, summary:)
+      previous = TickState.latest(run.run_id)
+      TickState.write(
+        previous.merge(
+          phase: "planning",
+          tick_count: previous.fetch(:tick_count) + 1,
+          last_plan_summary: "Pull-request review revision requested: #{summary}",
+          pending_spawn_keys: [], following_steps: [], last_stall_finding: nil
+        )
+      )
+    end
+    private_class_method :resume_tick_state_for_revision!
+
+    def pull_request_review_question?(question)
+      question.scope == "pull_request_review"
+    end
+    private_class_method :pull_request_review_question?
   end
 end

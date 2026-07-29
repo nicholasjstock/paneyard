@@ -1,7 +1,7 @@
 module McpTools
   class ReplyReceivedStateTool < MCP::Tool
     tool_name "get_reply_received_state"
-    description "Read the plan-approval question this reply answers, its full original context, and the operator's reply text."
+    description "Read the plan-approval or pull-request-review question this reply answers, its full original context, and the operator's reply text."
     input_schema(properties: {})
 
     def self.call(server_context:)
@@ -10,7 +10,7 @@ module McpTools
       question = review.user_question
 
       ToolResponse.structured(
-        review: { id: review.review_id, questionId: review.user_question_id },
+        review: { id: review.review_id, questionId: review.user_question_id, questionKind: question&.scope == "pull_request_review" ? "pull_request_review" : "plan_approval" },
         question: question && {
           text: question.text, context: question.context, askedAt: question.asked_at.iso8601(3)
         },

@@ -19,6 +19,24 @@ RSpec.describe Orchestrator::ReplyReceivedTrigger do
     expect(request.context).to include("not sure why this is needed")
   end
 
+  it "revives a completed pull-request review run so its reply can be dispatched" do
+    run = create_run
+    run.update!(status: "completed", publication_status: "awaiting_approval")
+    Orchestrator::TickState.write(
+      run_id: run.run_id, phase: "completed", tick_count: 1, last_plan_summary: nil,
+      pending_spawn_keys: [], following_steps: [], last_stall_finding: nil
+    )
+    question = run.user_questions.create!(
+      asked_by: "orchestrator", scope: "pull_request_review", priority: "blocking", status: "open",
+      text: "This run's work is ready for review."
+    )
+
+    described_class.call(question:, comment: { "id" => 8, "user" => { "login" => "nicholasjstock" }, "body" => "Please change the wording." })
+
+    expect(run.reload).to have_attributes(status: "running", publication_status: "resume_requested")
+    expect(Orchestrator::TickState.latest(run.run_id)[:phase]).to eq("planning")
+  end
+
   def create_run
     root = Dir.mktmpdir("reply-received-trigger")
     workspace = Workspace.create!(name: "reply-received-trigger-#{SecureRandom.hex(4)}", root_path: root)

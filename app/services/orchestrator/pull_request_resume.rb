@@ -78,15 +78,14 @@ module Orchestrator
         author = comment.dig("user", "login") || "unknown"
         body = comment.fetch("body")
 
-        # A reply answering the run's plan-approval question is never
-        # mechanically "answered" the way an ordinary blocking question is:
-        # unblocking dispatch here is itself the consequential action this
-        # gate exists to protect (see agent_personas/reply_received.md), so
-        # the reply's content must be classified by that bounded review
-        # before anything unblocks -- never inferred from a magic phrase.
-        plan_approval_question = run.user_questions.open_only.where(priority: "blocking").plan_approval.first
-        if plan_approval_question
-          Orchestrator::ReplyReceivedTrigger.call(question: plan_approval_question, comment: comment)
+        # A reply to either a plan gate or a completed PR's review gate must
+        # be classified before Rails changes run state. In particular, review
+        # feedback such as "change the wording" is a revise instruction, not
+        # permission to re-publish the unchanged pull request.
+        classified_question = run.user_questions.open_only.where(priority: "blocking").plan_approval.first ||
+          run.user_questions.open_only.where(priority: "blocking", scope: "pull_request_review").first
+        if classified_question
+          Orchestrator::ReplyReceivedTrigger.call(question: classified_question, comment: comment)
           RunContext.upsert!(
             run_id: run.run_id, entry_key: "conversation-comment-#{comment_id}", kind: "operator_decision", status: "confirmed",
             content: "GitHub comment from #{author}: #{body}", evidence_ref: comment["html_url"], created_by: "github_pr_comment"
