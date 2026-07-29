@@ -33,6 +33,45 @@ RSpec.describe "runs", type: :request do
     expect(run.target_root).to eq(workspace.source_root)
   end
 
+  it "accepts multiple uploaded launch artifacts and records their manifest" do
+    workspace = Workspace.create!(
+      name: "runs-controller-upload-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir,
+      protected_path_patterns: [ "app/controllers/**/*.rb" ]
+    )
+    allow(LaunchRunJob).to receive(:perform_later)
+    first = Tempfile.new([ "first", ".db" ])
+    second = Tempfile.new([ "second", ".log" ])
+    first.write("first artifact")
+    first.rewind
+    second.write("second artifact")
+    second.rewind
+
+    expect do
+      post workspace_runs_path(workspace), params: {
+        run: {
+          task: "Inspect uploaded artifacts", launcher_variant: "claude",
+          launch_files: [
+            Rack::Test::UploadedFile.new(first.path, "application/octet-stream", original_filename: "first.db"),
+            Rack::Test::UploadedFile.new(second.path, "text/plain", original_filename: "second.log")
+          ]
+        }
+      }
+    end.to change(Run, :count).by(1)
+
+    expect(response).to have_http_status(:redirect)
+    run = workspace.runs.order(:created_at).last
+    expect(run.launch_artifacts).to contain_exactly(
+      { "name" => "first.db", "source_run_id" => run.run_id, "source_path" => "first.db" },
+      { "name" => "second.log", "source_run_id" => run.run_id, "source_path" => "second.log" }
+    )
+    expect(File.read(Orchestrator::ArtifactStore.resolve_path(run.target_root, run.run_id, "first.db"))).to eq("first artifact")
+    expect(File.read(Orchestrator::ArtifactStore.resolve_path(run.target_root, run.run_id, "second.log"))).to eq("second artifact")
+  ensure
+    first&.close!
+    second&.close!
+    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+  end
+
   # Regression: run-20260727-165215-d272 had a worktree_name (assigned
   # eagerly at creation) but never a real provisioned worktree, since
   # GitWorktree.provision! failed first. publication_retryable? now checks

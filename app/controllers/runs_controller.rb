@@ -18,6 +18,7 @@ class RunsController < ApplicationController
     @run.status = "launching"
     @run.launched_by = current_operator
     @run.target_root = current_workspace.source_root
+    @run.launch_artifacts = normalize_launch_artifacts(run_params[:launch_artifacts]) + uploaded_artifacts(launch_files_params)
 
     if @run.save
       LaunchRunJob.perform_later(@run.id)
@@ -104,7 +105,35 @@ class RunsController < ApplicationController
   end
 
   def run_params
-    params.require(:run).permit(:task, :launcher_variant)
+    params.require(:run).permit(:task, :launcher_variant, :parent_run_id, :launch_artifacts)
+  end
+
+  def launch_files_params
+    params.require(:run).permit(launch_files: [])[:launch_files]
+  end
+
+  def normalize_launch_artifacts(entries)
+    entries = JSON.parse(entries) if entries.is_a?(String) && entries.present?
+    Array(entries).filter_map do |entry|
+      entry = entry.to_h.stringify_keys
+      next if entry["name"].blank?
+
+      entry.slice("name", "source_run_id", "source_path").merge("source_run_id" => entry["source_run_id"].presence)
+    end
+  end
+
+  def uploaded_artifacts(files)
+    Array(files).filter_map do |uploaded|
+      next unless uploaded.respond_to?(:original_filename) && uploaded.original_filename.present?
+
+      name = File.basename(uploaded.original_filename)
+      path = Orchestrator::ArtifactStore.resolve_path(@run.target_root, @run.run_id, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      FileUtils.cp(uploaded.tempfile.path, path)
+      { "name" => name, "source_run_id" => @run.run_id, "source_path" => uploaded.original_filename }
+    end
+  rescue JSON::ParserError
+    []
   end
 
   def generate_run_id

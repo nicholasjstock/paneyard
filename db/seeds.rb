@@ -40,4 +40,25 @@ if Rails.env.development?
       run.worktree_name = attrs[:worktree_name]
     end
   end
+
+  launch_artifact_run = Run.find_or_create_by!(run_id: "demo-launch-artifacts") do |run|
+    run.workspace = demo_workspace
+    run.task = "Review the uploaded launch artifacts"
+    run.target_root = File.join(demo_workspace.root_path, "launch-artifacts")
+    run.launcher_variant = "claude"
+    run.status = "running"
+    run.worktree_name = "review-launch-artifacts"
+  end
+
+  launch_artifacts = [
+    { "name" => "requirements.txt", "source_run_id" => launch_artifact_run.run_id,
+      "source_path" => "requirements.txt" },
+    { "name" => "sample-data.json", "source_run_id" => launch_artifact_run.run_id,
+      "source_path" => "sample-data.json" }
+  ]
+  launch_artifact_run.update!(launch_artifacts: launch_artifacts)
+  Orchestrator::ArtifactStore.write(launch_artifact_run.target_root, launch_artifact_run.run_id,
+                                    "requirements.txt", "Uploaded at launch\n- artifact manifest\n")
+  Orchestrator::ArtifactStore.write(launch_artifact_run.target_root, launch_artifact_run.run_id,
+                                    "sample-data.json", '{"source":"synthetic demo fixture","records":2}' + "\n")
 end

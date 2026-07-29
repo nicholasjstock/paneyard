@@ -11,13 +11,15 @@ class LaunchRunJob < ApplicationJob
   def perform(id)
     run = Run.find(id)
     Orchestrator::GitWorktree.provision!(run)
+    inherited = run.available_launch_artifacts
     run.spawn_requests.create!(
       asked_by: run.launched_by.presence || "ops_hub",
       scope: "workflow-plan.md",
       text: run.task,
       requested_role: "planner",
       priority: "blocking",
-      tags: %w[ops-hub launch]
+      tags: %w[ops-hub launch],
+      inherited_artifacts: inherited.map { |artifact| artifact["name"] }
     )
     Orchestrator::ProjectInitTrigger.call(run: run)
 
