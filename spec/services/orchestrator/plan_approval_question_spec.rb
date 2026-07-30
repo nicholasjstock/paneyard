@@ -28,7 +28,7 @@ RSpec.describe Orchestrator::PlanApprovalQuestion do
       success_check: "Distinctive success check text."
     }
 
-    question = described_class.ask!(decision:, next_step:)
+    question = described_class.ask!(decision:, next_step:, following_steps: [])
 
     expect(question.context).to include("Distinctive-verbatim-task-text-xyz")
     expect(question.context).to include("distinctive-criterion")
@@ -55,7 +55,7 @@ RSpec.describe Orchestrator::PlanApprovalQuestion do
     decision = PlannerDecision.create!(run:, spawn_request: request, status: "running")
     next_step = { artifact: "fix.md", mode: "implementation", write_scope: "scoped_changes", allowed_paths: [], addresses_criteria: [], success_check: "check" }
 
-    question = described_class.ask!(decision:, next_step:)
+    question = described_class.ask!(decision:, next_step:, following_steps: [])
 
     reporter_request = run.spawn_requests.find_by!(requested_role: "reporter")
     expect(reporter_request.scope).to eq("plan-summary-#{question.question_id}.md")
@@ -81,7 +81,7 @@ RSpec.describe Orchestrator::PlanApprovalQuestion do
     )
     next_step = { artifact: "fix.md", mode: "implementation", write_scope: "scoped_changes", allowed_paths: [], addresses_criteria: [], success_check: "check" }
 
-    question = described_class.ask!(decision:, next_step:)
+    question = described_class.ask!(decision:, next_step:, following_steps: [])
 
     refute_includes question.context, "a" * (described_class::TASK_LIMIT + 1)
     refute_includes question.context, "b" * (described_class::DIAGNOSIS_LIMIT + 1)
