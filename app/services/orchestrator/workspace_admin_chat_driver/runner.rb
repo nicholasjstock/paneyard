@@ -10,7 +10,7 @@ module Orchestrator
 
       class ConcurrentTurnError < StandardError; end
 
-      PROVIDERS = { "claude" => ClaudeProvider, "codex" => CodexProvider }.freeze
+      PROVIDERS = { "claude" => ClaudeProvider, "codex" => CodexProvider, "opencode" => OpenCodeProvider }.freeze
 
       # The admin chat's own cwd (Workspace#root_path) is deliberately the
       # workspace root, not the main checkout -- it needs to see every
@@ -28,7 +28,7 @@ module Orchestrator
       # (a resumed session already has it in context from the first turn;
       # CodexProvider's own module comment notes a resumed turn otherwise
       # behaves identically).
-      PROJECT_INSTRUCTIONS_FILE = { "claude" => "CLAUDE.md", "codex" => "AGENTS.md" }.freeze
+      PROJECT_INSTRUCTIONS_FILE = { "claude" => "CLAUDE.md", "codex" => "AGENTS.md", "opencode" => "AGENTS.md" }.freeze
 
       def worktree_orientation(workspace, provider_name)
         "This directory (#{workspace.root_path}) is this workspace's root -- it holds #{Pathname(workspace.source_root).basename} " \

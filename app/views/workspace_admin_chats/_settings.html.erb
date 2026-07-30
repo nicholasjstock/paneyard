@@ -20,6 +20,13 @@
         <option value="<%= model %>" <%= "selected" if chat.model_for("codex") == model %>><%= model %></option>
       <% end %>
     </select>
+
+    <select name="opencode_model" data-admin-chat-drawer-target="opencodeModelSelect" data-action="change->admin-chat-drawer#submitSettings"
+            <%= "hidden" unless chat.active_provider == "opencode" %>>
+      <% WorkspaceAdminChat::OPENCODE_MODELS.each do |model| %>
+        <option value="<%= model %>" <%= "selected" if chat.model_for("opencode") == model %>><%= model %></option>
+      <% end %>
+    </select>
   <% end %>
 
   <%= button_to "Reset", reset_workspace_workspace_admin_chat_path(chat.workspace, provider: chat.active_provider), method: :post,

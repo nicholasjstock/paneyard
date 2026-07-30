@@ -29,6 +29,8 @@ module Orchestrator
     CLAUDE_MODELS = { small: "haiku", strong: "sonnet" }.freeze
     CODEX_SMALL_MODEL = WorkerSpawner::CODEX_SMALL_MODEL
     CODEX_PROMOTED_MODEL = WorkerSpawner::CODEX_PROMOTED_MODEL
+    OPENCODE_SMALL_MODEL = WorkerSpawner::OPENCODE_SMALL_MODEL
+    OPENCODE_PROMOTED_MODEL = WorkerSpawner::OPENCODE_PROMOTED_MODEL
     OUTPUT_LIMIT = 50_000
 
     # High by default -- the planner's own decision quality gates everything
@@ -43,10 +45,13 @@ module Orchestrator
       raise ArgumentError, "Unknown planner model tier: #{model_tier}" unless MODEL_TIERS.include?(model_tier)
 
       prompt = PlannerBrief.build(run:, request:, model_tier:)
-      if run.launcher_variant == "claude"
+      case run.launcher_variant
+      when "claude"
         run_claude(run:, decision:, prompt:, model_tier:, effort:, command_runner:)
-      else
+      when "codex"
         run_codex(run:, decision:, prompt:, model_tier:, effort:, command_runner:)
+      else
+        run_opencode(run:, decision:, prompt:, model_tier:, effort:, command_runner:)
       end
     end
 
@@ -108,6 +113,30 @@ module Orchestrator
 
         { usage: {}, model: selected_model, cli_output: bounded_output(stdout) }
       end
+    end
+
+    def run_opencode(run:, decision:, prompt:, model_tier:, effort:, command_runner:)
+      token = PlannerDecisionCapability.issue(decision)
+      selected_model = model_tier == :strong ? OPENCODE_PROMOTED_MODEL : OPENCODE_SMALL_MODEL
+      mcp_config_content = JSON.generate({
+        mcpServers: { planner_decision: {
+          type: "http", url: "#{WorkerSpawner.rails_mcp_url}/planner-decision",
+          headers: { Authorization: "Bearer #{token}" }
+        } }
+      })
+      env = WorkerSpawner.build_worker_env.merge("OPENCODE_CONFIG_CONTENT" => mcp_config_content)
+      args = [
+        "opencode", "run", "--format", "json", "--auto",
+        "-m", selected_model,
+        *(effort ? [ "--variant", effort ] : []),
+        "--dir", run.target_root, "--agent", "build", prompt
+      ]
+      stdout, stderr, status = command_runner.call(env, *args, chdir: run.target_root)
+      raise Error.new("Planner model failed with exit #{status.exitstatus}: #{stderr.presence || stdout}", output: bounded_output("#{stdout}\n#{stderr}")) unless status.success?
+
+      { usage: {}, model: selected_model, cli_output: bounded_output(stdout) }
+    rescue JSON::ParserError => e
+      raise Error.new("Planner model returned invalid JSON: #{e.message}", output: bounded_output(stdout))
     end
 
     def usage_from_claude(envelope)

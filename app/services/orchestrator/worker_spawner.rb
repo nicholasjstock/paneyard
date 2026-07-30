@@ -30,6 +30,9 @@ module Orchestrator
     CODEX_SMALL_MODEL = "gpt-5.6-luna"
     CODEX_PROMOTED_MODEL = "gpt-5.6-terra"
     CODEX_WORKER_MODEL = CODEX_SMALL_MODEL
+    OPENCODE_SMALL_MODEL = "ollama/qwen2.5-coder:7b"
+    OPENCODE_PROMOTED_MODEL = "ollama/qwen2.5-coder:7b"
+    OPENCODE_WORKER_MODEL = OPENCODE_SMALL_MODEL
 
     def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil,
       write_scope: nil, allowed_paths: [], model_tier: "small", mcp_override: nil, inherited_artifacts: [],
@@ -67,10 +70,13 @@ module Orchestrator
       ) unless mcp_override
 
       driver = run.launcher_variant
-      selected_model = if driver == "claude"
+      selected_model = case driver
+      when "claude"
         claude_model_for(role, mode:, model_tier:)
-      else
+      when "codex"
         codex_model_for(model_tier:) || "default"
+      else
+        opencode_model_for(model_tier:) || "default"
       end
       enriched_prompt = build_prompt_with_persona(driver: driver, role: role, prompt: prompt)
       unless mcp_override
@@ -87,10 +93,14 @@ module Orchestrator
       # one config format/mechanism at all). Skipping the write for codex
       # avoids persisting a file neither the process nor anything else
       # (confirmed: referenced nowhere outside this file) ever reads back.
+      # opencode reads MCP config from its own opencode.json (injected via
+      # OPENCODE_CONFIG_CONTENT env var -- see opencode_args).
       if mcp_override
-        write_worker_mcp_config(
-          mcp_config_path, mcp_override[:token], server_name: mcp_override[:server_name], url: mcp_override[:url]
-        ) if driver == "claude"
+        if driver == "claude"
+          write_worker_mcp_config(
+            mcp_config_path, mcp_override[:token], server_name: mcp_override[:server_name], url: mcp_override[:url]
+          )
+        end
       else
         capability_token, capability_token_digest = Worker.issue_capability
         if driver == "claude"
@@ -141,17 +151,24 @@ module Orchestrator
       # otherwise fall back to the role's own persona-declared default.
       effective_effort = effort || persona_declared_effort(role)
 
-      command, args =
-        if driver == "claude"
+      command, args, opencode_mcp_env =
+        case driver
+        when "claude"
           [ "claude", claude_args(
             enriched_prompt, role:, mode:, mcp_config_path:, settings_path: claude_settings_path,
             target_root: root_dir, policy:, model_tier:, mcp_override:,
             resume_session_id:, effort: effective_effort
-          ) ]
-        else
+          ), nil ]
+        when "codex"
           [ "codex", codex_args(
             root_dir:, last_message_path:, policy:, model_tier:, mcp_override:, resume_session_id:, effort: effective_effort
-          ) ]
+          ), nil ]
+        else
+          oc_args, oc_env = opencode_args(
+            enriched_prompt, root_dir:, last_message_path:, policy:, model_tier:,
+            mcp_override:, resume_session_id:, effort: effective_effort
+          )
+          [ "opencode", oc_args, oc_env ]
         end
 
       worker_env = build_worker_env.merge(
@@ -167,6 +184,7 @@ module Orchestrator
         # ~/.cache and the target repository.
         "XDG_CACHE_HOME" => cache_dir
       ).merge(git_worker_env(role, run))
+      worker_env.merge!(opencode_mcp_env) if opencode_mcp_env
 
       File.write(prompt_path, enriched_prompt)
       File.write(log_path, "")
@@ -184,7 +202,7 @@ module Orchestrator
 
       # Brakeman flags this as command injection because command/args/paths
       # trace back to caller-supplied role/nickname/scope. Safe as written:
-      # command is always the literal "claude" or "codex" (never derived
+      # command is always the literal "claude", "codex", or "opencode" (never derived
       # from input), args is an argv array (no shell involved, so no
       # metacharacter can escape its argument boundary), and nickname --
       # the only piece of this that reaches a file path -- is validated by
@@ -196,7 +214,7 @@ module Orchestrator
         pgroup: true, in: stdin_read, out: [ log_path, "a" ], err: [ log_path, "a" ]
       )
       stdin_read.close
-      stdin_write.write(enriched_prompt) if driver != "claude"
+      stdin_write.write(enriched_prompt) if driver == "codex"
       stdin_write.close
       Process.detach(pid)
 
@@ -275,7 +293,11 @@ module Orchestrator
     def reconcile_pending_session_ids!(run_id:, role:, driver:)
       Worker.where(run_id:, role:, command: driver, status: "stopped", cli_session_id: nil).find_each do |worker|
         session_id = begin
-          driver == "codex" ? Orchestrator::LogReader.codex_session_id(worker.log_path) : Orchestrator::LogReader.claude_session_id(worker.log_path)
+          case driver
+          when "codex" then Orchestrator::LogReader.codex_session_id(worker.log_path)
+          when "opencode" then Orchestrator::LogReader.opencode_session_id(worker.log_path)
+          else Orchestrator::LogReader.claude_session_id(worker.log_path)
+          end
         rescue Errno::ENOENT, Errno::EACCES
           nil
         end
@@ -404,6 +426,10 @@ module Orchestrator
       model_tier.to_s == "strong" ? CODEX_PROMOTED_MODEL : CODEX_SMALL_MODEL
     end
 
+    def opencode_model_for(model_tier: "small")
+      model_tier.to_s == "strong" ? OPENCODE_PROMOTED_MODEL : OPENCODE_SMALL_MODEL
+    end
+
     def codex_args(root_dir:, last_message_path:, policy:, model_tier: "small", mcp_override: nil, resume_session_id: nil, effort: nil)
       model_args = [ "--model", codex_model_for(model_tier:) ]
       # No dedicated --reasoning-effort/--effort flag exists for codex --
@@ -450,7 +476,35 @@ module Orchestrator
       end
     end
 
-    # The shell remains the tracked process while the CLI runs. It records the
+    def opencode_args(prompt, root_dir:, last_message_path:, policy:, model_tier: "small", mcp_override: nil, resume_session_id: nil, effort: nil)
+      model_args = [ "-m", opencode_model_for(model_tier:) ]
+      effort_args = effort ? [ "--variant", effort ] : []
+      if mcp_override
+        return [
+          "run", "--format", "json", "--auto",
+          *model_args, *effort_args,
+          "--dir", root_dir, "--agent", "build", prompt
+        ]
+      end
+
+      mcp_config_content = JSON.generate({
+        mcpServers: {
+          workflow: {
+            type: "http",
+            url: "#{rails_mcp_url}/worker"
+          }
+        }
+      })
+      env_mcp_key = "OPENCODE_CONFIG_CONTENT"
+      env_mcp_config = { env_mcp_key => mcp_config_content }
+
+      args = [ "run", "--format", "json", "--auto", *model_args, *effort_args ]
+      args += [ "-s", resume_session_id ] if resume_session_id
+      args += [ "--dir", root_dir, prompt ]
+      [ args, env_mcp_config ]
+    end
+
+    # The shell remains the tracked process while the pipeline runs. It records the
     # CLI's exit code before exiting so reconciliation can distinguish a quota
     # rejection from an unobserved process disappearance.
     def worker_exit_wrapper
@@ -763,7 +817,8 @@ module Orchestrator
         WORKFLOW_REPLY_RECEIVED_TOKEN: resolved.call("WORKFLOW_REPLY_RECEIVED_TOKEN").present? ? "[set]" : nil,
         GH_TOKEN: resolved.call("GH_TOKEN").present? ? "[set]" : nil,
         OPENAI_API_KEY: resolved.call("OPENAI_API_KEY").present? ? "[set]" : nil,
-        OPENAI_BASE_URL: resolved.call("OPENAI_BASE_URL")
+        OPENAI_BASE_URL: resolved.call("OPENAI_BASE_URL"),
+        OPENCODE_CONFIG_CONTENT: resolved.call("OPENCODE_CONFIG_CONTENT").present? ? "[set]" : nil
       }
     end
 

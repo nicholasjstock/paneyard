@@ -16,7 +16,7 @@ class Run < ApplicationRecord
   # metadata does not try to write them during create/update.
   self.ignored_columns += %w[scenario frontend_url]
 
-  LAUNCHER_VARIANTS = %w[claude codex].freeze
+  LAUNCHER_VARIANTS = %w[claude codex opencode].freeze
   STATUSES = %w[launching running stopping stopped completed failed].freeze
   NON_TERMINAL_STATUSES = %w[launching running stopping].freeze
 
@@ -143,7 +143,7 @@ class Run < ApplicationRecord
   end
 
   def alternate_launcher_variant
-    (LAUNCHER_VARIANTS - [ launcher_variant ]).sole
+    (LAUNCHER_VARIANTS - [ launcher_variant ]).first
   end
 
   # The root acceptance criterion whose subtree owns the next handoff.

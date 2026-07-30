@@ -32,7 +32,7 @@ module Orchestrator
       raise Ineligible, "Run is not waiting for launcher capacity." unless run.capacity_blocked?
       raise Ineligible, "Unsupported launcher: #{target}." unless Run::LAUNCHER_VARIANTS.include?(target)
       raise Ineligible, "Run already uses #{target}." if run.launcher_variant == target
-      raise Ineligible, "The selected launcher is not the available alternative." unless target == run.alternate_launcher_variant
+      raise Ineligible, "Unchanged launcher variant." if target == run.launcher_variant
       raise Ineligible, "A worker is still active on this run." if run.workers.exists?(status: "running")
       raise Ineligible, "A planner decision is still active on this run." if PlannerDecision.active.where(run_id: run.run_id).exists?
     end

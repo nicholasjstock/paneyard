@@ -8,7 +8,7 @@ import { Controller } from "@hotwired/stimulus"
 // Stream refresh (broadcast_refresh_to on every streamed event) or a full
 // navigation back to the same page don't lose either.
 export default class extends Controller {
-  static targets = ["panel", "thread", "input", "providerSelect", "claudeModelSelect", "codexModelSelect"]
+  static targets = ["panel", "thread", "input", "providerSelect", "claudeModelSelect", "codexModelSelect", "opencodeModelSelect"]
 
   connect() {
     this.setOpen(sessionStorage.getItem(this.storageKey) === "open")
@@ -28,6 +28,7 @@ export default class extends Controller {
     const provider = this.providerSelectTarget.value
     if (this.hasClaudeModelSelectTarget) this.claudeModelSelectTarget.hidden = provider !== "claude"
     if (this.hasCodexModelSelectTarget) this.codexModelSelectTarget.hidden = provider !== "codex"
+    if (this.hasOpencodeModelSelectTarget) this.opencodeModelSelectTarget.hidden = provider !== "opencode"
   }
 
   // No Save button -- a settings select submits itself the moment it
