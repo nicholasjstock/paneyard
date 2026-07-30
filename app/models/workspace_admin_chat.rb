@@ -5,7 +5,7 @@
 # no xterm.js, no pty -- and both drivers' resumable session ids are kept
 # side by side so switching active_provider never loses either history.
 class WorkspaceAdminChat < ApplicationRecord
-  PROVIDERS = %w[claude codex].freeze
+  PROVIDERS = %w[claude codex opencode].freeze
   STATUSES = %w[idle running failed].freeze
 
   # Hardcoded rather than free text: the CLIs only accept a known alias/id
@@ -16,6 +16,7 @@ class WorkspaceAdminChat < ApplicationRecord
   # the priciest tier.
   CLAUDE_MODELS = %w[haiku sonnet opus].freeze
   CODEX_MODELS = [ Orchestrator::WorkerSpawner::CODEX_SMALL_MODEL, Orchestrator::WorkerSpawner::CODEX_PROMOTED_MODEL ].freeze
+  OPENCODE_MODELS = %w[ollama/qwen2.5-coder:7b].freeze
 
   belongs_to :workspace
   has_many :messages, -> { order(:created_at) }, class_name: "WorkspaceAdminChatMessage", dependent: :destroy
@@ -41,26 +42,46 @@ class WorkspaceAdminChat < ApplicationRecord
   end
 
   def session_id_for(provider)
-    provider == "codex" ? codex_session_id : claude_session_id
+    case provider
+    when "codex" then codex_session_id
+    when "opencode" then opencode_session_id
+    else claude_session_id
+    end
   end
 
   def set_session_id!(provider, session_id)
     return if session_id.blank?
 
-    update!(provider == "codex" ? { codex_session_id: session_id } : { claude_session_id: session_id })
+    update!(case provider
+            when "codex" then { codex_session_id: session_id }
+            when "opencode" then { opencode_session_id: session_id }
+            else { claude_session_id: session_id }
+            end)
   end
 
   def model_for(provider)
-    stored = provider == "codex" ? codex_model : claude_model
+    stored = case provider
+             when "codex" then codex_model
+             when "opencode" then opencode_model
+             else claude_model
+             end
     stored.presence || self.class.models_for(provider).first
   end
 
   def self.models_for(provider)
-    provider == "codex" ? CODEX_MODELS : CLAUDE_MODELS
+    case provider
+    when "codex" then CODEX_MODELS
+    when "opencode" then OPENCODE_MODELS
+    else CLAUDE_MODELS
+    end
   end
 
   def reset_session!(provider)
-    update!(provider == "codex" ? { codex_session_id: nil } : { claude_session_id: nil })
+    update!(case provider
+            when "codex" then { codex_session_id: nil }
+            when "opencode" then { opencode_session_id: nil }
+            else { claude_session_id: nil }
+            end)
   end
 
   private

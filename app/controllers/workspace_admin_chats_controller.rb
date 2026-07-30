@@ -14,6 +14,8 @@ class WorkspaceAdminChatsController < ApplicationController
     chat.update!(claude_model:) if claude_model
     codex_model = params[:codex_model].presence_in(WorkspaceAdminChat::CODEX_MODELS)
     chat.update!(codex_model:) if codex_model
+    opencode_model = params[:opencode_model].presence_in(WorkspaceAdminChat::OPENCODE_MODELS)
+    chat.update!(opencode_model:) if opencode_model
 
     redirect_back fallback_location: workspace_runs_path(current_workspace)
   end

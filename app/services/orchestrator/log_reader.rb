@@ -33,6 +33,23 @@ module Orchestrator
       tail.empty? ? nil : "#{tail.join("\n")}\n"
     end
 
+    # opencode's first JSON event is always `step_start` carrying its
+    # session id in the top-level `sessionID` field.
+    def opencode_session_id(path)
+      return nil unless File.exist?(path)
+
+      File.foreach(path).first(20).each do |line|
+        event = JSON.parse(line)
+        next unless event.is_a?(Hash) && event["type"] == "step_start"
+
+        return event["sessionID"]
+      rescue JSON::ParserError
+        next
+      end
+
+      nil
+    end
+
     # Neither driver is given a session id up front anymore (see
     # WorkerSpawner) -- both mint their own on a fresh spawn, so Rails only
     # learns it after the fact by reading it back out of the worker's own
