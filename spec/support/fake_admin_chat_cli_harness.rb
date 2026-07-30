@@ -24,19 +24,34 @@ module FakeAdminChatCliHarness
   end
 
   def fake_cli_script(lines:, stderr_lines:, exit_status:, start_delay:, hang:, capture_args_to:)
-    <<~RUBY
-      #!/usr/bin/env ruby
-      require "json"
-      STDOUT.sync = true
-      STDERR.sync = true
-      $stdin.close
-      File.write(#{capture_args_to.to_s.inspect}, ARGV.to_json) unless #{capture_args_to.nil?}
-      sleep(#{start_delay.to_f})
-      #{lines.map { |line| "puts #{line.inspect}" }.join("\n")}
-      #{stderr_lines.map { |line| "STDERR.puts #{line.inspect}" }.join("\n")}
-      #{"loop { sleep 1 }" if hang}
-      exit(#{exit_status.to_i})
-    RUBY
+    if hang
+      # Use a shell script for the hang case so that SIGTERM reliably
+      # terminates the process via signal (Ruby's default SIGTERM handler
+      # calls exit(0), which prevents Process::Status#signaled? from
+      # returning true that the provider's cancelled? check relies on).
+      cap = capture_args_to ? capture_args_to.shellescape : nil
+      <<~SH
+        #!/bin/sh
+        #{cap ? %{ruby -e "File.write(#{cap.dump}, ARGV.to_json)" -- "$@"} : ""}
+        sleep #{start_delay.to_f}
+        #{lines.map { |line| "echo #{line.shellescape}" }.join("\n")}
+        #{stderr_lines.map { |line| "echo #{line.shellescape} >&2" }.join("\n")}
+        exec tail -f /dev/null
+      SH
+    else
+      <<~RUBY
+        #!/usr/bin/env ruby
+        require "json"
+        STDOUT.sync = true
+        STDERR.sync = true
+        $stdin.close
+        File.write(#{capture_args_to.to_s.inspect}, ARGV.to_json) unless #{capture_args_to.nil?}
+        sleep(#{start_delay.to_f})
+        #{lines.map { |line| "puts #{line.inspect}" }.join("\n")}
+        #{stderr_lines.map { |line| "STDERR.puts #{line.inspect}" }.join("\n")}
+        exit(#{exit_status.to_i})
+      RUBY
+    end
   end
 end
 

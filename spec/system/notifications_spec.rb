@@ -36,7 +36,11 @@ RSpec.describe "global notifications", type: :system do
     expect(link["target"]).to eq("_blank")
     expect(link["rel"]).to include("noopener")
 
-    click_link notification.title
+    new_window = window_opened_by { click_link notification.title }
+    within_window new_window do
+      expect(page).to have_text(/.*/m)
+    end
+    new_window.close
 
     expect(Notification.find_by!(user_question: question)).not_to be_unread
   end
