@@ -24,7 +24,7 @@ RSpec.describe "workspace runs", type: :system do
     run = create_run(workspace:, suffix: "detail-open", task: "Inspect the orchestrator detail page")
 
     visit workspace_runs_path(workspace)
-    click_link run.run_id
+    within("#runs") { click_link run.run_id }
 
     expect(page).to have_current_path(workspace_run_path(workspace, run))
     expect(page).to have_text(run.task)

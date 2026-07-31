@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe "workspaces", type: :system do
-  it "lists current runs and switches to the selected run's workspace", js: true do
+  it "lists current runs in the panel and switches to the selected run's workspace", js: true do
     first_workspace = Workspace.create!(
       name: "first-#{SecureRandom.hex(4)}", root_path: "/tmp/first-#{SecureRandom.hex(4)}",
       protected_path_patterns: [ "app/**" ]
@@ -15,16 +15,15 @@ RSpec.describe "workspaces", type: :system do
 
     visit workspace_run_path(first_workspace, first_run)
 
-    expect(page).to have_css(
-      "#current-runs-dropdown option",
-      text: "#{first_workspace.name} · #{first_run.run_id}"
-    )
-    expect(page).to have_css(
-      "#current-runs-dropdown option",
-      text: "#{second_workspace.name} · #{second_run.run_id}"
-    )
+    expect(page).to have_css("button[aria-label='Open current runs']")
+    expect(page).to have_css("span[aria-label='2 current runs']", text: "2")
 
-    select "#{second_workspace.name} · #{second_run.run_id}", from: "Current runs"
+    click_button "Open current runs"
+
+    expect(page).to have_link(first_run.run_id, href: workspace_run_path(first_workspace, first_run))
+    expect(page).to have_link(second_run.run_id, href: workspace_run_path(second_workspace, second_run))
+
+    click_link second_run.run_id
 
     expect(page).to have_current_path(workspace_run_path(second_workspace, second_run))
     expect(page).to have_text(second_run.task)

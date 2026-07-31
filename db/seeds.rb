@@ -12,9 +12,10 @@ end
 Run.where(target_root: default_workspace.root_path, workspace_id: nil).update_all(workspace_id: default_workspace.id)
 
 # Demo fixtures for UI states that don't depend on any real model output --
-# e.g. the current-runs dropdown just needs Run rows in active statuses
-# with a range of title/worktree_name lengths to look at. Never seeded in
-# production: that database holds this machine's one real history.
+# e.g. the current-runs drawer panel and its count badge just need Run rows
+# in active statuses, spread across a few workspaces, with a range of
+# title/worktree_name lengths to look at. Never seeded in production: that
+# database holds this machine's one real history.
 if Rails.env.development?
   demo_workspace = Workspace.find_or_create_by!(root_path: "/tmp/workflow-demo/simple-retail-planner") do |workspace|
     workspace.name = "demo: simple-retail-planner"
