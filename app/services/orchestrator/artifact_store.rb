@@ -106,7 +106,7 @@ module Orchestrator
         preview = File.open(path, "rb") { |f| f.read(200) }
         {
           name: name, path: path, exists: true, size_bytes: stat.size,
-          updated_at: stat.mtime.utc.iso8601(3), preview: preview&.scrub
+          updated_at: stat.mtime.utc.iso8601(3), preview: preview&.force_encoding("UTF-8")&.scrub
         }
       end
 

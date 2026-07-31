@@ -38,4 +38,25 @@ RSpec.describe Orchestrator::ArtifactStore do
   ensure
     FileUtils.remove_entry(root_dir) if root_dir && Dir.exist?(root_dir)
   end
+
+  it "produces a JSON-safe preview even when the 200-byte window cuts a multibyte character in half" do
+    root_dir = Dir.mktmpdir("artifact-store")
+    # An em dash is 3 bytes (E2 80 94) in UTF-8; 199 filler bytes puts its
+    # first byte exactly at the 200-byte preview boundary, reproducing the
+    # live "\xE2 from ASCII-8BIT to UTF-8" JSON::GeneratorError this guards
+    # against -- reading in binary mode ("rb") tags the preview ASCII-8BIT,
+    # under which every byte is "valid" by definition, so a bare `.scrub`
+    # was a no-op and the dangling lead byte reached JSON.generate intact.
+    content = ("a" * 199) + "—" + "trailing content past the preview window"
+    Orchestrator::ArtifactStore.write(root_dir, "run-1", "report.md", content)
+
+    artifacts = Orchestrator::ArtifactStore.collect(root_dir, "run-1", [ "report.md" ])[:artifacts]
+    preview = artifacts.first[:preview]
+
+    assert preview.valid_encoding?
+    assert_equal Encoding::UTF_8, preview.encoding
+    JSON.generate(preview) # raises JSON::GeneratorError if this regresses
+  ensure
+    FileUtils.remove_entry(root_dir) if root_dir && Dir.exist?(root_dir)
+  end
 end
