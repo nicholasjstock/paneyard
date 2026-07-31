@@ -71,6 +71,32 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(File.read(worker.prompt_path)).to include("Current task:\nVerify the issue and report back.")
     end
 
+    it "does not leak this Rails process's own RAILS_ENV into the spawned worker" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-rails-env")
+      workspace = Workspace.create!(name: "planner-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Run the target repo's own test suite",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+
+      original_rails_env = ENV["RAILS_ENV"]
+      ENV["RAILS_ENV"] = "production"
+
+      spawned_env = nil
+      allow(Process).to receive(:spawn) { |env, *| spawned_env = env; 45_678 }
+      allow(Process).to receive(:detach)
+
+      described_class.spawn_worker(
+        run: run, role: "worker", mode: "diagnosis", nickname: "diagnosis-worker",
+        reason: "Confirm RAILS_ENV isolation.", scope: "diagnosis.md", prompt: "Capture direct evidence."
+      )
+
+      expect(spawned_env).to include("RAILS_ENV" => nil)
+    ensure
+      ENV["RAILS_ENV"] = original_rails_env
+    end
+
     it "starts Claude diagnosis workers on Haiku" do
       workspace_root = Dir.mktmpdir("workflow-worker-spawner-diagnosis")
       workspace = Workspace.create!(name: "planner-#{SecureRandom.hex(4)}", root_path: workspace_root)

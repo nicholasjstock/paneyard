@@ -728,9 +728,20 @@ module Orchestrator
       CLAUDE_CODE_CHILD_SESSION CLAUDE_PID CLAUDE_EFFORT AI_AGENT
     ].freeze
 
+    # bin/production sets RAILS_ENV=production on this Rails process itself
+    # (see bin/production); bin/dev's dotenv-loaded RAILS_ENV=development
+    # works the same way. Same Process.spawn merge issue as above: left
+    # alone, every worker -- including ones running this very repo's own
+    # test suite, since this repo is one of its own registered Workspaces --
+    # would inherit whichever RAILS_ENV happens to run the orchestrator,
+    # rather than picking its own (e.g. a target repo's spec suite forcing
+    # RAILS_ENV=test). This variable is scoped to the orchestrator's own
+    # runtime and has no meaning for a worker's target repo.
+    RAILS_PROCESS_ENV_KEYS = %w[RAILS_ENV].freeze
+
     def build_worker_env
       codex_home = resolve_codex_home
-      worker_env = (BUNDLER_ACTIVATION_ENV_KEYS + NESTED_CLAUDE_CODE_ENV_KEYS).index_with { nil }
+      worker_env = (BUNDLER_ACTIVATION_ENV_KEYS + NESTED_CLAUDE_CODE_ENV_KEYS + RAILS_PROCESS_ENV_KEYS).index_with { nil }
       worker_env["CODEX_HOME"] = codex_home if codex_home.present?
 
       api_key = ENV["OPENAI_API_KEY"]
