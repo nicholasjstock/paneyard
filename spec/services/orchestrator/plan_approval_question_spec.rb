@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::PlanApprovalQuestion do
-  it "builds a question whose context carries the verbatim task, the criteria tree, diagnosis findings, and the proposed step" do
+  it "builds a question whose context carries the verbatim task, the criteria tree, diagnosis attempt results, and the proposed step" do
     workspace = Workspace.create!(name: "plan-approval-#{SecureRandom.hex(4)}", root_path: Rails.root.to_s)
     run = workspace.runs.create!(
       run_id: "plan-approval-#{SecureRandom.hex(4)}", task: "Distinctive-verbatim-task-text-xyz",
@@ -18,10 +18,6 @@ RSpec.describe Orchestrator::PlanApprovalQuestion do
       attempt_id: SecureRandom.uuid, lineage_key: "diagnose-it", mode: "diagnosis", outcome: "done",
       result: "[DONE] Distinctive diagnosis finding text.", spawn_request_id: request.request_id
     )
-    RunContextEntry.create!(
-      run_id: run.run_id, entry_key: "diagnosis-findings-diagnose-it", kind: "fact", status: "confirmed",
-      content: "Distinctive structured findings content.", created_by: "worker", evidence_ref: "diagnose-it"
-    )
     next_step = {
       artifact: "fix.md", mode: "implementation", write_scope: "scoped_changes",
       allowed_paths: [ "app/models/example.rb" ], addresses_criteria: [ "distinctive-criterion" ],
@@ -34,7 +30,6 @@ RSpec.describe Orchestrator::PlanApprovalQuestion do
     expect(question.context).to include("distinctive-criterion")
     expect(question.context).to include("Distinctive criterion content")
     expect(question.context).to include("Distinctive diagnosis finding text")
-    expect(question.context).to include("Distinctive structured findings content")
     expect(question.context).to include("fix.md")
     expect(question.context).to include("app/models/example.rb")
     expect(question.context).to include("Distinctive success check text")

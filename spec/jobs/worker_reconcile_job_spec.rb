@@ -479,6 +479,68 @@ RSpec.describe WorkerReconcileJob do
     FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
   end
 
+  it "kills and reconciles a worker whose process is alive but has made no observable progress" do
+    workspace = Workspace.create!(name: "reconcile-stall-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(workspace:, run_id: "reconcile-stall-#{SecureRandom.hex(4)}", task: "Do something", target_root: workspace.root_path, launcher_variant: "claude", status: "running")
+    pid = Process.spawn("sleep", "100", pgroup: true)
+    Process.detach(pid)
+    missing_path = File.join(workspace.root_path, "missing.log")
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "worker", nickname: "stalled-worker",
+      reason: "Test stall", scope: "test.md", status: "running", pid: pid,
+      started_at: WorkerReconcileJob::STALL_TIMEOUT.ago - 1.minute,
+      prompt_path: missing_path, log_path: missing_path, last_message_path: missing_path, env_path: missing_path, command: "claude"
+    )
+    run.spawn_requests.create!(
+      asked_by: "orchestrator", requested_role: "worker", priority: "blocking", scope: "test.md", lineage_key: "test.md",
+      text: "Do something", status: "fulfilled", fulfilled_worker_id: worker.worker_id
+    )
+
+    WorkerReconcileJob.perform_now
+
+    assert_equal "stopped", worker.reload.status
+    assert_includes worker.stop_reason, "stalled"
+    Timeout.timeout(2) { sleep 0.05 while begin Process.kill(0, pid); true; rescue Errno::ESRCH; false end }
+  ensure
+    begin
+      Process.kill("KILL", -pid)
+    rescue Errno::ESRCH, Errno::EPERM
+      nil
+    end
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
+  it "does not treat a worker as stalled while a command it started is still producing output" do
+    workspace = Workspace.create!(name: "reconcile-watching-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    run = Run.create!(workspace:, run_id: "reconcile-watching-#{SecureRandom.hex(4)}", task: "Do something", target_root: workspace.root_path, launcher_variant: "claude", status: "running")
+    pid = Process.spawn("sleep", "100", pgroup: true)
+    Process.detach(pid)
+    missing_path = File.join(workspace.root_path, "missing.log")
+    worker = Worker.create!(
+      worker_id: SecureRandom.uuid, run_id: run.run_id, role: "worker", nickname: "watching-worker",
+      reason: "Test watching a command", scope: "test.md", status: "running", pid: pid,
+      started_at: WorkerReconcileJob::STALL_TIMEOUT.ago - 1.minute,
+      prompt_path: missing_path, log_path: missing_path, last_message_path: missing_path, env_path: missing_path, command: "claude"
+    )
+    command_log = File.join(workspace.root_path, "command.log")
+    File.write(command_log, "still building...\n")
+    RunCommand.create!(
+      run_id: run.run_id, requested_by_worker_id: worker.worker_id, executable: "npm", working_directory: workspace.root_path,
+      status: "running", pid: 999_999_998, process_group_id: 999_999_998, log_path: command_log, started_at: Time.current
+    )
+
+    WorkerReconcileJob.perform_now
+
+    assert_equal "running", worker.reload.status
+  ensure
+    begin
+      Process.kill("KILL", -pid)
+    rescue Errno::ESRCH, Errno::EPERM
+      nil
+    end
+    FileUtils.remove_entry(workspace.root_path) if workspace&.root_path && File.exist?(workspace.root_path)
+  end
+
   it "diagnostic worker payload excludes the launch prompt" do
     directory = Dir.mktmpdir
     log_path = File.join(directory, "worker.log")

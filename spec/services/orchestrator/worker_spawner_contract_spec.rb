@@ -130,6 +130,60 @@ RSpec.describe Orchestrator::WorkerSpawner do
     assert_equal "gpt-5.6-terra", chaperone_args[chaperone_args.index("--model") + 1]
   end
 
+  # opencode_args must always return [args_array, env_hash], same shape for
+  # both the ordinary and mcp_override branches -- the caller destructures
+  # it as `oc_args, oc_env = opencode_args(...)`. A prior version's
+  # mcp_override branch returned a bare args array, which Ruby's multiple
+  # assignment silently spread across oc_args/oc_env (oc_env became a
+  # string, e.g. "--format"), blowing up downstream with "no implicit
+  # conversion of String into Hash" the moment a real reply_received/
+  # chaperone opencode worker tried to spawn -- and since the override MCP
+  # server was never wired into any env var either, the worker would have
+  # had no way to reach it even if the crash hadn't happened first.
+  it "opencode mcp_override workers get a proper [args, env] tuple wiring the override MCP server" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
+    )
+
+    result = Orchestrator::WorkerSpawner.send(
+      :opencode_args, "Classify the reply.", root_dir: root, last_message_path: "/tmp/last.txt", policy:,
+      mcp_override: { url: "http://127.0.0.1:3000/mcp/reply_received", server_name: "reply_received", token: "secret-token" }
+    )
+
+    assert_equal 2, result.length
+    args, env = result
+    assert_instance_of Array, args
+    assert_includes args, "run"
+    assert_instance_of Hash, env
+    config = JSON.parse(env.fetch("OPENCODE_CONFIG_CONTENT"))
+    assert_equal "http://127.0.0.1:3000/mcp/reply_received", config.dig("mcp", "reply_received", "url")
+    assert_equal "Bearer secret-token", config.dig("mcp", "reply_received", "headers", "Authorization")
+  end
+
+  # Orchestrator::WorkerMcpEndpoint#call rejects any request without a valid
+  # "Bearer <capability_token>" Authorization header with a bare 401 --
+  # confirmed live: an ordinary opencode worker whose config omitted this
+  # header saw zero tools from the "workflow" MCP server (write_workflow_artifact,
+  # worker_turn) at all, with no error surfaced to the model. It could still
+  # do real file/shell work, but could never call worker_turn to report back,
+  # which repeatedly tripped Rails' dead-end recovery into re-planning.
+  it "ordinary opencode workers authenticate the workflow MCP connection with their capability token" do
+    root = Dir.mktmpdir("worker-policy")
+    policy = Orchestrator::WorkerExecutionPolicy.new(
+      root_dir: root, mode: "diagnosis", write_scope: "source_protected", allowed_paths: []
+    )
+
+    args, env = Orchestrator::WorkerSpawner.send(
+      :opencode_args, "Begin.", root_dir: root, last_message_path: "/tmp/last.txt", policy:,
+      capability_token: "worker-capability-token"
+    )
+
+    assert_instance_of Array, args
+    config = JSON.parse(env.fetch("OPENCODE_CONFIG_CONTENT"))
+    assert_equal "Bearer worker-capability-token", config.dig("mcp", "workflow", "headers", "Authorization")
+  end
+
   # Neither driver is pre-assigned a session id anymore -- claude mints its
   # own on a fresh spawn, same as codex always has, so --session-id is
   # dropped entirely rather than passed a value chosen up front.

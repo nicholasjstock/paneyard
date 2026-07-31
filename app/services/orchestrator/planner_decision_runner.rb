@@ -119,8 +119,8 @@ module Orchestrator
       token = PlannerDecisionCapability.issue(decision)
       selected_model = model_tier == :strong ? OPENCODE_PROMOTED_MODEL : OPENCODE_SMALL_MODEL
       mcp_config_content = JSON.generate({
-        mcpServers: { planner_decision: {
-          type: "http", url: "#{WorkerSpawner.rails_mcp_url}/planner-decision",
+        mcp: { planner_decision: {
+          type: "remote", url: "#{WorkerSpawner.rails_mcp_url}/planner-decision",
           headers: { Authorization: "Bearer #{token}" }
         } }
       })

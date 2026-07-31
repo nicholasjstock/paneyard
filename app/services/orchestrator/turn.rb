@@ -10,10 +10,9 @@ module Orchestrator
     # task is part of the MCP tool's input schema for API-surface
     # consistency with the other turn tools, but -- matching
     # scripts/worker-turn.ts exactly -- is never actually read here.
-    def run_worker_turn(run_id:, role:, nickname:, scope:, result:, evidence_outcome: nil, evidence_citations: [], diagnosis_findings: nil, produced_artifacts: nil, now: Time.current, previous_state: nil)
+    def run_worker_turn(run_id:, role:, nickname:, scope:, result:, evidence_outcome: nil, evidence_citations: [], produced_artifacts: nil, now: Time.current, previous_state: nil)
       DiagnosisEvidenceGate.validate!(run_id:, nickname:, scope:, evidence_outcome:, evidence_citations:)
-      StructuredDiagnosisFindings.persist!(run_id:, nickname:, scope:, findings: diagnosis_findings) if diagnosis_findings.present?
-      
+
       # Validate and record produced artifacts
       artifact_names = validate_and_record_artifacts!(run_id:, nickname:, produced_artifacts:)
       

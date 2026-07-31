@@ -163,11 +163,9 @@ module Orchestrator
 
     def diagnosis_section(run)
       attempts = run.step_attempts.where(mode: "diagnosis").order(created_at: :desc).limit(DIAGNOSIS_ATTEMPTS)
-      findings = RunContextEntry.where(run_id: run.run_id).where("entry_key LIKE ?", "diagnosis-findings-%")
-      return nil if attempts.empty? && findings.empty?
+      return nil if attempts.empty?
 
       lines = attempts.map { |a| "- #{a.lineage_key} (#{a.outcome}): #{truncate(a.result, DIAGNOSIS_LIMIT)}" }
-      lines += findings.map { |f| "- #{f.entry_key}: #{truncate(f.content, DIAGNOSIS_LIMIT)}" }
       "### What diagnosis found\n#{lines.join("\n")}"
     end
     private_class_method :diagnosis_section

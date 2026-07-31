@@ -19,7 +19,8 @@ module Orchestrator
       @mutex.synchronize do
         @transports.delete_if { |id, _| !PlannerDecision.exists?(id:, status: PlannerDecision::ACTIVE_STATUSES) } if @transports.size >= 100
         @transports[decision.id] ||= MCP::Server::Transports::StreamableHTTPTransport.new(
-          PlannerDecisionMcpServer.build(server_context: { decision_id: decision.decision_id })
+          PlannerDecisionMcpServer.build(server_context: { decision_id: decision.decision_id }),
+          enable_json_response: true
         )
       end
     end

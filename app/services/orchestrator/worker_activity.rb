@@ -89,7 +89,7 @@ module Orchestrator
     end
 
     def last_activity_at
-      [ @worker.started_at, @worker.stopped_at, file_mtime(@worker.log_path), file_mtime(@worker.last_message_path) ].compact.max
+      @worker.last_observed_activity_at
     end
 
     def output_preview
@@ -124,12 +124,6 @@ module Orchestrator
 
       @output_source = "Latest agent message (worker log unavailable)"
       message
-    end
-
-    def file_mtime(path)
-      File.mtime(path) if File.file?(path)
-    rescue Errno::ENOENT, Errno::EACCES
-      nil
     end
   end
 end

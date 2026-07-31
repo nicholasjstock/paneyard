@@ -30,8 +30,8 @@ module Orchestrator
     CODEX_SMALL_MODEL = "gpt-5.6-luna"
     CODEX_PROMOTED_MODEL = "gpt-5.6-terra"
     CODEX_WORKER_MODEL = CODEX_SMALL_MODEL
-    OPENCODE_SMALL_MODEL = "ollama/qwen2.5-coder:7b"
-    OPENCODE_PROMOTED_MODEL = "ollama/qwen2.5-coder:7b"
+    OPENCODE_SMALL_MODEL = "9router/oc/deepseek-v4-flash-free"
+    OPENCODE_PROMOTED_MODEL = "9router/oc/deepseek-v4-flash-free"
     OPENCODE_WORKER_MODEL = OPENCODE_SMALL_MODEL
 
     def spawn_worker(run:, role:, nickname:, reason:, scope:, prompt:, worker_id: nil, mode: nil,
@@ -166,7 +166,7 @@ module Orchestrator
         else
           oc_args, oc_env = opencode_args(
             enriched_prompt, root_dir:, last_message_path:, policy:, model_tier:,
-            mcp_override:, resume_session_id:, effort: effective_effort
+            mcp_override:, resume_session_id:, effort: effective_effort, capability_token:
           )
           [ "opencode", oc_args, oc_env ]
         end
@@ -476,22 +476,33 @@ module Orchestrator
       end
     end
 
-    def opencode_args(prompt, root_dir:, last_message_path:, policy:, model_tier: "small", mcp_override: nil, resume_session_id: nil, effort: nil)
+    def opencode_args(prompt, root_dir:, last_message_path:, policy:, model_tier: "small", mcp_override: nil, resume_session_id: nil, effort: nil, capability_token: nil)
       model_args = [ "-m", opencode_model_for(model_tier:) ]
       effort_args = effort ? [ "--variant", effort ] : []
       if mcp_override
-        return [
+        override_config_content = JSON.generate({
+          mcp: {
+            mcp_override[:server_name] => {
+              type: "remote",
+              url: mcp_override[:url],
+              headers: { Authorization: "Bearer #{mcp_override[:token]}" }
+            }
+          }
+        })
+        args = [
           "run", "--format", "json", "--auto",
           *model_args, *effort_args,
           "--dir", root_dir, "--agent", "build", prompt
         ]
+        return [ args, { "OPENCODE_CONFIG_CONTENT" => override_config_content } ]
       end
 
       mcp_config_content = JSON.generate({
-        mcpServers: {
+        mcp: {
           workflow: {
-            type: "http",
-            url: "#{rails_mcp_url}/worker"
+            type: "remote",
+            url: "#{rails_mcp_url}/worker",
+            headers: { Authorization: "Bearer #{capability_token}" }
           }
         }
       })

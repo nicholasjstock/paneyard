@@ -9,6 +9,15 @@
 # exact exit-code fidelity for a Rails-detected-only stop is an
 # acceptable, already-anticipated degradation -- Worker#stop_reason
 # already treats this as best-effort.
+#
+# Also catches the other kind of dead worker: one whose process is still
+# alive but has stopped making any observable progress (hung, wedged on
+# something that will never return). A worker legitimately watching a
+# long start_run_command process it started (a dev server, a build) is
+# exempted -- that command's own log is a separate, still-moving signal
+# outliving the worker on purpose (see Orchestrator::RunCommandRunner) --
+# so only a worker with no activity of its own *and* no actively-updating
+# command it started is presumed stalled and killed here.
 class WorkerReconcileJob < ApplicationJob
   queue_as :default
 
@@ -17,15 +26,26 @@ class WorkerReconcileJob < ApplicationJob
   # and launch before surfacing it to the operator.
   REPLY_RECEIVED_MAX_ATTEMPTS = 2
 
+  # Generous on purpose: a worker's own log only gets a new entry when a
+  # tool call starts or finishes, so one legitimately slow bounded command
+  # (a big bundle install, a full test suite) can leave it quiet for
+  # several minutes with no separate log to prove it's still working.
+  STALL_TIMEOUT = 15.minutes
+
   def perform
     Worker.active.find_each do |worker|
-      next if process_alive?(worker.pid)
+      alive = process_alive?(worker.pid)
+      stalled = alive && stalled?(worker)
+      next if alive && !stalled
+
+      terminate_stalled_worker!(worker) if stalled
 
       exit_code = read_exit_code(worker.exit_status_path)
       output = Orchestrator::LogReader.read_tail_lines(worker.log_path, 12).to_s
       usage = Orchestrator::LogReader.claude_usage(worker.log_path)
       persist_claude_final_response(worker)
-      stop_reason = worker.stop_reason.presence || stop_reason_for(worker, exit_code, output)
+      stop_reason = worker.stop_reason.presence ||
+        (stalled ? stalled_stop_reason : stop_reason_for(worker, exit_code, output))
       worker.update!(
         status: "stopped",
         stopped_at: Time.current,
@@ -66,6 +86,32 @@ class WorkerReconcileJob < ApplicationJob
     true
   rescue Errno::ESRCH
     false
+  end
+
+  def stalled?(worker)
+    return false if worker.last_observed_activity_at > STALL_TIMEOUT.ago
+    return false if watching_active_command?(worker)
+
+    true
+  end
+
+  def watching_active_command?(worker)
+    RunCommand.active.where(requested_by_worker_id: worker.worker_id).any? do |command|
+      mtime = File.mtime(command.log_path) if command.log_path.present? && File.file?(command.log_path)
+      mtime.present? && mtime > STALL_TIMEOUT.ago
+    rescue Errno::ENOENT, Errno::EACCES
+      false
+    end
+  end
+
+  def terminate_stalled_worker!(worker)
+    Process.kill("SIGTERM", -worker.pid)
+  rescue Errno::ESRCH
+    nil
+  end
+
+  def stalled_stop_reason
+    "Rails observed no output from the worker or any command it started for over #{STALL_TIMEOUT.inspect} and stopped it as stalled."
   end
 
   def read_exit_code(path)

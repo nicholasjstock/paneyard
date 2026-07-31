@@ -50,6 +50,15 @@ class Worker < ApplicationRecord
     workers.order(created_at: :desc).first&.update_column(:handoff_completed_at, Time.current)
   end
 
+  # Shared definition of "activity" for a worker: the ops UI displays it
+  # (Orchestrator::WorkerActivity delegates here) and WorkerReconcileJob
+  # uses the exact same signal to decide whether a still-alive worker has
+  # actually gone stale, so the two never disagree about what "recent"
+  # means.
+  def last_observed_activity_at
+    [ started_at, stopped_at, mtime(log_path), mtime(last_message_path) ].compact.max
+  end
+
   def as_json(*)
     {
       workerId: worker_id,
@@ -127,6 +136,12 @@ class Worker < ApplicationRecord
 
   def assign_started_at
     self.started_at ||= Time.current
+  end
+
+  def mtime(path)
+    File.mtime(path) if path.present? && File.file?(path)
+  rescue Errno::ENOENT, Errno::EACCES
+    nil
   end
 
   def publish_spawned_event

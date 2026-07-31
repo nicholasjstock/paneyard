@@ -16,7 +16,7 @@ class WorkspaceAdminChat < ApplicationRecord
   # the priciest tier.
   CLAUDE_MODELS = %w[haiku sonnet opus].freeze
   CODEX_MODELS = [ Orchestrator::WorkerSpawner::CODEX_SMALL_MODEL, Orchestrator::WorkerSpawner::CODEX_PROMOTED_MODEL ].freeze
-  OPENCODE_MODELS = %w[ollama/qwen2.5-coder:7b].freeze
+  OPENCODE_MODELS = %w[9router/oc/deepseek-v4-flash-free].freeze
 
   belongs_to :workspace
   has_many :messages, -> { order(:created_at) }, class_name: "WorkspaceAdminChatMessage", dependent: :destroy

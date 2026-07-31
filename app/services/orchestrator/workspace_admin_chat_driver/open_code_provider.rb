@@ -5,7 +5,7 @@ module Orchestrator
     module OpenCodeProvider
       module_function
 
-      DEFAULT_MODEL = "ollama/qwen2.5-coder:7b"
+      DEFAULT_MODEL = "ollama/qwen2.5-coder:14b"
 
       SESSION_MISSING_PATTERN = /session not found/i
 
