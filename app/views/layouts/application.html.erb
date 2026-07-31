@@ -24,9 +24,9 @@
     <%= javascript_importmap_tags %>
   </head>
 
-  <body data-controller="notification-drawer"
+  <body data-controller="notification-drawer runs-drawer"
         data-notification-drawer-mark-all-read-url-value="<%= mark_all_read_notifications_path %>"
-        data-action="keydown.esc@window->notification-drawer#close turbo:before-morph-element@document->notification-drawer#beforeMorph">
+        data-action="keydown.esc@window->notification-drawer#close turbo:before-morph-element@document->notification-drawer#beforeMorph keydown.esc@window->runs-drawer#close turbo:before-morph-element@document->runs-drawer#beforeMorph">
     <header class="topbar">
       <a class="brand" href="<%= root_path %>">Workflow Orchestrator</a>
       <nav>
@@ -46,19 +46,15 @@
               <% end %>
         </button>
         <% if current_runs.any? %>
-          <label class="current-runs-picker">
+          <button type="button" class="runs-launcher" aria-label="Open current runs" aria-expanded="false" title="Open current runs" data-action="runs-drawer#open" data-runs-drawer-target="launcher">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
             <span class="sr-only">Current runs</span>
-            <select id="current-runs-dropdown" aria-label="Current runs"
-                    onchange="if (this.value) window.location.href = this.value">
-              <option value="" <%= "selected" unless current_runs.any? { |run| current_page?(workspace_run_path(run.workspace, run)) } %>>Current runs</option>
-              <% current_runs.each do |run| %>
-                <option value="<%= workspace_run_path(run.workspace, run) %>"
-                        <%= "selected" if current_page?(workspace_run_path(run.workspace, run)) %>>
-                  <%= "#{run.workspace.name} · #{run.worktree_name.presence || run.run_id}" %>
-                </option>
-              <% end %>
-            </select>
-          </label>
+            <% if current_runs.count.positive? %>
+              <span class="runs-badge" aria-label="<%= current_runs.count %> current runs"><%= current_runs.count %></span>
+            <% end %>
+          </button>
         <% end %>
       </nav>
     </header>
@@ -105,6 +101,40 @@
           </div>
         </aside>
     </div>
+
+    <% if current_runs.any? %>
+      <div class="runs-launcher-root">
+        <div class="runs-backdrop" data-action="click->runs-drawer#close"></div>
+        <aside class="runs-drawer" role="dialog" aria-modal="true" aria-label="Current runs"
+               aria-hidden="true" tabindex="-1" data-runs-drawer-target="panel">
+          <div class="notification-drawer-shell">
+            <header class="notification-drawer-header">
+              <div>
+                <span class="eyebrow">In progress</span>
+                <h2>Current runs</h2>
+                <p class="muted">Across every workspace</p>
+              </div>
+              <button type="button" class="chat-close" aria-label="Close current runs" data-action="runs-drawer#close">
+                <span class="sr-only">Close current runs</span>
+                <span aria-hidden="true">×</span>
+              </button>
+            </header>
+            <section class="notification-drawer-list" aria-live="polite">
+              <% current_runs.each do |run| %>
+                <article class="notification-drawer-item">
+                  <div class="notification-drawer-meta">
+                    <span class="notification-drawer-workspace"><%= run.workspace.name %></span>
+                    <span><%= run.status %></span>
+                  </div>
+                  <%= link_to(run.worktree_name.presence || run.run_id, workspace_run_path(run.workspace, run), class: "notification-drawer-title") %>
+                  <span class="muted notification-drawer-run"><%= run.run_id %></span>
+                </article>
+              <% end %>
+            </section>
+          </div>
+        </aside>
+      </div>
+    <% end %>
 
     <% if current_workspace %>
       <%= render "shared/admin_chat_launcher" %>
