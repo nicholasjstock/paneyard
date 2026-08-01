@@ -10,6 +10,18 @@ class WorkspaceEnvVar < ApplicationRecord
   validates :name, :value, :evidence_ref, :recorded_by, presence: true
   validates :name, format: { with: /\A[A-Za-z_][A-Za-z0-9_]*\z/, message: "must be a valid environment variable name" }
   validates :name, uniqueness: { scope: :workspace_id }
+  # This value becomes a literal Process.spawn env entry, never a shell-
+  # sourced line -- confirmed live: a recorded "${TMPDIR:-/tmp}/x" reaches a
+  # future worker's $FOO as that exact unexpanded literal string, not a
+  # resolved path, because env var values are substituted verbatim rather
+  # than re-parsed as shell syntax. Reject the shapes that only make sense
+  # if something were about to re-expand them, so this is caught at record
+  # time instead of silently breaking whatever reads the variable later.
+  validates :value, format: {
+    without: /[$`]/,
+    message: "must be a fully resolved literal value, not shell syntax (e.g. use an absolute path like /tmp/foo, " \
+      "not $TMPDIR/foo or `cmd`) -- this is set directly as the process environment, never shell-expanded"
+  }
 
   def as_json(*)
     {
