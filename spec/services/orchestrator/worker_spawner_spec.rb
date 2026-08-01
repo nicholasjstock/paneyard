@@ -270,6 +270,63 @@ RSpec.describe Orchestrator::WorkerSpawner do
       expect(File.read(worker.prompt_path)).to include("Run `bin/dev` from the repository root to start every service together.")
     end
 
+    it "merges a workspace's recorded env var into the spawned process's actual environment" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-env-var")
+      workspace = Workspace.create!(name: "env-var-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Reuse a recorded workaround",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+      Orchestrator::WorkspaceEnvVars.record!(
+        run_id: run.run_id, name: "BUNDLE_WITHOUT", value: "production", evidence_ref: "worker.log:12",
+        recorded_by: "worker"
+      )
+
+      spawned_env = nil
+      allow(Process).to receive(:spawn) do |env, *_args, **_kwargs|
+        spawned_env = env
+        34_569
+      end
+      allow(Process).to receive(:detach)
+
+      worker = described_class.spawn_worker(
+        run: run, role: "worker", nickname: "env-var-worker", reason: "Install dependencies.",
+        scope: "task.md", prompt: "Run bundle install."
+      )
+
+      expect(spawned_env["BUNDLE_WITHOUT"]).to eq("production")
+      expect(JSON.parse(File.read(worker.env_path)).dig("WorkspaceEnvVars", "BUNDLE_WITHOUT")).to eq("production")
+    end
+
+    it "never lets a workspace-recorded env var shadow the identity env WorkerSpawner itself manages" do
+      workspace_root = Dir.mktmpdir("workflow-worker-spawner-env-var-shadow")
+      workspace = Workspace.create!(name: "env-var-shadow-#{SecureRandom.hex(4)}", root_path: workspace_root)
+      run = workspace.runs.create!(
+        run_id: "demo-#{SecureRandom.hex(4)}", task: "Attempt to override identity env",
+        target_root: workspace.root_path, launcher_variant: "claude", status: "running",
+        launched_by: "operator", started_at: Time.current
+      )
+      Orchestrator::WorkspaceEnvVars.record!(
+        run_id: run.run_id, name: "WORKFLOW_WORKER_SCOPE", value: "attacker-controlled", evidence_ref: "x",
+        recorded_by: "worker"
+      )
+
+      spawned_env = nil
+      allow(Process).to receive(:spawn) do |env, *_args, **_kwargs|
+        spawned_env = env
+        34_570
+      end
+      allow(Process).to receive(:detach)
+
+      described_class.spawn_worker(
+        run: run, role: "worker", nickname: "env-var-shadow-worker", reason: "Do work.",
+        scope: "task.md", prompt: "Do the work."
+      )
+
+      expect(spawned_env["WORKFLOW_WORKER_SCOPE"]).to eq("task.md")
+    end
+
     # A GitHub App installation token is scoped to this one repository/
     # installation, not the operator's own identity -- prefer it over the
     # ambient gh auth fallback whenever one is configured. This is the git

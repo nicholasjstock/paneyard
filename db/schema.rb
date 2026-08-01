@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_30_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_01_065711) do
   create_table "acceptance_criteria", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -478,6 +478,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_30_000000) do
     t.index ["workspace_id"], name: "index_workspace_admin_chats_on_workspace_id", unique: true
   end
 
+  create_table "workspace_env_vars", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "evidence_ref", null: false
+    t.string "name", null: false
+    t.string "recorded_by", null: false
+    t.datetime "updated_at", null: false
+    t.text "value", null: false
+    t.integer "workspace_id", null: false
+    t.index ["workspace_id", "name"], name: "index_workspace_env_vars_on_workspace_id_and_name", unique: true
+    t.index ["workspace_id"], name: "index_workspace_env_vars_on_workspace_id"
+  end
+
   create_table "workspace_memory_entries", force: :cascade do |t|
     t.text "content", null: false
     t.datetime "created_at", null: false
@@ -517,6 +529,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_30_000000) do
   add_foreign_key "workspace_admin_chat_messages", "telegram_conversations"
   add_foreign_key "workspace_admin_chat_messages", "workspace_admin_chats"
   add_foreign_key "workspace_admin_chats", "workspaces"
+  add_foreign_key "workspace_env_vars", "workspaces"
   add_foreign_key "workspace_memory_entries", "workspace_memory_entries", column: "supersedes_id"
   add_foreign_key "workspace_memory_entries", "workspaces"
 end

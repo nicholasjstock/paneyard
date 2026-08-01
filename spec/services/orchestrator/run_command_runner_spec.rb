@@ -131,6 +131,41 @@ RSpec.describe Orchestrator::RunCommandRunner do
     ENV["RUBYOPT"] = original_rubyopt
   end
 
+  it "applies a workspace's recorded env var to a run command by default" do
+    run = create_run
+    Orchestrator::WorkspaceEnvVars.record!(
+      run_id: run.run_id, name: "BUNDLE_WITHOUT", value: "production", evidence_ref: "worker.log:12",
+      recorded_by: "worker"
+    )
+
+    command = described_class.start(
+      run: run, requested_by_worker_id: "worker-1", executable: "/bin/sh",
+      arguments: [ "-c", "echo BUNDLE_WITHOUT=[$BUNDLE_WITHOUT]" ]
+    )
+
+    wait_until { described_class.reconcile!(command.reload).status == "exited" }
+
+    expect(File.read(command.log_path)).to include("BUNDLE_WITHOUT=[production]")
+  end
+
+  it "lets an explicit `environment:` argument override a workspace's recorded env var for that one call" do
+    run = create_run
+    Orchestrator::WorkspaceEnvVars.record!(
+      run_id: run.run_id, name: "BUNDLE_WITHOUT", value: "production", evidence_ref: "worker.log:12",
+      recorded_by: "worker"
+    )
+
+    command = described_class.start(
+      run: run, requested_by_worker_id: "worker-1", executable: "/bin/sh",
+      arguments: [ "-c", "echo BUNDLE_WITHOUT=[$BUNDLE_WITHOUT]" ],
+      environment: { "BUNDLE_WITHOUT" => "test" }
+    )
+
+    wait_until { described_class.reconcile!(command.reload).status == "exited" }
+
+    expect(File.read(command.log_path)).to include("BUNDLE_WITHOUT=[test]")
+  end
+
   it "reaps a surviving child left behind in the process group once the leader disappears" do
     run = create_run
     command = described_class.start(

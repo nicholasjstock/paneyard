@@ -55,7 +55,15 @@ module Orchestrator
       exit_status_path = File.join(commands_dir, "#{basename}.exit-status.txt")
       File.write(log_path, "")
 
-      spawn_env = { "HOME" => ENV["HOME"], "PATH" => ENV["PATH"] }.merge(environment.to_h.transform_keys(&:to_s))
+      # Workspace-recorded workarounds (see Orchestrator::WorkspaceEnvVars)
+      # form a base layer beneath the caller's own explicit `environment:` --
+      # a bundle install quirk discovered once via record_workspace_env_var
+      # applies to every later start_run_command in this workspace without
+      # the caller having to pass it again, while an explicit override for
+      # this one invocation still wins.
+      spawn_env = { "HOME" => ENV["HOME"], "PATH" => ENV["PATH"] }
+        .merge(Orchestrator::WorkspaceEnvVars.for_workspace(run.workspace))
+        .merge(environment.to_h.transform_keys(&:to_s))
 
       # unsetenv_others: true is required here -- Process.spawn otherwise
       # merges spawn_env onto this Rails process's own OS environment

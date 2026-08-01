@@ -171,7 +171,13 @@ module Orchestrator
           [ "opencode", oc_args, oc_env ]
         end
 
-      worker_env = build_worker_env.merge(
+      # Workspace-recorded workarounds (see Orchestrator::WorkspaceEnvVars)
+      # form the base layer: a worker discovering, say, a bundle install
+      # quirk records it once and every later spawn in this workspace picks
+      # it up automatically. Merged first so it can never shadow the
+      # identity/credential env this method itself manages below.
+      workspace_env_vars = Orchestrator::WorkspaceEnvVars.for_workspace(run.workspace)
+      worker_env = workspace_env_vars.merge(build_worker_env).merge(
         "WORKER_LOG_PATH" => log_path,
         "WORKFLOW_RUN_ID" => run.run_id,
         "WORKFLOW_WORKER_ID" => worker_id,
@@ -190,7 +196,7 @@ module Orchestrator
       File.write(log_path, "")
       File.delete(last_message_path) if File.exist?(last_message_path)
       File.delete(exit_status_path) if File.exist?(exit_status_path)
-      File.write(env_path, "#{JSON.pretty_generate(build_worker_env_snapshot(worker_env))}\n")
+      File.write(env_path, "#{JSON.pretty_generate(build_worker_env_snapshot(worker_env, workspace_env_vars: workspace_env_vars))}\n")
 
       worker = run.workers.create!(
         worker_id:, role:, nickname:, reason:, scope:, status: "launching", pid: 0,
@@ -818,9 +824,10 @@ module Orchestrator
       nil
     end
 
-    def build_worker_env_snapshot(worker_env)
+    def build_worker_env_snapshot(worker_env, workspace_env_vars: {})
       resolved = ->(key) { worker_env.key?(key) ? worker_env[key] : ENV[key] }
       {
+        WorkspaceEnvVars: workspace_env_vars,
         HOME: resolved.call("HOME"),
         CODEX_HOME: resolved.call("CODEX_HOME"),
         PATH: resolved.call("PATH"),

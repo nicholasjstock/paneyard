@@ -6,24 +6,31 @@ module Orchestrator
       worker = Worker.find_by(worker_id: server_context[:worker_id])
       tools = case worker&.role
       when "reporter"
-        [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::GetReporterContextTool, ::McpTools::CompleteWorkerTaskTool ]
+        [
+          ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::GetReporterContextTool,
+          ::McpTools::RecordWorkspaceEnvVarTool, ::McpTools::CompleteWorkerTaskTool
+        ]
       when "curator"
-        [ ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::SelectReviewAssetsTool, ::McpTools::CompleteWorkerTaskTool ]
+        [
+          ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::SelectReviewAssetsTool,
+          ::McpTools::RecordWorkspaceEnvVarTool, ::McpTools::CompleteWorkerTaskTool
+        ]
       when "seeder"
         [
           ::McpTools::PingTool, ::McpTools::GetRunContextTool, ::McpTools::WriteScopedFileTool,
-          ::McpTools::WriteWorkflowArtifactTool, ::McpTools::CompleteWorkerTaskTool
+          ::McpTools::WriteWorkflowArtifactTool, ::McpTools::RecordWorkspaceEnvVarTool, ::McpTools::CompleteWorkerTaskTool
         ]
       when "demo"
         [
           ::McpTools::PingTool, ::McpTools::WriteWorkflowArtifactTool, ::McpTools::StartRunCommandTool,
           ::McpTools::StopRunCommandTool, ::McpTools::GetRunCommandTool, ::McpTools::ListRunCommandsTool,
-          ::McpTools::ReadRunCommandLogTool, ::McpTools::CompleteWorkerTaskTool, ::McpTools::WorkerTurnTool
+          ::McpTools::ReadRunCommandLogTool, ::McpTools::RecordWorkspaceEnvVarTool,
+          ::McpTools::CompleteWorkerTaskTool, ::McpTools::WorkerTurnTool
         ]
       when "git"
         [
           ::McpTools::PingTool, ::McpTools::GetRunContextTool, ::McpTools::WriteWorkflowArtifactTool,
-          ::McpTools::WorkerTurnTool, ::McpTools::FinalizeRunPublicationTool
+          ::McpTools::RecordWorkspaceEnvVarTool, ::McpTools::WorkerTurnTool, ::McpTools::FinalizeRunPublicationTool
         ]
       else
         ordinary_worker_tools
@@ -54,6 +61,7 @@ module Orchestrator
           ::McpTools::GetProjectMemoryTool,
           ::McpTools::RecordProjectSetupTool,
           ::McpTools::RecordProtectedPathsTool,
+          ::McpTools::RecordWorkspaceEnvVarTool,
           ::McpTools::SubmitAcceptanceVerificationTool
       ]
     end
