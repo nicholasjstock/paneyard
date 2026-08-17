@@ -5,16 +5,11 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "health#show", as: :rails_health_check
 
-  # MCP endpoints worker/chaperone/planner-decision CLI subprocesses connect
-  # to -- Streamable HTTP, hosted inside this already-running process rather
-  # than spawned fresh per worker like the old scripts/workflow-mcp-server.ts
-  # did. Each role gets its own scoped, tokenized server (app/services/
-  # orchestrator/{worker,chaperone,planner_decision}_mcp_server.rb); there is
-  # deliberately no unscoped bare /mcp endpoint anymore.
-  mount Orchestrator::ChaperoneMcpEndpoint.new => "/mcp/chaperone"
-  mount Orchestrator::ReplyReceivedMcpEndpoint.new => "/mcp/reply_received"
-  mount Orchestrator::WorkerMcpEndpoint.new => "/mcp/worker"
-  mount Orchestrator::PlannerDecisionMcpEndpoint.new => "/mcp/planner-decision"
+  # The MCP endpoint a run's interactive CLI session connects to --
+  # Streamable HTTP, hosted inside this already-running process. Scoped and
+  # tokenized per session (app/services/orchestrator/run_mcp_server.rb);
+  # there is deliberately no unscoped bare /mcp endpoint.
+  mount Orchestrator::RunMcpEndpoint.new => "/mcp/run"
 
   mount ActionCable.server => "/cable"
 
@@ -25,20 +20,8 @@ Rails.application.routes.draw do
   # Defines the root path route ("/")
   root "workspaces#index"
 
-  resources :notifications, only: %i[index] do
-    collection do
-      patch :mark_all_read
-    end
-    member do
-      get :open
-      patch :mark_read
-    end
-  end
-
   resources :workspaces, only: %i[index show new create edit update destroy] do
     resource :project_setup, only: %i[create]
-
-    resource :terminal_session, controller: "terminal_sessions", only: %i[show create destroy]
 
     resource :workspace_admin_chat, controller: "workspace_admin_chats", only: %i[update] do
       post :cancel
@@ -48,28 +31,9 @@ Rails.application.routes.draw do
     resources :runs, only: %i[index new create show] do
       member do
         post :stop
-        post :switch_launcher
+        post :send_message
+        post :remove_worktree
         post :retry_publication
-      end
-    end
-
-    resources :workers, only: %i[show] do
-      member do
-        post :stop
-      end
-    end
-
-    resources :run_commands, only: [], param: :command_id do
-      member do
-        post :stop
-      end
-    end
-
-    resources :questions, only: %i[index]
-    resources :notifications, only: %i[index] do
-      member do
-        get :open
-        patch :mark_read
       end
     end
 

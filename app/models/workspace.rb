@@ -6,10 +6,8 @@
 # from here now.
 class Workspace < ApplicationRecord
   has_many :runs, dependent: :restrict_with_error
-  has_many :notifications, dependent: :destroy
   has_many :workspace_memory_entries, dependent: :restrict_with_error
   has_many :workspace_env_vars, dependent: :destroy
-  has_one :terminal_session, dependent: :destroy
   has_one :workspace_admin_chat, dependent: :destroy
 
   validates :name, presence: true, uniqueness: true
@@ -20,8 +18,8 @@ class Workspace < ApplicationRecord
     order(:created_at).first
   end
 
-  # Gates RunsController#new/#create until project_init has recorded the
-  # source patterns that are protected by default.
+  # Gates RunsController#new/#create until the bootstrap run has recorded
+  # this workspace's protected source patterns.
   def initialized?
     protected_path_patterns.present?
   end
@@ -33,10 +31,11 @@ class Workspace < ApplicationRecord
     Pathname(root_path).join("main").expand_path.to_s
   end
 
-  # These patterns are readable by every worker but writable only by an
-  # implementation worker. They deliberately describe source, configuration,
-  # and test paths, never the entire checkout: dependency caches and generated
-  # output must not become source merely because they sit beside it.
+  # Named in every run's prompt as the paths a session should leave alone
+  # unless its task is explicitly about them. Prose rather than a sandbox
+  # now: a session owns its whole worktree, and the safety net is human PR
+  # review. They deliberately describe source, configuration, and test paths,
+  # never the entire checkout.
   def protected_write_patterns
     protected_path_patterns.select do |pattern|
       pattern.present? && !Pathname(pattern).absolute? && !Pathname(pattern).cleanpath.to_s.start_with?("../")

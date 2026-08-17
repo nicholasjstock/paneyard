@@ -85,11 +85,10 @@ module Orchestrator
       }
     end
 
-    # Candidate names come from SpawnRequest#scope, which is often a real
-    # nested workspace path (e.g. "front/scripts/record-demo.ts") rather
-    # than a flat artifact filename -- treat those as simply not existing
-    # as artifacts instead of raising, since resolve_path's traversal guard
-    # rejects any name containing "/".
+    # A candidate name may be a real nested workspace path (e.g.
+    # "front/scripts/record-demo.ts") rather than a flat artifact filename --
+    # treat those as simply not existing as artifacts instead of raising,
+    # since resolve_path's traversal guard rejects any name containing "/".
     def collect(root_dir, run_id, artifact_names)
       artifacts = artifact_names.map do |name|
         path = begin

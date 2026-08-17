@@ -4,7 +4,12 @@
         disabled: chat.active?,
         data: { admin_chat_drawer_target: "input", action: "keydown->admin-chat-drawer#submitOnEnter" } %>
   <div class="chat-composer-footer">
-    <span class="muted mono"><%= chat.active_provider.capitalize %> &middot; <%= chat.model_for(chat.active_provider) %></span>
+    <span class="muted mono">
+      <%= chat.active_provider.capitalize %> &middot; <%= chat.model_for(chat.active_provider) %>
+      <% if (session_id = chat.session_id_for(chat.active_provider)).present? %>
+        &middot; <%= session_id %>
+      <% end %>
+    </span>
     <%= submit_tag chat.active? ? "Working…" : "Send", class: "btn primary", disabled: chat.active? %>
   </div>
 <% end %>

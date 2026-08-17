@@ -15,7 +15,7 @@ class WorkspaceAdminChat < ApplicationRecord
   # entry, so an unset model starts cheap rather than jumping straight to
   # the priciest tier.
   CLAUDE_MODELS = %w[haiku sonnet opus].freeze
-  CODEX_MODELS = [ Orchestrator::WorkerSpawner::CODEX_SMALL_MODEL, Orchestrator::WorkerSpawner::CODEX_PROMOTED_MODEL ].freeze
+  CODEX_MODELS = [ Orchestrator::SessionArgs.codex_model ].freeze
   OPENCODE_MODELS = %w[9router/oc/deepseek-v4-flash-free].freeze
 
   belongs_to :workspace
@@ -53,18 +53,18 @@ class WorkspaceAdminChat < ApplicationRecord
     return if session_id.blank?
 
     update!(case provider
-            when "codex" then { codex_session_id: session_id }
-            when "opencode" then { opencode_session_id: session_id }
-            else { claude_session_id: session_id }
-            end)
+    when "codex" then { codex_session_id: session_id }
+    when "opencode" then { opencode_session_id: session_id }
+    else { claude_session_id: session_id }
+    end)
   end
 
   def model_for(provider)
     stored = case provider
-             when "codex" then codex_model
-             when "opencode" then opencode_model
-             else claude_model
-             end
+    when "codex" then codex_model
+    when "opencode" then opencode_model
+    else claude_model
+    end
     stored.presence || self.class.models_for(provider).first
   end
 
@@ -78,10 +78,10 @@ class WorkspaceAdminChat < ApplicationRecord
 
   def reset_session!(provider)
     update!(case provider
-            when "codex" then { codex_session_id: nil }
-            when "opencode" then { opencode_session_id: nil }
-            else { claude_session_id: nil }
-            end)
+    when "codex" then { codex_session_id: nil }
+    when "opencode" then { opencode_session_id: nil }
+    else { claude_session_id: nil }
+    end)
   end
 
   private

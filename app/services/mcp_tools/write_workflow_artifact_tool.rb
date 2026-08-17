@@ -8,10 +8,11 @@ module McpTools
     )
 
     def self.call(runId:, artifactName:, content:, server_context:)
-      worker = WorkerAuthorization.worker!(server_context:, run_id: runId)
-      if worker && worker.scope != artifactName
-        return ToolResponse.error("artifactName must match the assigned worker artifact: #{worker.scope}")
-      end
+      # No assigned-artifact check any more: a session owns the whole job, so
+      # it writes whatever artifacts the job needs rather than exactly the one
+      # a planner named for it. run-summary.md is the one Rails itself reads
+      # (RunPublication uses it as the pull request body).
+      SessionAuthorization.session!(server_context:, run_id: runId)
       run = Run.find_or_create_for_bus!(runId)
       path = Orchestrator::ArtifactStore.write(run.target_root, runId, artifactName, content)
       ToolResponse.structured({ artifactName: artifactName, path: path })

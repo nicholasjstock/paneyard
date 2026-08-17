@@ -55,7 +55,7 @@ Rails.application.configure do
   # Highlight code that enqueued background job in logs.
   config.active_job.verbose_enqueue_logs = true
 
-  # Solid Queue so TickRunJob's recurring schedule (config/recurring.yml)
+  # Solid Queue so RunDispatchJob's recurring schedule (config/recurring.yml)
   # actually fires in dev, same as production. Run `bin/jobs` alongside
   # `bin/rails server` (or just `bin/dev`, which starts both).
   config.active_job.queue_adapter = :solid_queue

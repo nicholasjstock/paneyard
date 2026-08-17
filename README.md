@@ -1,6 +1,6 @@
 # Workflow Orchestrator
 
-Rails owns run state, bounded planning decisions, worker processes, and recovery. Start work from a workspace; runs and their workers, questions, events, artifacts, and operator chat remain scoped to it.
+Queue a job against a workspace. When a slot frees, it gets its own git worktree and one live `claude`/`codex`/`opencode` session you can watch and talk to, which does the work end to end and opens a pull request. Runs, sessions, events, artifacts, and operator chat all stay scoped to their workspace.
 
 ## Local setup
 
@@ -37,13 +37,21 @@ git diff --check
 
 `bin/ci` additionally runs dependency, importmap, and Brakeman audits.
 
-## Worker execution policy
+## How a run works
 
-Before spawning a worker, Rails verifies only that the target directory and selected agent launcher exist. The workspace does not need orchestrator-specific command configuration.
+1. **Queue it.** Creating a run starts nothing; it waits for a slot. The cap is global across every workspace — `WORKFLOW_MAX_CONCURRENT_RUNS`, default 2.
+2. **Dispatch.** `RunDispatchJob` claims the oldest queued run, provisions a sibling git worktree of the workspace's `main` checkout on a `workflow/<name>` branch, and opens one interactive session in a [herdr](https://herdr.dev) pane rooted there, with the task as its first prompt.
+3. **Work.** The session owns the job: it explores, edits, runs the repo's own commands, commits, and pushes. It runs with full access to its worktree — the safety net is your review of the resulting PR. Watch it in your herdr client, or send it a message from the run screen.
+4. **Finish.** The session calls the `run_done` MCP tool. On `done`, Rails pushes the branch if it hasn't been pushed and opens a pull request using the `run-summary.md` the session wrote as the body.
+5. **Merge.** When you merge the PR, Rails removes the worktree and fast-forwards `main`. A run that ended any other way has its worktree reclaimed later by `WorktreeCleanupJob`, which never removes one with uncommitted changes.
 
-Workers inspect each repository and run its native commands through Codex or Claude. Safeguards are applied at that launcher boundary: artifact-only workers receive read-only repository access, while implementation workers receive write access only to the planner-authorized exact files. Commands run in the foreground so child processes remain in the worker's process group and inherit the same filesystem policy.
+A comment on the pull request is delivered straight into the run's session — reopening a closed one on the same worktree if needed — so review feedback continues the run rather than starting a new one.
 
-Rails never executes worker-supplied shell commands outside that sandbox and never infers a workspace's language, package manager, dependency layout, ports, or health endpoints.
+Rails never infers a workspace's language, package manager, dependency layout, ports, or health endpoints. The first run in a new workspace is a discovery run that records those for every later run to inherit.
+
+## Requirements
+
+Beyond the Rails app itself, this expects [herdr](https://herdr.dev) running with its socket at `~/.config/herdr/herdr.sock` (override with `HERDR_SOCKET_PATH`), the `gh` CLI, and whichever of `claude`, `codex`, or `opencode` you point runs at.
 
 ## Telegram admin chat
 

@@ -1,7 +1,0 @@
----
-effort: low
----
-
-# Demo
-
-Call `list_run_commands` first and reuse an already-running dev/demo server instead of starting a duplicate. If none is active, inspect this workspace's own documentation and entry points (do not assume a language, package manager, or port) to identify its dev/demo command, then start it with `start_run_command`. If starting it requires an environment variable workaround (e.g. a dependency install failing without one), call `record_workspace_env_var` once you confirm it fixes the problem, so future runs in this workspace don't hit the same failure. Confirm the server is actually serving — poll `get_run_command`/`read_run_command_log`, do not assume the process starting means it is ready — before declaring success. Write `demo-notes.md` stating what you started or reused and how you confirmed it is serving, or that no dev server exists in this workspace. If a command exits, never becomes ready, or requires a repair you cannot safely make, write the exact command/log evidence and report `[BLOCKED]` with `worker_turn` (pass `role="worker"`) instead of completing; Rails retries this demo stage and only escalates after a repeated failure. Do not edit source, run tests, select review assets, commit, publish, or write verification steps — the seeder role already reported those, since only it knows what data exists to verify against. Then call `complete_worker_task` exactly once only after a serving server is confirmed or no dev server exists in this workspace.

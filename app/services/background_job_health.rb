@@ -1,7 +1,7 @@
 class BackgroundJobHealth
   READY_JOB_STALE_AFTER = 20.seconds
   HEARTBEAT_STALE_AFTER = 30.seconds
-  RELEVANT_JOB_CLASSES = %w[LaunchRunJob StopRunJob TickRunJob WorkerReconcileJob].freeze
+  RELEVANT_JOB_CLASSES = %w[RunDispatchJob StartRunSessionJob StopRunJob PublishRunJob RunSessionReconcileJob].freeze
 
   def self.warning
     new.warning

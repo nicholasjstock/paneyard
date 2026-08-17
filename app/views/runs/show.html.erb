@@ -1,256 +1,111 @@
-<% content_for :title, @run.run_id %>
-<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+<% content_for :title, "#{@run.worktree_name.presence || @run.run_id}" %>
 
 <%= turbo_stream_from "run_#{@run.run_id}" %>
 
 <div class="toolbar">
-  <div class="run-title">
-    <span class="eyebrow">Run <span class="mono"><%= @run.run_id %></span></span>
-    <% if @run.branch_name.present? %>
-      <h1><span class="mono"><%= @run.branch_name %></span></h1>
-      <% if @run.task.present? %><p class="muted">Task: <%= truncate(@run.task, length: 200) %></p><% end %>
-    <% else %>
-      <h1><%= @run.task %></h1>
-    <% end %>
-    <span class="muted"><%= current_workspace.name %> &middot; <%= @run.launcher_variant %></span>
-    <% if @run.managed_worktree? %>
-      <p class="muted mono"><%= @run.worktree_name %> &middot; <%= @run.branch_name %></p>
-      <p class="muted mono"><%= @run.target_root %></p>
-      <% if @run.pull_request_url.present? %><p><%= link_to "Open pull request", @run.pull_request_url, target: "_blank", rel: "noopener" %></p><% end %>
-      <% if @run.review_assets.where.not(github_url: nil).exists? %>
-        <div class="review-evidence">
-          <p class="muted">Review evidence</p>
-          <ul>
-            <% @run.review_assets.where.not(github_url: nil).find_each do |asset| %>
-              <li><%= link_to asset.label, asset.github_url, target: "_blank", rel: "noopener" %></li>
-            <% end %>
-          </ul>
-        </div>
-      <% end %>
-      <% if @run.publication_error.present? %><p class="error-banner">PR publication: <%= @run.publication_error %></p><% end %>
+  <div>
+    <h1 class="mono"><%= @run.worktree_name.presence || @run.run_id %></h1>
+    <span class="badge <%= @run.status %>"><%= @run.status.humanize %></span>
+    <% if @session && @session.live? && @session.agent_status.present? %>
+      <span class="badge <%= @session.agent_status %>">agent: <%= @session.agent_status %></span>
     <% end %>
   </div>
+
   <div class="toolbar-actions">
-    <% if @run.active? %>
-      <%= button_to "Kill run", stop_workspace_run_path(current_workspace, @run), method: :post,
-            class: "btn danger",
-            data: { turbo_confirm: "Stop run #{@run.run_id}? This cascades to every active worker under it." } %>
+    <% if @run.pull_request_url.present? %>
+      <%= link_to "Pull request", @run.pull_request_url, class: "btn", target: "_blank", rel: "noopener" %>
+    <% end %>
+    <% if @session&.live? %>
+      <%= button_to "Stop run", stop_workspace_run_path(current_workspace, @run), method: :post, class: "btn danger" %>
     <% end %>
     <% if @run.publication_retryable? %>
-      <%= button_to "Retry PR publication", retry_publication_workspace_run_path(current_workspace, @run), method: :post, class: "btn primary" %>
+      <%= button_to "Retry publication", retry_publication_workspace_run_path(current_workspace, @run), method: :post, class: "btn" %>
     <% end %>
   </div>
 </div>
 
-<% if @blocking_questions.any? %>
-  <% question = @blocking_questions.first %>
-  <section class="panel run-now-panel blocking" data-testid="run-state-header">
-    <div class="panel-header">
-      <div>
-        <h2>Question needs your answer</h2>
-        <p class="muted"><%= pluralize(@blocking_questions.count, "blocking question") %> must be answered before work can continue.</p>
-      </div>
-      <span class="badge blocking">action required</span>
-    </div>
-    <p><%= question.text %></p>
-    <% if question.github_comment_url.present? %>
-      <%= link_to "Answer on GitHub", question.github_comment_url, target: "_blank", rel: "noopener", class: "btn primary" %>
-    <% elsif @run.pull_request_url.present? %>
-      <%= link_to "Open pull request to answer", @run.pull_request_url, target: "_blank", rel: "noopener", class: "btn primary" %>
-    <% else %>
-      <p class="muted">A draft pull request is being created so you can answer this question.</p>
+<p><%= @run.task %></p>
+
+<% if @run.publication_error.present? %>
+  <p class="error-banner">Publication failed: <%= @run.publication_error %></p>
+<% end %>
+
+<section class="panel">
+  <h2>Worktree</h2>
+  <% if @run.managed_worktree? %>
+    <p class="mono"><%= @run.target_root %></p>
+    <p class="muted mono"><%= @run.branch_name || "branch not provisioned" %></p>
+    <% if @run.terminal? %>
+      <%= button_to "Remove worktree", remove_worktree_workspace_run_path(current_workspace, @run),
+            method: :post, class: "btn",
+            data: { turbo_confirm: "Remove #{@run.worktree_name}? This deletes the checkout." } %>
     <% end %>
-  </section>
-<% elsif @run.capacity_blocked? && @active_workers.empty? %>
-  <% target_launcher = @run.alternate_launcher_variant %>
-  <section class="panel run-now-panel planning">
-    <div class="panel-header">
-      <div>
-        <h2>Waiting for capacity</h2>
-        <p class="muted"><%= @run.phase_summary.presence || "The model provider rejected the previous attempt because capacity was unavailable." %></p>
-      </div>
-      <span class="badge planning">auto retry</span>
-    </div>
-    <p>The next model call will retry automatically after <%= l(@run.capacity_available_at.in_time_zone, format: "%H:%M %Z") %>.</p>
-    <%= button_to "Switch to #{target_launcher.capitalize} & resume",
-          switch_launcher_workspace_run_path(current_workspace, @run),
-          params: { launcher_variant: target_launcher },
-          class: "btn primary",
-          data: { turbo_confirm: "Switch this paused run from #{@run.launcher_variant.capitalize} to #{target_launcher.capitalize} and resume its queued work?" } %>
+  <% else %>
+    <p class="muted">No managed worktree.</p>
+  <% end %>
+</section>
+
+<section class="panel">
+  <h2>Session</h2>
+  <% if @session.nil? %>
+    <p class="muted">
+      <% if @run.status == "queued" %>
+        Waiting for a free slot. <%= pluralize(Orchestrator::RunConcurrency.in_flight, "run") %> in flight of
+        <%= Orchestrator::RunConcurrency.limit %>.
+      <% else %>
+        No session has been started for this run.
+      <% end %>
+    </p>
+  <% else %>
+    <p class="muted">
+      <%= @session.driver %> &middot; <%= @session.status %>
+      <% if @session.pid.present? %> &middot; pid <%= @session.pid %><% end %>
+      <% if @session.started_at %> &middot; started <%= time_ago_in_words(@session.started_at) %> ago<% end %>
+    </p>
+
+    <% if @session.result.present? %>
+      <p><strong><%= @session.outcome %>:</strong> <%= @session.result %></p>
+    <% end %>
+
+    <% if @session.live? %>
+      <%= form_with url: send_message_workspace_run_path(current_workspace, @run), method: :post, local: true do |form| %>
+        <div class="field">
+          <%= form.label :message, "Send a message to this session" %>
+          <%= form.text_area :message, rows: 3, placeholder: "Use the other migration instead — see db/migrate/2026…" %>
+        </div>
+        <%= form.submit "Send", class: "btn primary" %>
+      <% end %>
+    <% end %>
+
+    <% if @pane.present? %>
+      <h3>Live pane</h3>
+      <pre class="log"><%= @pane %></pre>
+    <% end %>
+  <% end %>
+</section>
+
+<% if @artifacts.any? %>
+  <section class="panel">
+    <h2>Artifacts</h2>
+    <% @artifacts.each do |artifact| %>
+      <details>
+        <summary class="mono"><%= artifact[:name] %></summary>
+        <pre class="log"><%= artifact[:content] %></pre>
+      </details>
+    <% end %>
   </section>
 <% end %>
 
-<section class="run-dashboard">
-
-  <% if @acceptance_criteria.any? || @worker_activities.any? || @planner_decisions.any? %>
-    <section class="panel span-2 workflow-tree-panel">
-      <div class="panel-header">
-        <div>
-          <h2>Workflow tree</h2>
-          <p class="muted">Planners, acceptance criteria, workers, and nested planning stay together at the point where the work occurs.</p>
-        </div>
-      </div>
-      <%= render "workflow_tree",
-        planners: @planner_activities.reject { |activity| @nested_planner_ids.include?(activity[:worker].worker_id) },
-        planner_entries: @planner_entries,
-        criteria: @acceptance_criteria,
-        worker_groups: @criterion_worker_groups,
-        planner_decisions: @planner_decisions,
-        questions: @all_user_questions,
-        run: @run,
-        current_workspace: current_workspace %>
-    </section>
-  <% end %>
-
-  <details class="panel secondary-panel run-usage-panel" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:usage">
-    <summary>
-      <span>
-        <strong>Usage & planner</strong>
-        <span class="muted">
-          <%= pluralize(@planner_decisions.count, "planner decision") %> &middot;
-          <%= number_with_delimiter(@usage_summary[:input_tokens] + @usage_summary[:output_tokens]) %> tokens &middot;
-          <%= number_to_currency(@usage_summary[:total_cost_usd]) %>
-        </span>
-      </span>
-      <span class="detail-affordance">View details</span>
-    </summary>
-    <div class="secondary-panel-body">
-    <div class="stat-strip">
-      <div class="stat-card">
-        <span class="stat-label">Agent Turns</span>
-        <strong><%= number_with_delimiter(@usage_summary[:agent_turn_count]) %></strong>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Input Tokens</span>
-        <strong><%= number_with_delimiter(@usage_summary[:input_tokens]) %></strong>
-        <span class="muted"><%= number_with_delimiter(@usage_summary[:cache_read_input_tokens]) %> cache reads</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Output Tokens</span>
-        <strong><%= number_with_delimiter(@usage_summary[:output_tokens]) %></strong>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Cost</span>
-        <strong><%= number_to_currency(@usage_summary[:total_cost_usd]) %></strong>
-        <span class="muted"><%= @usage_summary[:models].map { |model, count| "#{model}: #{count}" }.join(", ").presence || "no completed telemetry" %></span>
-      </div>
-    </div>
-    </div>
-  </details>
-
-  <div class="dashboard-grid">
-    <% if @blocking_questions.any? %>
-      <section class="panel span-2 blocking-questions">
-        <div class="panel-header">
-          <div>
-            <h2>Operator Input Required</h2>
-            <p class="muted">The run will remain paused until these questions are answered.</p>
-          </div>
-          <span class="badge blocking"><%= pluralize(@blocking_questions.count, "blocking question") %></span>
-        </div>
-        <% @blocking_questions.each do |question| %>
-          <article class="mini-card question-card">
-            <div class="card-title">
-              <span class="mono"><%= question.scope %></span>
-              <span>
-                <span class="badge <%= question.priority %>"><%= question.priority %></span>
-                <span class="badge <%= question.status %>"><%= question.status %></span>
-              </span>
-            </div>
-            <p class="question-text"><%= question.text %></p>
-            <% if question.context.present? %><p class="muted"><%= question.context %></p><% end %>
-            <p class="muted">asked by <%= question.asked_by %> &middot; <%= time_ago_in_words(question.asked_at) %> ago</p>
-            <% if question.github_comment_url.present? %>
-              <p><%= link_to "Answer on GitHub", question.github_comment_url, target: "_blank", rel: "noopener", class: "btn primary" %></p>
-            <% elsif @run.pull_request_url.present? %>
-              <p><%= link_to "Open pull request to answer", @run.pull_request_url, target: "_blank", rel: "noopener", class: "btn primary" %></p>
-            <% else %>
-              <p class="muted">A draft pull request is being created for this question.</p>
-            <% end %>
-            <p class="muted">Use <span class="mono">Question <%= question.question_id %>: &lt;your answer&gt;</span> in a PR comment.</p>
-          </article>
-        <% end %>
-      </section>
-    <% end %>
-
-    <details class="panel secondary-panel span-2" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:artifacts">
-      <summary>
-        <span><strong>Artifacts</strong> <span class="muted"><%= pluralize(@artifacts.count, "available artifact") %></span></span>
-        <span class="detail-affordance">View details</span>
-      </summary>
-      <div class="secondary-panel-body">
-      <% if @artifacts.any? %>
-        <% @artifacts.each do |artifact| %>
-          <div class="mini-card artifact-card">
-            <div class="card-title">
-              <span class="mono"><%= artifact[:name] %></span>
-              <span class="muted"><%= artifact[:updated_at] %></span>
-            </div>
-            <p class="muted"><%= number_to_human_size(artifact[:size_bytes]) %></p>
-            <% if artifact[:content].present? %>
-              <pre class="log artifact-content"><%= artifact[:content] %></pre>
-            <% end %>
-          </div>
-        <% end %>
-      <% else %>
-        <p class="empty">No run-scoped artifacts found yet.</p>
+<% if @timeline.any? %>
+  <section class="panel">
+    <h2>Timeline</h2>
+    <ul class="timeline">
+      <% @timeline.each do |event| %>
+        <li>
+          <span class="muted"><%= event.created_at.strftime("%H:%M:%S") %></span>
+          <span class="mono"><%= event.event_type %></span>
+        </li>
       <% end %>
-      </div>
-    </details>
-  </div>
-
-  <details class="panel secondary-panel run-command-center" data-controller="accordion-state" data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph" data-accordion-state-key-value="run:<%= @run.run_id %>:commands">
-    <summary>
-      <span><strong>Run commands</strong> <span class="muted"><%= pluralize(@run_commands.count, "background command") %></span></span>
-      <span class="detail-affordance">View details</span>
-    </summary>
-    <div class="secondary-panel-body">
-
-    <% if @run_commands.any? %>
-      <div class="run-command-list">
-        <% @run_commands.each do |command| %>
-          <details id="run-command-<%= command.command_id %>"
-                   class="run-command-row <%= command.status %>"
-                   data-controller="accordion-state"
-                   data-action="toggle->accordion-state#persist turbo:before-morph-element@document->accordion-state#beforeMorph"
-                   data-accordion-state-key-value="run:<%= @run.run_id %>:command:<%= command.command_id %>">
-            <summary>
-              <span class="run-command-purpose"><%= command.purpose.presence || command.executable %></span>
-              <span class="badge <%= command.status %>"><%= command.status %></span>
-              <span class="run-command-executable mono"><%= command.executable %></span>
-            </summary>
-            <div class="run-command-detail">
-              <div class="run-command-metadata muted">
-                <span class="mono">pid <%= command.pid || "—" %></span>
-                <span>started <%= command.started_at ? time_ago_in_words(command.started_at) + " ago" : "not started" %></span>
-                <% if command.finished_at %><span>finished <%= time_ago_in_words(command.finished_at) %> ago</span><% end %>
-                <% if command.exit_code %><span>exit code <%= command.exit_code %></span><% end %>
-                <% if command.signal %><span>signal <%= command.signal %></span><% end %>
-              </div>
-              <% if command.failure_message.present? %><p class="run-command-failure"><strong>Note:</strong> <%= command.failure_message %></p><% end %>
-              <% tail = command.log_path.present? ? Orchestrator::LogReader.read_tail_lines(command.log_path, 12) : nil %>
-              <% if tail.present? %>
-                <pre class="log compact"><%= tail %></pre>
-              <% else %>
-                <p class="empty">No output captured yet.</p>
-              <% end %>
-              <% if command.active? %>
-                <% if command.port.present? %>
-                  <button type="button" class="btn"
-                          onclick="window.open(window.location.protocol + '//' + window.location.hostname + ':<%= command.port %>', '_blank', 'noopener')">Open</button>
-                <% end %>
-                <%= button_to "Stop", stop_workspace_run_command_path(current_workspace, command.command_id), method: :post, class: "btn", data: { turbo_confirm: "Stop #{command.executable}?" } %>
-              <% end %>
-            </div>
-          </details>
-        <% end %>
-      </div>
-    <% else %>
-      <p class="empty">No background commands started for this run yet.</p>
-    <% end %>
-    </div>
-  </details>
-
-</section>
-
-<%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
+    </ul>
+  </section>
+<% end %>

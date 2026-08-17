@@ -1,35 +1,50 @@
 module Orchestrator
-  # Launches the one bootstrap run that discovers a workspace's dev
-  # environment and declares its protected paths (see ProjectInitTrigger and
-  # McpTools::RecordProtectedPathsTool). Shared by WorkspacesController#create
-  # (a brand-new workspace) and ProjectSetupsController#create (re-running
-  # discovery for a workspace with no active run to piggyback on) so both
-  # paths launch it identically.
+  # Queues the one bootstrap run that discovers a workspace's dev environment
+  # and declares its protected paths. Shared by WorkspacesController#create (a
+  # brand-new workspace) and ProjectSetupsController#create (re-running
+  # discovery).
   #
-  # Deliberately does not go through LaunchRunJob: that job always seeds a
-  # real "workflow-plan.md" planner SpawnRequest, which is right for a task
-  # run but wrong here -- project_init's findings land as workspace-level
-  # data (WorkspaceMemoryEntry, Workspace#protected_path_patterns), entirely
-  # invisible to a planner's own acceptance-criteria bookkeeping. Queuing a
-  # planner anyway was tried and confirmed to backfire: with no contract to
-  # check against, it invented one and re-planned the same discovery as a
-  # redundant "infrastructure" step. WorkerReconcileJob#complete_bootstrap_run!
-  # is what actually ends this run once project_init succeeds.
+  # This used to need its own dispatch path, because the normal one always
+  # seeded a planner decision and a planner given a discovery task with no
+  # contract to check against would invent one and re-plan the discovery as a
+  # redundant implementation step. With the planner gone there is nothing to
+  # special-case: a bootstrap run is an ordinary queued run whose task happens
+  # to be "look, don't change".
   module WorkspaceInit
     module_function
 
-    TASK = "Initialize workspace: discover the local dev environment and declare protected paths."
+    PRIMARY_ENTRY_KEY = "dev-environment"
+
+    TASK = <<~TASK.strip
+      Initialize this workspace. Do not change any code -- this run is discovery only, and should end with
+      nothing to commit.
+
+      1. Work out how to run this project's local development environment end to end: dependency install,
+         database setup, how to start it, and how to run its tests. Verify what you can by actually running it.
+      2. Record what you learned with `record_project_setup`, including one finding keyed
+         "#{PRIMARY_ENTRY_KEY}" that states exactly how to start the full dev environment.
+      3. Declare this workspace's protected source paths with `record_protected_paths` -- source,
+         configuration, and maintained tests, but not dependency caches, build output, or generated files.
+      4. Call `run_done` with outcome `done`.
+    TASK
 
     def launch!(workspace, force: false)
-      run = workspace.runs.create!(
+      if !force && workspace.workspace_memory_entries.current.exists?(entry_key: PRIMARY_ENTRY_KEY)
+        return nil
+      end
+
+      workspace.runs.create!(
         run_id: generate_run_id,
         task: TASK,
-        target_root: workspace.source_root, launcher_variant: "claude",
-        status: "launching", launched_by: "workspace_init"
-      )
-      Orchestrator::ProjectInitTrigger.call(run:, force:)
-      run.update!(status: "running", started_at: Time.current)
-      run
+        target_root: workspace.source_root,
+        launcher_variant: "claude",
+        status: "queued",
+        launched_by: "workspace_init"
+      ).tap do |run|
+        run.worktree_name = GitWorktree.name_for(run)
+        run.save!
+        RunDispatchJob.perform_later
+      end
     end
 
     def generate_run_id
