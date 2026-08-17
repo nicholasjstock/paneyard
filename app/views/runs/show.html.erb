@@ -1,0 +1,111 @@
+<% content_for :title, "#{@run.worktree_name.presence || @run.run_id}" %>
+
+<%= turbo_stream_from "run_#{@run.run_id}" %>
+
+<div class="toolbar">
+  <div>
+    <h1 class="mono"><%= @run.worktree_name.presence || @run.run_id %></h1>
+    <span class="badge <%= @run.status %>"><%= @run.status.humanize %></span>
+    <% if @session && @session.live? && @session.agent_status.present? %>
+      <span class="badge <%= @session.agent_status %>">agent: <%= @session.agent_status %></span>
+    <% end %>
+  </div>
+
+  <div class="toolbar-actions">
+    <% if @run.pull_request_url.present? %>
+      <%= link_to "Pull request", @run.pull_request_url, class: "btn", target: "_blank", rel: "noopener" %>
+    <% end %>
+    <% if @session&.live? %>
+      <%= button_to "Stop run", stop_workspace_run_path(current_workspace, @run), method: :post, class: "btn danger" %>
+    <% end %>
+    <% if @run.publication_retryable? %>
+      <%= button_to "Retry publication", retry_publication_workspace_run_path(current_workspace, @run), method: :post, class: "btn" %>
+    <% end %>
+  </div>
+</div>
+
+<p><%= @run.task %></p>
+
+<% if @run.publication_error.present? %>
+  <p class="error-banner">Publication failed: <%= @run.publication_error %></p>
+<% end %>
+
+<section class="panel">
+  <h2>Worktree</h2>
+  <% if @run.managed_worktree? %>
+    <p class="mono"><%= @run.target_root %></p>
+    <p class="muted mono"><%= @run.branch_name || "branch not provisioned" %></p>
+    <% if @run.terminal? %>
+      <%= button_to "Remove worktree", remove_worktree_workspace_run_path(current_workspace, @run),
+            method: :post, class: "btn",
+            data: { turbo_confirm: "Remove #{@run.worktree_name}? This deletes the checkout." } %>
+    <% end %>
+  <% else %>
+    <p class="muted">No managed worktree.</p>
+  <% end %>
+</section>
+
+<section class="panel">
+  <h2>Session</h2>
+  <% if @session.nil? %>
+    <p class="muted">
+      <% if @run.status == "queued" %>
+        Waiting for a free slot. <%= pluralize(Orchestrator::RunConcurrency.in_flight, "run") %> in flight of
+        <%= Orchestrator::RunConcurrency.limit %>.
+      <% else %>
+        No session has been started for this run.
+      <% end %>
+    </p>
+  <% else %>
+    <p class="muted">
+      <%= @session.driver %> &middot; <%= @session.status %>
+      <% if @session.pid.present? %> &middot; pid <%= @session.pid %><% end %>
+      <% if @session.started_at %> &middot; started <%= time_ago_in_words(@session.started_at) %> ago<% end %>
+    </p>
+
+    <% if @session.result.present? %>
+      <p><strong><%= @session.outcome %>:</strong> <%= @session.result %></p>
+    <% end %>
+
+    <% if @session.live? %>
+      <%= form_with url: send_message_workspace_run_path(current_workspace, @run), method: :post, local: true do |form| %>
+        <div class="field">
+          <%= form.label :message, "Send a message to this session" %>
+          <%= form.text_area :message, rows: 3, placeholder: "Use the other migration instead — see db/migrate/2026…" %>
+        </div>
+        <%= form.submit "Send", class: "btn primary" %>
+      <% end %>
+    <% end %>
+
+    <% if @pane.present? %>
+      <h3>Live pane</h3>
+      <pre class="log"><%= @pane %></pre>
+    <% end %>
+  <% end %>
+</section>
+
+<% if @artifacts.any? %>
+  <section class="panel">
+    <h2>Artifacts</h2>
+    <% @artifacts.each do |artifact| %>
+      <details>
+        <summary class="mono"><%= artifact[:name] %></summary>
+        <pre class="log"><%= artifact[:content] %></pre>
+      </details>
+    <% end %>
+  </section>
+<% end %>
+
+<% if @timeline.any? %>
+  <section class="panel">
+    <h2>Timeline</h2>
+    <ul class="timeline">
+      <% @timeline.each do |event| %>
+        <li>
+          <span class="muted"><%= event.created_at.strftime("%H:%M:%S") %></span>
+          <span class="mono"><%= event.event_type %></span>
+        </li>
+      <% end %>
+    </ul>
+  </section>
+<% end %>

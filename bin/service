@@ -1,0 +1,114 @@
+#!/usr/bin/env ruby
+# A thin daemon wrapper around bin/production. bin/production already gets
+# process supervision right for its two children (Puma + bin/jobs) -- one
+# TERM cascades to both, and it correctly waits for both to exit. What it
+# doesn't have is a way to run detached from a terminal, or a stable
+# command an agent (this one, or any future Claude Code / worker session)
+# can invoke directly to apply a config change (recurring.yml, queue.yml,
+# credentials) without asking a human to manage a foreground pane.
+#
+# Usage: bin/service start|stop|restart|status
+
+ROOT_DIR = File.expand_path("..", __dir__)
+PID_FILE = File.join(ROOT_DIR, "tmp/pids/production.pid")
+LOG_FILE = File.join(ROOT_DIR, "log/production_service.log")
+STOP_GRACE_PERIOD = 15
+STARTUP_GRACE_PERIOD = 1
+STARTUP_POLL_INTERVAL = 0.2
+DEFAULT_PORT = "3001"
+
+def running_pid
+  return nil unless File.exist?(PID_FILE)
+
+  pid = File.read(PID_FILE).strip.to_i
+  return nil if pid.zero?
+
+  Process.kill(0, pid)
+  pid
+rescue Errno::ESRCH, Errno::EPERM
+  nil
+end
+
+def start
+  if (pid = running_pid)
+    puts "bin/service: already running (pid #{pid}). See #{LOG_FILE}."
+    return
+  end
+
+  FileUtils.mkdir_p(File.dirname(PID_FILE))
+  FileUtils.mkdir_p(File.dirname(LOG_FILE))
+
+  log = File.open(LOG_FILE, "a")
+  pid = Process.spawn(
+    { "RAILS_ENV" => "production", "PORT" => ENV.fetch("PORT", DEFAULT_PORT) },
+    File.join(ROOT_DIR, "bin/production"),
+    chdir: ROOT_DIR, pgroup: true, out: log, err: log, in: File::NULL
+  )
+  Process.detach(pid)
+  File.write(PID_FILE, pid.to_s)
+
+  deadline = Time.now + STARTUP_GRACE_PERIOD
+  while Time.now < deadline && process_alive?(pid)
+    sleep(STARTUP_POLL_INTERVAL)
+  end
+
+  unless process_alive?(pid)
+    warn "bin/service: failed to start (pid #{pid} exited). See #{LOG_FILE}."
+    if File.exist?(LOG_FILE)
+      warn "Recent log output:"
+      warn File.readlines(LOG_FILE).last(100).join
+    end
+    File.delete(PID_FILE) if File.exist?(PID_FILE)
+    exit 1
+  end
+
+  puts "bin/service: started (pid #{pid}). Logging to #{LOG_FILE}."
+end
+
+def stop
+  pid = running_pid
+  unless pid
+    puts "bin/service: not running."
+    File.delete(PID_FILE) if File.exist?(PID_FILE)
+    return
+  end
+
+  Process.kill("TERM", pid)
+  deadline = Time.now + STOP_GRACE_PERIOD
+  sleep(0.2) while Time.now < deadline && process_alive?(pid)
+  Process.kill("KILL", pid) if process_alive?(pid)
+  File.delete(PID_FILE) if File.exist?(PID_FILE)
+  puts "bin/service: stopped."
+end
+
+def process_alive?(pid)
+  Process.kill(0, pid)
+  true
+rescue Errno::ESRCH, Errno::EPERM
+  false
+end
+
+def status
+  if (pid = running_pid)
+    puts "bin/service: running (pid #{pid})."
+  else
+    puts "bin/service: not running."
+  end
+end
+
+require "fileutils"
+
+case ARGV.first
+when "start"
+  start
+when "stop"
+  stop
+when "restart"
+  stop
+  start
+when "status"
+  status
+else
+  warn "Usage: bin/service start|stop|restart|status"
+  exit 1
+end

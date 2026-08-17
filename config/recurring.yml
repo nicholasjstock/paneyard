@@ -1,0 +1,43 @@
+# examples:
+#   periodic_cleanup:
+#     class: CleanSoftDeletedRecordsJob
+#     queue: background
+#     args: [ 1000, { batch_size: 500 } ]
+#     schedule: every hour
+#   periodic_cleanup_with_command:
+#     command: "SoftDeletedRecord.due.delete_all"
+#     priority: 2
+#     schedule: at 5am every day
+
+production: &recurring_jobs
+  clear_solid_queue_finished_jobs:
+    command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
+    schedule: every hour at minute 12
+  # Starts queued runs as slots free up. A floor, not the primary trigger --
+  # RunCompletion enqueues this directly the moment a slot frees.
+  dispatch_runs:
+    class: RunDispatchJob
+    schedule: every 10 seconds
+  # Notices sessions that ended without calling run_done (pane closed, CLI
+  # quit or crashed) so their runs do not hold a slot forever.
+  reconcile_run_sessions:
+    class: RunSessionReconcileJob
+    schedule: every 30 seconds
+  merge_approved_runs:
+    class: MergeApprovedRunsJob
+    schedule: every minute
+  resume_runs_from_pull_request_comments:
+    class: ResumeRunsFromPullRequestCommentsJob
+    schedule: every minute
+  cleanup_worktrees:
+    class: WorktreeCleanupJob
+    schedule: every 10 minutes
+  poll_telegram_updates:
+    class: PollTelegramUpdatesJob
+    schedule: every 5 seconds
+  refresh_telegram_admin_chat_progress:
+    class: RefreshTelegramAdminChatProgressJob
+    schedule: every 4 seconds
+
+development:
+  <<: *recurring_jobs

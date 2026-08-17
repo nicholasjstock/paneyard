@@ -1,0 +1,66 @@
+#!/usr/bin/env ruby
+# Runs the Rails server and the Solid Queue jobs process together, so
+# RunDispatchJob's recurring schedule (config/recurring.yml) actually fires
+# in dev. Both processes are killed together on exit.
+
+require "socket"
+
+unless system("bundle", "check", out: File::NULL)
+  warn "bin/dev: Ruby dependencies are incomplete. Run bin/setup, then retry bin/dev."
+  exit 1
+end
+
+unless system("./bin/rails", "db:abort_if_pending_migrations", out: File::NULL)
+  warn "bin/dev: the database is not prepared. Run bin/setup (or bin/rails db:prepare), then retry bin/dev."
+  exit 1
+end
+
+port = if ENV.key?("PORT")
+  requested_port = Integer(ENV.fetch("PORT"), 10)
+  begin
+    probe = TCPServer.new("127.0.0.1", requested_port)
+    probe.close
+  rescue Errno::EADDRINUSE
+    warn "bin/dev: requested port #{requested_port} is already in use. Choose another PORT or omit PORT to select one automatically."
+    exit 1
+  end
+  requested_port
+else
+  # Ask the OS for an ephemeral port so a disposable dev server never takes
+  # the conventional production/local-development port by default.
+  probe = TCPServer.new("127.0.0.1", 0)
+  begin
+    probe.addr[1]
+  ensure
+    probe.close
+  end
+end
+
+warn "bin/dev: starting Rails on http://127.0.0.1:#{port}"
+
+pids = [
+  # Solid Queue forks scheduler children. Give each top-level service its
+  # own process group so shutdown reaches those descendants too.
+  Process.spawn({ "PORT" => port.to_s }, "./bin/rails", "server", *ARGV, pgroup: true),
+  Process.spawn("./bin/jobs", pgroup: true)
+]
+
+stopping = false
+stop_children = proc do
+  next if stopping
+
+  stopping = true
+  pids.each { |pid| Process.kill("TERM", -pid) rescue nil }
+end
+
+%w[INT TERM].each do |signal|
+  trap(signal) { stop_children.call }
+end
+
+begin
+  exited_pid = Process.wait
+  warn "bin/dev: child #{exited_pid} exited; stopping the remaining development services" unless stopping
+ensure
+  stop_children.call
+  pids.each { |pid| Process.wait(pid) rescue nil }
+end

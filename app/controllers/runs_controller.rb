@@ -1,0 +1,133 @@
+require "fileutils"
+
+class RunsController < ApplicationController
+  before_action :require_workspace
+  before_action :require_initialized_workspace, only: %i[new create]
+  before_action :set_run, only: %i[show stop send_message remove_worktree retry_publication]
+
+  def index
+    @runs = current_workspace.runs.order(created_at: :desc).limit(50).to_a
+    @queued = @runs.select { |run| run.status == "queued" }
+    @in_flight = @runs.select { |run| run.status.in?(%w[launching running]) }
+    @concurrency_limit = Orchestrator::RunConcurrency.limit
+  end
+
+  def new
+    @run = current_workspace.runs.new(launcher_variant: "claude")
+  end
+
+  # Creating a run only queues it. RunDispatchJob starts it when a slot is
+  # free -- there is no per-run launcher process and nothing to supervise.
+  def create
+    @run = current_workspace.runs.new(run_params)
+    @run.run_id = generate_run_id
+    @run.worktree_name = Orchestrator::GitWorktree.name_for(@run)
+    @run.status = "queued"
+    @run.launched_by = current_operator
+    @run.target_root = current_workspace.source_root
+    @run.launch_artifacts = uploaded_artifacts(launch_files_params)
+
+    if @run.save
+      RunDispatchJob.perform_later
+      redirect_to workspace_run_path(current_workspace, @run), notice: "Queued #{@run.run_id}…"
+    else
+      render :new, status: :unprocessable_entity
+    end
+  end
+
+  def show
+    @session = @run.latest_session
+    @pane = @session && Orchestrator::RunSessionRunner.snapshot(@session)
+    @artifacts = collect_artifacts
+    @timeline = BusEvent.where(run_id: @run.run_id).order(created_at: :desc).limit(12).to_a
+  end
+
+  def stop
+    StopRunJob.perform_now(@run.id)
+    redirect_to workspace_run_path(current_workspace, @run), notice: "Stopped #{@run.run_id}."
+  end
+
+  # The operator's steering wheel: type into the live session from the run
+  # screen instead of switching to their herdr client. This replaced the whole
+  # blocking-question protocol -- there is always a live session to say it to.
+  def send_message
+    session = @run.live_session
+    if session.nil?
+      redirect_to workspace_run_path(current_workspace, @run), alert: "This run has no live session."
+      return
+    end
+
+    Orchestrator::RunSessionRunner.prompt!(session, params.require(:message))
+    redirect_to workspace_run_path(current_workspace, @run), notice: "Sent to the session."
+  rescue ActionController::ParameterMissing, Orchestrator::RunSessionRunner::Error, Orchestrator::Herdr::Error => error
+    redirect_to workspace_run_path(current_workspace, @run), alert: error.message
+  end
+
+  def remove_worktree
+    Orchestrator::WorktreeJanitor.remove_for_run!(@run, force: params[:force].present?)
+    redirect_to workspace_run_path(current_workspace, @run), notice: "Removed #{@run.worktree_name}."
+  rescue Orchestrator::WorktreeJanitor::Error => error
+    redirect_to workspace_run_path(current_workspace, @run), alert: error.message
+  end
+
+  def retry_publication
+    unless @run.publication_status == "failed"
+      redirect_to workspace_run_path(current_workspace, @run), alert: "This run is not awaiting publication retry."
+      return
+    end
+
+    PublishRunJob.perform_later(@run.id)
+    redirect_to workspace_run_path(current_workspace, @run), notice: "Retrying publication…"
+  end
+
+  private
+
+  # A workspace must finish its bootstrap discovery before task runs launch:
+  # that run is what records the dev environment and protected paths every
+  # later run's prompt depends on.
+  def require_initialized_workspace
+    return if current_workspace.initialized?
+
+    redirect_to workspace_runs_path(current_workspace),
+      alert: "This workspace is still initializing (discovering its dev environment and protected paths). " \
+        "Wait for that run to finish before launching a new one."
+  end
+
+  def set_run
+    @run = current_workspace.runs.find_by!(run_id: params[:id])
+  end
+
+  def run_params
+    params.require(:run).permit(:task, :launcher_variant)
+  end
+
+  def launch_files_params
+    params.fetch(:run, {}).permit(launch_files: [])[:launch_files]
+  end
+
+  # Files the operator attached at launch, copied into the run's artifact
+  # store so the session can read them with read_workflow_artifact.
+  def uploaded_artifacts(files)
+    Array(files).filter_map do |uploaded|
+      next unless uploaded.respond_to?(:original_filename) && uploaded.original_filename.present?
+
+      name = File.basename(uploaded.original_filename)
+      path = Orchestrator::ArtifactStore.resolve_path(@run.target_root, @run.run_id, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      FileUtils.cp(uploaded.tempfile.path, path)
+      { "name" => name, "source_path" => uploaded.original_filename }
+    end
+  end
+
+  def generate_run_id
+    "run-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}"
+  end
+
+  def collect_artifacts
+    Orchestrator::ArtifactStore.names(@run.target_root, @run.run_id).map do |name|
+      { name:, content: Orchestrator::ArtifactStore.read(@run.target_root, @run.run_id, name) }
+    end
+  rescue Errno::ENOENT
+    []
+  end
+end

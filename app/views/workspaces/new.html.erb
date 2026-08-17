@@ -1,0 +1,18 @@
+<% content_for :title, "Add workspace" %>
+
+<h1>Add workspace</h1>
+
+<%= form_with model: @workspace, url: workspaces_path, local: true do |form| %>
+  <div class="field">
+    <%= form.label :name, "Name" %>
+    <%= form.text_field :name, placeholder: "simple-retail-planner" %>
+  </div>
+
+  <div class="field">
+    <%= form.label :root_path, "Workspace root" %>
+    <%= form.text_field :root_path, placeholder: "/Users/stockn/Source/simple-retail-planner" %>
+  </div>
+
+  <%= form.submit "Add workspace", class: "btn primary" %>
+  <%= link_to "Cancel", workspaces_path, class: "btn" %>
+<% end %>

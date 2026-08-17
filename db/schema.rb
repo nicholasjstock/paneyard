@@ -1,0 +1,199 @@
+# This file is auto-generated from the current state of the database. Instead
+# of editing this file, please use the migrations feature of Active Record to
+# incrementally modify your database, and then regenerate this schema definition.
+#
+# This file is the source Rails uses to define your schema when running `bin/rails
+# db:schema:load`. When creating a new database, `bin/rails db:schema:load` tends to
+# be faster and is potentially less error prone than running all of your
+# migrations from scratch. Old migrations may fail to apply correctly if those
+# migrations use external dependencies or application code.
+#
+# It's strongly recommended that you check this file into your version control system.
+
+ActiveRecord::Schema[8.1].define(version: 2026_08_17_120200) do
+  create_table "bus_events", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "event_id", null: false
+    t.string "event_type", null: false
+    t.json "payload", default: {}, null: false
+    t.string "run_id"
+    t.datetime "updated_at", null: false
+    t.index ["event_id"], name: "index_bus_events_on_event_id", unique: true
+    t.index ["run_id"], name: "index_bus_events_on_run_id"
+  end
+
+  create_table "run_outbound_comments", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "github_comment_id", null: false
+    t.string "kind", null: false
+    t.string "run_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["run_id", "github_comment_id"], name: "index_run_outbound_comments_on_run_id_and_github_comment_id", unique: true
+  end
+
+  create_table "run_sessions", force: :cascade do |t|
+    t.string "agent_status"
+    t.string "capability_token_digest"
+    t.string "cli_session_id"
+    t.datetime "created_at", null: false
+    t.string "driver", null: false
+    t.datetime "ended_at"
+    t.string "herdr_pane_id"
+    t.string "herdr_tab_id"
+    t.string "herdr_workspace_id"
+    t.datetime "last_seen_at"
+    t.string "mcp_config_path"
+    t.string "model"
+    t.string "outcome"
+    t.integer "pid"
+    t.string "prompt_path"
+    t.text "result"
+    t.integer "run_id", null: false
+    t.datetime "started_at"
+    t.string "status", default: "starting", null: false
+    t.datetime "updated_at", null: false
+    t.index ["capability_token_digest"], name: "index_run_sessions_on_capability_token_digest", unique: true
+    t.index ["run_id"], name: "index_run_sessions_on_one_live_session_per_run", unique: true, where: "ended_at IS NULL"
+    t.index ["run_id"], name: "index_run_sessions_on_run_id"
+    t.index ["status"], name: "index_run_sessions_on_status"
+  end
+
+  create_table "runs", force: :cascade do |t|
+    t.string "base_sha"
+    t.string "branch_name"
+    t.datetime "created_at", null: false
+    t.string "last_pull_request_comment_id"
+    t.json "launch_artifacts", default: [], null: false
+    t.string "launched_by"
+    t.string "launcher_variant", default: "claude", null: false
+    t.datetime "publication_completed_at"
+    t.text "publication_error"
+    t.datetime "publication_started_at"
+    t.string "publication_status"
+    t.string "pull_request_url"
+    t.string "run_id", null: false
+    t.string "source_root"
+    t.datetime "started_at"
+    t.string "status", default: "queued", null: false
+    t.datetime "stopped_at"
+    t.string "target_root", null: false
+    t.text "task", null: false
+    t.datetime "updated_at", null: false
+    t.integer "workspace_id", null: false
+    t.string "worktree_name"
+    t.index ["publication_status"], name: "index_runs_on_publication_status"
+    t.index ["run_id"], name: "index_runs_on_run_id", unique: true
+    t.index ["status"], name: "index_runs_on_status"
+    t.index ["workspace_id"], name: "index_runs_on_workspace_id"
+    t.index ["worktree_name"], name: "index_runs_on_worktree_name"
+  end
+
+  create_table "telegram_conversations", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "telegram_chat_id", null: false
+    t.string "telegram_user_id", null: false
+    t.datetime "updated_at", null: false
+    t.integer "workspace_id"
+    t.index ["telegram_chat_id"], name: "index_telegram_conversations_on_telegram_chat_id", unique: true
+    t.index ["workspace_id"], name: "index_telegram_conversations_on_workspace_id"
+  end
+
+  create_table "telegram_update_cursors", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "last_update_id", default: -1, null: false
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_telegram_update_cursors_on_name", unique: true
+  end
+
+  create_table "workspace_admin_chat_messages", force: :cascade do |t|
+    t.text "content", default: "", null: false
+    t.datetime "created_at", null: false
+    t.text "error_message"
+    t.json "events", default: [], null: false
+    t.integer "pid"
+    t.integer "process_group_id"
+    t.string "provider"
+    t.string "role", null: false
+    t.string "status", default: "queued", null: false
+    t.integer "telegram_conversation_id"
+    t.datetime "telegram_delivered_at"
+    t.integer "telegram_draft_id"
+    t.integer "telegram_message_id"
+    t.integer "telegram_persisted_characters", default: 0, null: false
+    t.text "telegram_synced_content"
+    t.string "turn_id"
+    t.datetime "updated_at", null: false
+    t.json "usage", default: {}, null: false
+    t.integer "workspace_admin_chat_id", null: false
+    t.index ["telegram_conversation_id"], name: "idx_on_telegram_conversation_id_d672f9d019"
+    t.index ["turn_id"], name: "index_workspace_admin_chat_messages_on_turn_id"
+    t.index ["workspace_admin_chat_id"], name: "index_workspace_admin_chat_messages_on_workspace_admin_chat_id"
+  end
+
+  create_table "workspace_admin_chats", force: :cascade do |t|
+    t.string "active_provider", default: "claude", null: false
+    t.string "active_turn_id"
+    t.string "claude_model"
+    t.string "claude_session_id"
+    t.string "codex_model"
+    t.string "codex_session_id"
+    t.datetime "created_at", null: false
+    t.text "last_error"
+    t.string "opencode_model"
+    t.string "opencode_session_id"
+    t.string "status", default: "idle", null: false
+    t.datetime "updated_at", null: false
+    t.integer "workspace_id", null: false
+    t.index ["workspace_id"], name: "index_workspace_admin_chats_on_workspace_id", unique: true
+  end
+
+  create_table "workspace_env_vars", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "evidence_ref", null: false
+    t.string "name", null: false
+    t.string "recorded_by", null: false
+    t.datetime "updated_at", null: false
+    t.text "value", null: false
+    t.integer "workspace_id", null: false
+    t.index ["workspace_id", "name"], name: "index_workspace_env_vars_on_workspace_id_and_name", unique: true
+    t.index ["workspace_id"], name: "index_workspace_env_vars_on_workspace_id"
+  end
+
+  create_table "workspace_memory_entries", force: :cascade do |t|
+    t.text "content", null: false
+    t.datetime "created_at", null: false
+    t.string "entry_key", null: false
+    t.string "evidence_ref", null: false
+    t.string "kind", null: false
+    t.string "recorded_by", null: false
+    t.string "status", null: false
+    t.integer "supersedes_id"
+    t.datetime "updated_at", null: false
+    t.integer "workspace_id", null: false
+    t.index ["supersedes_id"], name: "index_workspace_memory_entries_on_supersedes_id"
+    t.index ["workspace_id", "entry_key"], name: "index_workspace_memory_entries_on_workspace_id_and_entry_key"
+    t.index ["workspace_id", "status"], name: "index_workspace_memory_entries_on_workspace_id_and_status"
+    t.index ["workspace_id"], name: "index_workspace_memory_entries_on_workspace_id"
+  end
+
+  create_table "workspaces", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.json "protected_path_patterns", default: [], null: false
+    t.string "root_path", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_workspaces_on_name", unique: true
+    t.index ["root_path"], name: "index_workspaces_on_root_path", unique: true
+  end
+
+  add_foreign_key "run_sessions", "runs"
+  add_foreign_key "runs", "workspaces"
+  add_foreign_key "telegram_conversations", "workspaces"
+  add_foreign_key "workspace_admin_chat_messages", "telegram_conversations"
+  add_foreign_key "workspace_admin_chat_messages", "workspace_admin_chats"
+  add_foreign_key "workspace_admin_chats", "workspaces"
+  add_foreign_key "workspace_env_vars", "workspaces"
+  add_foreign_key "workspace_memory_entries", "workspace_memory_entries", column: "supersedes_id"
+  add_foreign_key "workspace_memory_entries", "workspaces"
+end

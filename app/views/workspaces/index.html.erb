@@ -1,0 +1,25 @@
+<% content_for :title, "Workspaces" %>
+
+<div class="toolbar">
+  <h1>Workspaces</h1>
+  <%= link_to "Add workspace", new_workspace_path, class: "btn primary" %>
+</div>
+
+<div id="workspaces">
+  <% if @workspaces.empty? %>
+    <p class="empty">No workspaces registered yet.</p>
+  <% else %>
+    <% @workspaces.each do |workspace| %>
+      <div class="card">
+        <div class="card-title">
+          <%= link_to workspace.name, workspace_runs_path(workspace) %>
+          <%= link_to "Edit", edit_workspace_path(workspace), class: "btn" %>
+          <%= button_to "Remove", workspace_path(workspace), method: :delete,
+                class: "btn danger",
+                data: { turbo_confirm: "Remove workspace #{workspace.name}? This only works when the workspace has no runs." } %>
+        </div>
+        <p class="muted mono"><%= workspace.root_path %></p>
+      </div>
+    <% end %>
+  <% end %>
+</div>

@@ -1,0 +1,23 @@
+<% content_for :title, "#{current_workspace.name} Events" %>
+
+<%= turbo_stream_from "workspace_#{current_workspace.id}_events" %>
+
+<h1><%= current_workspace.name %> Events</h1>
+
+<%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
+
+<div id="events">
+  <% if @events.empty? %>
+    <p class="empty">No recent events.</p>
+  <% else %>
+    <% @events.each do |event| %>
+      <div class="card">
+        <div class="card-title">
+          <span class="mono"><%= event["type"] %></span>
+          <span class="muted"><%= event["at"] %></span>
+        </div>
+        <pre class="log"><%= JSON.pretty_generate(event["payload"]) %></pre>
+      </div>
+    <% end %>
+  <% end %>
+</div>

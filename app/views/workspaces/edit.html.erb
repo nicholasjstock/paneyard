@@ -1,0 +1,24 @@
+<% content_for :title, "Edit #{@workspace.name}" %>
+
+<h1>Edit <%= @workspace.name %></h1>
+
+<%= form_with model: @workspace, url: workspace_path(@workspace), method: :patch, local: true do |form| %>
+  <div class="field">
+    <%= form.label :root_path, "Workspace root" %>
+    <p class="muted">The clean Git checkout is expected at <span class="mono">main</span> beneath this directory. Task runs receive sibling worktrees.</p>
+    <%= form.text_field :root_path, disabled: @workspace.runs.active.exists? %>
+  </div>
+
+  <div class="field">
+    <%= form.label :protected_path_patterns_text, "Protected source path patterns" %>
+    <p class="muted">
+      One workspace-relative glob per line. Include maintained source, configuration, and tests; exclude dependency caches,
+      generated output, logs, and runtime state. These paths are read-only by default and writable only by implementation workers.
+      Proposed automatically by project setup; edit freely.
+    </p>
+    <%= form.text_area :protected_path_patterns_text, value: @workspace.protected_path_patterns.join("\n"), rows: 10 %>
+  </div>
+
+  <%= form.submit "Save", class: "btn primary" %>
+  <%= link_to "Cancel", workspaces_path, class: "btn" %>
+<% end %>

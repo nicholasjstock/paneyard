@@ -1,0 +1,12 @@
+<% if chat.visible_messages.empty? %>
+  <div class="chat-empty">
+    <h2>Ask <%= chat.active_provider.capitalize %> about this workspace</h2>
+    <p>It can inspect and edit <%= chat.workspace.source_root %>, run shell commands, and report back what it did.</p>
+  </div>
+<% else %>
+  <%= render chat.visible_messages %>
+<% end %>
+
+<% if chat.active? %>
+  <div class="chat-thinking"><span></span><span></span><span></span> Working in <%= chat.workspace.name %>…</div>
+<% end %>
