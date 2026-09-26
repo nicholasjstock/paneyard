@@ -20,9 +20,6 @@ module McpTools
       chat = AdminChatAuthorization.chat!(server_context:)
       workspace = chat&.workspace || Workspace.default
       raise ArgumentError, "no workspace to queue a run in" unless workspace
-      unless workspace.initialized?
-        raise ArgumentError, "workspace #{workspace.name} has not finished its setup discovery yet"
-      end
 
       run = workspace.runs.new(
         run_id: "run-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}",

@@ -2,14 +2,8 @@ require "rails_helper"
 
 RSpec.describe "workspaces", type: :system do
   it "lists current runs in the panel and switches to the selected run's workspace", js: true do
-    first_workspace = Workspace.create!(
-      name: "first-#{SecureRandom.hex(4)}", root_path: "/tmp/first-#{SecureRandom.hex(4)}",
-      protected_path_patterns: [ "app/**" ]
-    )
-    second_workspace = Workspace.create!(
-      name: "second-#{SecureRandom.hex(4)}", root_path: "/tmp/second-#{SecureRandom.hex(4)}",
-      protected_path_patterns: [ "app/**" ]
-    )
+    first_workspace = Workspace.create!(name: "first-#{SecureRandom.hex(4)}", root_path: "/tmp/first-#{SecureRandom.hex(4)}")
+    second_workspace = Workspace.create!(name: "second-#{SecureRandom.hex(4)}", root_path: "/tmp/second-#{SecureRandom.hex(4)}")
     first_run = create_active_run(first_workspace, "first-current")
     second_run = create_active_run(second_workspace, "second-current")
 
@@ -29,7 +23,9 @@ RSpec.describe "workspaces", type: :system do
     expect(page).to have_text(second_run.task)
   end
 
-  it "creates a workspace from the index flow, auto-launches its bootstrap run, and redirects into its runs" do
+  # There is no bootstrap discovery run any more: a new workspace takes task
+  # runs straight away, and sessions record what they learn as they go.
+  it "creates a workspace from the index flow and can queue a task in it immediately" do
     suffix = SecureRandom.hex(4)
 
     expect do
@@ -38,39 +34,27 @@ RSpec.describe "workspaces", type: :system do
       fill_in "Name", with: "planner-app-#{suffix}"
       fill_in "Workspace root", with: "/tmp/planner-app-#{suffix}"
       click_button "Add workspace"
-    end.to change(Run, :count).by(1)
+    end.not_to change(Run, :count)
 
-    expect(page).to have_text("Added workspace planner-app-#{suffix}. Queued a run to discover its dev environment and protected paths…")
+    expect(page).to have_text("Added workspace planner-app-#{suffix}.")
     expect(page).to have_current_path(%r{/workspaces/\d+/runs})
     expect(page).to have_text("planner-app-#{suffix} Runs")
-    expect(page).to have_no_link("Queue a task")
-    expect(page).to have_text("still initializing")
-
-    workspace = Workspace.find_by!(name: "planner-app-#{suffix}")
-    run = workspace.runs.sole
-    expect(run.launched_by).to eq("workspace_init")
-    # A bootstrap run is an ordinary queued run now -- same dispatch path as
-    # any other, just a discovery task.
-    expect(run.status).to eq("queued")
-    expect(run.task).to include("record_protected_paths")
+    expect(page).to have_link("Queue a task")
+    expect(page).to have_no_button("Re-run project setup")
   end
 
-  it "lets an operator edit a workspace's protected path patterns" do
-    workspace = Workspace.create!(
-      name: "planner-app-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir,
-      protected_path_patterns: [ "app/controllers/**/*.rb" ]
-    )
+  it "lets an operator edit a workspace's root" do
+    workspace = Workspace.create!(name: "planner-app-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+    new_root = Dir.mktmpdir
 
     visit workspaces_path
     within(find(".card", text: workspace.name, match: :first)) { click_link "Edit" }
 
-    expect(page).to have_field("Protected source path patterns", with: "app/controllers/**/*.rb")
-
-    fill_in "Protected source path patterns", with: "app/controllers/**/*.rb\ndb/migrate/**"
+    fill_in "Workspace root", with: new_root
     click_button "Save"
 
     expect(page).to have_text("Updated workspace #{workspace.name}.")
-    expect(workspace.reload.protected_path_patterns).to eq(%w[app/controllers/**/*.rb db/migrate/**])
+    expect(workspace.reload.root_path).to eq(new_root)
   end
 
   it "shows the empty state when no workspaces exist" do

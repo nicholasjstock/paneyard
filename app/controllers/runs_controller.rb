@@ -2,7 +2,6 @@ require "fileutils"
 
 class RunsController < ApplicationController
   before_action :require_workspace
-  before_action :require_initialized_workspace, only: %i[new create]
   before_action :set_run, only: %i[show stop send_message remove_worktree publish close_session retry_publication]
 
   def index
@@ -104,17 +103,6 @@ class RunsController < ApplicationController
   end
 
   private
-
-  # A workspace must finish its bootstrap discovery before task runs launch:
-  # that run is what records the dev environment and protected paths every
-  # later run's prompt depends on.
-  def require_initialized_workspace
-    return if current_workspace.initialized?
-
-    redirect_to workspace_runs_path(current_workspace),
-      alert: "This workspace is still initializing (discovering its dev environment and protected paths). " \
-        "Wait for that run to finish before launching a new one."
-  end
 
   def set_run
     @run = current_workspace.runs.find_by!(run_id: params[:id])

@@ -1,24 +1,10 @@
 require "rails_helper"
 
 RSpec.describe "runs", type: :request do
-  it "blocks queueing a new run while the workspace is not yet initialized" do
-    workspace = create_workspace(prefix: "runs-controller")
-
-    get new_workspace_run_path(workspace)
-    expect(response).to redirect_to(workspace_runs_path(workspace))
-    follow_redirect!
-    expect(response.body).to include("still initializing")
-
-    expect do
-      post workspace_runs_path(workspace), params: { run: { task: "Do something", launcher_variant: "claude" } }
-    end.not_to change(Run, :count)
-    expect(response).to redirect_to(workspace_runs_path(workspace))
-  end
-
   # Creating a run starts nothing by itself -- it queues, and the dispatcher
   # decides when it runs. That separation is the whole scheduler.
   it "queues a run rather than starting one, and asks the dispatcher to look" do
-    workspace = create_workspace(prefix: "runs-controller", protected_path_patterns: [ "app/**/*.rb" ])
+    workspace = create_workspace(prefix: "runs-controller")
 
     get new_workspace_run_path(workspace)
     expect(response).to have_http_status(:ok)
@@ -36,7 +22,7 @@ RSpec.describe "runs", type: :request do
   end
 
   it "stores uploaded files in the run's artifact store so the session can read them" do
-    workspace = create_workspace(prefix: "runs-controller-upload", protected_path_patterns: [ "app/**/*.rb" ])
+    workspace = create_workspace(prefix: "runs-controller-upload")
     first = Tempfile.new([ "first", ".db" ])
     second = Tempfile.new([ "second", ".log" ])
     first.write("first artifact")

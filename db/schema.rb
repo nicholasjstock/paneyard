@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_26_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_26_150000) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -192,7 +192,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_140000) do
   create_table "workspaces", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "name", null: false
-    t.json "protected_path_patterns", default: [], null: false
     t.string "root_path", null: false
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_workspaces_on_name", unique: true

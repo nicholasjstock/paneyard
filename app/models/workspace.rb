@@ -18,28 +18,11 @@ class Workspace < ApplicationRecord
     order(:created_at).first
   end
 
-  # Gates RunsController#new/#create until the bootstrap run has recorded
-  # this workspace's protected source patterns.
-  def initialized?
-    protected_path_patterns.present?
-  end
-
   # A workspace owns a project directory; its durable source checkout is the
   # conventional `main` child. Task runs receive sibling worktrees beneath
   # this directory, never inside the source checkout.
   def source_root
     Pathname(root_path).join("main").expand_path.to_s
-  end
-
-  # Named in every run's prompt as the paths a session should leave alone
-  # unless its task is explicitly about them. Prose rather than a sandbox
-  # now: a session owns its whole worktree, and the safety net is human PR
-  # review. They deliberately describe source, configuration, and test paths,
-  # never the entire checkout.
-  def protected_write_patterns
-    protected_path_patterns.select do |pattern|
-      pattern.present? && !Pathname(pattern).absolute? && !Pathname(pattern).cleanpath.to_s.start_with?("../")
-    end
   end
 
   private
