@@ -18,29 +18,11 @@ module Orchestrator
 
     def compose(run:, session_driver:)
       sections = [
-        memory_section(run),
         identity_section(run:, session_driver:),
         working_agreement(run),
         task_section(run)
       ]
       sections.compact_blank.join("\n")
-    end
-
-    # Prepended so no session has to remember to ask -- see ProjectMemory and
-    # RecordProjectMemoryEntryTool for how these get written. Reuses
-    # ProjectMemory.snapshot's own brief bound rather than querying the table.
-    def memory_section(run)
-      entries = ProjectMemory.snapshot(run_id: run.run_id)[:entries]
-      return nil if entries.empty?
-
-      lines = entries.map { |entry| "- [#{entry[:kind]}] #{entry[:key]}: #{entry[:content]}" }
-      <<~SECTION
-        # Durable project knowledge for this workspace
-
-        Evidence-backed notes from earlier runs. Call `get_project_memory` for full detail.
-
-        #{lines.join("\n")}
-      SECTION
     end
 
     def identity_section(run:, session_driver:)

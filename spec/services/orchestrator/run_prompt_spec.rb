@@ -39,16 +39,6 @@ RSpec.describe Orchestrator::RunPrompt do
     expect(prompt).not_to include("off limits")
   end
 
-  it "includes durable workspace memory so a session does not rediscover it" do
-    Orchestrator::ProjectMemory.record!(
-      run_id: run.run_id, entry_key: "dev-environment", kind: "operational_rule",
-      content: "Run bin/dev from the repository root.", evidence_ref: "bin/dev", recorded_by: "session"
-    )
-
-    expect(described_class.compose(run:, session_driver: "claude"))
-      .to include("Durable project knowledge", "bin/dev")
-  end
-
   it "points the session at any files the operator attached at launch" do
     run.update!(launch_artifacts: [ { "name" => "failing-test.log", "source_path" => "failing-test.log" } ])
 
