@@ -1,8 +1,7 @@
 module Orchestrator
   # Queues the one bootstrap run that discovers a workspace's dev environment
-  # and declares its protected paths. Shared by WorkspacesController#create (a
-  # brand-new workspace) and ProjectSetupsController#create (re-running
-  # discovery).
+  # and declares its protected paths, launched by WorkspacesController#create
+  # when a workspace is added.
   #
   # This used to need its own dispatch path, because the normal one always
   # seeded a planner decision and a planner given a discovery task with no
@@ -28,8 +27,8 @@ module Orchestrator
       4. Call `run_done` with outcome `done`.
     TASK
 
-    def launch!(workspace, force: false)
-      if !force && workspace.workspace_memory_entries.current.exists?(entry_key: PRIMARY_ENTRY_KEY)
+    def launch!(workspace)
+      if workspace.workspace_memory_entries.current.exists?(entry_key: PRIMARY_ENTRY_KEY)
         return nil
       end
 

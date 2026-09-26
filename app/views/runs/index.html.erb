@@ -4,7 +4,6 @@
 
 <div class="toolbar">
   <h1><%= current_workspace.name %> Runs</h1>
-  <%= button_to "Re-run project setup", workspace_project_setup_path(current_workspace), method: :post, class: "btn" %>
   <% if current_workspace.initialized? %>
     <%= link_to "Queue a task", new_workspace_run_path(current_workspace), class: "btn primary" %>
   <% end %>
@@ -18,7 +17,8 @@
 <% unless current_workspace.initialized? %>
   <p class="muted">
     This workspace is still initializing (discovering its dev environment and protected paths) before it can
-    queue a task run.
+    queue a task run. If that run fails, set its protected paths by hand under
+    <%= link_to "Edit workspace", edit_workspace_path(current_workspace) %>.
   </p>
 <% end %>
 
