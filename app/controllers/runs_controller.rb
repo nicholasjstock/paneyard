@@ -37,7 +37,6 @@ class RunsController < ApplicationController
 
   def show
     @session = @run.latest_session
-    @pane = @session && Orchestrator::RunSessionRunner.snapshot(@session)
     @checkpoints = @run.checkpoints.to_a
     @artifacts = collect_artifacts
     @timeline = BusEvent.where(run_id: @run.run_id).order(created_at: :desc).limit(12).to_a
