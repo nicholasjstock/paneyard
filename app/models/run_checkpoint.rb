@@ -9,7 +9,7 @@
 # its current state.
 class RunCheckpoint < ApplicationRecord
   belongs_to :run
-  belongs_to :run_session
+  belongs_to :run_session, inverse_of: :checkpoints
 
   validates :outcome, inclusion: { in: RunSession::OUTCOMES }
 
