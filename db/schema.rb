@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_17_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_26_140000) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -20,6 +20,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_140000) do
     t.datetime "updated_at", null: false
     t.index ["event_id"], name: "index_bus_events_on_event_id", unique: true
     t.index ["run_id"], name: "index_bus_events_on_run_id"
+  end
+
+  create_table "run_checkpoints", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "outcome", null: false
+    t.integer "run_id", null: false
+    t.integer "run_session_id", null: false
+    t.text "summary"
+    t.index ["run_id"], name: "index_run_checkpoints_on_run_id"
+    t.index ["run_session_id"], name: "index_run_checkpoints_on_run_session_id"
   end
 
   create_table "run_outbound_comments", force: :cascade do |t|
@@ -189,6 +199,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_140000) do
     t.index ["root_path"], name: "index_workspaces_on_root_path", unique: true
   end
 
+  add_foreign_key "run_checkpoints", "run_sessions"
+  add_foreign_key "run_checkpoints", "runs"
   add_foreign_key "run_sessions", "runs"
   add_foreign_key "runs", "workspaces"
   add_foreign_key "telegram_conversations", "workspaces"

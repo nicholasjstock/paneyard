@@ -1,8 +1,11 @@
 require "rails_helper"
 
 RSpec.describe RunSessionReconcileJob do
-  # This job is the safety net behind run_done. Its whole job is to notice
-  # sessions that ended without reporting, so their runs stop holding a slot.
+  # RunIdleReport notifies the operator's real herdr; a spec must never open
+  # that socket.
+  before { allow(Orchestrator::Herdr).to receive(:notify) }
+  # This job is the safety net for sessions that die unnoticed. Its whole job is
+  # to spot sessions that stopped existing, so their runs stop holding a slot.
   it "completes the run when a session turns out to have died" do
     run, session = create_run_and_session(prefix: "reconcile-dead")
     allow(Orchestrator::RunSessionRunner).to receive(:refresh!) do |s|
@@ -24,6 +27,23 @@ RSpec.describe RunSessionReconcileJob do
     described_class.perform_now
 
     expect(run.reload.status).to eq("running")
+  end
+
+  # An idle session is waiting on the operator, on purpose: pane open, process
+  # up, slot held. Reaping it here would undo the entire point of reporting
+  # idle rather than ending the run.
+  it "leaves a session that has reported idle alone, however long it waits" do
+    run, session = create_run_and_session(prefix: "reconcile-idle")
+    Orchestrator::RunIdleReport.call(run:, session:, outcome: "done", summary: "Finished; over to you.")
+    allow(Orchestrator::RunSessionRunner).to receive(:refresh!) do |s|
+      s.update!(agent_status: "idle", last_seen_at: Time.current)
+    end
+
+    described_class.perform_now
+
+    expect(session.reload).to be_live
+    expect(session.ended_at).to be_nil
+    expect(run.reload).to have_attributes(status: "awaiting_review", stopped_at: nil)
   end
 
   # herdr being unreachable says nothing about any one session. Failing every

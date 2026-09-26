@@ -51,7 +51,7 @@ module Orchestrator
       git!(root, "rev-parse", "HEAD").strip
     end
 
-    # The session is told to push before calling run_done, but a push is
+    # The session is told to push before reporting idle, but a push is
     # cheap, idempotent ("Everything up-to-date"), and the alternative is
     # losing a whole run's work to one forgotten command.
     def push_branch!(root, run, env)

@@ -106,8 +106,8 @@ module Orchestrator
 
         #{comment.fetch('body')}
 
-        Act on it in this worktree, then push and call `run_done` again as usual. If it needs no code
-        change, say so and call `run_done` with outcome `done`.
+        Act on it in this worktree, then push and call `report_idle` again as usual. If it needs no code
+        change, say so and call `report_idle` with outcome `done`.
       PROMPT
     end
 

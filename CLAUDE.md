@@ -6,7 +6,9 @@ The most important architectural rule is that **Rails schedules; it does not orc
 
 Do not reintroduce a planner, a step queue, per-step workers, a chaperone, acceptance-criteria trees, or a GitHub-mediated question protocol. All of that existed to compensate for headless one-shot workers that had no continuity and no operator in the loop. A session has both. If a run needs to change direction, talk to it (`Orchestrator::RunSessionRunner.prompt!`) — that is also how a pull-request comment reaches it.
 
-A run ends only when its session calls the `run_done` MCP tool. `RunSessionReconcileJob` catches the cases where that never happens; without it a run holds its concurrency slot forever, because a live interactive CLI and a finished one look identical from outside.
+A session reports going idle with the `report_idle` MCP tool; it does not end the run. Rails cannot infer idleness, because a live interactive CLI looks identical whether the agent finished or is waiting for input. Reporting leaves the pane open, the process up and the concurrency slot held, and publishes nothing: the operator reads the pane and decides what happens next. Each report is a checkpoint covering the interval since the previous one, kept as `RunCheckpoint` history rather than overwritten, so the newest is current state and the sequence is the run's narrative.
+
+Only the operator ends a session, from the run screen: **Open pull request** (`PublishRunJob`) or **Close session** (kills the CLI, closes the herdr workspace, frees the slot). Never make a session's report open a pull request or tear down its own pane. `RunSessionReconcileJob` remains the safety net for a session that genuinely died; an idle session is not an anomaly to it.
 
 ## herdr
 

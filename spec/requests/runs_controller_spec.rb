@@ -87,4 +87,60 @@ RSpec.describe "runs", type: :request do
     follow_redirect!
     expect(response.body).to include("no live session")
   end
+
+  # Publication moved out of the session's hands: it reports idle and waits,
+  # and this is where the operator decides the work is worth a pull request.
+  describe "publish" do
+    it "opens the pull request on the operator's request" do
+      run, = create_run_and_session(run: create_run(prefix: "publish-action", branch_name: "workflow/publish-action", worktree_name: "publish-action"))
+
+      expect { post publish_workspace_run_path(run.workspace, run) }
+        .to have_enqueued_job(PublishRunJob).with(run.id)
+
+      expect(run.reload.publication_status).to eq("publishing")
+    end
+
+    # Two clicks must not race two `gh pr create` calls at the same branch.
+    it "refuses a second request while publication is already in flight" do
+      run, = create_run_and_session(run: create_run(prefix: "publish-twice", branch_name: "workflow/publish-twice", worktree_name: "publish-twice"))
+      run.update!(publication_status: "publishing")
+
+      expect { post publish_workspace_run_path(run.workspace, run) }
+        .not_to have_enqueued_job(PublishRunJob)
+    end
+
+    it "refuses a run that never got a branch" do
+      run, = create_run_and_session(run: create_run(prefix: "publish-nobranch", worktree_name: "publish-nobranch"))
+
+      expect { post publish_workspace_run_path(run.workspace, run) }
+        .not_to have_enqueued_job(PublishRunJob)
+    end
+  end
+
+  # Nothing tears a pane down but the operator, so this is the only path that
+  # kills the CLI and hands the concurrency slot back.
+  describe "close_session" do
+    it "ends the live session and frees the slot" do
+      run, session = create_run_and_session(prefix: "close-session")
+      allow(Orchestrator::RunSessionRunner).to receive(:finish!) do |s, **|
+        s.update!(status: "done", outcome: "done", ended_at: Time.current)
+      end
+
+      expect { post close_session_workspace_run_path(run.workspace, run) }
+        .to have_enqueued_job(RunDispatchJob)
+
+      expect(Orchestrator::RunSessionRunner).to have_received(:finish!)
+      expect(session.reload).to be_ended
+    end
+
+    it "says so when there is no live session to close" do
+      run = create_run(prefix: "close-session-none", status: "awaiting_review")
+
+      post close_session_workspace_run_path(run.workspace, run)
+
+      expect(response).to redirect_to(workspace_run_path(run.workspace, run))
+      follow_redirect!
+      expect(response.body).to include("no live session")
+    end
+  end
 end

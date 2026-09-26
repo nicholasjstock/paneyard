@@ -54,9 +54,9 @@ module Orchestrator
 
         Rails authenticates your MCP calls with this session's private capability -- do not invent or
         alter identity fields. The workflow tools are MCP tools registered under the `mcp__workflow__`
-        prefix (e.g. `mcp__workflow__run_done`). If they are not directly callable they are deferred:
+        prefix (e.g. `mcp__workflow__report_idle`). If they are not directly callable they are deferred:
         load them FIRST with ToolSearch using their full prefixed names (e.g. query
-        `select:mcp__workflow__run_done`) -- bare, unprefixed names will not match. Never state or imply
+        `select:mcp__workflow__report_idle`) -- bare, unprefixed names will not match. Never state or imply
         that you called a tool you did not actually invoke; if a required tool cannot be loaded or
         called, say exactly that instead of narrating a call that never happened.
       SECTION
@@ -82,15 +82,21 @@ module Orchestrator
 
         When the work is finished:
 
-        1. Write `run-summary.md` with `write_workflow_artifact`. This becomes the pull request body, so
-           write it for a reviewer: what changed, why, and how to verify it.
+        1. Write `run-summary.md` with `write_workflow_artifact`. It becomes the pull request body if the
+           operator opens one, so write it for a reviewer: what changed, why, and how to verify it.
         2. Commit your work and push the branch: `git push -u origin #{run.branch_name}`.
-        3. Call `run_done` with outcome `done`. Rails opens the pull request from your pushed branch.
+        3. Call `report_idle` with outcome `done`.
 
-        If you cannot finish, still call `run_done` -- with `blocked` if you need the operator, or
-        `failed` if the task cannot be done as specified -- and say why in the summary. Do not end your
-        turn without calling it: Rails has no other way to learn the run is over, and the run holds a
-        concurrency slot until it does.
+        `report_idle` does not end the run and does not open a pull request. It tells the operator you
+        have stopped working; they read this pane and decide what happens next, which may well be sending
+        you more work. If it is, do it and call `report_idle` again when you next go idle. Each report
+        covers only the interval since your previous one and they are kept as the run's history, so say
+        what you attempted, what landed, what failed, what state you are leaving behind, and what you
+        think should happen next -- without restating earlier reports.
+
+        If you cannot finish, report anyway -- `blocked` if you need the operator, `failed` if the task
+        cannot be done as specified -- and say why. Do not end your turn without calling it: until you do,
+        Rails cannot tell you are idle rather than still working, and the run holds a concurrency slot.
       SECTION
     end
 

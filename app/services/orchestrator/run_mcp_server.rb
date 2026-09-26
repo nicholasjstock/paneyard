@@ -15,7 +15,7 @@ module Orchestrator
 
     TOOLS = [
       ::McpTools::PingTool,
-      ::McpTools::RunDoneTool,
+      ::McpTools::ReportIdleTool,
       ::McpTools::WriteWorkflowArtifactTool,
       ::McpTools::ReadWorkflowArtifactTool,
       ::McpTools::GetProjectMemoryTool,

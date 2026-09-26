@@ -42,7 +42,8 @@ git diff --check
 1. **Queue it.** Creating a run starts nothing; it waits for a slot. The cap is global across every workspace — `WORKFLOW_MAX_CONCURRENT_RUNS`, default 2.
 2. **Dispatch.** `RunDispatchJob` claims the oldest queued run, provisions a sibling git worktree of the workspace's `main` checkout on a `workflow/<name>` branch, and opens one interactive session in a [herdr](https://herdr.dev) pane rooted there, with the task as its first prompt.
 3. **Work.** The session owns the job: it explores, edits, runs the repo's own commands, commits, and pushes. It runs with full access to its worktree — the safety net is your review of the resulting PR. Watch it in your herdr client, or send it a message from the run screen.
-4. **Finish.** The session calls the `run_done` MCP tool. On `done`, Rails pushes the branch if it hasn't been pushed and opens a pull request using the `run-summary.md` the session wrote as the body.
+4. **Report.** The session calls the `report_idle` MCP tool each time it stops working. This does not end the run: the pane stays open and the slot stays held, and each report is a checkpoint covering the interval since the last one.
+5. **Decide.** From the run screen you read the pane and choose: **Open pull request** (Rails pushes the branch and opens one using the `run-summary.md` the session wrote as the body), send more work, or **Close session**, which quits the CLI, closes the pane and frees the slot.
 5. **Merge.** When you merge the PR, Rails removes the worktree and fast-forwards `main`. A run that ended any other way has its worktree reclaimed later by `WorktreeCleanupJob`, which never removes one with uncommitted changes.
 
 A comment on the pull request is delivered straight into the run's session — reopening a closed one on the same worktree if needed — so review feedback continues the run rather than starting a new one.

@@ -257,7 +257,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
     end
 
     # Without this, a run whose CLI was quit or crashed would hold its
-    # concurrency slot forever: run_done can no longer arrive.
+    # concurrency slot forever: no further report can arrive.
     it "fails the session when the pane is alive but its process is gone" do
       _run, session = create_run_and_session(run:, prefix: "session-runner")
       allow(Orchestrator::Herdr).to receive(:agent_get).and_return("agent_status" => "idle")

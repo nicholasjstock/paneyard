@@ -1,16 +1,17 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::RunCompletion do
-  # A run stays non-terminal through publication: pushing the branch and
-  # opening the PR can fail, and a run that failed to publish is not a
-  # completed run.
-  it "hands a done run to publication rather than completing it outright" do
+  # Publication is the operator's decision, taken from the run screen after
+  # they have read the pane. A run whose session is over is waiting for that
+  # decision, so it is left non-terminal and nothing is pushed or opened.
+  it "leaves a done run awaiting the operator rather than publishing it" do
     run = create_run(prefix: "completion-done", status: "running")
 
     expect { described_class.call(run:, outcome: "done", summary: "Shipped it.") }
-      .to have_enqueued_job(PublishRunJob).with(run.id)
+      .not_to have_enqueued_job(PublishRunJob)
 
-    expect(run.reload).to have_attributes(status: "running", publication_status: "publishing")
+    expect(run.reload).to have_attributes(status: "awaiting_review", publication_status: nil)
+    expect(run).to be_active
   end
 
   it "stops a blocked run and fails a failed one" do

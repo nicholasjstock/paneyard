@@ -27,6 +27,8 @@ class Run < ApplicationRecord
   # RunSession is Rails' own bookkeeping and never crosses the MCP wire, so it
   # has no reason to join on the natural key.
   has_many :run_sessions, dependent: :destroy
+  # The run's own history: one row per time a session reported going idle.
+  has_many :checkpoints, -> { chronological }, class_name: "RunCheckpoint", inverse_of: :run, dependent: :destroy
 
   has_many :bus_events, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
   has_many :outbound_comments, class_name: "RunOutboundComment", foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
@@ -99,8 +101,16 @@ class Run < ApplicationRecord
   # eagerly at run creation, before StartRunSessionJob attempts provisioning,
   # so a run whose provisioning failed (a dirty source checkout, say) can
   # carry a worktree_name with no real worktree behind it.
+  # Publication is an operator decision now, not something a finished session
+  # triggers, so the run screen offers it for any run with a real branch rather
+  # than only after a failed automatic attempt. "publishing" is excluded so a
+  # double click cannot race two PublishRunJobs into `gh pr create`.
+  def publishable?
+    managed_worktree? && branch_name.present? && publication_status != "publishing"
+  end
+
   def publication_retryable?
-    managed_worktree? && branch_name.present? && publication_status == "failed"
+    publishable? && publication_status == "failed"
   end
 
   def to_param

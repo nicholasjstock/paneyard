@@ -18,7 +18,7 @@ production: &recurring_jobs
   dispatch_runs:
     class: RunDispatchJob
     schedule: every 10 seconds
-  # Notices sessions that ended without calling run_done (pane closed, CLI
+  # Notices sessions that died without reporting (pane closed, CLI
   # quit or crashed) so their runs do not hold a slot forever.
   reconcile_run_sessions:
     class: RunSessionReconcileJob

@@ -126,7 +126,7 @@ module Orchestrator
 
       # The pane is alive but the process behind it is gone: the operator
       # quit the CLI, or it crashed. Either way the run is over and its slot
-      # must be released -- run_done can no longer arrive.
+      # must be released -- no further report can arrive.
       mark_process_lost!(session) unless process_alive?(session)
       session
     end

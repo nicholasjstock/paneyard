@@ -25,7 +25,7 @@ module Orchestrator
          "#{PRIMARY_ENTRY_KEY}" that states exactly how to start the full dev environment.
       3. Declare this workspace's protected source paths with `record_protected_paths` -- source,
          configuration, and maintained tests, but not dependency caches, build output, or generated files.
-      4. Call `run_done` with outcome `done`.
+      4. Call `report_idle` with outcome `done`.
     TASK
 
     def launch!(workspace, force: false)
