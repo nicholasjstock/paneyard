@@ -39,7 +39,7 @@ git diff --check
 
 ## How a run works
 
-1. **Queue it.** Creating a run starts nothing; it waits for a slot. The cap is global across every workspace — `WORKFLOW_MAX_CONCURRENT_RUNS`, default 2.
+1. **Queue it.** Creating a run starts nothing; it waits for a slot. The cap is global across every workspace — `WORKFLOW_MAX_CONCURRENT_RUNS`, default 4.
 2. **Dispatch.** `RunDispatchJob` claims the oldest queued run, provisions a sibling git worktree of the workspace's `main` checkout on a `workflow/<name>` branch, and opens one interactive session in a [herdr](https://herdr.dev) pane rooted there, with the task as its first prompt.
 3. **Work.** The session owns the job: it explores, edits, runs the repo's own commands, commits, and pushes. It runs with full access to its worktree — the safety net is your review of the resulting PR. Watch it in your herdr client, or send it a message from the run screen.
 4. **Report.** The session calls the `report_idle` MCP tool each time it stops working. This does not end the run: the pane stays open and the slot stays held, and each report is a checkpoint covering the interval since the last one.

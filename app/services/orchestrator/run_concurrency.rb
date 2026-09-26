@@ -8,7 +8,10 @@ module Orchestrator
   module RunConcurrency
     module_function
 
-    DEFAULT_LIMIT = 2
+    # Raised from 2 once a session started holding its slot until the operator
+    # closes it: with a finished run occupying a slot while it waits to be
+    # looked at, a low cap stalls the queue on review rather than on work.
+    DEFAULT_LIMIT = 4
 
     def limit
       raw = ENV["WORKFLOW_MAX_CONCURRENT_RUNS"]
