@@ -14,17 +14,48 @@ RSpec.describe Orchestrator::RunSessionRunner do
     # SessionEnv's concern, not this module's.
     allow(Orchestrator::SessionEnv).to receive(:for_session).and_return({ "FOO" => "bar" })
     allow(Orchestrator::Herdr).to receive(:notify)
+    # Every failure path closes the pane's workspace; stubbed here so no
+    # example can reach the real socket through it.
+    allow(Orchestrator::Herdr).to receive(:workspace_close)
+    stub_const("#{described_class}::SHELL_POLL_INTERVAL_SECONDS", 0)
+    stub_const("#{described_class}::PROMPT_SUBMIT_POLL_INTERVAL_SECONDS", 0)
+  end
+
+  # An idle pane: the shell itself is the only thing in the foreground.
+  def idle_shell_info(shell_pid: 100)
+    { "shell_pid" => shell_pid, "foreground_process_group_id" => shell_pid,
+      "foreground_processes" => [ { "pid" => shell_pid, "name" => "zsh" } ] }
+  end
+
+  # A pane whose shell is still running its own rc files, which is what herdr
+  # refuses to launch an agent into.
+  def busy_shell_info(shell_pid: 100)
+    { "shell_pid" => shell_pid, "foreground_process_group_id" => 301,
+      "foreground_processes" => [ { "pid" => 301, "name" => "bash" } ] }
+  end
+
+  # A pane with the launched agent holding the foreground; its process group is
+  # what start! records as the session pid.
+  def running_agent_info(shell_pid: 100, pid: 555)
+    { "shell_pid" => shell_pid, "foreground_process_group_id" => pid,
+      "foreground_processes" => [ { "pid" => pid, "name" => "claude" } ] }
   end
 
   def stub_successful_launch(pane_id: "w9:p1", agent_status: "working")
-    allow(Orchestrator::Herdr).to receive(:workspace_create)
-      .and_return("root_pane" => { "pane_id" => pane_id, "tab_id" => "w9:t1", "workspace_id" => "w9" })
-    allow(Orchestrator::Herdr).to receive(:agent_start)
+    # The pane is idle at its shell prompt until the agent launches into it,
+    # and the agent holds the foreground from then on. Driven off the launch
+    # rather than a fixed call sequence so this survives a retried launch, and
+    # a second start! (whose fresh pane is idle again) in the same example.
+    launched = false
+    allow(Orchestrator::Herdr).to receive(:workspace_create) do
+      launched = false
+      { "root_pane" => { "pane_id" => pane_id, "tab_id" => "w9:t1", "workspace_id" => "w9" } }
+    end
     allow(Orchestrator::Herdr).to receive(:agent_get)
       .and_return("interactive_ready" => true, "agent_status" => agent_status)
     allow(Orchestrator::Herdr).to receive(:agent_prompt)
-    allow(Orchestrator::Herdr).to receive(:pane_process_info)
-      .and_return("shell_pid" => 100, "foreground_process_group_id" => 555)
+    allow(Orchestrator::Herdr).to receive(:agent_start) { launched = true; nil }
+    allow(Orchestrator::Herdr).to receive(:pane_process_info) { launched ? running_agent_info : idle_shell_info }
   end
 
   describe ".start!" do
@@ -42,6 +73,114 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
       expect(session).to have_attributes(status: "running", pid: 555, herdr_pane_id: "w9:p1", driver: "claude")
       expect(File.read(session.prompt_path)).to include(run.task)
+    end
+
+    # A fresh pane's shell runs the operator's rc files (pyenv, starship, git)
+    # before it is idle, and herdr rejects agent.start for the whole of that
+    # window. Rails writes the session row between workspace.create and
+    # agent.start, which put the launch squarely inside it.
+    it "waits for the pane's shell to go idle before launching the agent" do
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:pane_process_info).and_return(
+        busy_shell_info, busy_shell_info,
+        *Array.new(described_class::SHELL_STABLE_SAMPLES) { idle_shell_info },
+        running_agent_info
+      )
+
+      described_class.start!(run)
+
+      expect(Orchestrator::Herdr).to have_received(:agent_start).once
+    end
+
+    # A single idle sample can be a gap between two rc files rather than the
+    # end of startup.
+    it "requires consecutive idle samples rather than one" do
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:pane_process_info).and_return(
+        idle_shell_info, busy_shell_info,
+        *Array.new(described_class::SHELL_STABLE_SAMPLES) { idle_shell_info },
+        running_agent_info
+      )
+
+      described_class.start!(run)
+
+      expect(Orchestrator::Herdr).to have_received(:agent_start).once
+    end
+
+    # The poll cannot close the gap between its last sample and agent.start.
+    it "retries the launch when herdr still reports the pane is not an available shell" do
+      stub_successful_launch
+      attempts = 0
+      launched = false
+      allow(Orchestrator::Herdr).to receive(:agent_start) do
+        attempts += 1
+        raise Orchestrator::Herdr::Error, "agent target pane w9:p1 is not an available shell" if attempts == 1
+
+        launched = true
+        nil
+      end
+      allow(Orchestrator::Herdr).to receive(:pane_process_info) { launched ? running_agent_info : idle_shell_info }
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).to have_received(:agent_start).twice
+      expect(session.status).to eq("running")
+    end
+
+    it "gives up and fails the session when every launch attempt is rejected" do
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:agent_start)
+        .and_raise(Orchestrator::Herdr::Error, "agent target pane w9:p1 is not an available shell")
+      allow(Orchestrator::Herdr).to receive(:pane_process_info).and_return(idle_shell_info)
+
+      expect { described_class.start!(run) }.to raise_error(Orchestrator::Herdr::Error, /not an available shell/)
+
+      expect(Orchestrator::Herdr).to have_received(:agent_start).exactly(described_class::AGENT_START_ATTEMPTS).times
+      expect(Orchestrator::Herdr).to have_received(:workspace_close).with("w9")
+      expect(run.run_sessions.sole).to have_attributes(status: "failed", outcome: "failed")
+    end
+
+    # An unrelated herdr failure must not be retried as if it were the race.
+    it "does not retry a launch that failed for any other reason" do
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:agent_start)
+        .and_raise(Orchestrator::Herdr::Error, "unknown agent kind")
+
+      expect { described_class.start!(run) }.to raise_error(Orchestrator::Herdr::Error, /unknown agent kind/)
+
+      expect(Orchestrator::Herdr).to have_received(:agent_start).once
+    end
+
+    it "fails the session when the pane never settles at an idle shell" do
+      stub_const("#{described_class}::SHELL_POLL_ATTEMPTS", 2)
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:pane_process_info).and_return(busy_shell_info)
+
+      expect { described_class.start!(run) }
+        .to raise_error(described_class::Error, /never settled at an idle shell/)
+
+      expect(Orchestrator::Herdr).not_to have_received(:agent_start)
+      expect(run.run_sessions.sole).to have_attributes(status: "failed", outcome: "failed")
+    end
+
+    # Observed live: agent.prompt delivered the prompt but left it unsubmitted
+    # in the input box, and the session sat idle holding its slot forever.
+    it "nudges the agent with an Enter when the prompt is left unsubmitted" do
+      stub_successful_launch(agent_status: "idle")
+      allow(Orchestrator::Herdr).to receive(:agent_send_keys)
+
+      described_class.start!(run)
+
+      expect(Orchestrator::Herdr).to have_received(:agent_send_keys).with("w9:p1", [ "Enter" ]).once
+    end
+
+    it "does not nudge a claude session that picked the prompt up on its own" do
+      stub_successful_launch(agent_status: "working")
+      allow(Orchestrator::Herdr).to receive(:agent_send_keys)
+
+      described_class.start!(run)
+
+      expect(Orchestrator::Herdr).not_to have_received(:agent_send_keys)
     end
 
     it "refuses a run whose worktree was never provisioned" do

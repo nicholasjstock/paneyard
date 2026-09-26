@@ -27,6 +27,16 @@ module Orchestrator
     PID_POLL_ATTEMPTS = 40
     PID_POLL_INTERVAL_SECONDS = 0.25
     CODEX_TRUST_PROMPT_GRACE_SECONDS = 2
+    SHELL_POLL_ATTEMPTS = 80
+    SHELL_POLL_INTERVAL_SECONDS = 0.25
+    # herdr rejects agent.start unless the target pane is idle at its own
+    # prompt, so one clear sample is not enough: the operator's shell rc files
+    # run in bursts with idle gaps between them, and a single idle reading can
+    # be one of those gaps rather than the end of startup.
+    SHELL_STABLE_SAMPLES = 3
+    AGENT_START_ATTEMPTS = 5
+    PROMPT_SUBMIT_POLL_ATTEMPTS = 8
+    PROMPT_SUBMIT_POLL_INTERVAL_SECONDS = 0.5
 
     def start!(run, resume_session_id: nil, prompt: nil)
       raise Error, "run #{run.run_id} has no provisioned worktree" if run.target_root.blank? || run.branch_name.blank?
@@ -62,10 +72,11 @@ module Orchestrator
         )
 
         pane_id = session.herdr_pane_id
-        Herdr.agent_start(name: run.run_id, kind:, pane_id:, args:)
+        start_agent!(name: run.run_id, kind:, pane_id:, args:)
         dismiss_codex_trust_prompt!(pane_id) if run.launcher_variant == "codex"
         wait_until_ready!(pane_id)
         Herdr.agent_prompt(pane_id, text)
+        submit_prompt_if_unsent!(pane_id)
 
         pid = wait_for_pid(pane_id)
         raise Error, "session for run #{run.run_id} never started a foreground process" unless pid
@@ -208,6 +219,80 @@ module Orchestrator
     def dismiss_codex_trust_prompt!(pane_id)
       sleep CODEX_TRUST_PROMPT_GRACE_SECONDS
       Herdr.agent_send_keys(pane_id, [ "Enter" ])
+    end
+
+    # workspace.create returns a pane whose shell exists immediately, but that
+    # shell then runs the operator's own rc files -- confirmed live on this
+    # machine: pyenv-rehash (which forks bash and chmod), starship's prompt
+    # init, and git. herdr refuses agent.start while any of that holds the
+    # pane's foreground ("... is not an available shell"), and because Rails
+    # writes the session row between the two calls, agent.start reliably landed
+    # mid-startup rather than intermittently. So wait for the pane to be idle
+    # before launching, and still retry the launch itself: the gap between the
+    # last poll and agent.start is not something the poll can close, and rc
+    # files that fire on a timer can reclaim the foreground inside it.
+    #
+    # foreground_process_group_id == shell_pid is NOT a sufficient signal
+    # (confirmed live: it matched while starship and bash were still running).
+    # The reliable one is the foreground process list being exactly the shell.
+    def start_agent!(name:, kind:, pane_id:, args:)
+      attempts = 0
+      begin
+        attempts += 1
+        wait_for_available_shell!(pane_id)
+        Herdr.agent_start(name:, kind:, pane_id:, args:)
+      rescue Herdr::Error => error
+        raise if attempts >= AGENT_START_ATTEMPTS || !error.message.include?("not an available shell")
+
+        sleep SHELL_POLL_INTERVAL_SECONDS
+        retry
+      end
+    end
+
+    def wait_for_available_shell!(pane_id)
+      stable = 0
+      SHELL_POLL_ATTEMPTS.times do
+        if shell_idle?(pane_id)
+          stable += 1
+          return true if stable >= SHELL_STABLE_SAMPLES
+        else
+          stable = 0
+        end
+        sleep SHELL_POLL_INTERVAL_SECONDS
+      end
+      raise Error, "pane #{pane_id} never settled at an idle shell prompt"
+    end
+
+    def shell_idle?(pane_id)
+      info = Herdr.pane_process_info(pane_id)
+      foreground = Array(info["foreground_processes"])
+      foreground.one? && foreground.first["pid"] == info["shell_pid"]
+    rescue Herdr::Error
+      false
+    end
+
+    # agent.prompt normally submits on its own -- confirmed live, including
+    # with this app's real ~5KB composed prompt. But it was also observed once
+    # on a real run to deliver the text and leave it sitting unsubmitted in
+    # Claude's input box: the session stayed idle forever, holding its
+    # concurrency slot, and a single Enter submitted it. That was not
+    # reproducible in isolation, so rather than always send an Enter, confirm
+    # the agent actually picked the prompt up and only nudge it if it did not.
+    # An Enter on an already-submitted (empty) input box does nothing.
+    def submit_prompt_if_unsent!(pane_id)
+      PROMPT_SUBMIT_POLL_ATTEMPTS.times do
+        return true unless agent_idle?(pane_id)
+
+        sleep PROMPT_SUBMIT_POLL_INTERVAL_SECONDS
+      end
+      Herdr.agent_send_keys(pane_id, [ "Enter" ])
+      false
+    end
+
+    def agent_idle?(pane_id)
+      Herdr.agent_get(pane_id)["agent_status"].to_s == "idle"
+    rescue Herdr::Error
+      false
     end
 
     def wait_until_ready!(pane_id)
