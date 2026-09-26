@@ -1,3 +1,5 @@
+require "digest"
+
 # Rails-owned bookkeeping for a workspace's admin chat: a persistent,
 # non-interactive conversation with either the claude or codex CLI (see
 # Orchestrator::WorkspaceAdminChat::Runner). Unlike TerminalSession (a raw,
@@ -29,6 +31,22 @@ class WorkspaceAdminChat < ApplicationRecord
 
   def active?
     active_turn_id.present?
+  end
+
+  # The chat's MCP capability, minted once and reused for every turn -- the
+  # chat is the durable subject here, unlike a run session whose capability
+  # is meant to die with it. Only the digest is stored, so the plaintext is
+  # returned exactly once and must be handed straight to the CLI's config.
+  def issue_capability!
+    token = SecureRandom.hex(32)
+    update!(capability_token_digest: Digest::SHA256.hexdigest(token))
+    token
+  end
+
+  def self.authenticate_capability(token)
+    return if token.blank?
+
+    find_by(capability_token_digest: Digest::SHA256.hexdigest(token))
   end
 
   # The transcript actually shown: claude and codex hold entirely separate
