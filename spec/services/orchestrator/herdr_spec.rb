@@ -53,16 +53,33 @@ RSpec.describe Orchestrator::Herdr do
   end
 
   describe ".pane_read" do
-    it "returns the pane text and only sends lines when a limit is given" do
+    # The live shape (herdr 0.7.5, protocol 17). This spec previously asserted a
+    # flat {"text" => ...}, which is why every real pane read raised KeyError.
+    it "unwraps the nested read envelope and only sends lines when a limit is given" do
       expect(described_class).to receive(:request!).with(
         "pane.read", pane_id: "w1:p1", source: "recent", strip_ansi: true
-      ).and_return("text" => "all of it")
+      ).and_return("type" => "pane_read", "read" => { "pane_id" => "w1:p1", "text" => "all of it" })
       expect(described_class.pane_read("w1:p1")).to eq("all of it")
 
       expect(described_class).to receive(:request!).with(
         "pane.read", pane_id: "w1:p1", source: "visible", strip_ansi: true, lines: 40
-      ).and_return("text" => "just the tail")
+      ).and_return("type" => "pane_read", "read" => { "text" => "just the tail" })
       expect(described_class.pane_read("w1:p1", source: "visible", lines: 40)).to eq("just the tail")
+    end
+
+    it "still accepts a flat text payload" do
+      allow(described_class).to receive(:request!).and_return("text" => "flat")
+
+      expect(described_class.pane_read("w1:p1")).to eq("flat")
+    end
+
+    # A Herdr::Error, not a KeyError: RunSessionRunner.snapshot rescues the
+    # former to degrade to nil instead of taking the run screen down with a 500.
+    it "raises a Herdr::Error when the response carries no text at all" do
+      allow(described_class).to receive(:request!).and_return("type" => "pane_read", "read" => {})
+
+      expect { described_class.pane_read("w1:p1") }
+        .to raise_error(described_class::Error, /no text/)
     end
   end
 

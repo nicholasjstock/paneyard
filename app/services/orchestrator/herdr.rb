@@ -121,10 +121,22 @@ module Orchestrator
       request!("pane.process_info", pane_id:).fetch("process_info")
     end
 
+    # pane.read nests its payload one level down, under "read" (confirmed live
+    # against herdr 0.7.5, protocol 17: the result is {"type" => "pane_read",
+    # "read" => {"text" => ..., ...}}), unlike agent.get's "agent" or
+    # pane.process_info's "process_info" which this client reads directly. A
+    # missing key is raised as a Herdr::Error rather than a KeyError so callers
+    # that already rescue Herdr::Error -- RunSessionRunner.snapshot, whose
+    # whole job is to degrade to nil rather than take the run screen down --
+    # keep working.
     def pane_read(pane_id, source: "recent", lines: nil, strip_ansi: true)
       params = { pane_id:, source:, strip_ansi: }
       params[:lines] = lines if lines
-      request!("pane.read", **params).fetch("text")
+      result = request!("pane.read", **params)
+      text = result.dig("read", "text") || result["text"]
+      raise Error, "herdr pane.read returned no text for #{pane_id}" if text.nil?
+
+      text
     end
 
     def pane_alive?(pane_id)
