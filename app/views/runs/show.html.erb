@@ -85,7 +85,7 @@
     </p>
   <% else %>
     <p class="muted">
-      <%= @session.driver %> &middot; <%= @session.status %>
+      <%= @session.driver %><% if @session.model.present? %> (<%= @session.model %>)<% end %> &middot; <%= @session.status %>
       <% if @session.pid.present? %> &middot; pid <%= @session.pid %><% end %>
       <% if @session.started_at %> &middot; started <%= time_ago_in_words(@session.started_at) %> ago<% end %>
     </p>

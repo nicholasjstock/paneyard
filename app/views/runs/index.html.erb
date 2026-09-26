@@ -39,7 +39,7 @@
           <p><%= link_to "Pull request", run.pull_request_url, target: "_blank", rel: "noopener" %></p>
         <% end %>
         <p class="muted">
-          <%= run.launcher_variant %>
+          <%= run.launcher_variant %><% if run.model.present? %> (<%= run.model %>)<% end %>
           &middot;
           <% if run.started_at %>started <%= time_ago_in_words(run.started_at) %> ago<% else %>waiting for a slot<% end %>
           <% if run.stopped_at %> &middot; ended <%= time_ago_in_words(run.stopped_at) %> ago<% end %>

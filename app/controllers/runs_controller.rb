@@ -25,9 +25,11 @@ class RunsController < ApplicationController
     @run.status = "queued"
     @run.launched_by = current_operator
     @run.target_root = current_workspace.source_root
-    @run.launch_artifacts = uploaded_artifacts(launch_files_params)
+    @run.model = @run.model.presence
+    validate_model_choice(@run)
+    @run.launch_artifacts = uploaded_artifacts(launch_files_params) if @run.errors.empty?
 
-    if @run.save
+    if @run.errors.empty? && @run.save
       RunDispatchJob.perform_later
       redirect_to workspace_run_path(current_workspace, @run), notice: "Queued #{@run.run_id}…"
     else
@@ -116,12 +118,28 @@ class RunsController < ApplicationController
     "Closed the session, but could not remove its worktree: #{error.message}"
   end
 
+  def model_catalog
+    @model_catalog ||= Orchestrator::ModelCatalog.all
+  end
+  helper_method :model_catalog
+
   def set_run
     @run = current_workspace.runs.find_by!(run_id: params[:id])
   end
 
   def run_params
-    params.require(:run).permit(:task, :launcher_variant)
+    params.require(:run).permit(:task, :launcher_variant, :model)
+  end
+
+  # The dropdown only ever offers what the chosen agent's own CLI lists
+  # (Orchestrator::ModelCatalog), so anything else -- another agent's model,
+  # or one the CLI has since dropped -- is refused here rather than left to
+  # fail inside a herdr pane after the run has already taken a slot.
+  def validate_model_choice(run)
+    return if run.model.blank?
+    return if model_catalog.fetch(run.launcher_variant, []).any? { |option| option["id"] == run.model }
+
+    run.errors.add(:model, "#{run.model.inspect} is not a model #{run.launcher_variant} offers")
   end
 
   def launch_files_params
