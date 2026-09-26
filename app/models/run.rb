@@ -96,6 +96,19 @@ class Run < ApplicationRecord
     worktree_name.present?
   end
 
+  # Nothing is working in the worktree any more: the run has finished, or is
+  # awaiting review with its session closed.
+  def session_over?
+    !status.in?(%w[queued launching running]) && live_session.nil?
+  end
+
+  # Still on disk after its session ended. WorktreeJanitor removes every such
+  # worktree whose work is pushed or merged, so one that remains holds work
+  # that exists nowhere else, and is kept until the operator deals with it.
+  def kept_worktree?
+    managed_worktree? && target_root.present? && File.directory?(target_root) && session_over?
+  end
+
   # branch_name is only ever set by GitWorktree.provision! after it actually
   # succeeds -- worktree_name alone is not proof of that: it is assigned
   # eagerly at run creation, before StartRunSessionJob attempts provisioning,

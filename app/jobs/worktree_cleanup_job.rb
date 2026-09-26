@@ -1,6 +1,6 @@
 # Reclaims worktrees for runs that have been terminal long enough, and for
 # orphans no run owns. See Orchestrator::WorktreeJanitor for the safety rules
-# (never `main`, never a dirty worktree).
+# (never `main`, never work that is not pushed or merged).
 class WorktreeCleanupJob < ApplicationJob
   queue_as :default
 

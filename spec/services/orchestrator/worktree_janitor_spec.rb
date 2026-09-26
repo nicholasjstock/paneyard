@@ -55,7 +55,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
   end
 
   describe ".sweep" do
-    it "reclaims a clean worktree whose run has been terminal past the retention window" do
+    it "reclaims a clean finished worktree whose HEAD is already on main" do
       path = add_worktree("old-failed")
       terminal_run("old-failed", path)
 
@@ -63,10 +63,21 @@ RSpec.describe Orchestrator::WorktreeJanitor do
       expect(File.exist?(path)).to be(false)
     end
 
-    it "leaves a run that only just failed with unpushed commits, so the operator can still look at it" do
-      path = add_worktree("just-failed")
+    # There is no age-based retention: commits that exist nowhere but this
+    # branch keep their worktree however long ago the run ended.
+    it "keeps a finished run with unpushed commits indefinitely, flagged as a kept worktree" do
+      path = add_worktree("long-unpushed")
       commit_in(path, "unpushed.rb")
-      terminal_run("just-failed", path, stopped_at: 10.minutes.ago)
+      run = terminal_run("long-unpushed", path, stopped_at: 1.year.ago)
+
+      expect(described_class.sweep(workspace)).to eq(0)
+      expect(File.exist?(path)).to be(true)
+      expect(run.kept_worktree?).to be(true)
+    end
+
+    it "keeps an orphan worktree whose commits are not pushed or merged" do
+      path = add_worktree("orphan-unpushed")
+      commit_in(path, "unpushed.rb")
 
       expect(described_class.sweep(workspace)).to eq(0)
       expect(File.exist?(path)).to be(true)
@@ -92,6 +103,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
 
       expect(described_class.sweep(workspace)).to eq(0)
       expect(File.exist?(path)).to be(true)
+      expect(run.kept_worktree?).to be(false)
     end
 
     it "leaves an active run's worktree alone no matter how old the row is" do
@@ -120,7 +132,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
 
     # Uncommitted work in a failed run is exactly what an operator is most
     # likely to want back. Reclaiming it unattended would destroy it.
-    it "refuses to reclaim a dirty worktree even long past retention" do
+    it "refuses to reclaim a dirty worktree however long ago its run ended" do
       path = add_worktree("dirty")
       terminal_run("dirty", path)
       File.write(File.join(path, "scratch.rb"), "half-finished\n")

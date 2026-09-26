@@ -17,26 +17,24 @@ module Orchestrator
   #     is reported for a human decision rather than reclaimed. `--force` is
   #     reserved for the explicit per-run button.
   #
-  # Removing a worktree never deletes its branch. Once the session is closed
-  # and the branch is already on main or pushed, the worktree holds nothing
-  # that is not somewhere else too, so it goes straight away -- on close
-  # (release!) or on the next sweep. RETENTION only still applies to a
-  # finished run whose commits exist nowhere but its local branch.
+  # The rule for everything else is whether the work is saved elsewhere, not
+  # how old it is. Removing a worktree never deletes its branch, so once the
+  # session is over and the worktree is clean with HEAD already on main or
+  # pushed, it holds nothing that is not somewhere else too and goes straight
+  # away -- on close (release!) or on the next sweep. Anything else is kept
+  # indefinitely and shown as a kept worktree (Run#kept_worktree?) until the
+  # operator pushes, merges, or removes it.
   module WorktreeJanitor
     class Error < StandardError; end
     module_function
 
-    # How long a run must have been terminal before its worktree is reclaimed.
-    # Long enough that "the run failed, let me go look at what it did" is
-    # still possible the next morning.
-    RETENTION = 24.hours
 
-    def sweep_all(now: Time.current)
-      Workspace.find_each.sum { |workspace| sweep(workspace, now:) }
+    def sweep_all
+      Workspace.find_each.sum { |workspace| sweep(workspace) }
     end
 
     # Returns the number of worktrees removed.
-    def sweep(workspace, now: Time.current)
+    def sweep(workspace)
       source_root = Pathname(workspace.source_root)
       return 0 unless source_root.directory?
 
@@ -45,8 +43,7 @@ module Orchestrator
         next if protected_path?(source_root, path)
 
         run = run_for(workspace, path)
-        next unless reclaimable?(run, path:, now:)
-        next if dirty?(path)
+        next unless reclaimable?(run, path:)
 
         remove_worktree!(source_root, path)
         removed += 1
@@ -62,15 +59,11 @@ module Orchestrator
 
     # A worktree with no Run row at all is an orphan -- a run whose record was
     # destroyed, or a leftover from an earlier version of this tool -- and is
-    # reclaimable on the same terms as a terminal run.
-    def reclaimable?(run, path:, now:)
-      return true if run.nil?
-      return false if run.status.in?(%w[queued launching running]) || run.live_session
-      return true if work_saved?(path)
-      return false if run.active?
+    # reclaimable on the same terms as a run whose session is over.
+    def reclaimable?(run, path:)
+      return false if run && !run.session_over?
 
-      terminal_at = run.stopped_at || run.updated_at
-      terminal_at.present? && terminal_at <= now - RETENTION
+      work_saved?(path)
     end
 
     def entries(source_root)

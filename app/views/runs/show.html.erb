@@ -57,7 +57,12 @@
   <% if @run.managed_worktree? %>
     <p class="mono"><%= @run.target_root %></p>
     <p class="muted mono"><%= @run.branch_name || "branch not provisioned" %></p>
-    <% if @run.terminal? %>
+    <% if @run.kept_worktree? %>
+      <p><span class="badge attention">worktree kept</span></p>
+      <p class="muted">
+        This worktree has uncommitted changes or commits that are not pushed or merged, so it is kept until you push,
+        merge, or remove it. Removing it keeps the branch but discards uncommitted changes.
+      </p>
       <%= button_to "Remove worktree", remove_worktree_workspace_run_path(current_workspace, @run),
             method: :post, class: "btn",
             data: { turbo_confirm: "Remove #{@run.worktree_name}? This deletes the checkout." } %>

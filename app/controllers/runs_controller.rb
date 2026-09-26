@@ -8,6 +8,7 @@ class RunsController < ApplicationController
     @runs = current_workspace.runs.order(created_at: :desc).limit(50).to_a
     @queued = @runs.select { |run| run.status == "queued" }
     @in_flight = @runs.select { |run| run.status.in?(%w[launching running]) }
+    @kept_worktrees = @runs.select(&:kept_worktree?)
     @concurrency_limit = Orchestrator::RunConcurrency.limit
   end
 

@@ -58,18 +58,43 @@ RSpec.describe "workspace runs", type: :system do
     expect(page).to have_no_button("Stop run")
   end
 
-  it "surfaces the pull request and a worktree removal action once a run is over" do
+  # The janitor only leaves a finished run's worktree on disk when its work
+  # exists nowhere else, so one that is still there is flagged, not hidden.
+  it "flags a worktree kept after its run ended, on the run and on the run list" do
+    worktree = File.join(workspace.root_path, "runs-ui-kept-a1b2")
+    FileUtils.mkdir_p(worktree)
     run = create_run(
-      workspace:, prefix: "runs-ui-published", status: "completed", stopped_at: 1.hour.ago,
-      worktree_name: "runs-ui-published-a1b2", branch_name: "workflow/runs-ui-published-a1b2",
+      workspace:, prefix: "runs-ui-kept", status: "completed", stopped_at: 1.hour.ago,
+      worktree_name: "runs-ui-kept-a1b2", branch_name: "workflow/runs-ui-kept-a1b2", target_root: worktree,
       pull_request_url: "https://github.com/example/repo/pull/7"
     )
 
     visit workspace_run_path(workspace, run)
 
     expect(page).to have_link("Pull request", href: run.pull_request_url)
-    expect(page).to have_text("workflow/runs-ui-published-a1b2")
+    expect(page).to have_text("workflow/runs-ui-kept-a1b2")
+    expect(page).to have_text("worktree kept")
     expect(page).to have_button("Remove worktree")
+
+    visit workspace_runs_path(workspace)
+
+    expect(page).to have_text("1 worktree kept")
+    within(find(".card", text: "runs-ui-kept-a1b2")) { expect(page).to have_text("worktree kept") }
+  end
+
+  it "does not flag a finished run whose worktree is already gone" do
+    run = create_run(
+      workspace:, prefix: "runs-ui-released", status: "completed", stopped_at: 1.hour.ago,
+      worktree_name: "runs-ui-released-a1b2", branch_name: "workflow/runs-ui-released-a1b2",
+      target_root: File.join(workspace.root_path, "runs-ui-released-a1b2")
+    )
+
+    visit workspace_run_path(workspace, run)
+    expect(page).to have_no_text("worktree kept")
+    expect(page).to have_no_button("Remove worktree")
+
+    visit workspace_runs_path(workspace)
+    expect(page).to have_no_text("worktree kept")
   end
 
   it "stops a live run from the detail page" do

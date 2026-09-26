@@ -61,7 +61,7 @@ Accepted trade-off: a real interactive TUI produces human-rendered output, not s
 
 ### Worktrees are the durable artifact
 
-Every run gets a sibling worktree of the workspace's `main` checkout (`Orchestrator::GitWorktree`) on a `workflow/<name>` branch. Two things reclaim them, and nothing else should: `RunPublication.cleanup_merged_run!` after a PR merges, and `Orchestrator::WorktreeJanitor` for runs that ended some other way. The janitor never touches `main` and never removes a dirty worktree — uncommitted work in a failed run is exactly what an operator wants back. `--force` is reserved for the explicit per-run button.
+Every run gets a sibling worktree of the workspace's `main` checkout (`Orchestrator::GitWorktree`) on a `workflow/<name>` branch. Two things reclaim them, and nothing else should: `RunPublication.cleanup_merged_run!` after a PR merges, and `Orchestrator::WorktreeJanitor` for everything else — straight away on **Close session** (`release!`) and on its ten-minute sweep. There is no age-based retention: the janitor never touches `main` and removes a worktree only once its session is over and it is clean with HEAD already on `main` or a remote branch (removal keeps the branch). Anything else is kept indefinitely and flagged as a kept worktree (`Run#kept_worktree?`) on the runs list and run screen — uncommitted or unpushed work is exactly what an operator wants back. `--force` is reserved for the explicit per-run button.
 
 ### Full access, human review
 

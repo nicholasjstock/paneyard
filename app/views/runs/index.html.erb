@@ -10,6 +10,10 @@
 <p class="muted">
   <%= pluralize(@in_flight.size, "run") %> in flight of <%= @concurrency_limit %>
   &middot; <%= pluralize(@queued.size, "run") %> queued
+  <% if @kept_worktrees.any? %>
+    &middot; <span class="badge attention"><%= pluralize(@kept_worktrees.size, "worktree") %> kept</span>
+    with uncommitted or unpushed work
+  <% end %>
 </p>
 
 <%= render "shared/orchestrator_error", orchestrator_error: @orchestrator_error %>
@@ -23,6 +27,9 @@
         <div class="card-title">
           <%= link_to run.worktree_name.presence || run.run_id, workspace_run_path(current_workspace, run), class: "mono" %>
           <span class="badge <%= run.status %>"><%= run.status.humanize %></span>
+          <% if @kept_worktrees.include?(run) %>
+            <span class="badge attention" title="Uncommitted or unpushed work; kept until you push, merge, or remove it">worktree kept</span>
+          <% end %>
         </div>
         <p><%= truncate(run.task, length: 140) %></p>
         <% if run.branch_name.present? %>
