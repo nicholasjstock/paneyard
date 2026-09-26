@@ -64,6 +64,22 @@ RSpec.describe Orchestrator::WorktreeJanitor do
       expect(File.exist?(path)).to be(true)
     end
 
+    # git resolves symlinks in the paths it reports; a Run's target_root keeps
+    # whatever string provisioned it. When those differ, an exact-string lookup
+    # finds no owning run and the worktree of a live run looks like a
+    # reclaimable orphan. The tmpdirs above already differ that way on macOS
+    # (/var vs /private/var), so this spells the case out explicitly to keep it
+    # covered where /tmp is not a symlink.
+    it "still finds the owning run when its target_root reaches the worktree through a symlink" do
+      path = add_worktree("symlinked")
+      link_root = File.join(root, "link-to-root")
+      File.symlink(root, link_root)
+      terminal_run("symlinked", File.join(link_root, "symlinked"), stopped_at: nil, status: "running")
+
+      expect(described_class.sweep(workspace)).to eq(0)
+      expect(File.exist?(path)).to be(true)
+    end
+
     # Uncommitted work in a failed run is exactly what an operator is most
     # likely to want back. Reclaiming it unattended would destroy it.
     it "refuses to reclaim a dirty worktree even long past retention" do

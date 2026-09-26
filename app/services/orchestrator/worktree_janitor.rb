@@ -38,7 +38,7 @@ module Orchestrator
       entries(source_root).each do |path|
         next if protected_path?(source_root, path)
 
-        run = Run.find_by(target_root: path.to_s)
+        run = run_for(workspace, path)
         next unless reclaimable?(run, now:)
         next if dirty?(path)
 
@@ -71,8 +71,32 @@ module Orchestrator
         .filter_map { |line| Pathname(line.delete_prefix("worktree ")) if line.start_with?("worktree ") }
     end
 
+    # `git worktree list` reports every path with its symlinks resolved, while
+    # a Run's target_root is whatever string provisioned it. Those two are not
+    # interchangeable: anywhere a parent directory is a symlink (on macOS
+    # /tmp and /var both are) git says /private/var/... where the Run row says
+    # /var/..., an exact-string lookup finds no owning run, and a worktree with
+    # no run looks like a reclaimable orphan. That mistook live runs for
+    # orphans and reclaimed their worktrees, so every path comparison here
+    # resolves both sides first.
+    def run_for(workspace, path)
+      Run.find_by(target_root: path.to_s) ||
+        workspace.runs.where.not(target_root: [ nil, "" ])
+          .find { |run| same_path?(run.target_root, path) }
+    end
+
+    def same_path?(one, other)
+      real_path(one) == real_path(other)
+    end
+
+    def real_path(path)
+      Pathname(path).realpath
+    rescue SystemCallError
+      Pathname(path).expand_path
+    end
+
     def protected_path?(source_root, path)
-      path.expand_path == source_root.expand_path || path.basename.to_s == "main"
+      same_path?(path, source_root) || path.basename.to_s == "main"
     end
 
     def dirty?(path)
