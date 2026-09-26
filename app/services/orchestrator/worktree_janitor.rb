@@ -27,6 +27,23 @@ module Orchestrator
       Workspace.find_each.sum { |workspace| sweep(workspace) }
     end
 
+    # Whether `path` is a worktree git itself knows about, as opposed to a
+    # directory that merely exists there. A run's target_root can point at a
+    # directory for reasons that have nothing to do with a provisioned
+    # worktree -- it defaults to the source checkout until provisioning
+    # succeeds, and a worktree `git worktree remove` already reclaimed can
+    # leave an inert leftover directory behind -- so Run#kept_worktree? asks
+    # here rather than trusting File.directory? alone.
+    def registered_worktree?(workspace, path)
+      source_root = Pathname(workspace.source_root)
+      return false unless source_root.directory?
+
+      target = Pathname(path)
+      return false if protected_path?(source_root, target)
+
+      entries(source_root).any? { |entry| same_path?(entry, target) }
+    end
+
     # Returns the number of worktrees removed.
     def sweep(workspace)
       source_root = Pathname(workspace.source_root)

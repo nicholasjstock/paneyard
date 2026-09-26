@@ -109,8 +109,16 @@ class Run < ApplicationRecord
   # Still on disk after its session ended. WorktreeJanitor removes every such
   # worktree whose work is pushed or merged, so one that remains holds work
   # that exists nowhere else, and is kept until the operator deals with it.
+  #
+  # target_root existing as a directory is not enough: it defaults to the
+  # workspace's source checkout until GitWorktree.provision! succeeds, so a
+  # run that died before provisioning still has a target_root that resolves
+  # (to `main`, never a worktree of it), and a worktree already removed by
+  # the janitor can leave an inert leftover directory behind. Asking git
+  # whether target_root is actually a registered worktree rules out both.
   def kept_worktree?
-    managed_worktree? && target_root.present? && File.directory?(target_root) && session_over?
+    managed_worktree? && target_root.present? && File.directory?(target_root) && session_over? &&
+      Orchestrator::WorktreeJanitor.registered_worktree?(workspace, target_root)
   end
 
   def to_param
