@@ -32,7 +32,8 @@ module McpTools
     end
 
     def find_named!(name)
-      Workspace.find_by(name:) || raise(ArgumentError, "no workspace named #{name.inspect}")
+      Workspace.find_by(name:) ||
+        raise(ArgumentError, "no workspace named #{name.inspect}; registered: #{Workspace.order(:created_at).pluck(:name).join(', ')}")
     end
     private_class_method :find_named!
 

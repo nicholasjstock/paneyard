@@ -14,7 +14,8 @@ module Orchestrator
       ::McpTools::PingTool,
       ::McpTools::QueueRunTool,
       ::McpTools::ListRunsTool,
-      ::McpTools::GetRunTool
+      ::McpTools::GetRunTool,
+      ::McpTools::ListWorkspacesTool
     ].freeze
 
     def build

@@ -23,7 +23,8 @@ module Orchestrator
       ::McpTools::RecordWorkspaceEnvVarTool,
       ::McpTools::QueueRunTool,
       ::McpTools::ListRunsTool,
-      ::McpTools::GetRunTool
+      ::McpTools::GetRunTool,
+      ::McpTools::ListWorkspacesTool
     ].freeze
 
     def build(server_context:)
