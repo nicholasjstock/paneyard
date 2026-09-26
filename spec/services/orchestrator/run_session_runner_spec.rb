@@ -275,6 +275,22 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(session.reload).to have_attributes(status: "failed", outcome: "failed", herdr_pane_id: nil)
     end
 
+    # Regression: a session that already reported "done" -- work committed,
+    # pushed, maybe merged -- and then lost its pane before the operator
+    # closed it is not a failed run. Losing the pane afterward must not
+    # overwrite what the session itself already reported.
+    it "keeps a session's last reported outcome when its pane disappears afterward" do
+      run.update!(status: "awaiting_review")
+      _run, session = create_run_and_session(run:, prefix: "session-runner")
+      Orchestrator::RunIdleReport.call(run:, session:, outcome: "done", summary: "Merged into main.")
+      allow(Orchestrator::Herdr).to receive(:agent_get).and_raise(Orchestrator::Herdr::Error, "pane_not_found")
+
+      described_class.refresh!(session)
+
+      expect(session.reload).to have_attributes(status: "done", outcome: "done", herdr_pane_id: nil)
+      expect(session.result).to eq("Merged into main.")
+    end
+
     # Without this, a run whose CLI was quit or crashed would hold its
     # concurrency slot forever: no further report can arrive.
     it "fails the session when the pane is alive but its process is gone" do
@@ -303,6 +319,22 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect { described_class.refresh!(session) }.to raise_error(Orchestrator::Herdr::Unreachable)
 
       expect(session.reload).to have_attributes(status: "done", outcome: "done", ended_at: nil)
+    end
+
+    # Same regression, via the process-gone path: the CLI exiting after a
+    # "done" report must not clobber that report with the generic message.
+    it "keeps a session's last reported outcome when its process exits afterward" do
+      run.update!(status: "awaiting_review")
+      _run, session = create_run_and_session(run:, prefix: "session-runner")
+      Orchestrator::RunIdleReport.call(run:, session:, outcome: "done", summary: "Merged into main.")
+      allow(Orchestrator::Herdr).to receive(:agent_get).and_return("agent_status" => "idle")
+      allow(Orchestrator::Herdr).to receive(:workspace_close)
+      allow(described_class).to receive(:process_alive?).and_return(false)
+
+      described_class.refresh!(session)
+
+      expect(session.reload).to have_attributes(status: "done", outcome: "done")
+      expect(session.result).to eq("Merged into main.")
     end
 
     it "leaves an already-ended session alone" do

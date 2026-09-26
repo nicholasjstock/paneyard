@@ -192,8 +192,9 @@ module Orchestrator
     end
 
     def mark_pane_lost!(session)
+      outcome = last_reported_outcome(session)
       session.update!(
-        status: "failed", outcome: "failed", herdr_pane_id: nil, ended_at: Time.current,
+        status: outcome == "done" ? "done" : "failed", outcome:, herdr_pane_id: nil, ended_at: Time.current,
         result: session.result.presence || "The herdr pane for this session no longer exists."
       )
       kill_process(session)
@@ -201,7 +202,21 @@ module Orchestrator
     end
 
     def mark_process_lost!(session)
-      finish!(session, outcome: "failed", result: "The session's CLI process exited without reporting a result.")
+      finish!(
+        session, outcome: last_reported_outcome(session),
+        result: session.result.presence || "The session's CLI process exited without reporting a result."
+      )
+    end
+
+    # A pane or process disappearing does not undo a report the session
+    # already made -- a session that reported "done" (work committed, pushed,
+    # maybe merged) and then lost its pane before the operator closed it is
+    # not a failed run, whatever killed the pane. The session's own last
+    # checkpoint is its most recent word on how the run actually stands, so
+    # trust that over guessing "failed". Only a session that never reported
+    # anything falls back to "failed".
+    def last_reported_outcome(session)
+      session.checkpoints.last&.outcome || "failed"
     end
 
     def notify(session, outcome:)

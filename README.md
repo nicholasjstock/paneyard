@@ -47,7 +47,7 @@ git diff --check
 5. **Decide.** From the run screen you read the reports and either send more work or **Close session**, which quits the CLI, closes the pane and frees the slot. Pull requests are yours to open from the pushed branch; Rails does not touch GitHub.
 6. **Clean up.** `WorktreeCleanupJob` reclaims a finished run's worktree a day later, and never removes one with uncommitted changes.
 
-Rails never infers a workspace's language, package manager, dependency layout, ports, or health endpoints. A session works them out from the checkout itself, and can record what it learns with `record_project_setup` / `record_project_memory_entry` for later runs in the workspace to inherit.
+Rails never infers a workspace's language, package manager, dependency layout, ports, or health endpoints. A session works them out from the checkout itself each run.
 
 ## Requirements
 
