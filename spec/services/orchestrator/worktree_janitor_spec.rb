@@ -218,30 +218,6 @@ RSpec.describe Orchestrator::WorktreeJanitor do
     end
   end
 
-  describe "Orchestrator::GitWorktree.restore!" do
-    it "checks a released run's branch back out where its worktree was" do
-      path = add_worktree("restored")
-      commit_in(path, "restored.rb")
-      git(source_root, "merge", "--ff-only", "workflow/restored")
-      run = terminal_run("restored", path, stopped_at: 1.minute.ago)
-      described_class.release!(run)
-
-      Orchestrator::GitWorktree.restore!(run)
-
-      expect(File.read(File.join(path, "restored.rb"))).to eq("restored.rb\n")
-      output, _error, _status = Open3.capture3("git", "-C", path, "branch", "--show-current")
-      expect(output.strip).to eq("workflow/restored")
-    end
-
-    it "leaves an existing worktree as it is" do
-      path = add_worktree("still-there")
-      run = terminal_run("still-there", path, stopped_at: 1.minute.ago)
-
-      expect { Orchestrator::GitWorktree.restore!(run) }.not_to raise_error
-      expect(File.exist?(path)).to be(true)
-    end
-  end
-
   describe ".remove_for_run!" do
     it "removes a clean worktree on the operator's explicit request" do
       path = add_worktree("explicit")

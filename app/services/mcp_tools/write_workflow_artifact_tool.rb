@@ -10,8 +10,8 @@ module McpTools
     def self.call(runId:, artifactName:, content:, server_context:)
       # No assigned-artifact check any more: a session owns the whole job, so
       # it writes whatever artifacts the job needs rather than exactly the one
-      # a planner named for it. run-summary.md is the one Rails itself reads
-      # (RunPublication uses it as the pull request body).
+      # a planner named for it. Rails reads none of them back; what a session
+      # has to say to the operator goes in its report_idle summary.
       SessionAuthorization.session!(server_context:, run_id: runId)
       run = Run.find_or_create_for_bus!(runId)
       path = Orchestrator::ArtifactStore.write(run.target_root, runId, artifactName, content)

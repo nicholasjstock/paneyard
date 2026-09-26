@@ -75,17 +75,17 @@ module Orchestrator
 
         When the work is finished:
 
-        1. Write `run-summary.md` with `write_workflow_artifact`. It becomes the pull request body if the
-           operator opens one, so write it for a reviewer: what changed, why, and how to verify it.
-        2. Commit your work and push the branch: `git push -u origin #{run.branch_name}`.
-        3. Call `report_idle` with outcome `done`.
+        1. Commit your work and push the branch: `git push -u origin #{run.branch_name}`.
+        2. Call `report_idle` with outcome `done`.
 
-        `report_idle` does not end the run and does not open a pull request. It tells the operator you
-        have stopped working; they read this pane and decide what happens next, which may well be sending
-        you more work. If it is, do it and call `report_idle` again when you next go idle. Each report
-        covers only the interval since your previous one and they are kept as the run's history, so say
-        what you attempted, what landed, what failed, what state you are leaving behind, and what you
-        think should happen next -- without restating earlier reports.
+        `report_idle` does not end the run. It tells the operator you have stopped working, and its
+        summary is the record of what you did: the run screen shows the reports in order and nothing
+        else, so the operator reads them instead of this pane. Write each summary as a full report in
+        Markdown, not a one-liner -- what you changed and why, how it was verified (commands run and their
+        results), what failed or was left out, what state the worktree and branch are in, and what you
+        think should happen next. The operator may send you more work; if so, do it and call
+        `report_idle` again when you next go idle. Each report covers only the interval since your
+        previous one and they are kept as the run's history, so do not restate earlier reports.
 
         If you cannot finish, report anyway -- `blocked` if you need the operator, `failed` if the task
         cannot be done as specified -- and say why. Do not end your turn without calling it: until you do,

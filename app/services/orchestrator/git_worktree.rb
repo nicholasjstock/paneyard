@@ -24,19 +24,6 @@ module Orchestrator
       run
     end
 
-    # Checks a run's existing branch back out where its worktree was, after
-    # WorktreeJanitor.release! reclaimed it on close, so a reopened session
-    # picks up exactly where the branch left off.
-    def restore!(run)
-      worktree = Pathname(run.target_root.to_s)
-      return run if worktree.directory?
-      raise Error, "run #{run.run_id} has no branch to restore" if run.branch_name.blank? || run.source_root.blank?
-
-      git!(run.source_root, "worktree", "prune")
-      git!(run.source_root, "worktree", "add", worktree.to_s, run.branch_name)
-      run
-    end
-
     def provisioned?(run, worktree)
       return false unless run.worktree_name.present? && run.branch_name.present? && run.source_root.present?
       return false unless Pathname(run.target_root).expand_path == worktree.expand_path

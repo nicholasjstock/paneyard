@@ -25,8 +25,8 @@ RSpec.describe StartRunSessionJob do
       .to raise_error(Orchestrator::GitWorktree::Error)
       .and have_enqueued_job(RunDispatchJob)
 
-    expect(run.reload).to have_attributes(status: "failed", publication_status: "failed")
-    expect(run.publication_error).to include("must be on main")
+    expect(run.reload).to have_attributes(status: "failed")
+    expect(run.launch_error).to include("must be on main")
   end
 
   it "does nothing for a run another dispatcher already moved on from" do

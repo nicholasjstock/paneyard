@@ -17,8 +17,7 @@ class StartRunSessionJob < ApplicationJob
   rescue => error
     # Whatever went wrong -- a dirty source checkout, herdr not running, a CLI
     # that never became ready -- the run is done and its slot must go back.
-    run&.update(status: "failed", stopped_at: Time.current,
-      publication_status: "failed", publication_error: error.message)
+    run&.update(status: "failed", stopped_at: Time.current, launch_error: error.message)
     RunDispatchJob.perform_later
     raise
   end

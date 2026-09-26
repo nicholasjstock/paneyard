@@ -31,9 +31,7 @@ Rails.application.routes.draw do
         post :stop
         post :send_message
         post :remove_worktree
-        post :publish
         post :close_session
-        post :retry_publication
       end
     end
 

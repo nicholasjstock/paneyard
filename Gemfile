@@ -17,6 +17,9 @@ gem "stimulus-rails"
 # Build JSON APIs with ease [https://github.com/rails/jbuilder]
 gem "jbuilder"
 
+# GitHub-flavoured Markdown for sessions' report_idle summaries [https://github.com/gjtorikian/commonmarker]
+gem "commonmarker"
+
 # Official Ruby SDK for the Model Context Protocol -- hosts the MCP server
 # worker/planner CLI subprocesses connect to (see app/mcp/).
 gem "mcp"

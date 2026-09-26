@@ -1,12 +1,7 @@
 require "open3"
 
 module Orchestrator
-  # Reclaims run worktrees.
-  #
-  # Before this existed the only removal in the system was the post-merge one
-  # in RunPublication.cleanup_merged_run!, so every stopped, failed, or
-  # abandoned run left its worktree on disk forever -- a real and growing mess
-  # given every run gets one.
+  # Reclaims run worktrees -- the only automatic removal in the system.
   #
   # Two rules make this safe to run unattended:
   #
@@ -27,7 +22,6 @@ module Orchestrator
   module WorktreeJanitor
     class Error < StandardError; end
     module_function
-
 
     def sweep_all
       Workspace.find_each.sum { |workspace| sweep(workspace) }
@@ -147,8 +141,7 @@ module Orchestrator
 
     # Closing a session is the operator saying they are done with it. Removes
     # the worktree when nothing in it would be lost, and returns whether it
-    # did. A pull-request comment can still reopen the run later:
-    # PullRequestResume checks the branch back out first.
+    # did.
     def release!(run)
       return false if run.worktree_name.blank? || run.source_root.blank? || run.target_root.blank?
 

@@ -12,13 +12,6 @@
   </div>
 
   <div class="toolbar-actions">
-    <% if @run.pull_request_url.present? %>
-      <%= link_to "Pull request", @run.pull_request_url, class: "btn", target: "_blank", rel: "noopener" %>
-    <% end %>
-    <% if @run.publishable? %>
-      <%= button_to @run.pull_request_url.present? ? "Update pull request" : "Open pull request",
-            publish_workspace_run_path(current_workspace, @run), method: :post, class: "btn primary" %>
-    <% end %>
     <% if @session&.live? %>
       <%= button_to "Close session", close_session_workspace_run_path(current_workspace, @run),
             method: :post, class: "btn",
@@ -30,8 +23,8 @@
 
 <p><%= @run.task %></p>
 
-<% if @run.publication_error.present? %>
-  <p class="error-banner">Publication failed: <%= @run.publication_error %></p>
+<% if @run.launch_error.present? %>
+  <p class="error-banner">Launch failed: <%= @run.launch_error %></p>
 <% end %>
 
 <% if @checkpoints.present? %>
@@ -44,7 +37,7 @@
           <span class="badge <%= checkpoint.outcome %>"><%= checkpoint.outcome %></span>
           <span class="muted"><%= checkpoint.created_at.strftime("%b %-d %H:%M") %></span>
           <% if checkpoint.summary.present? %>
-            <p><%= simple_format checkpoint.summary %></p>
+            <div class="markdown"><%= render_markdown checkpoint.summary %></div>
           <% end %>
         </li>
       <% end %>
@@ -90,10 +83,6 @@
       <% if @session.started_at %> &middot; started <%= time_ago_in_words(@session.started_at) %> ago<% end %>
     </p>
 
-    <% if @session.result.present? %>
-      <p><strong><%= @session.outcome %>:</strong> <%= @session.result %></p>
-    <% end %>
-
     <% if @session.live? %>
       <%= form_with url: send_message_workspace_run_path(current_workspace, @run), method: :post, local: true do |form| %>
         <div class="field">
@@ -102,11 +91,6 @@
         </div>
         <%= form.submit "Send", class: "btn primary" %>
       <% end %>
-    <% end %>
-
-    <% if @pane.present? %>
-      <h3>Live pane</h3>
-      <pre class="log"><%= @pane %></pre>
     <% end %>
   <% end %>
 </section>

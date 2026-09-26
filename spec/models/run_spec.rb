@@ -23,29 +23,4 @@ RSpec.describe Run, type: :model do
       end.to raise_error(ActiveRecord::RecordNotUnique)
     end
   end
-
-  describe "#publication_retryable?" do
-    # worktree_name is assigned eagerly at run creation (RunsController#create),
-    # before StartRunSessionJob ever attempts GitWorktree.provision! -- a run
-    # whose provisioning failed (e.g. a dirty source checkout) keeps that
-    # proposed name with no real worktree behind it. branch_name is only ever
-    # set once provisioning actually succeeds, so it's the real signal.
-    it "is false for a run whose worktree was never actually provisioned, even though worktree_name is set" do
-      run = create_run(
-        prefix: "retry-unprovisioned", status: "failed",
-        worktree_name: "never-provisioned-a1b2", branch_name: nil, publication_status: "failed"
-      )
-
-      expect(run.publication_retryable?).to be(false)
-    end
-
-    it "is true for a genuinely provisioned run that failed publication" do
-      run = create_run(
-        prefix: "retry-provisioned", status: "failed",
-        worktree_name: "provisioned-a1b2", branch_name: "workflow/provisioned-a1b2", publication_status: "failed"
-      )
-
-      expect(run.publication_retryable?).to be(true)
-    end
-  end
 end

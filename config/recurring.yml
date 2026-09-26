@@ -23,12 +23,6 @@ production: &recurring_jobs
   reconcile_run_sessions:
     class: RunSessionReconcileJob
     schedule: every 30 seconds
-  merge_approved_runs:
-    class: MergeApprovedRunsJob
-    schedule: every minute
-  resume_runs_from_pull_request_comments:
-    class: ResumeRunsFromPullRequestCommentsJob
-    schedule: every minute
   cleanup_worktrees:
     class: WorktreeCleanupJob
     schedule: every 10 minutes
