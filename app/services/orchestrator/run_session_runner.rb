@@ -38,6 +38,9 @@ module Orchestrator
     PROMPT_SUBMIT_POLL_ATTEMPTS = 8
     PROMPT_SUBMIT_POLL_INTERVAL_SECONDS = 0.5
     EDITOR_COMMAND = "nvim"
+    # `.` opens the worktree itself (LazyVim's explorer on the project root)
+    # rather than an empty buffer on the dashboard.
+    EDITOR_COMMAND_LINE = "#{EDITOR_COMMAND} .".freeze
 
     def start!(run, resume_session_id: nil, prompt: nil)
       raise Error, "run #{run.run_id} has no provisioned worktree" if run.target_root.blank? || run.branch_name.blank?
@@ -261,7 +264,7 @@ module Orchestrator
       end
 
       editor_pane = Herdr.pane_split(target_pane_id: agent_pane_id, direction: "right", cwd:, focus: false)
-      Herdr.pane_send_input(editor_pane.fetch("pane_id"), text: EDITOR_COMMAND, keys: [ "Enter" ])
+      Herdr.pane_send_input(editor_pane.fetch("pane_id"), text: EDITOR_COMMAND_LINE, keys: [ "Enter" ])
       editor_pane
     rescue Herdr::Error, KeyError => error
       Rails.logger.warn("[RunSessionRunner] could not open an editor pane beside #{agent_pane_id}: #{error.message}")

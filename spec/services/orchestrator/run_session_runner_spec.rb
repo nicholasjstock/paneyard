@@ -81,14 +81,14 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(File.read(session.prompt_path)).to include(run.task)
     end
 
-    it "splits nvim into the worktree beside the agent, and keeps tracking only the agent pane" do
+    it "splits nvim opened on the worktree beside the agent, and keeps tracking only the agent pane" do
       stub_successful_launch
 
       session = described_class.start!(run)
 
       expect(Orchestrator::Herdr).to have_received(:pane_split)
         .with(target_pane_id: "w9:p1", direction: "right", cwd: run.target_root, focus: false)
-      expect(Orchestrator::Herdr).to have_received(:pane_send_input).with("w9:p2", text: "nvim", keys: [ "Enter" ])
+      expect(Orchestrator::Herdr).to have_received(:pane_send_input).with("w9:p2", text: "nvim .", keys: [ "Enter" ])
       expect(Orchestrator::Herdr).to have_received(:agent_start).with(hash_including(pane_id: "w9:p1"))
       expect(Orchestrator::Herdr).not_to have_received(:agent_prompt).with("w9:p2", anything)
       expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1", herdr_workspace_id: "w9")
