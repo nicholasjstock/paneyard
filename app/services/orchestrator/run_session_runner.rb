@@ -37,6 +37,7 @@ module Orchestrator
     AGENT_START_ATTEMPTS = 5
     PROMPT_SUBMIT_POLL_ATTEMPTS = 8
     PROMPT_SUBMIT_POLL_INTERVAL_SECONDS = 0.5
+    EDITOR_COMMAND = "nvim"
 
     def start!(run, resume_session_id: nil, prompt: nil)
       raise Error, "run #{run.run_id} has no provisioned worktree" if run.target_root.blank? || run.branch_name.blank?
@@ -73,6 +74,7 @@ module Orchestrator
         )
 
         pane_id = session.herdr_pane_id
+        open_editor_pane(pane_id, cwd: run.target_root)
         start_agent!(name: run.run_id, kind:, pane_id:, args:)
         dismiss_codex_trust_prompt!(pane_id) if run.launcher_variant == "codex"
         wait_until_ready!(pane_id)
@@ -242,6 +244,35 @@ module Orchestrator
     def dismiss_codex_trust_prompt!(pane_id)
       sleep CODEX_TRUST_PROMPT_GRACE_SECONDS
       Herdr.agent_send_keys(pane_id, [ "Enter" ])
+    end
+
+    # The operator's side of the split: nvim in the worktree, next to the
+    # agent, for reading the diff or editing alongside the session. Rails never
+    # records or talks to this pane -- herdr_pane_id stays the agent's, so
+    # prompt!/refresh!/reconcile cannot reach it -- and workspace.close on
+    # Close session takes it down with the rest of the workspace. Purely a
+    # convenience, so any failure leaves the run launching with just the agent
+    # pane. The PATH check is Rails' own PATH rather than the pane shell's;
+    # the operator's shell normally sees at least as much.
+    def open_editor_pane(agent_pane_id, cwd:)
+      unless executable_on_path?(EDITOR_COMMAND)
+        Rails.logger.info("[RunSessionRunner] #{EDITOR_COMMAND} not on PATH; launching #{agent_pane_id} without an editor pane")
+        return nil
+      end
+
+      editor_pane = Herdr.pane_split(target_pane_id: agent_pane_id, direction: "right", cwd:, focus: false)
+      Herdr.pane_send_input(editor_pane.fetch("pane_id"), text: EDITOR_COMMAND, keys: [ "Enter" ])
+      editor_pane
+    rescue Herdr::Error, KeyError => error
+      Rails.logger.warn("[RunSessionRunner] could not open an editor pane beside #{agent_pane_id}: #{error.message}")
+      nil
+    end
+
+    def executable_on_path?(command)
+      ENV["PATH"].to_s.split(File::PATH_SEPARATOR).any? do |dir|
+        path = File.join(dir, command)
+        File.file?(path) && File.executable?(path)
+      end
     end
 
     # workspace.create returns a pane whose shell exists immediately, but that

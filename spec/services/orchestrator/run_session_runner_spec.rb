@@ -17,6 +17,12 @@ RSpec.describe Orchestrator::RunSessionRunner do
     # Every failure path closes the pane's workspace; stubbed here so no
     # example can reach the real socket through it.
     allow(Orchestrator::Herdr).to receive(:workspace_close)
+    # The operator's nvim pane beside the agent. PATH is stubbed so examples
+    # do not depend on whether this machine has nvim installed.
+    allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(true)
+    allow(Orchestrator::Herdr).to receive(:pane_split)
+      .and_return("pane_id" => "w9:p2", "tab_id" => "w9:t1", "workspace_id" => "w9")
+    allow(Orchestrator::Herdr).to receive(:pane_send_input)
     stub_const("#{described_class}::SHELL_POLL_INTERVAL_SECONDS", 0)
     stub_const("#{described_class}::PROMPT_SUBMIT_POLL_INTERVAL_SECONDS", 0)
   end
@@ -73,6 +79,51 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
       expect(session).to have_attributes(status: "running", pid: 555, herdr_pane_id: "w9:p1", driver: "claude")
       expect(File.read(session.prompt_path)).to include(run.task)
+    end
+
+    it "splits nvim into the worktree beside the agent, and keeps tracking only the agent pane" do
+      stub_successful_launch
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).to have_received(:pane_split)
+        .with(target_pane_id: "w9:p1", direction: "right", cwd: run.target_root, focus: false)
+      expect(Orchestrator::Herdr).to have_received(:pane_send_input).with("w9:p2", text: "nvim", keys: [ "Enter" ])
+      expect(Orchestrator::Herdr).to have_received(:agent_start).with(hash_including(pane_id: "w9:p1"))
+      expect(Orchestrator::Herdr).not_to have_received(:agent_prompt).with("w9:p2", anything)
+      expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1", herdr_workspace_id: "w9")
+    end
+
+    it "launches with just the agent pane when nvim is not on PATH" do
+      stub_successful_launch
+      allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(false)
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).not_to have_received(:pane_split)
+      expect(Orchestrator::Herdr).not_to have_received(:pane_send_input)
+      expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1")
+    end
+
+    it "launches with just the agent pane when herdr refuses the split" do
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:pane_split).and_raise(Orchestrator::Herdr::Error, "no such pane")
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).not_to have_received(:pane_send_input)
+      expect(Orchestrator::Herdr).not_to have_received(:workspace_close)
+      expect(session).to have_attributes(status: "running", pid: 555, herdr_pane_id: "w9:p1")
+    end
+
+    it "still launches the agent when nvim cannot be typed into the split pane" do
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:pane_send_input).and_raise(Orchestrator::Herdr::Unreachable, "timed out")
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).to have_received(:agent_start).once
+      expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1")
     end
 
     # A fresh pane's shell runs the operator's rc files (pyenv, starship, git)

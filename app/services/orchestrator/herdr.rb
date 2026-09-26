@@ -59,6 +59,13 @@ module Orchestrator
   #     --print/exec process a real interactive CLI never exits on its own.
   #     That group id is what Rails records as the session pid and what it must
   #     explicitly kill for "session over" to mean "process gone".
+  #   - pane.split {target_pane_id, direction, cwd, focus} -> {pane: {pane_id,
+  #     ...}}. direction is right|down. It takes no command to run: the new pane
+  #     is a plain shell, so anything in it is launched with pane.send_input
+  #     {pane_id, text, keys}. Confirmed live that input sent straight after the
+  #     split, while the shell is still running its rc files, is held as
+  #     typeahead and runs once the prompt comes up, and that workspace.close
+  #     takes every pane in the workspace (and the process in it) down with it.
   #   - pane.read {pane_id, source} -> {text, truncated, ...}; source is one of
   #     visible|recent|recent_unwrapped|detection.
   #   - pane.get / workspace.get / workspace.close take {pane_id}/
@@ -137,6 +144,14 @@ module Orchestrator
     # that already rescue Herdr::Error -- RunSessionRunner.snapshot, whose
     # whole job is to degrade to nil rather than take the run screen down --
     # keep working.
+    def pane_split(target_pane_id:, direction:, cwd:, focus: false)
+      request!("pane.split", target_pane_id:, direction:, cwd:, focus:).fetch("pane")
+    end
+
+    def pane_send_input(pane_id, text:, keys: [])
+      request!("pane.send_input", pane_id:, text:, keys:)
+    end
+
     def pane_read(pane_id, source: "recent", lines: nil, strip_ansi: true)
       params = { pane_id:, source:, strip_ansi: }
       params[:lines] = lines if lines

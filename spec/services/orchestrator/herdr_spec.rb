@@ -52,6 +52,19 @@ RSpec.describe Orchestrator::Herdr do
     end
   end
 
+  describe ".pane_split" do
+    # The live shape (herdr 0.7.5): {"type" => "pane_info", "pane" => {...}}.
+    it "splits the target pane and unwraps the new pane" do
+      expect(described_class).to receive(:request!).with(
+        "pane.split", target_pane_id: "w1:p1", direction: "right", cwd: "/tmp/run-1", focus: false
+      ).and_return("type" => "pane_info", "pane" => { "pane_id" => "w1:p2", "workspace_id" => "w1" })
+
+      pane = described_class.pane_split(target_pane_id: "w1:p1", direction: "right", cwd: "/tmp/run-1")
+
+      expect(pane.fetch("pane_id")).to eq("w1:p2")
+    end
+  end
+
   describe ".pane_read" do
     # The live shape (herdr 0.7.5, protocol 17). This spec previously asserted a
     # flat {"text" => ...}, which is why every real pane read raised KeyError.
