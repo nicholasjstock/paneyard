@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_17_120200) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_17_140000) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -134,6 +134,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_120200) do
   create_table "workspace_admin_chats", force: :cascade do |t|
     t.string "active_provider", default: "claude", null: false
     t.string "active_turn_id"
+    t.string "capability_token_digest"
     t.string "claude_model"
     t.string "claude_session_id"
     t.string "codex_model"
@@ -145,6 +146,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_120200) do
     t.string "status", default: "idle", null: false
     t.datetime "updated_at", null: false
     t.integer "workspace_id", null: false
+    t.index ["capability_token_digest"], name: "index_workspace_admin_chats_on_capability_token_digest", unique: true
     t.index ["workspace_id"], name: "index_workspace_admin_chats_on_workspace_id", unique: true
   end
 
