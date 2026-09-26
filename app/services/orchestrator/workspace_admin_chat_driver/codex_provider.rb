@@ -10,7 +10,7 @@ module Orchestrator
     module CodexProvider
       module_function
 
-      DEFAULT_MODEL = WorkerSpawner::CODEX_WORKER_MODEL
+      DEFAULT_MODEL = SessionArgs.codex_model
       SANDBOX_MODE = "workspace-write"
 
       # See the identical constant on ClaudeProvider -- confirmed directly:
@@ -21,7 +21,7 @@ module Orchestrator
 
       def run_turn(workspace_path:, prompt:, session_id:, model:, on_spawn: nil, &on_event)
         args = build_args(session_id:, model: model.presence || DEFAULT_MODEL, prompt:)
-        env = WorkerSpawner.build_worker_env
+        env = SessionEnv.sanitized_process_env
         new_session_id = session_id
 
         result = ProcessStream.run(env:, args:, chdir: workspace_path, on_spawn:) do |line|

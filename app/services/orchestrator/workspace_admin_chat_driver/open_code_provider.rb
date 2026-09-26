@@ -11,7 +11,7 @@ module Orchestrator
 
       def run_turn(workspace_path:, prompt:, session_id:, model:, on_spawn: nil, &on_event)
         args = build_args(session_id:, model: model.presence || DEFAULT_MODEL, prompt:)
-        env = WorkerSpawner.build_worker_env
+        env = SessionEnv.sanitized_process_env
         new_session_id = session_id
 
         result = ProcessStream.run(env:, args:, chdir: workspace_path, on_spawn:) do |line|

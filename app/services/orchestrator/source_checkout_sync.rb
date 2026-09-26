@@ -1,49 +1,42 @@
 require "open3"
 
 module Orchestrator
+  # Fast-forwards a workspace's `main` checkout after one of its runs merges,
+  # so the next run branches from current code.
+  #
+  # Best-effort by design. When main is dirty or the fast-forward is not
+  # clean, this reports :dirty/:diverged and leaves the checkout untouched:
+  # the operator's own uncommitted work in main is theirs, and silently
+  # rebasing around it is exactly the kind of thing this tool must not do to
+  # a repository it also edits.
+  #
+  # This used to dispatch a git-role worker to stash, rebase, and reapply.
+  # That existed because the old architecture had a worker sitting there
+  # anyway; spawning a whole agent session to run three git commands is not a
+  # trade worth making now.
   module SourceCheckoutSync
     module_function
 
     def after_merge!(run)
-      root = Pathname(run.source_root)
+      root = Pathname(run.source_root.to_s)
       return :skipped unless root.directory?
-      return queue_worker!(run, root) unless clean?(root)
+      return :dirty unless clean?(root)
 
       _output, _error, status = Open3.capture3("git", "-C", root.to_s, "fetch", "origin", "main")
-      return queue_worker!(run, root) unless status.success?
+      return :unreachable unless status.success?
 
       _output, _error, status = Open3.capture3("git", "-C", root.to_s, "merge", "--ff-only", "origin/main")
-      status.success? ? :synced : queue_worker!(run, root)
+      return :synced if status.success?
+
+      Rails.logger.info(
+        "SourceCheckoutSync: #{root} could not fast-forward to origin/main; leaving it for the operator."
+      )
+      :diverged
     end
 
     def clean?(root)
       output, _error, status = Open3.capture3("git", "-C", root.to_s, "status", "--porcelain")
       status.success? && output.blank?
     end
-    private_class_method :clean?
-
-    def queue_worker!(run, root)
-      return :queued if SpawnRequest.open_only.exists?(run_id: run.run_id, requested_role: "git", scope: "source-sync.md")
-
-      # A merge may race a queued publish retry. That request targets the
-      # worktree we just removed, so it must not consume the run's one-worker
-      # dispatch slot ahead of the source-sync handoff.
-      SpawnRequest.open_only.where(run_id: run.run_id).find_each do |request|
-        request.update!(
-          status: "dismissed", dismissed_by: "post_merge_sync",
-          dismissal_note: "Superseded by merged-run source synchronization."
-        )
-      end
-
-      SpawnRequest.create!(
-        run_id: run.run_id, asked_by: "post_merge_sync", requested_role: "git", priority: "blocking",
-        scope: "source-sync.md", execution_mode: "implementation", write_scope: "git_managed", allowed_paths: [ "**/*" ],
-        working_root: root.to_s, tags: %w[git source-sync],
-        text: "Synchronize the assigned source checkout with origin/main. Preserve every local edit: create a named stash including untracked files, fetch origin main, rebase local main onto origin/main, resolve clear conflicts, then reapply the stash and resolve clear conflicts. If anything is ambiguous, abort the rebase or restore the stash so the checkout is never left mid-operation, then report [BLOCKED] through worker_turn. On success report [DONE] through worker_turn; do not publish a pull request."
-      )
-      SpawnRequestedWorkers.call(run:)
-      :queued
-    end
-    private_class_method :queue_worker!
   end
 end

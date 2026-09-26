@@ -18,7 +18,7 @@ class WorkspacesController < ApplicationController
     if @workspace.save
       Orchestrator::WorkspaceInit.launch!(@workspace)
       redirect_to workspace_runs_path(@workspace),
-        notice: "Added workspace #{@workspace.name}. Discovering its dev environment and operational path metadata…"
+        notice: "Added workspace #{@workspace.name}. Queued a run to discover its dev environment and protected paths…"
     else
       render :new, status: :unprocessable_entity
     end

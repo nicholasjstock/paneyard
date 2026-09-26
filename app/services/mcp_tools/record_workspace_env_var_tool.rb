@@ -19,9 +19,10 @@ module McpTools
     )
 
     def self.call(runId:, name:, value:, evidenceRef:, server_context:)
-      worker = WorkerAuthorization.worker!(server_context:, run_id: runId)
+      session = SessionAuthorization.session!(server_context:, run_id: runId)
       entry = Orchestrator::WorkspaceEnvVars.record!(
-        run_id: runId, name: name, value: value, evidence_ref: evidenceRef, recorded_by: worker&.role || "unknown"
+        run_id: runId, name: name, value: value, evidence_ref: evidenceRef,
+        recorded_by: session&.driver || "session"
       )
       ToolResponse.structured(entry.as_json)
     rescue ArgumentError, ActiveRecord::RecordInvalid => error

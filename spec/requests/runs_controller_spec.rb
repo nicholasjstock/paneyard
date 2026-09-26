@@ -1,8 +1,8 @@
 require "rails_helper"
 
 RSpec.describe "runs", type: :request do
-  it "blocks launching a new run while the workspace is not yet initialized" do
-    workspace = Workspace.create!(name: "runs-controller-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+  it "blocks queueing a new run while the workspace is not yet initialized" do
+    workspace = create_workspace(prefix: "runs-controller")
 
     get new_workspace_run_path(workspace)
     expect(response).to redirect_to(workspace_runs_path(workspace))
@@ -15,11 +15,10 @@ RSpec.describe "runs", type: :request do
     expect(response).to redirect_to(workspace_runs_path(workspace))
   end
 
-  it "allows launching a new run once the workspace has declared protected paths" do
-    workspace = Workspace.create!(
-      name: "runs-controller-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir,
-      protected_path_patterns: [ "app/controllers/**/*.rb" ]
-    )
+  # Creating a run starts nothing by itself -- it queues, and the dispatcher
+  # decides when it runs. That separation is the whole scheduler.
+  it "queues a run rather than starting one, and asks the dispatcher to look" do
+    workspace = create_workspace(prefix: "runs-controller", protected_path_patterns: [ "app/**/*.rb" ])
 
     get new_workspace_run_path(workspace)
     expect(response).to have_http_status(:ok)
@@ -27,18 +26,17 @@ RSpec.describe "runs", type: :request do
     expect do
       post workspace_runs_path(workspace), params: { run: { task: "Do something", launcher_variant: "claude" } }
     end.to change(Run, :count).by(1)
+      .and have_enqueued_job(RunDispatchJob)
 
     run = workspace.runs.order(:created_at).last
+    expect(run.status).to eq("queued")
     expect(run.worktree_name).to start_with("do-something-")
     expect(run.target_root).to eq(workspace.source_root)
+    expect(run.run_sessions).to be_empty
   end
 
-  it "accepts multiple uploaded launch artifacts and records their manifest" do
-    workspace = Workspace.create!(
-      name: "runs-controller-upload-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir,
-      protected_path_patterns: [ "app/controllers/**/*.rb" ]
-    )
-    allow(LaunchRunJob).to receive(:perform_later)
+  it "stores uploaded files in the run's artifact store so the session can read them" do
+    workspace = create_workspace(prefix: "runs-controller-upload", protected_path_patterns: [ "app/**/*.rb" ])
     first = Tempfile.new([ "first", ".db" ])
     second = Tempfile.new([ "second", ".log" ])
     first.write("first artifact")
@@ -61,41 +59,32 @@ RSpec.describe "runs", type: :request do
     expect(response).to have_http_status(:redirect)
     run = workspace.runs.order(:created_at).last
     expect(run.launch_artifacts).to contain_exactly(
-      { "name" => "first.db", "source_run_id" => run.run_id, "source_path" => "first.db" },
-      { "name" => "second.log", "source_run_id" => run.run_id, "source_path" => "second.log" }
+      { "name" => "first.db", "source_path" => "first.db" },
+      { "name" => "second.log", "source_path" => "second.log" }
     )
     expect(File.read(Orchestrator::ArtifactStore.resolve_path(run.target_root, run.run_id, "first.db"))).to eq("first artifact")
     expect(File.read(Orchestrator::ArtifactStore.resolve_path(run.target_root, run.run_id, "second.log"))).to eq("second artifact")
   ensure
     first&.close!
     second&.close!
-    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
   end
 
-  # Regression: run-20260727-165215-d272 had a worktree_name (assigned
-  # eagerly at creation) but never a real provisioned worktree, since
-  # GitWorktree.provision! failed first. publication_retryable? now checks
-  # branch_name, so the button itself would not appear for that exact case --
-  # this exercises the deeper defense: even if reached directly, the
-  # controller must not spawn the git worker against a broken target_root,
-  # and must not leave the run stuck at status "running" with nothing in flight.
-  it "does not spawn the git worker or leave the run running when its target_root is missing" do
-    workspace = Workspace.create!(name: "runs-controller-retry-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
-    run = workspace.runs.create!(
-      run_id: "runs-controller-retry-#{SecureRandom.hex(4)}", task: "Retry a broken worktree",
-      target_root: File.join(workspace.root_path, "missing-worktree"), launcher_variant: "codex",
-      status: "failed", worktree_name: "broken-a1b2", branch_name: "workflow/broken-a1b2",
-      publication_status: "failed"
-    )
+  it "sends an operator message into the run's live session" do
+    run, session = create_run_and_session(prefix: "runs-controller-message")
+    allow(Orchestrator::RunSessionRunner).to receive(:prompt!)
 
-    expect do
-      post retry_publication_workspace_run_path(workspace, run)
-    end.not_to change(SpawnRequest, :count)
+    post send_message_workspace_run_path(run.workspace, run), params: { message: "Use the other migration." }
+
+    expect(Orchestrator::RunSessionRunner).to have_received(:prompt!).with(session, "Use the other migration.")
+    expect(response).to redirect_to(workspace_run_path(run.workspace, run))
+  end
+
+  it "explains itself rather than erroring when a run has no live session to message" do
+    run = create_run(prefix: "runs-controller-message")
+
+    post send_message_workspace_run_path(run.workspace, run), params: { message: "Anyone there?" }
 
     follow_redirect!
-    expect(response.body).to include("Could not retry publication")
-    expect(run.reload).to have_attributes(status: "failed", publication_status: "failed")
-  ensure
-    FileUtils.remove_entry(workspace.root_path) if workspace && File.exist?(workspace.root_path)
+    expect(response.body).to include("no live session")
   end
 end

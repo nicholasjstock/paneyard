@@ -40,21 +40,19 @@ RSpec.describe "workspaces", type: :system do
       click_button "Add workspace"
     end.to change(Run, :count).by(1)
 
-    expect(page).to have_text("Added workspace planner-app-#{suffix}. Discovering its dev environment and operational path metadata…")
+    expect(page).to have_text("Added workspace planner-app-#{suffix}. Queued a run to discover its dev environment and protected paths…")
     expect(page).to have_current_path(%r{/workspaces/\d+/runs})
     expect(page).to have_text("planner-app-#{suffix} Runs")
-    expect(page).to have_no_link("Launch task")
+    expect(page).to have_no_link("Queue a task")
     expect(page).to have_text("still initializing")
 
     workspace = Workspace.find_by!(name: "planner-app-#{suffix}")
     run = workspace.runs.sole
     expect(run.launched_by).to eq("workspace_init")
-    expect(run.spawn_requests.find_by(requested_role: "project_init")).to be_present
-    # No planner request either: a planner has no visibility into
-    # project_init's workspace-level findings, so queuing one here re-plans
-    # the same discovery as a redundant step instead of ever finishing --
-    # see Orchestrator::WorkspaceInit's comment.
-    expect(run.spawn_requests.find_by(requested_role: "planner")).to be_nil
+    # A bootstrap run is an ordinary queued run now -- same dispatch path as
+    # any other, just a discovery task.
+    expect(run.status).to eq("queued")
+    expect(run.task).to include("record_protected_paths")
   end
 
   it "lets an operator edit a workspace's protected path patterns" do

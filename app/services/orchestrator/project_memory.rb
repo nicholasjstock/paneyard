@@ -55,7 +55,7 @@ module Orchestrator
       if entry_keys.present?
         entries.select { |entry| entry_keys.include?(entry.entry_key) }.first(DETAIL_ENTRY_LIMIT).map(&:as_json)
       else
-        primary_count = entries.count { |entry| entry.entry_key == Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY }
+        primary_count = entries.count { |entry| entry.entry_key == Orchestrator::WorkspaceInit::PRIMARY_ENTRY_KEY }
         entries.first(DEFAULT_BRIEF_ENTRY_LIMIT + primary_count).map do |entry|
           entry.as_json.merge(content: truncate(entry.content, BRIEF_CONTENT_LIMIT))
         end
@@ -64,14 +64,14 @@ module Orchestrator
     private_class_method :select_entries
 
     # A workspace's primary dev-environment fact always leads (see
-    # Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY). Everything else
+    # Orchestrator::WorkspaceInit::PRIMARY_ENTRY_KEY). Everything else
     # is ordered by created_at alone -- the actual time it was recorded,
     # there is no separate "sent at" field -- most recent first, with no
     # kind-based tiering. A stale entry of any kind ages out of the compact
     # brief on its own as newer ones are confirmed; it stays reachable via
     # entry_keys detail retrieval, it just isn't forced into the default view.
     def brief_order(entries)
-      primary, rest = entries.partition { |entry| entry.entry_key == Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY }
+      primary, rest = entries.partition { |entry| entry.entry_key == Orchestrator::WorkspaceInit::PRIMARY_ENTRY_KEY }
       primary + rest.sort_by { |entry| -entry.created_at.to_i }
     end
     private_class_method :brief_order

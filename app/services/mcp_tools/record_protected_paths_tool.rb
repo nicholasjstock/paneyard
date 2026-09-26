@@ -1,9 +1,9 @@
 module McpTools
   class RecordProtectedPathsTool < MCP::Tool
     tool_name "record_protected_paths"
-    description "Declare this workspace's protected source glob patterns. Read-only workers cannot modify these paths; implementation workers receive all of them. " \
-      "Include source, configuration, and maintained tests, but exclude dependency caches, build output, and generated artifacts. " \
-      "Only callable by an authenticated project_init worker. Replaces any previously declared patterns for this workspace."
+    description "Declare this workspace's protected source glob patterns -- the paths a run should not touch unless " \
+      "its task is explicitly about them. Include source, configuration, and maintained tests, but exclude dependency " \
+      "caches, build output, and generated artifacts. Replaces any previously declared patterns for this workspace."
     input_schema(
       properties: {
         runId: { type: "string" },
@@ -16,9 +16,7 @@ module McpTools
     )
 
     def self.call(runId:, patterns:, server_context:)
-      worker = WorkerAuthorization.worker!(server_context:, run_id: runId)
-      raise ArgumentError, "record_protected_paths requires an authenticated project_init worker" unless worker.nil? || worker.role == "project_init"
-
+      SessionAuthorization.session!(server_context:, run_id: runId)
       run = Run.find_by!(run_id: runId)
       cleaned = patterns.map(&:to_s).map(&:strip).reject(&:blank?).uniq
       validate_patterns!(cleaned)

@@ -6,17 +6,19 @@
   <h1><%= current_workspace.name %> Runs</h1>
   <%= button_to "Re-run project setup", workspace_project_setup_path(current_workspace), method: :post, class: "btn" %>
   <% if current_workspace.initialized? %>
-    <%= link_to "Launch task", new_workspace_run_path(current_workspace), class: "btn primary" %>
+    <%= link_to "Queue a task", new_workspace_run_path(current_workspace), class: "btn primary" %>
   <% end %>
 </div>
 
-<%# Kept for manual debugging/interactive use alongside the admin chat -- see shared/_terminal_launcher.html.erb. %>
-<%= render "shared/terminal_launcher" %>
+<p class="muted">
+  <%= pluralize(@in_flight.size, "run") %> in flight of <%= @concurrency_limit %>
+  &middot; <%= pluralize(@queued.size, "run") %> queued
+</p>
 
 <% unless current_workspace.initialized? %>
   <p class="muted">
-    This workspace is still initializing (discovering its dev environment and operational path metadata) before it can
-    launch a task run.
+    This workspace is still initializing (discovering its dev environment and protected paths) before it can
+    queue a task run.
   </p>
 <% end %>
 
@@ -24,31 +26,28 @@
 
 <div id="runs">
   <% if @runs.empty? %>
-    <p class="empty">No runs launched yet.</p>
+    <p class="empty">No runs yet.</p>
   <% else %>
     <% @runs.each do |run| %>
-        <div class="card">
-          <div class="card-title">
-            <%= link_to run.worktree_name.presence || run.run_id, workspace_run_path(current_workspace, run), class: "mono" %>
-            <span class="badge <%= run.status_badge_class %>"><%= run.status_badge_label %></span>
-          </div>
-          <% if run.branch_name.present? %>
-            <p class="muted mono"><%= run.branch_name %></p>
-            <% if run.task.present? %><p class="muted"><%= truncate(run.task, length: 140) %></p><% end %>
-          <% else %>
-            <p><%= truncate(run.task, length: 140) %></p>
-          <% end %>
-          <% if run.pull_request_url.present? %><p><%= link_to "Pull request", run.pull_request_url, target: "_blank", rel: "noopener" %></p><% end %>
-          <p class="muted">
-            <%= run.launcher_variant %>
-            &middot;
-            <% if run.started_at %>started <%= time_ago_in_words(run.started_at) %> ago<% else %>not started<% end %>
-            <% if run.stopped_at %> &middot; stopped <%= time_ago_in_words(run.stopped_at) %> ago<% end %>
-          </p>
-          <% if run.launch_queued? %>
-            <p class="error-banner">Launch job has not started. This run is still queued; start `bin/jobs` or `bin/dev`.</p>
-          <% end %>
+      <div class="card">
+        <div class="card-title">
+          <%= link_to run.worktree_name.presence || run.run_id, workspace_run_path(current_workspace, run), class: "mono" %>
+          <span class="badge <%= run.status %>"><%= run.status.humanize %></span>
         </div>
-      <% end %>
+        <p><%= truncate(run.task, length: 140) %></p>
+        <% if run.branch_name.present? %>
+          <p class="muted mono"><%= run.branch_name %></p>
+        <% end %>
+        <% if run.pull_request_url.present? %>
+          <p><%= link_to "Pull request", run.pull_request_url, target: "_blank", rel: "noopener" %></p>
+        <% end %>
+        <p class="muted">
+          <%= run.launcher_variant %>
+          &middot;
+          <% if run.started_at %>started <%= time_ago_in_words(run.started_at) %> ago<% else %>waiting for a slot<% end %>
+          <% if run.stopped_at %> &middot; ended <%= time_ago_in_words(run.stopped_at) %> ago<% end %>
+        </p>
+      </div>
+    <% end %>
   <% end %>
 </div>

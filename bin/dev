@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # Runs the Rails server and the Solid Queue jobs process together, so
-# TickRunJob's recurring schedule (config/recurring.yml) actually fires
+# RunDispatchJob's recurring schedule (config/recurring.yml) actually fires
 # in dev. Both processes are killed together on exit.
 
 require "socket"

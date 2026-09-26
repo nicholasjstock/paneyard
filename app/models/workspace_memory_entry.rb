@@ -1,7 +1,9 @@
 class WorkspaceMemoryEntry < ApplicationRecord
   KINDS = %w[architecture convention operational_rule known_hazard].freeze
   STATUSES = %w[confirmed superseded].freeze
-  RECORDERS = %w[planner operator project_init].freeze
+  # "session" replaced the planner/project_init recorders: every entry now
+  # comes from a run's own session, or from the operator by hand.
+  RECORDERS = %w[session operator].freeze
 
   belongs_to :workspace
   belongs_to :supersedes, class_name: "WorkspaceMemoryEntry", optional: true

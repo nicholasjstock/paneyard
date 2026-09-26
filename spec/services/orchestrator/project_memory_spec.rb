@@ -10,11 +10,11 @@ RSpec.describe Orchestrator::ProjectMemory do
 
     first = Orchestrator::ProjectMemory.record!(
       run_id: run.run_id, entry_key: "test-command", kind: "convention", content: "Run command A.",
-      evidence_ref: "report-a.md", recorded_by: "planner"
+      evidence_ref: "report-a.md", recorded_by: "session"
     )
     second = Orchestrator::ProjectMemory.record!(
       run_id: run.run_id, entry_key: "test-command", kind: "convention", content: "Run command B.",
-      evidence_ref: "report-b.md", recorded_by: "planner"
+      evidence_ref: "report-b.md", recorded_by: "session"
     )
 
     entries = Orchestrator::ProjectMemory.snapshot(run_id: run.run_id)[:entries]
@@ -37,13 +37,13 @@ RSpec.describe Orchestrator::ProjectMemory do
     # load-bearing facts crowding out the one fact every worker actually
     # needs to get started.
     Orchestrator::ProjectMemory.record!(
-      run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
-      content: "Run bin/dev from project root.", evidence_ref: "bin/dev", recorded_by: "project_init"
+      run_id: run.run_id, entry_key: Orchestrator::WorkspaceInit::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+      content: "Run bin/dev from project root.", evidence_ref: "bin/dev", recorded_by: "session"
     )
     9.times do |i|
       Orchestrator::ProjectMemory.record!(
         run_id: run.run_id, entry_key: "aaa-hazard-#{i}", kind: "known_hazard",
-        content: "Hazard #{i}.", evidence_ref: "hazard.md", recorded_by: "planner"
+        content: "Hazard #{i}.", evidence_ref: "hazard.md", recorded_by: "session"
       )
     end
 
@@ -60,12 +60,12 @@ RSpec.describe Orchestrator::ProjectMemory do
     )
     rule = Orchestrator::ProjectMemory.record!(
       run_id: run.run_id, entry_key: "old-operational-rule", kind: "operational_rule",
-      content: "An old rule.", evidence_ref: "a.md", recorded_by: "planner"
+      content: "An old rule.", evidence_ref: "a.md", recorded_by: "session"
     )
     rule.update!(created_at: 1.hour.ago)
     Orchestrator::ProjectMemory.record!(
       run_id: run.run_id, entry_key: "new-convention", kind: "convention",
-      content: "A newer convention.", evidence_ref: "b.md", recorded_by: "planner"
+      content: "A newer convention.", evidence_ref: "b.md", recorded_by: "session"
     )
 
     brief = Orchestrator::ProjectMemory.snapshot(run_id: run.run_id)
@@ -82,12 +82,12 @@ RSpec.describe Orchestrator::ProjectMemory do
     Orchestrator::ProjectMemory::DEFAULT_BRIEF_ENTRY_LIMIT.times do |i|
       Orchestrator::ProjectMemory.record!(
         run_id: run.run_id, entry_key: "rule-#{i}", kind: "operational_rule",
-        content: "Rule #{i}.", evidence_ref: "r.md", recorded_by: "planner"
+        content: "Rule #{i}.", evidence_ref: "r.md", recorded_by: "session"
       )
     end
     Orchestrator::ProjectMemory.record!(
-      run_id: run.run_id, entry_key: Orchestrator::ProjectInitTrigger::PRIMARY_ENTRY_KEY, kind: "operational_rule",
-      content: "Run bin/dev from project root.", evidence_ref: "bin/dev", recorded_by: "project_init"
+      run_id: run.run_id, entry_key: Orchestrator::WorkspaceInit::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+      content: "Run bin/dev from project root.", evidence_ref: "bin/dev", recorded_by: "session"
     )
 
     brief = Orchestrator::ProjectMemory.snapshot(run_id: run.run_id)
@@ -104,12 +104,12 @@ RSpec.describe Orchestrator::ProjectMemory do
     )
     older = Orchestrator::ProjectMemory.record!(
       run_id: run.run_id, entry_key: "aaa-older", kind: "known_hazard",
-      content: "Older hazard.", evidence_ref: "a.md", recorded_by: "planner"
+      content: "Older hazard.", evidence_ref: "a.md", recorded_by: "session"
     )
     older.update!(created_at: 1.hour.ago)
     Orchestrator::ProjectMemory.record!(
       run_id: run.run_id, entry_key: "zzz-newer", kind: "known_hazard",
-      content: "Newer hazard.", evidence_ref: "b.md", recorded_by: "planner"
+      content: "Newer hazard.", evidence_ref: "b.md", recorded_by: "session"
     )
 
     brief = Orchestrator::ProjectMemory.snapshot(run_id: run.run_id)
@@ -126,7 +126,7 @@ RSpec.describe Orchestrator::ProjectMemory do
     long_content = "x" * 900
     Orchestrator::ProjectMemory.record!(
       run_id: run.run_id, entry_key: "long-rule", kind: "operational_rule", content: long_content,
-      evidence_ref: "rule.md", recorded_by: "planner"
+      evidence_ref: "rule.md", recorded_by: "session"
     )
 
     brief = Orchestrator::ProjectMemory.snapshot(run_id: run.run_id)

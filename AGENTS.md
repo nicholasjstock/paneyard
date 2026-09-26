@@ -11,7 +11,7 @@ This is not a typical multi-tenant web app under normal clone/test/deploy develo
 **Remote control is a real, load-bearing surface, not a side feature.** Beyond the local web UI, an operator can drive any workspace's admin chat from Telegram (`Telegram::UpdateProcessor`, `Orchestrator::WorkspaceAdminChatDriver`), and GitHub operations across every managed repo (regardless of which account owns it) authenticate through one GitHub App installation (`Orchestrator::GitHubAppAuth`, `GITHUB_APP_SETUP.md`) rather than per-repo credentials.
 
 ## Project Structure & Module Organization
-This repository is a Rails 8 application organized around `Workspace` as the top-level boundary. New work should start from a specific workspace, and related runs, workers, questions, events, and orchestration artifacts should stay nested under that workspace in code and UI flow. Core server code lives in `app/`: controllers in `app/controllers`, persistence models in `app/models`, background jobs in `app/jobs`, and orchestration logic in `app/services/orchestrator` and `app/services/mcp_tools`. Frontend code uses importmap + Stimulus under `app/javascript`, with views in `app/views` and static assets in `public/`. Database schema and migrations live in `db/`. Operational notes and handoff material belong in root-level docs such as `HANDOFF.md`.
+This repository is a Rails 8 application organized around `Workspace` as the top-level boundary. New work should start from a specific workspace, and related runs, sessions, events, and artifacts should stay nested under that workspace in code and UI flow. Core server code lives in `app/`: controllers in `app/controllers`, persistence models in `app/models`, background jobs in `app/jobs`, and orchestration logic in `app/services/orchestrator` and `app/services/mcp_tools`. Frontend code uses importmap + Stimulus under `app/javascript`, with views in `app/views` and static assets in `public/`. Database schema and migrations live in `db/`. Operational notes and handoff material belong in root-level docs such as `HANDOFF.md`.
 
 ## Build, Test, and Development Commands
 Run `bin/setup` to install gems, prepare the database, and clear stale logs/tmp files. Use `bin/dev` for local development; it starts both the Rails server and the Solid Queue worker process so recurring jobs fire. Use `bin/rails db:prepare` after schema changes, and `bin/rails console` for local inspection. Run `bin/ci` before opening a PR; it executes setup, RuboCop, `bundler-audit`, `bin/importmap audit`, and Brakeman.
@@ -37,36 +37,49 @@ Follow the default Rails Omakase style configured in `.rubocop.yml`; run `bin/ru
 ## Workspace-First Design
 Treat `Workspace` as the precursor to everything else. When adding routes, screens, jobs, or persistence, prefer shapes that scope data by workspace first, then by the nested resource, for example `/workspaces/:workspace_id/runs/:id`. Avoid introducing new top-level flows that bypass workspace selection unless the feature is truly global.
 
-## Rails-Owned Orchestration
-Rails owns workflow state, planning lifecycle, retries, and process dispatch. Do not introduce planner agent files or spawn planner OS processes. Planning requests are claimed by `Orchestrator::SpawnRequestedWorkers`, persisted as `PlannerDecision` records, and executed by `PlannerDecisionJob`.
+## Sessions, Not Orchestration
 
-The planning model is a bounded decision function, not an autonomous coordinator. `Orchestrator::PlannerBrief` builds the compact input, `Orchestrator::PlannerDecisionRunner` requests structured output with tools disabled, and `Orchestrator::Turn` validates and persists the decision before Rails dispatches work.
+Rails does not decide what an agent does next. It decides **which job runs, where, and what happens to the branch afterwards**. Everything else belongs to one continuous interactive session.
 
-Workers are still autonomous executors. They report `[DONE]`, `[BLOCKED]`, or `[FAILED]` through `worker_turn`. When `[DONE]` arrives and a validated `followingSteps` queue exists, Rails promotes its head directly without spending another planner call. Other outcomes queue a new planner decision.
+A run is a queued job. `RunDispatchJob` claims the oldest queued run when a slot frees (global cap, `Orchestrator::RunConcurrency`, `WORKFLOW_MAX_CONCURRENT_RUNS`, default 2). `StartRunSessionJob` provisions a git worktree and opens **one** interactive `claude`/`codex`/`opencode` session in a herdr pane rooted in it, with the task submitted as live input. That session owns the job end to end: it explores, edits, runs tests, commits, and pushes. The operator can watch it and type into it — from their own herdr client, or from the run screen's message box.
 
-## Planner Context Protocol
-A planner that lacks information returns `outcome: "needs_context"` with one `contextRequest` containing:
+There is no planner, no step queue, no per-step worker, no chaperone, and no acceptance-criteria tree. Do not reintroduce them. If a run needs to change direction, the way to do that is to talk to its session (`Orchestrator::RunSessionRunner.prompt!`), which is also how a pull-request comment reaches it.
 
-- `source`: `artifact`, `run_context`, `worker_log`, or `file`.
-- `reference`: the exact artifact, entry key, worker nickname, or workspace-relative file.
-- `question`: the specific uncertainty the context must resolve.
-- `offset`: `null`/zero for the first window or a prior `next_offset`.
-- `maxChars`: the planner-selected window size.
+A run ends when its session calls the `run_done` MCP tool with `done`, `blocked`, or `failed`. `RunSessionReconcileJob` is the safety net for when that never arrives (pane closed, CLI quit or crashed) — without it a run would hold its concurrency slot forever, because a live interactive CLI and a finished one look identical from outside.
 
-Rails resolves that request and starts a fresh model call with accumulated requested context. There is no fixed round or total-context cap. An identical request is rejected because it would return the same information and loop without progress. `PlannerDecision` records model calls, requested windows, returned bytes, tokens, and cost so tuning should be based on observed runs rather than arbitrary limits.
+Key implementation files: `app/services/orchestrator/{herdr,run_session_runner,session_args,session_env,run_prompt,run_concurrency,run_completion}.rb`, `app/jobs/{run_dispatch_job,start_run_session_job,run_session_reconcile_job}.rb`, `app/models/run_session.rb`.
 
-Planning defaults to the smaller model tier. When information is sufficient but reasoning complexity warrants escalation, the planner may return `outcome: "needs_stronger_model"`; Rails reruns with unchanged accumulated context on the stronger tier. Model attempts and promotions are persisted for inspection on the run screen.
+### herdr owns the processes
 
-Key implementation files are `app/jobs/planner_decision_job.rb`, `app/models/planner_decision.rb`, and `app/services/orchestrator/{planner_brief,planner_context_resolver,planner_decision_runner,spawn_requested_workers,turn}.rb`.
+`Orchestrator::Herdr` is a thin JSON-RPC client for the operator's already-running herdr server (Unix socket, newline-delimited JSON). herdr owns every pty and process; Rails only remembers which pane, which pid, and which CLI session id.
+
+The per-driver flags in `Orchestrator::SessionArgs` were established by running these CLIs for real inside a pane, and several contradict what `--help` implies (codex's `--dangerously-bypass-approvals-and-sandbox` breaks the interactive command; opencode silently never receives input without `--mini`). Do not "simplify" a flag out of that file without re-verifying it live.
+
+Accepted trade-off: a real interactive TUI produces human-rendered output, not structured JSON, so there is **no cost/usage/token accounting for a session**. That was only ever recoverable from `--print --output-format stream-json`, which is exactly the mode this design abandons. Missing cost data is not a bug.
+
+### Worktrees are the durable artifact
+
+Every run gets a sibling worktree of the workspace's `main` checkout (`Orchestrator::GitWorktree`) on a `workflow/<name>` branch. Two things reclaim them, and nothing else should: `RunPublication.cleanup_merged_run!` after a PR merges, and `Orchestrator::WorktreeJanitor` for runs that ended some other way. The janitor never touches `main` and never removes a dirty worktree — uncommitted work in a failed run is exactly what an operator wants back. `--force` is reserved for the explicit per-run button.
+
+### Full access, human review
+
+A session runs with full access to its own worktree (`--permission-mode bypassPermissions`, `-s danger-full-access`, `--auto`). The per-step filesystem sandbox is gone with the planner that authorized it; a workspace's `protected_path_patterns` now reach the session as prose in its prompt. The safety net is human PR review, same as it always actually was.
 
 ## Testing Guidelines
-The repository uses RSpec under `spec/`. Add service and job regression coverage for orchestration state changes, and system coverage for UI behavior. Run `bundle exec rspec`, `bin/rubocop`, and `git diff --check`. Stub `Orchestrator::PlannerDecisionRunner` in specs; do not consume live model capacity to verify routing or structured-output parsing.
+The repository uses RSpec under `spec/`. Add service and job regression coverage for run/session state changes, and system coverage for UI behavior. Run `bundle exec rspec`, `bin/rubocop`, and `git diff --check`.
+
+Stub `Orchestrator::Herdr` in specs — never open a live socket, because herdr's mutating calls have real, visible effects in the operator's own session. Do not consume live model capacity to verify dispatch or arg building.
+
+Use real git where git behavior is the thing under test (`spec/services/orchestrator/{worktree_janitor,run_publication}_spec.rb` build actual repos, worktrees, and a bare `origin`): the rules that matter — is this worktree dirty, is there anything to push — are only meaningful against real git. `spec/support/run_fixtures.rb` provides `create_workspace`/`create_run`/`create_run_and_session`.
 
 ## Commit & Pull Request Guidelines
 Recent commit history favors short, imperative summaries such as `Flatten ops/ into the repo root` and `Port the TS orchestrator engine to Ruby`. Keep commits focused and descriptive. PRs should include a concise problem statement, the implementation approach, any schema or job-queue impact, and manual verification steps. Link related issues when available and include screenshots only for UI changes.
 
 ## Security & Configuration Tips
-Do not commit decrypted credentials, database dumps, or logs containing run data. Review changes to `config/credentials.yml.enc`, queue configuration, and any MCP tool implementation carefully, because they affect worker execution and orchestration flow.
+Do not commit decrypted credentials, database dumps, or logs containing run data. Review changes to `config/credentials.yml.enc`, queue configuration, and any MCP tool implementation carefully, because they affect what a session can reach and how a run reports its result.
 
-## Chaperone Boundary
-Repeated failed diagnosis attempts with the same explicit lineage may trigger a strong-model chaperone. The chaperone uses the capability-scoped `/mcp/chaperone` endpoint, which exposes only curated run state, bounded artifact reads, and the `continue_small`, `promote`, or `stop` decision. Never expose arbitrary SQL, Active Record lookup, filesystem traversal, command execution, or general MCP tools through this endpoint.
+## MCP Boundary
+
+A session reaches Rails through exactly one endpoint, `/mcp/run`, authenticated by that session's own bearer capability (`RunSession#capability_token_digest`) and dead the moment the session ends. It exposes nine tools (`Orchestrator::RunMcpServer::TOOLS`) and nothing more.
+
+Keep it that way. Anything a real interactive CLI can already do for itself — read files, run commands, edit code, start a dev server — is its own business now that it has full access to its worktree; it does not need a tool from us. What belongs here is only what Rails alone knows or owns: how a run reports its result (`run_done`), the run-scoped artifact store, and the workspace knowledge that outlives any single run. Never expose arbitrary SQL, Active Record lookup, filesystem traversal, or command execution through it.

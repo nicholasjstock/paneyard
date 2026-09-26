@@ -1,13 +1,13 @@
 require "rails_helper"
 
 RSpec.describe McpTools::RecordProtectedPathsTool do
-  it "declares protected source globs on the workspace, attributed to project_init" do
-    run, worker = create_run_and_worker(role: "project_init")
+  it "declares protected source globs on the workspace" do
+    run, session = create_run_and_session(prefix: "record-protected-paths")
 
     response = described_class.call(
       runId: run.run_id,
       patterns: [ "app/**", "db/migrate/**", " " ],
-      server_context: { worker_id: worker.worker_id }
+      server_context: { run_session_id: session.id }
     )
 
     expect(response.error?).to be_falsey
@@ -16,56 +16,39 @@ RSpec.describe McpTools::RecordProtectedPathsTool do
   end
 
   it "replaces any previously declared patterns" do
-    run, worker = create_run_and_worker(role: "project_init")
+    run, session = create_run_and_session(prefix: "record-protected-paths")
     run.workspace.update!(protected_path_patterns: [ "old/root" ])
 
     described_class.call(
       runId: run.run_id, patterns: [ "app/**" ],
-      server_context: { worker_id: worker.worker_id }
+      server_context: { run_session_id: session.id }
     )
 
     expect(run.workspace.reload.protected_path_patterns).to eq([ "app/**" ])
   end
 
-  it "rejects a worker that is not the project_init role" do
-    run, worker = create_run_and_worker(role: "worker")
+  it "rejects a capability belonging to a different run" do
+    _run, session = create_run_and_session(prefix: "record-protected-paths-a")
+    other_run = create_run(prefix: "record-protected-paths-b")
 
     response = described_class.call(
-      runId: run.run_id, patterns: [ "app/**" ],
-      server_context: { worker_id: worker.worker_id }
+      runId: other_run.run_id, patterns: [ "app/**" ],
+      server_context: { run_session_id: session.id }
     )
 
     expect(response.error?).to be(true)
-    expect(run.workspace.reload.protected_path_patterns).to eq([])
+    expect(other_run.workspace.reload.protected_path_patterns).to eq([])
   end
 
   it "rejects a catch-all, negated, or cache pattern" do
-    run, worker = create_run_and_worker(role: "project_init")
+    run, session = create_run_and_session(prefix: "record-protected-paths")
 
     response = described_class.call(
       runId: run.run_id, patterns: [ ".", "!config/*.key", "node_modules/**" ],
-      server_context: { worker_id: worker.worker_id }
+      server_context: { run_session_id: session.id }
     )
 
     expect(response.error?).to be(true)
     expect(run.workspace.reload.protected_path_patterns).to eq([])
-  end
-
-  def create_run_and_worker(role:)
-    root = Dir.mktmpdir("record-protected-paths")
-    workspace = Workspace.create!(name: "record-protected-paths-#{SecureRandom.hex(4)}", root_path: root)
-    run = workspace.runs.create!(
-      run_id: "record-protected-paths-#{SecureRandom.hex(4)}", task: "Exercise record_protected_paths",
-      target_root: root, launcher_variant: "claude", status: "running"
-    )
-    worker = run.workers.create!(
-      worker_id: SecureRandom.uuid, role: role, nickname: "#{role}-#{SecureRandom.hex(2)}", reason: "test",
-      scope: "project-setup", status: "running", pid: 99_997, command: "claude", args: [],
-      prompt_path: Rails.root.join("tmp/#{SecureRandom.hex(4)}.prompt").to_s,
-      log_path: Rails.root.join("tmp/#{SecureRandom.hex(4)}.log").to_s,
-      last_message_path: Rails.root.join("tmp/#{SecureRandom.hex(4)}.last").to_s,
-      env_path: Rails.root.join("tmp/#{SecureRandom.hex(4)}.env").to_s
-    )
-    [ run, worker ]
   end
 end
