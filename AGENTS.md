@@ -84,6 +84,8 @@ Do not commit decrypted credentials, database dumps, or logs containing run data
 
 ## MCP Boundary
 
-A session reaches Rails through exactly one endpoint, `/mcp/run`, authenticated by that session's own bearer capability (`RunSession#capability_token_digest`) and dead the moment the session ends. It exposes eight tools (`Orchestrator::RunMcpServer::TOOLS`) and nothing more.
+A session reaches Rails through exactly one endpoint, `/mcp/run`, authenticated by that session's own bearer capability (`RunSession#capability_token_digest`) and dead the moment the session ends. It exposes five tools (`Orchestrator::RunMcpServer::TOOLS`) and nothing more.
 
-Keep it that way. Anything a real interactive CLI can already do for itself — read files, run commands, edit code, start a dev server — is its own business now that it has full access to its worktree; it does not need a tool from us. What belongs here is only what Rails alone knows or owns: how a run reports where it stands (`report_idle`), the run-scoped artifact store, and the workspace knowledge that outlives any single run. Never expose arbitrary SQL, Active Record lookup, filesystem traversal, or command execution through it.
+Keep it that way. Anything a real interactive CLI can already do for itself — read files, run commands, edit code, start a dev server — is its own business now that it has full access to its worktree; it does not need a tool from us. What belongs here is only what Rails alone knows or owns: how a run reports where it stands (`report_idle`), the run-scoped artifact store, and workspace-scoped env vars a future run's process needs (`record_workspace_env_var`). Never expose arbitrary SQL, Active Record lookup, filesystem traversal, or command execution through it.
+
+There used to also be a durable, evidence-backed "project memory" store (`get_project_memory`/`record_project_memory_entry`/`record_project_setup`, `WorkspaceMemoryEntry`) prepended to every run's prompt. It was removed deliberately — if old commits or docs still reference it, that is not an oversight; recreate it only if it turns out to actually be missed.

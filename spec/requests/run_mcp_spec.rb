@@ -52,8 +52,7 @@ RSpec.describe "the run MCP endpoint", type: :request do
 
     expect(names).to contain_exactly(
       "ping_tool", "report_idle", "write_workflow_artifact", "read_workflow_artifact",
-      "get_project_memory", "record_project_memory_entry", "record_workspace_env_var",
-      "record_project_setup"
+      "record_workspace_env_var"
     )
   end
 end

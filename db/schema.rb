@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_26_170000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_26_174057) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -158,23 +158,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_170000) do
     t.index ["workspace_id"], name: "index_workspace_env_vars_on_workspace_id"
   end
 
-  create_table "workspace_memory_entries", force: :cascade do |t|
-    t.text "content", null: false
-    t.datetime "created_at", null: false
-    t.string "entry_key", null: false
-    t.string "evidence_ref", null: false
-    t.string "kind", null: false
-    t.string "recorded_by", null: false
-    t.string "status", null: false
-    t.integer "supersedes_id"
-    t.datetime "updated_at", null: false
-    t.integer "workspace_id", null: false
-    t.index ["supersedes_id"], name: "index_workspace_memory_entries_on_supersedes_id"
-    t.index ["workspace_id", "entry_key"], name: "index_workspace_memory_entries_on_workspace_id_and_entry_key"
-    t.index ["workspace_id", "status"], name: "index_workspace_memory_entries_on_workspace_id_and_status"
-    t.index ["workspace_id"], name: "index_workspace_memory_entries_on_workspace_id"
-  end
-
   create_table "workspaces", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "name", null: false
@@ -193,6 +176,4 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_170000) do
   add_foreign_key "workspace_admin_chat_messages", "workspace_admin_chats"
   add_foreign_key "workspace_admin_chats", "workspaces"
   add_foreign_key "workspace_env_vars", "workspaces"
-  add_foreign_key "workspace_memory_entries", "workspace_memory_entries", column: "supersedes_id"
-  add_foreign_key "workspace_memory_entries", "workspaces"
 end

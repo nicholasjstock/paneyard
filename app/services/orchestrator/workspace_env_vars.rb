@@ -1,11 +1,9 @@
 module Orchestrator
   # Workspace-scoped environment variables, discovered live by any worker
   # (e.g. a bundle install workaround) and merged into every future spawned
-  # worker's and run command's process environment for this workspace --
-  # unlike ProjectMemory, this survives as literal subprocess env rather than
-  # prompt text a future worker has to read and re-apply by hand. Persists
-  # across runs the same way ProjectMemory does, since a dev-environment
-  # quirk for a given project is almost always still true in the next run.
+  # worker's and run command's process environment for this workspace.
+  # Persists across runs, since a dev-environment quirk for a given project
+  # is almost always still true in the next run.
   module WorkspaceEnvVars
     module_function
 
