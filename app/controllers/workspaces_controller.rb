@@ -16,9 +16,7 @@ class WorkspacesController < ApplicationController
     @workspace = Workspace.new(workspace_params)
 
     if @workspace.save
-      Orchestrator::WorkspaceInit.launch!(@workspace)
-      redirect_to workspace_runs_path(@workspace),
-        notice: "Added workspace #{@workspace.name}. Queued a run to discover its dev environment and protected paths…"
+      redirect_to workspace_runs_path(@workspace), notice: "Added workspace #{@workspace.name}."
     else
       render :new, status: :unprocessable_entity
     end
@@ -55,8 +53,6 @@ class WorkspacesController < ApplicationController
   end
 
   def workspace_edit_params
-    permitted = params.require(:workspace).permit(:root_path, :protected_path_patterns_text)
-    patterns = permitted[:protected_path_patterns_text].to_s.split("\n").map(&:strip).reject(&:blank?)
-    { root_path: permitted[:root_path], protected_path_patterns: patterns }
+    params.require(:workspace).permit(:root_path)
   end
 end

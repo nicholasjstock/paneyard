@@ -223,6 +223,25 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(Orchestrator::Herdr).to have_received(:agent_send_keys).with("w9:p1", [ "Enter" ])
     end
 
+    it "launches the model picked for the run and records it on the session" do
+      stub_successful_launch
+      run.update!(model: "claude-sonnet-5")
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).to have_received(:agent_start)
+        .with(hash_including(args: array_including("--model", "claude-sonnet-5")))
+      expect(session.model).to eq("claude-sonnet-5")
+    end
+
+    it "records the driver default as the session model when none was picked" do
+      stub_successful_launch
+
+      session = described_class.start!(run)
+
+      expect(session.model).to eq(Orchestrator::SessionArgs.claude_model)
+    end
+
     it "passes a resume id through to the driver args when one is known" do
       stub_successful_launch
 

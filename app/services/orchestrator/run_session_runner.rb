@@ -43,7 +43,8 @@ module Orchestrator
 
       capability_token, digest = RunSession.issue_capability
       session = run.run_sessions.create!(
-        driver: run.launcher_variant, status: "starting", capability_token_digest: digest
+        driver: run.launcher_variant, model: run.model.presence || SessionArgs.default_model(run.launcher_variant),
+        status: "starting", capability_token_digest: digest
       )
 
       begin
@@ -53,7 +54,7 @@ module Orchestrator
 
         kind, args, extra_env = SessionArgs.build(
           driver: run.launcher_variant, root_dir: run.target_root,
-          mcp_config_path:, capability_token:, resume_session_id:
+          mcp_config_path:, capability_token:, resume_session_id:, model: run.model
         )
         env = SessionEnv.for_session(run:, capability_token:, extra: extra_env)
 

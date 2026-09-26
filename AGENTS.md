@@ -4,9 +4,9 @@
 
 This is not a typical multi-tenant web app under normal clone/test/deploy development. It is a single-operator local tool: one person runs it continuously on their own machine (`bin/service`, wrapping `bin/production`) and there is deliberately no authentication (`ApplicationController#current_operator`'s own comment: "No auth in v1 (single-user local tool)") -- the operator is always the person at the keyboard, or a Telegram user on the configured allow-list (`Telegram::Configuration`, `README.md`'s "Telegram admin chat" section).
 
-**It edits its own source.** This repository is itself registered as one of its own `Workspace` rows -- a run launched from this instance's own UI can hand an autonomous agent write access to the orchestrator's own codebase, which that same running process then supervises and may need to restart itself for (`bin/service restart`, see below). There is no runtime sandbox protecting this repository from itself the way there is for a target app's protected paths; the safety net is entirely human PR review before merge, same as any other workspace. Keep this in mind for anything touching process supervision, `config/queue.yml`/`config/recurring.yml`, or the git-worktree lifecycle: a bug here can affect the very process trying to fix it.
+**It edits its own source.** This repository is itself registered as one of its own `Workspace` rows -- a run launched from this instance's own UI can hand an autonomous agent write access to the orchestrator's own codebase, which that same running process then supervises and may need to restart itself for (`bin/service restart`, see below). There is no runtime sandbox protecting this repository from itself; the safety net is entirely human PR review before merge, same as any other workspace. Keep this in mind for anything touching process supervision, `config/queue.yml`/`config/recurring.yml`, or the git-worktree lifecycle: a bug here can affect the very process trying to fix it.
 
-**It also edits other, unrelated repos side by side.** The same running instance manages arbitrary target projects as separate `Workspace` rows (each with its own `main` checkout plus sibling run worktrees, its own GitHub repo/owner, its own protected-path config) -- there is nothing workflow-orchestrator-specific baked into how a run operates; workspace-scoping is the whole point of the `Workspace` model (see below).
+**It also edits other, unrelated repos side by side.** The same running instance manages arbitrary target projects as separate `Workspace` rows (each with its own `main` checkout plus sibling run worktrees, its own GitHub repo/owner) -- there is nothing workflow-orchestrator-specific baked into how a run operates; workspace-scoping is the whole point of the `Workspace` model (see below).
 
 **Remote control is a real, load-bearing surface, not a side feature.** Beyond the local web UI, an operator can drive any workspace's admin chat from Telegram (`Telegram::UpdateProcessor`, `Orchestrator::WorkspaceAdminChatDriver`), and GitHub operations across every managed repo (regardless of which account owns it) authenticate through one GitHub App installation (`Orchestrator::GitHubAppAuth`, `GITHUB_APP_SETUP.md`) rather than per-repo credentials.
 
@@ -67,7 +67,7 @@ Every run gets a sibling worktree of the workspace's `main` checkout (`Orchestra
 
 ### Full access, human review
 
-A session runs with full access to its own worktree (`--permission-mode bypassPermissions`, `-s danger-full-access`, `--auto`). The per-step filesystem sandbox is gone with the planner that authorized it; a workspace's `protected_path_patterns` now reach the session as prose in its prompt. The safety net is human PR review, same as it always actually was.
+A session runs with full access to its own worktree (`--permission-mode bypassPermissions`, `-s danger-full-access`, `--auto`). The per-step filesystem sandbox is gone with the planner that authorized it, and so are the protected-path patterns that outlived it as a line of prompt prose. The safety net is human PR review, same as it always actually was.
 
 ## Testing Guidelines
 The repository uses RSpec under `spec/`. Add service and job regression coverage for run/session state changes, and system coverage for UI behavior. Run `bundle exec rspec`, `bin/rubocop`, and `git diff --check`.
@@ -84,6 +84,6 @@ Do not commit decrypted credentials, database dumps, or logs containing run data
 
 ## MCP Boundary
 
-A session reaches Rails through exactly one endpoint, `/mcp/run`, authenticated by that session's own bearer capability (`RunSession#capability_token_digest`) and dead the moment the session ends. It exposes nine tools (`Orchestrator::RunMcpServer::TOOLS`) and nothing more.
+A session reaches Rails through exactly one endpoint, `/mcp/run`, authenticated by that session's own bearer capability (`RunSession#capability_token_digest`) and dead the moment the session ends. It exposes eight tools (`Orchestrator::RunMcpServer::TOOLS`) and nothing more.
 
 Keep it that way. Anything a real interactive CLI can already do for itself — read files, run commands, edit code, start a dev server — is its own business now that it has full access to its worktree; it does not need a tool from us. What belongs here is only what Rails alone knows or owns: how a run reports where it stands (`report_idle`), the run-scoped artifact store, and the workspace knowledge that outlives any single run. Never expose arbitrary SQL, Active Record lookup, filesystem traversal, or command execution through it.

@@ -2,10 +2,7 @@ require "rails_helper"
 
 RSpec.describe "workspace runs", type: :system do
   let(:workspace) do
-    Workspace.create!(
-      name: "runs-ui-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir("runs-ui"),
-      protected_path_patterns: [ "app/**/*.rb" ]
-    )
+    Workspace.create!(name: "runs-ui-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir("runs-ui"))
   end
 
   it "queues a task and lands on its detail page, with nothing started yet" do

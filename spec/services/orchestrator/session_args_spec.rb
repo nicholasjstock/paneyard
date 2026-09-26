@@ -16,6 +16,38 @@ RSpec.describe Orchestrator::SessionArgs do
     end
   end
 
+  describe "per-run model" do
+    it "uses the model the operator picked over the driver default, for every driver" do
+      { "claude" => "--model", "codex" => "--model", "opencode" => "-m" }.each do |driver, flag|
+        _command, args, _env = described_class.build(
+          driver:, root_dir: "/repos/app-1", mcp_config_path: "/tmp/mcp.json", capability_token: "tok",
+          model: "picked-model"
+        )
+
+        expect(args.each_cons(2)).to include([ flag, "picked-model" ]), "#{driver} args: #{args.inspect}"
+      end
+    end
+
+    it "falls back to the driver default when no model was picked" do
+      Run::LAUNCHER_VARIANTS.each do |driver|
+        _command, args, _env = described_class.build(
+          driver:, root_dir: "/repos/app-1", mcp_config_path: "/tmp/mcp.json", capability_token: "tok", model: ""
+        )
+
+        expect(args).to include(described_class.default_model(driver))
+      end
+    end
+
+    it "keeps the picked model when codex resumes a session" do
+      _command, args, _env = described_class.build(
+        driver: "codex", root_dir: "/repos/app-1", mcp_config_path: "/tmp/mcp.json",
+        capability_token: "tok", resume_session_id: "codex-7", model: "gpt-5.5"
+      )
+
+      expect(args.each_cons(2)).to include([ "--model", "gpt-5.5" ])
+    end
+  end
+
   describe "claude" do
     it "builds an interactive command line with no headless or planner-era flags" do
       command, args, env = described_class.build(

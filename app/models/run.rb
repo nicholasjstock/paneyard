@@ -5,7 +5,7 @@
 # start to finish (RunSession), and ends when that session reports back.
 class Run < ApplicationRecord
   # Removed in 20260709175910_remove_scenario_and_frontend_url_from_runs,
-  # 20260817120200_simplify_runs and 20260926160000_remove_pull_request_publication.
+  # 20260817120200_simplify_runs and 20260926170000_remove_pull_request_publication.
   # Kept ignored so a long-lived Rails process
   # with stale schema metadata does not try to write them.
   self.ignored_columns += %w[
@@ -39,6 +39,10 @@ class Run < ApplicationRecord
   validates :task, presence: true
   validates :target_root, presence: true
   validates :launcher_variant, inclusion: { in: LAUNCHER_VARIANTS }
+  # Blank means the driver's default (Orchestrator::SessionArgs). A model id
+  # becomes one argv element of the session's command line, so it may never
+  # look like a flag.
+  validates :model, format: { with: %r{\A[A-Za-z0-9][\w.:/\[\]@-]*\z} }, allow_blank: true
   validates :status, inclusion: { in: STATUSES }
   validate :launch_artifacts_are_safe
 

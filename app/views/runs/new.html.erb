@@ -7,7 +7,20 @@
   worktree, as a live session you can watch and type into.
 </p>
 
-<%= form_with model: @run, url: workspace_runs_path(current_workspace), local: true do |form| %>
+<%= form_with model: @run, url: workspace_runs_path(current_workspace), local: true,
+      data: {
+        controller: "run-model",
+        run_model_catalog_value: model_catalog.to_json,
+        run_model_defaults_value: Run::LAUNCHER_VARIANTS.index_with { |v| Orchestrator::SessionArgs.default_model(v) }.to_json
+      } do |form| %>
+  <% if @run.errors.any? %>
+    <div class="flash alert">
+      <% @run.errors.full_messages.each do |message| %>
+        <div><%= message %></div>
+      <% end %>
+    </div>
+  <% end %>
+
   <div class="field">
     <%= form.label :task, "Task" %>
     <%= form.text_area :task, placeholder: "Fix the bug described in issue #42." %>
@@ -15,7 +28,17 @@
 
   <div class="field">
     <%= form.label :launcher_variant, "Agent" %>
-    <%= form.select :launcher_variant, Run::LAUNCHER_VARIANTS.map { |v| [v, v] } %>
+    <%= form.select :launcher_variant, Run::LAUNCHER_VARIANTS.map { |v| [v, v] }, {},
+          data: { run_model_target: "agent", action: "change->run-model#agentChanged" } %>
+  </div>
+
+  <div class="field">
+    <%= form.label :model, "Model" %>
+    <% default_model = Orchestrator::SessionArgs.default_model(@run.launcher_variant) %>
+    <%= form.select :model,
+          [ [ "Default (#{default_model})", "" ] ] +
+            model_catalog.fetch(@run.launcher_variant, []).map { |option| option.values_at("label", "id") },
+          {}, data: { run_model_target: "model" } %>
   </div>
 
   <div class="field">
