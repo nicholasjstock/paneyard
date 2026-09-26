@@ -26,6 +26,10 @@ class RunSession < ApplicationRecord
   OUTCOMES = %w[done blocked failed].freeze
 
   belongs_to :run
+  # This session's own checkpoints, oldest first -- see RunSessionRunner's use
+  # of the last one to learn whether a session already reported success
+  # before its pane or process disappeared.
+  has_many :checkpoints, -> { order(:created_at, :id) }, class_name: "RunCheckpoint", inverse_of: :run_session
 
   validates :driver, presence: true
   validates :status, inclusion: { in: STATUSES }

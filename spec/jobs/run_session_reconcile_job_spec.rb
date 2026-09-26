@@ -18,6 +18,22 @@ RSpec.describe RunSessionReconcileJob do
     expect(session.reload.outcome).to eq("failed")
   end
 
+  # Regression: refresh! now consults the session's last checkpoint before
+  # guessing "failed" -- a session that already reported "done" and then died
+  # (pane closed, process gone) completed the run, it did not fail it.
+  it "completes the run as done when a session that already reported done then dies" do
+    run, session = create_run_and_session(prefix: "reconcile-done-then-dead")
+    Orchestrator::RunIdleReport.call(run:, session:, outcome: "done", summary: "Merged into main.")
+    allow(Orchestrator::RunSessionRunner).to receive(:refresh!) do |s|
+      s.update!(status: "done", outcome: "done", ended_at: Time.current)
+    end
+
+    described_class.perform_now
+
+    expect(run.reload.status).to eq("completed")
+    expect(session.reload.outcome).to eq("done")
+  end
+
   it "leaves a still-live session running and completes nothing" do
     run, _session = create_run_and_session(prefix: "reconcile-alive")
     allow(Orchestrator::RunSessionRunner).to receive(:refresh!) do |s|
