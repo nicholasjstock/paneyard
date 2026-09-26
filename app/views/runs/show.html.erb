@@ -37,7 +37,7 @@
           <span class="badge <%= checkpoint.outcome %>"><%= checkpoint.outcome %></span>
           <span class="muted"><%= checkpoint.created_at.strftime("%b %-d %H:%M") %></span>
           <% if checkpoint.summary.present? %>
-            <p><%= simple_format checkpoint.summary %></p>
+            <div class="markdown"><%= render_markdown checkpoint.summary %></div>
           <% end %>
         </li>
       <% end %>

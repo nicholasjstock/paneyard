@@ -1,6 +1,6 @@
 # GitHub App Authentication Setup
 
-This orchestrator uses GitHub App authentication for all GitHub operations (PR creation, comments, releases, etc.) instead of relying on user credentials or personal access tokens.
+Rails itself makes no GitHub calls: it does not open, update, or watch pull requests. What needs GitHub credentials is each run's session, which commits and pushes its own `workflow/<name>` branch (and may run `gh` if you ask it to). When a GitHub App is configured, `Orchestrator::SessionEnv` gives every session an installation token for the app instead of letting it act as you with your own `gh auth` identity. The token reaches exactly the repositories that installation was granted, which is why "Only select repositories" below is recommended.
 
 ## Prerequisites
 
@@ -26,9 +26,10 @@ An app created under one can't be installed on repos owned by the other — if y
    - **Webhook active**: Uncheck (not needed)
 
 4. Under "Permissions", select **Repository permissions**:
-   - **Pull requests**: Read & write
-   - **Contents**: Read & write — this also covers release management (`gh release create`/`delete`, used to attach/clean up review evidence); GitHub Apps have no separate "Releases" permission, it's folded into Contents.
-   - **Issues**: Read & write — required for the operator plan-approval gate (`Orchestrator::RunPublication`), which opens a GitHub issue per run to carry the first-step approval conversation and closes it once the run's PR is up. Without this, `gh issue create` fails with `GraphQL: Resource not accessible by integration (createIssue)` and the run sits retrying `PublishUserQuestionJob` indefinitely instead of surfacing the plan for approval.
+   - **Contents**: Read & write — required. This is what lets a session `git push` its branch.
+   - **Pull requests**: Read & write — optional. Only needed if you want to tell a session to open or update a pull request itself with `gh pr create`; otherwise you open PRs yourself from the pushed branch.
+
+   Nothing else is needed. Earlier versions of this orchestrator also asked for **Issues** (a GitHub-issue approval gate) and used Contents for release uploads; both are gone, so an existing app can drop Issues.
 
 5. Under **Where can this GitHub App be installed?**:
    - Select "Only on this account" for a single-owner setup (recommended — this just restricts *who can install it*, it does not make the app public or listed anywhere; that only happens if you separately publish it to the GitHub Marketplace, a distinct opt-in step this guide doesn't cover). Select "Any account" only if you need to install the same app across multiple, unrelated owners.
@@ -178,16 +179,16 @@ rails runner '
 
 ## How It Works
 
-1. When the orchestrator needs to make a GitHub API call (via `gh` CLI or direct API), it:
+1. When a run's session starts, `Orchestrator::SessionEnv.git_env`:
    - Checks if GitHub App credentials are configured
-   - Generates a JWT token signed with the app's private key
-   - Exchanges the JWT for an installation access token
-   - Caches the token for 55 minutes (tokens are valid for 1 hour)
-   - Passes the token to all `gh` commands via `GH_TOKEN` environment variable
+   - Generates a JWT signed with the app's private key
+   - Exchanges it for an access token for the installation that covers the run's repository (looked up from `remote.origin.url`)
+   - Caches the token for 55 minutes (tokens are valid for 1 hour), so a session may start with one that is already up to 55 minutes old
+   - Puts it in the session's environment as `GH_TOKEN`, and appends `gh auth git-credential` as a git credential helper, so both `gh` and plain `git push` authenticate with it
 
-2. The `gh` CLI automatically uses `GH_TOKEN` when present, so no additional configuration is needed in the CLI itself.
+2. If the GitHub App is not configured, or minting a token fails, the session gets whatever `gh auth token` returns for the local user instead.
 
-3. If GitHub App is not configured, the orchestrator falls back to using whatever credentials the `gh` CLI has already configured (local user auth).
+The token is fixed when the session starts. A session left open for long enough will find it expired and its next push failing; close the session and start a new run, or push that branch yourself.
 
 ## Troubleshooting
 
@@ -205,13 +206,9 @@ Make sure:
 - The `GITHUB_APP_INSTALLATION_ID` environment variable (if set) is correct
 - The repository's `remote.origin.url` is correctly configured
 
-### "Resource not accessible by integration (createIssue)"
+### A session's `git push` is rejected with 403
 
-The installation is missing the **Issues: Read & write** permission (see step 4 above). This can happen even to an already-installed app if it predates this permission being added:
-
-1. On the app's settings page, under **Permissions & events**, set **Issues** to **Read & write** and save.
-2. GitHub will queue a permission-update request rather than applying it immediately. Go to `https://github.com/settings/installations` (or your org's equivalent), find this app's installation, and approve the pending permission request.
-3. No orchestrator restart is needed — `Orchestrator::GitHubAppAuth` mints a fresh installation token per request, so the next retry of `PublishUserQuestionJob` picks up the new scope automatically.
+The installation lacks **Contents: Read & write** on that repository, or the repository is not among the ones the installation was granted (see "Installing the App"). If you change the app's permissions, GitHub queues a permission-update request: approve it at `https://github.com/settings/installations` (or your org's equivalent). A session only picks up the new scope with a token minted after the change, so a new session (and possibly up to 55 minutes for the cached token to expire).
 
 ### "Failed to get GitHub App token"
 
@@ -226,7 +223,7 @@ Check:
 - **Never commit private keys** to version control
 - **Rotate private keys regularly** by regenerating them on GitHub
 - **Use environment variables** (not credentials files) in CI/CD pipelines
-- **Restrict app permissions** to only what's needed (PR, contents, releases)
+- **Restrict app permissions** to only what's needed (Contents, plus Pull requests only if sessions open PRs)
 - **Monitor app usage** in GitHub audit logs for suspicious activity
 - **Limit installation scope** to only target repositories/organizations
 

@@ -1333,3 +1333,46 @@ pre.log.live-log {
     font-size: 2.35rem;
   }
 }
+
+/* report_idle summaries, rendered from Markdown on the run screen */
+.checkpoints > li + li {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.markdown { overflow-wrap: anywhere; }
+.markdown > :first-child { margin-top: 0.5rem; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 {
+  font-size: 0.95rem;
+  margin: 1rem 0 0.4rem;
+}
+.markdown h1, .markdown h2 { font-size: 1rem; }
+.markdown p, .markdown ul, .markdown ol { margin: 0.4rem 0; }
+.markdown ul, .markdown ol { padding-left: 1.4rem; }
+.markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  background: #0a0c10;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.25rem;
+}
+.markdown pre {
+  background: #0a0c10;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow: auto;
+}
+.markdown pre code { border: 0; padding: 0; background: none; }
+.markdown blockquote {
+  margin: 0.4rem 0;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
+.markdown th, .markdown td { border: 1px solid var(--border); padding: 0.25rem 0.5rem; text-align: left; }
+.markdown a { color: var(--accent); }
