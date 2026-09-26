@@ -73,9 +73,18 @@ RSpec.describe "workspace runs", type: :system do
 
   # The janitor only leaves a finished run's worktree on disk when its work
   # exists nowhere else, so one that is still there is flagged, not hidden.
+  # A "kept" worktree has to be a real git worktree -- see Run#kept_worktree?
+  # -- so this needs an actual source checkout and `git worktree add`, not a
+  # bare directory.
   it "flags a worktree kept after its run ended, offers its removal, and says nothing about pull requests" do
+    workspace = Workspace.create!(name: "runs-ui-#{SecureRandom.hex(4)}", root_path: create_source_checkout)
     worktree = File.join(workspace.root_path, "runs-ui-kept-a1b2")
-    FileUtils.mkdir_p(worktree)
+    system("git", "-C", workspace.source_root, "worktree", "add", "-b", "workflow/runs-ui-kept-a1b2",
+      worktree, "HEAD", out: File::NULL, err: File::NULL) || raise("could not add worktree")
+    File.write(File.join(worktree, "scratch.txt"), "unpushed\n")
+    system("git", "-C", worktree, "add", "scratch.txt")
+    system("git", "-C", worktree, "commit", "-m", "unpushed work", out: File::NULL, err: File::NULL)
+
     run = create_run(
       workspace:, prefix: "runs-ui-kept", status: "completed", stopped_at: 1.hour.ago,
       worktree_name: "runs-ui-kept-a1b2", branch_name: "workflow/runs-ui-kept-a1b2", target_root: worktree
