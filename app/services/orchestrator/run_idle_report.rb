@@ -36,9 +36,6 @@ module Orchestrator
         run.update!(status: "awaiting_review") if run.active?
       end
 
-      BusEvent.publish("run.idle", run_id: run.run_id, payload: {
-        runId: run.run_id, outcome:, summary:, checkpoint: run.checkpoints.size
-      })
       Herdr.notify(
         title: "Run #{run.run_id} idle (#{outcome})",
         body: summary.to_s.truncate(140),

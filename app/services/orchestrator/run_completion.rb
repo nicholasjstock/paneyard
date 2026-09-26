@@ -25,9 +25,6 @@ module Orchestrator
         end
       end
 
-      BusEvent.publish("run.finished", run_id: run.run_id, payload: {
-        runId: run.run_id, outcome:, summary:
-      })
       # The slot this run was holding is free now, so the next queued run can
       # start without waiting for the dispatcher's own interval to come round.
       RunDispatchJob.perform_later

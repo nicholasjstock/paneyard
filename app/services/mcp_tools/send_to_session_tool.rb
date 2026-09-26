@@ -23,10 +23,6 @@ module McpTools
       return ToolResponse.error("run #{runId} has no live session to send to") unless session
 
       Orchestrator::RunSessionRunner.prompt!(session, message)
-      BusEvent.publish("run.operator_message", run_id: run.run_id, payload: {
-        runId: run.run_id, via: "admin_chat", message:
-      })
-
       ToolResponse.structured(run_id: run.run_id, delivered: true, agent_status: session.reload.agent_status)
     rescue ArgumentError, Orchestrator::RunSessionRunner::Error, Orchestrator::Herdr::Error => error
       ToolResponse.error(error.message)

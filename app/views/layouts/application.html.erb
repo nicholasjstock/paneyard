@@ -31,7 +31,6 @@
         <%= link_to "Workspaces", workspaces_path, class: current_page?(workspaces_path) ? "active" : nil %>
         <% if current_workspace %>
           <%= link_to "Runs", workspace_runs_path(current_workspace), class: current_page?(workspace_runs_path(current_workspace)) ? "active" : nil %>
-          <%= link_to "Events", workspace_events_path(current_workspace), class: current_page?(workspace_events_path(current_workspace)) ? "active" : nil %>
         <% end %>
         <% if current_runs.any? %>
           <button type="button" class="runs-launcher" aria-label="Open current runs" aria-expanded="false" title="Open current runs" data-action="runs-drawer#open" data-runs-drawer-target="launcher">

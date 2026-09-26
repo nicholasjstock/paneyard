@@ -26,8 +26,10 @@ module McpTools
         worktree_name: run.worktree_name,
         launch_error: run.launch_error,
         launched_by: run.launched_by,
-        recent_events: run.bus_events.order(created_at: :desc).limit(10).map do |event|
-          { at: event.created_at.iso8601, type: event.event_type, payload: event.payload }
+        # The run's own history: one Markdown report per time its session went
+        # idle, oldest first, so the last entry is where the run stands now.
+        checkpoints: run.checkpoints.map do |checkpoint|
+          { at: checkpoint.created_at.iso8601, outcome: checkpoint.outcome, summary: checkpoint.summary }
         end
       ).compact
     end

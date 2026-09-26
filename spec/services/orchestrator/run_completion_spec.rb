@@ -34,15 +34,6 @@ RSpec.describe Orchestrator::RunCompletion do
     expect { described_class.call(run:, outcome: "failed") }.to have_enqueued_job(RunDispatchJob)
   end
 
-  it "records the outcome on the run's timeline" do
-    run = create_run(prefix: "completion-event", status: "running")
-
-    described_class.call(run:, outcome: "blocked", summary: "Which migration?")
-
-    event = run.bus_events.find_by!(event_type: "run.finished")
-    expect(event.payload).to include("outcome" => "blocked", "summary" => "Which migration?")
-  end
-
   it "rejects an unknown outcome rather than silently leaving the run running" do
     run = create_run(prefix: "completion-unknown", status: "running")
 

@@ -34,7 +34,5 @@ Rails.application.routes.draw do
         post :close_session
       end
     end
-
-    resources :events, only: %i[index]
   end
 end

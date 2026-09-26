@@ -106,17 +106,3 @@
     <% end %>
   </section>
 <% end %>
-
-<% if @timeline.any? %>
-  <section class="panel">
-    <h2>Timeline</h2>
-    <ul class="timeline">
-      <% @timeline.each do |event| %>
-        <li>
-          <span class="muted"><%= event.created_at.strftime("%H:%M:%S") %></span>
-          <span class="mono"><%= event.event_type %></span>
-        </li>
-      <% end %>
-    </ul>
-  </section>
-<% end %>

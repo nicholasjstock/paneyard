@@ -41,7 +41,6 @@ class RunsController < ApplicationController
     @session = @run.latest_session
     @checkpoints = @run.checkpoints.to_a
     @artifacts = collect_artifacts
-    @timeline = BusEvent.where(run_id: @run.run_id).order(created_at: :desc).limit(12).to_a
   end
 
   def stop

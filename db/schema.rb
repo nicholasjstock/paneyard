@@ -10,18 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_26_170000) do
-  create_table "bus_events", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "event_id", null: false
-    t.string "event_type", null: false
-    t.json "payload", default: {}, null: false
-    t.string "run_id"
-    t.datetime "updated_at", null: false
-    t.index ["event_id"], name: "index_bus_events_on_event_id", unique: true
-    t.index ["run_id"], name: "index_bus_events_on_run_id"
-  end
-
+ActiveRecord::Schema[8.1].define(version: 2026_09_26_180000) do
   create_table "run_checkpoints", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "outcome", null: false

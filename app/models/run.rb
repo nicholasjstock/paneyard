@@ -33,7 +33,6 @@ class Run < ApplicationRecord
   # The run's own history: one row per time a session reported going idle.
   has_many :checkpoints, -> { chronological }, class_name: "RunCheckpoint", inverse_of: :run, dependent: :destroy
 
-  has_many :bus_events, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
 
   validates :run_id, presence: true, uniqueness: true
   validates :task, presence: true
