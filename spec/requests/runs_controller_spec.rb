@@ -35,6 +35,52 @@ RSpec.describe "runs", type: :request do
     expect(run.run_sessions).to be_empty
   end
 
+  describe "model choice" do
+    let(:workspace) { create_workspace(prefix: "runs-controller-model", protected_path_patterns: [ "app/**/*.rb" ]) }
+
+    before do
+      allow(Orchestrator::ModelCatalog).to receive(:all).and_return(
+        "claude" => [ { "id" => "claude-sonnet-5", "label" => "Sonnet 5 — claude-sonnet-5" } ],
+        "codex" => [ { "id" => "gpt-5.5", "label" => "gpt-5.5" } ],
+        "opencode" => []
+      )
+    end
+
+    it "offers the selected agent's models, with every agent's list available to switch to" do
+      get new_workspace_run_path(workspace)
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include("Default (#{Orchestrator::SessionArgs.claude_model})")
+      expect(response.body).to include(%(<option value="claude-sonnet-5">Sonnet 5 — claude-sonnet-5</option>))
+      expect(response.body).not_to include(%(<option value="gpt-5.5">))
+      expect(response.body).to include("gpt-5.5") # in the Stimulus catalog value
+    end
+
+    it "stores a model the chosen agent offers" do
+      post workspace_runs_path(workspace),
+        params: { run: { task: "Do something", launcher_variant: "codex", model: "gpt-5.5" } }
+
+      expect(workspace.runs.sole.model).to eq("gpt-5.5")
+    end
+
+    it "treats a blank model as the agent's default" do
+      post workspace_runs_path(workspace),
+        params: { run: { task: "Do something", launcher_variant: "claude", model: "" } }
+
+      expect(workspace.runs.sole.model).to be_nil
+    end
+
+    it "refuses a model the chosen agent does not offer" do
+      expect do
+        post workspace_runs_path(workspace),
+          params: { run: { task: "Do something", launcher_variant: "claude", model: "gpt-5.5" } }
+      end.not_to change(Run, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.body).to include("is not a model claude offers")
+    end
+  end
+
   it "stores uploaded files in the run's artifact store so the session can read them" do
     workspace = create_workspace(prefix: "runs-controller-upload", protected_path_patterns: [ "app/**/*.rb" ])
     first = Tempfile.new([ "first", ".db" ])

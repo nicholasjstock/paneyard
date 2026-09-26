@@ -14,7 +14,9 @@ module Orchestrator
   # There is no small/strong model tier any more (that was a planner concept --
   # a bounded decision could run cheap, a real step could not). A session now
   # owns an entire job end to end, so each driver gets its strongest configured
-  # model, overridable per driver by env var for experimentation.
+  # model, overridable per driver by env var for experimentation -- and per
+  # run by the model the operator picked when queueing it (Run#model, chosen
+  # from Orchestrator::ModelCatalog), which wins over both.
   module SessionArgs
     module_function
 
@@ -32,14 +34,22 @@ module Orchestrator
       ENV["WORKFLOW_OPENCODE_MODEL"].presence || "9router/oc/deepseek-v4-flash-free"
     end
 
+    def default_model(driver)
+      case driver
+      when "claude" then claude_model
+      when "codex" then codex_model
+      when "opencode" then opencode_model
+      end
+    end
+
     # Returns [command, args, extra_env] for the given driver. extra_env is
     # merged into the pane's environment (opencode carries its whole MCP
     # config that way; the others point at a file or use -c overrides).
-    def build(driver:, root_dir:, mcp_config_path:, capability_token:, resume_session_id: nil)
+    def build(driver:, root_dir:, mcp_config_path:, capability_token:, resume_session_id: nil, model: nil)
       case driver
-      when "claude" then [ "claude", claude_args(root_dir:, mcp_config_path:, resume_session_id:), {} ]
-      when "codex" then [ "codex", codex_args(root_dir:, resume_session_id:), {} ]
-      when "opencode" then [ "opencode", *opencode_args(root_dir:, capability_token:, resume_session_id:) ]
+      when "claude" then [ "claude", claude_args(root_dir:, mcp_config_path:, resume_session_id:, model:), {} ]
+      when "codex" then [ "codex", codex_args(root_dir:, resume_session_id:, model:), {} ]
+      when "opencode" then [ "opencode", *opencode_args(root_dir:, capability_token:, resume_session_id:, model:) ]
       else raise ArgumentError, "unsupported driver: #{driver.inspect}"
       end
     end
@@ -61,9 +71,9 @@ module Orchestrator
     # --strict-mcp-config is kept: it guarantees the workflow MCP server is
     # the one the session gets, and keeps startup predictable regardless of
     # whatever .mcp.json the target repo happens to ship.
-    def claude_args(root_dir:, mcp_config_path:, resume_session_id: nil)
+    def claude_args(root_dir:, mcp_config_path:, resume_session_id: nil, model: nil)
       [
-        "--model", claude_model,
+        "--model", model.presence || claude_model,
         "--permission-mode", "bypassPermissions",
         "--add-dir", root_dir,
         "--mcp-config", mcp_config_path,
@@ -87,7 +97,8 @@ module Orchestrator
     # `codex resume <id>` mirrors `codex exec resume <id>`, which rejects -C
     # (a resumed session keeps the cwd it started with). Not itself
     # live-verified -- verify before relying on it.
-    def codex_args(root_dir:, resume_session_id: nil)
+    def codex_args(root_dir:, resume_session_id: nil, model: nil)
+      model = model.presence || codex_model
       config_args = [
         %(mcp_servers.workflow.url=#{"#{rails_mcp_url}/run".to_json}),
         %(mcp_servers.workflow.bearer_token_env_var="#{TOKEN_ENV_VAR}"),
@@ -96,9 +107,9 @@ module Orchestrator
       sandbox_args = [ "-s", "danger-full-access" ]
 
       if resume_session_id
-        [ "resume", resume_session_id, "--model", codex_model, *sandbox_args, *config_args ]
+        [ "resume", resume_session_id, "--model", model, *sandbox_args, *config_args ]
       else
-        [ "--model", codex_model, *sandbox_args, *config_args, "-C", root_dir ]
+        [ "--model", model, *sandbox_args, *config_args, "-C", root_dir ]
       end
     end
 
@@ -116,7 +127,7 @@ module Orchestrator
     #     explicit Enter keypress); --mini's simpler renderer receives it
     #     correctly (the submitted prompt appeared verbatim and the agent
     #     began working).
-    def opencode_args(root_dir:, capability_token:, resume_session_id: nil)
+    def opencode_args(root_dir:, capability_token:, resume_session_id: nil, model: nil)
       config = JSON.generate({
         mcp: {
           workflow: {
@@ -127,7 +138,7 @@ module Orchestrator
         }
       })
 
-      args = [ "-m", opencode_model, "--auto", "--mini" ]
+      args = [ "-m", model.presence || opencode_model, "--auto", "--mini" ]
       args += [ "-s", resume_session_id ] if resume_session_id
       args << root_dir
       [ args, { "OPENCODE_CONFIG_CONTENT" => config } ]

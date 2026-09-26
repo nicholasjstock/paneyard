@@ -37,6 +37,10 @@ class Run < ApplicationRecord
   validates :task, presence: true
   validates :target_root, presence: true
   validates :launcher_variant, inclusion: { in: LAUNCHER_VARIANTS }
+  # Blank means the driver's default (Orchestrator::SessionArgs). A model id
+  # becomes one argv element of the session's command line, so it may never
+  # look like a flag.
+  validates :model, format: { with: %r{\A[A-Za-z0-9][\w.:/\[\]@-]*\z} }, allow_blank: true
   validates :status, inclusion: { in: STATUSES }
   validate :launch_artifacts_are_safe
 
