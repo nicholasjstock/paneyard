@@ -88,7 +88,8 @@ class RunsController < ApplicationController
   # Ends a session the operator is finished looking at: kills the CLI, closes
   # the herdr pane, and releases the concurrency slot. Until this is called an
   # idle session keeps both, which is deliberate -- nothing tears a pane down
-  # but the operator.
+  # but the operator. The worktree goes too if its work is already pushed or
+  # merged; otherwise it stays for the operator to deal with.
   def close_session
     session = @run.live_session
     if session.nil?
@@ -99,10 +100,20 @@ class RunsController < ApplicationController
     outcome = session.outcome.presence || "failed"
     Orchestrator::RunSessionRunner.finish!(session, outcome:, result: session.result)
     Orchestrator::RunCompletion.call(run: @run, outcome:, summary: session.result)
-    redirect_to workspace_run_path(current_workspace, @run), notice: "Closed the session."
+    redirect_to workspace_run_path(current_workspace, @run), notice: close_session_notice
   end
 
   private
+
+  def close_session_notice
+    if Orchestrator::WorktreeJanitor.release!(@run)
+      "Closed the session and removed #{@run.worktree_name}."
+    else
+      "Closed the session. Kept #{@run.worktree_name}: it has uncommitted or unpushed work."
+    end
+  rescue Orchestrator::WorktreeJanitor::Error => error
+    "Closed the session, but could not remove its worktree: #{error.message}"
+  end
 
   def set_run
     @run = current_workspace.runs.find_by!(run_id: params[:id])

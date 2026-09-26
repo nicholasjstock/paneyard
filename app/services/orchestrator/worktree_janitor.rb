@@ -16,6 +16,12 @@ module Orchestrator
   #     the work an operator is most likely to want back, so a dirty worktree
   #     is reported for a human decision rather than reclaimed. `--force` is
   #     reserved for the explicit per-run button.
+  #
+  # Removing a worktree never deletes its branch. Once the session is closed
+  # and the branch is already on main or pushed, the worktree holds nothing
+  # that is not somewhere else too, so it goes straight away -- on close
+  # (release!) or on the next sweep. RETENTION only still applies to a
+  # finished run whose commits exist nowhere but its local branch.
   module WorktreeJanitor
     class Error < StandardError; end
     module_function
@@ -39,7 +45,7 @@ module Orchestrator
         next if protected_path?(source_root, path)
 
         run = run_for(workspace, path)
-        next unless reclaimable?(run, now:)
+        next unless reclaimable?(run, path:, now:)
         next if dirty?(path)
 
         remove_worktree!(source_root, path)
@@ -57,8 +63,10 @@ module Orchestrator
     # A worktree with no Run row at all is an orphan -- a run whose record was
     # destroyed, or a leftover from an earlier version of this tool -- and is
     # reclaimable on the same terms as a terminal run.
-    def reclaimable?(run, now:)
+    def reclaimable?(run, path:, now:)
       return true if run.nil?
+      return false if run.status.in?(%w[queued launching running]) || run.live_session
+      return true if work_saved?(path)
       return false if run.active?
 
       terminal_at = run.stopped_at || run.updated_at
@@ -109,6 +117,16 @@ module Orchestrator
       true
     end
 
+    # Clean, and HEAD is already on main or on a remote branch.
+    def work_saved?(path)
+      return false if dirty?(path)
+
+      git_success?(path, "merge-base", "--is-ancestor", "HEAD", "main") ||
+        git!(path, "branch", "--remotes", "--contains", "HEAD").strip.present?
+    rescue Error
+      false
+    end
+
     def remove_worktree!(source_root, path, force: false)
       args = [ "worktree", "remove" ]
       args << "--force" if force
@@ -132,6 +150,27 @@ module Orchestrator
       remove_worktree!(source_root, path, force:)
       prune!(source_root)
       run
+    end
+
+    # Closing a session is the operator saying they are done with it. Removes
+    # the worktree when nothing in it would be lost, and returns whether it
+    # did. A pull-request comment can still reopen the run later:
+    # PullRequestResume checks the branch back out first.
+    def release!(run)
+      return false if run.worktree_name.blank? || run.source_root.blank? || run.target_root.blank?
+
+      source_root = Pathname(run.source_root)
+      path = Pathname(run.target_root)
+      return false if !path.directory? || protected_path?(source_root, path) || !work_saved?(path)
+
+      remove_worktree!(source_root, path)
+      prune!(source_root)
+      true
+    end
+
+    def git_success?(root, *args)
+      _output, _error, status = Open3.capture3("git", "-C", root.to_s, *args)
+      status.success?
     end
 
     def git!(root, *args)

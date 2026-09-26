@@ -35,6 +35,7 @@ RSpec.describe Orchestrator::PullRequestResume do
     it "reopens a closed session on the same worktree, resuming the CLI conversation" do
       _run, previous = create_run_and_session(run:, prefix: "pr-resume")
       previous.update!(status: "done", outcome: "done", ended_at: Time.current, cli_session_id: "cli-77")
+      allow(Orchestrator::GitWorktree).to receive(:restore!)
       allow(Orchestrator::RunSessionRunner).to receive(:start!)
 
       expect(described_class.resume!(run, comment(id: 102))).to eq(:reopened)
@@ -44,9 +45,38 @@ RSpec.describe Orchestrator::PullRequestResume do
       expect(run.reload.status).to eq("running")
     end
 
+    # Closing the session may have reclaimed the worktree (its work was
+    # already pushed), so it has to be checked back out before a session can
+    # start in it.
+    it "restores the run's worktree before reopening a session in it" do
+      _run, previous = create_run_and_session(run:, prefix: "pr-resume")
+      previous.update!(status: "done", outcome: "done", ended_at: Time.current)
+      allow(Orchestrator::GitWorktree).to receive(:restore!)
+      allow(Orchestrator::RunSessionRunner).to receive(:start!)
+
+      described_class.resume!(run, comment(id: 104))
+
+      expect(Orchestrator::GitWorktree).to have_received(:restore!).with(run).ordered
+      expect(Orchestrator::RunSessionRunner).to have_received(:start!).ordered
+    end
+
+    it "puts the run back to awaiting_review if its worktree cannot be restored" do
+      _run, previous = create_run_and_session(run:, prefix: "pr-resume")
+      previous.update!(status: "closed", ended_at: Time.current)
+      allow(Orchestrator::GitWorktree).to receive(:restore!)
+        .and_raise(Orchestrator::GitWorktree::Error, "branch is gone")
+      allow(Orchestrator::RunSessionRunner).to receive(:start!)
+
+      expect { described_class.resume!(run, comment(id: 105)) }
+        .to raise_error(described_class::Error, /branch is gone/)
+      expect(Orchestrator::RunSessionRunner).not_to have_received(:start!)
+      expect(run.reload.status).to eq("awaiting_review")
+    end
+
     it "puts the run back to awaiting_review if a session cannot be reopened" do
       _run, previous = create_run_and_session(run:, prefix: "pr-resume")
       previous.update!(status: "closed", ended_at: Time.current)
+      allow(Orchestrator::GitWorktree).to receive(:restore!)
       allow(Orchestrator::RunSessionRunner).to receive(:start!)
         .and_raise(Orchestrator::Herdr::Error, "herdr is not running")
 

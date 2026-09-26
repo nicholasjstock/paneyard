@@ -119,6 +119,22 @@ RSpec.describe "runs", type: :request do
       expect(session.reload).to be_ended
     end
 
+    it "removes the worktree when its work is already safe, and keeps it when it is not" do
+      run, _session = create_run_and_session(prefix: "close-session-release")
+      allow(Orchestrator::RunSessionRunner).to receive(:finish!)
+
+      allow(Orchestrator::WorktreeJanitor).to receive(:release!).with(run).and_return(true)
+      post close_session_workspace_run_path(run.workspace, run)
+      follow_redirect!
+      expect(response.body).to include("Closed the session and removed")
+
+      run2, _session2 = create_run_and_session(prefix: "close-session-keep")
+      allow(Orchestrator::WorktreeJanitor).to receive(:release!).with(run2).and_return(false)
+      post close_session_workspace_run_path(run2.workspace, run2)
+      follow_redirect!
+      expect(response.body).to include("uncommitted or unpushed work")
+    end
+
     it "says so when there is no live session to close" do
       run = create_run(prefix: "close-session-none", status: "awaiting_review")
 

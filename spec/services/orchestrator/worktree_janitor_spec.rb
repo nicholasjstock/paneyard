@@ -31,6 +31,21 @@ RSpec.describe Orchestrator::WorktreeJanitor do
     path
   end
 
+  # A bare origin the source checkout pushes to, so "pushed" means what it
+  # means in real use: HEAD is on a remote-tracking branch.
+  def add_origin
+    origin = File.join(root, "origin.git")
+    git(root, "init", "--bare", origin)
+    git(source_root, "remote", "add", "origin", origin)
+    origin
+  end
+
+  def commit_in(path, file)
+    File.write(File.join(path, file), "#{file}\n")
+    git(path, "add", file)
+    git(path, "commit", "-m", "Add #{file}")
+  end
+
   def terminal_run(name, path, stopped_at: 2.days.ago, status: "failed")
     workspace.runs.create!(
       run_id: name, task: "Exercise #{name}", target_root: path, source_root: source_root,
@@ -48,9 +63,32 @@ RSpec.describe Orchestrator::WorktreeJanitor do
       expect(File.exist?(path)).to be(false)
     end
 
-    it "leaves a run that only just failed, so the operator can still look at it" do
+    it "leaves a run that only just failed with unpushed commits, so the operator can still look at it" do
       path = add_worktree("just-failed")
+      commit_in(path, "unpushed.rb")
       terminal_run("just-failed", path, stopped_at: 10.minutes.ago)
+
+      expect(described_class.sweep(workspace)).to eq(0)
+      expect(File.exist?(path)).to be(true)
+    end
+
+    it "reclaims a just-closed run straight away when its branch is already pushed" do
+      add_origin
+      path = add_worktree("just-pushed")
+      commit_in(path, "pushed.rb")
+      git(path, "push", "origin", "workflow/just-pushed")
+      terminal_run("just-pushed", path, stopped_at: 1.minute.ago, status: "awaiting_review")
+
+      expect(described_class.sweep(workspace)).to eq(1)
+      expect(File.exist?(path)).to be(false)
+    end
+
+    it "leaves a pushed run alone while its session is still live" do
+      add_origin
+      path = add_worktree("live-idle")
+      git(path, "push", "origin", "workflow/live-idle")
+      run = terminal_run("live-idle", path, stopped_at: nil, status: "awaiting_review")
+      create_run_and_session(run:, prefix: "live-idle")
 
       expect(described_class.sweep(workspace)).to eq(0)
       expect(File.exist?(path)).to be(true)
@@ -120,6 +158,75 @@ RSpec.describe Orchestrator::WorktreeJanitor do
       missing = Workspace.create!(name: "janitor-missing-#{SecureRandom.hex(4)}", root_path: "/tmp/nope-#{SecureRandom.hex(4)}")
 
       expect(described_class.sweep(missing)).to eq(0)
+    end
+  end
+
+  describe ".release!" do
+    it "removes a clean worktree whose branch is already merged into main, keeping the branch" do
+      path = add_worktree("merged")
+      commit_in(path, "merged.rb")
+      git(source_root, "merge", "--ff-only", "workflow/merged")
+      run = terminal_run("merged", path, stopped_at: 1.minute.ago)
+
+      expect(described_class.release!(run)).to be(true)
+      expect(File.exist?(path)).to be(false)
+      output, _error, _status = Open3.capture3("git", "-C", source_root, "branch", "--list", "workflow/merged")
+      expect(output).to include("workflow/merged")
+    end
+
+    it "removes a clean worktree whose branch is pushed" do
+      add_origin
+      path = add_worktree("pushed")
+      commit_in(path, "pushed.rb")
+      git(path, "push", "origin", "workflow/pushed")
+      run = terminal_run("pushed", path, stopped_at: 1.minute.ago)
+
+      expect(described_class.release!(run)).to be(true)
+      expect(File.exist?(path)).to be(false)
+    end
+
+    it "keeps a worktree with commits that are neither pushed nor merged" do
+      path = add_worktree("unpushed")
+      commit_in(path, "unpushed.rb")
+      run = terminal_run("unpushed", path, stopped_at: 1.minute.ago)
+
+      expect(described_class.release!(run)).to be(false)
+      expect(File.exist?(path)).to be(true)
+    end
+
+    it "keeps a pushed worktree that has uncommitted changes" do
+      add_origin
+      path = add_worktree("pushed-dirty")
+      git(path, "push", "origin", "workflow/pushed-dirty")
+      File.write(File.join(path, "scratch.rb"), "unsaved\n")
+      run = terminal_run("pushed-dirty", path, stopped_at: 1.minute.ago)
+
+      expect(described_class.release!(run)).to be(false)
+      expect(File.exist?(path)).to be(true)
+    end
+  end
+
+  describe "Orchestrator::GitWorktree.restore!" do
+    it "checks a released run's branch back out where its worktree was" do
+      path = add_worktree("restored")
+      commit_in(path, "restored.rb")
+      git(source_root, "merge", "--ff-only", "workflow/restored")
+      run = terminal_run("restored", path, stopped_at: 1.minute.ago)
+      described_class.release!(run)
+
+      Orchestrator::GitWorktree.restore!(run)
+
+      expect(File.read(File.join(path, "restored.rb"))).to eq("restored.rb\n")
+      output, _error, _status = Open3.capture3("git", "-C", path, "branch", "--show-current")
+      expect(output.strip).to eq("workflow/restored")
+    end
+
+    it "leaves an existing worktree as it is" do
+      path = add_worktree("still-there")
+      run = terminal_run("still-there", path, stopped_at: 1.minute.ago)
+
+      expect { Orchestrator::GitWorktree.restore!(run) }.not_to raise_error
+      expect(File.exist?(path)).to be(true)
     end
   end
 

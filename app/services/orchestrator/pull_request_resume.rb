@@ -90,11 +90,12 @@ module Orchestrator
     # session.
     def reopen!(run, text)
       previous = run.latest_session
+      GitWorktree.restore!(run)
       run.update!(status: "running", stopped_at: nil)
       RunSessionRunner.start!(run, resume_session_id: previous&.cli_session_id, prompt: text)
       Rails.logger.info("PullRequestResume.resume run=#{run.run_id} outcome=reopened_session")
       :reopened
-    rescue RunSessionRunner::Error, Herdr::Error => error
+    rescue GitWorktree::Error, RunSessionRunner::Error, Herdr::Error => error
       run.update!(status: "awaiting_review")
       raise Error, "Could not reopen a session for #{run.run_id}: #{error.message}"
     end
