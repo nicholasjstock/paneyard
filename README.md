@@ -48,7 +48,7 @@ git diff --check
 
 A comment on the pull request is delivered straight into the run's session — reopening a closed one on the same worktree if needed — so review feedback continues the run rather than starting a new one.
 
-Rails never infers a workspace's language, package manager, dependency layout, ports, or health endpoints. The first run in a new workspace is a discovery run that records those for every later run to inherit.
+Rails never infers a workspace's language, package manager, dependency layout, ports, or health endpoints. A session works them out from the checkout itself, and can record what it learns with `record_project_setup` / `record_project_memory_entry` for later runs in the workspace to inherit.
 
 ## Requirements
 

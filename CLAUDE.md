@@ -22,7 +22,7 @@ Every run gets a sibling worktree of the workspace's `main` checkout on a `workf
 
 ## MCP boundary
 
-One endpoint, `/mcp/run`, scoped to a single session's bearer capability, exposing nine tools. Add a tool only for something Rails alone knows or owns — a session with full access to its worktree does not need us to proxy file reads or shell commands for it.
+One endpoint, `/mcp/run`, scoped to a single session's bearer capability, exposing eight tools. Add a tool only for something Rails alone knows or owns — a session with full access to its worktree does not need us to proxy file reads or shell commands for it.
 
 ## Verification
 

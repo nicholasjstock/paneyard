@@ -34,12 +34,8 @@ RSpec.describe Orchestrator::RunPrompt do
     expect(prompt).to include("watching this pane")
   end
 
-  it "names the workspace's protected paths when it has any, and says nothing when it does not" do
+  it "does not fence off any paths -- the session owns its whole worktree" do
     expect(prompt).not_to include("off limits")
-
-    run.workspace.update!(protected_path_patterns: [ "db/schema.rb", "config/credentials.yml.enc" ])
-    expect(described_class.compose(run:, session_driver: "claude"))
-      .to include("off limits", "db/schema.rb", "config/credentials.yml.enc")
   end
 
   it "includes durable workspace memory so a session does not rediscover it" do

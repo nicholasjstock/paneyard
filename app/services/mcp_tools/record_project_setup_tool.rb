@@ -3,7 +3,7 @@ module McpTools
     tool_name "record_project_setup"
     description "Record durable findings about how to run this project's local development environment, so future " \
       "runs in this workspace inherit them. Include one finding with key " \
-      "\"#{Orchestrator::WorkspaceInit::PRIMARY_ENTRY_KEY}\" describing exactly how to start the full dev environment."
+      "\"#{Orchestrator::ProjectMemory::PRIMARY_ENTRY_KEY}\" describing exactly how to start the full dev environment."
     input_schema(
       properties: {
         runId: { type: "string" },

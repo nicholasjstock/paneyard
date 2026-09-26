@@ -37,7 +37,7 @@ RSpec.describe Orchestrator::ProjectMemory do
     # load-bearing facts crowding out the one fact every worker actually
     # needs to get started.
     Orchestrator::ProjectMemory.record!(
-      run_id: run.run_id, entry_key: Orchestrator::WorkspaceInit::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+      run_id: run.run_id, entry_key: Orchestrator::ProjectMemory::PRIMARY_ENTRY_KEY, kind: "operational_rule",
       content: "Run bin/dev from project root.", evidence_ref: "bin/dev", recorded_by: "session"
     )
     9.times do |i|
@@ -86,7 +86,7 @@ RSpec.describe Orchestrator::ProjectMemory do
       )
     end
     Orchestrator::ProjectMemory.record!(
-      run_id: run.run_id, entry_key: Orchestrator::WorkspaceInit::PRIMARY_ENTRY_KEY, kind: "operational_rule",
+      run_id: run.run_id, entry_key: Orchestrator::ProjectMemory::PRIMARY_ENTRY_KEY, kind: "operational_rule",
       content: "Run bin/dev from project root.", evidence_ref: "bin/dev", recorded_by: "session"
     )
 

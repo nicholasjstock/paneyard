@@ -63,20 +63,13 @@ module Orchestrator
     end
 
     def working_agreement(run)
-      protected_paths = Array(run.workspace.protected_path_patterns).compact_blank
-      protected_line =
-        if protected_paths.any?
-          "Treat these paths as off limits unless the task is explicitly about them: " \
-            "#{protected_paths.join(', ')}.\n"
-        end
-
       <<~SECTION
         # How this run works
 
         You own this worktree end to end. It is a real git worktree on branch `#{run.branch_name}`,
         checked out at `#{run.target_root}`, and nobody else is working in it -- you do not need to
         coordinate, ask permission for ordinary changes, or scope your edits to a pre-approved file list.
-        #{protected_line}
+
         An operator is watching this pane and can type into it. If you are genuinely blocked on a
         decision only they can make, ask here and wait -- that is cheaper than guessing.
 
