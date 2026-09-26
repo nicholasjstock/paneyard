@@ -24,7 +24,7 @@ Every run gets a sibling worktree of the workspace's `main` checkout on a `workf
 
 ## MCP boundary
 
-One endpoint, `/mcp/run`, scoped to a single session's bearer capability, exposing eight tools. Add a tool only for something Rails alone knows or owns — a session with full access to its worktree does not need us to proxy file reads or shell commands for it.
+`/mcp/run`, scoped to a single session's bearer capability, is what a run session talks to. `/mcp/admin` is a second, unauthenticated endpoint for external MCP clients (an operator's own everyday Claude Code session, principally) to queue and inspect runs without the web UI — see AGENTS.md's "MCP Boundary" for the full shape and which tools each endpoint carries. Add a tool only for something Rails alone knows or owns — a session with full access to its worktree does not need us to proxy file reads or shell commands for it.
 
 ## Verification
 

@@ -7,9 +7,15 @@ Rails.application.routes.draw do
 
   # The MCP endpoint a run's interactive CLI session connects to --
   # Streamable HTTP, hosted inside this already-running process. Scoped and
-  # tokenized per session (app/services/orchestrator/run_mcp_server.rb);
-  # there is deliberately no unscoped bare /mcp endpoint.
+  # tokenized per session (app/services/orchestrator/run_mcp_server.rb).
   mount Orchestrator::RunMcpEndpoint.new => "/mcp/run"
+
+  # A standing MCP endpoint for the operator's own external MCP clients --
+  # their everyday Claude Code session, principally -- to queue and inspect
+  # runs without opening the web UI. Unauthenticated like the rest of this
+  # app; see Orchestrator::AdminMcpEndpoint's own comment for why that's an
+  # accepted trust boundary here, not an oversight.
+  mount Orchestrator::AdminMcpEndpoint.new => "/mcp/admin"
 
   mount ActionCable.server => "/cable"
 
