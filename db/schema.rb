@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_26_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_26_160000) do
   create_table "bus_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "event_id", null: false
@@ -30,15 +30,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_140000) do
     t.text "summary"
     t.index ["run_id"], name: "index_run_checkpoints_on_run_id"
     t.index ["run_session_id"], name: "index_run_checkpoints_on_run_session_id"
-  end
-
-  create_table "run_outbound_comments", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "github_comment_id", null: false
-    t.string "kind", null: false
-    t.string "run_id", null: false
-    t.datetime "updated_at", null: false
-    t.index ["run_id", "github_comment_id"], name: "index_run_outbound_comments_on_run_id_and_github_comment_id", unique: true
   end
 
   create_table "run_sessions", force: :cascade do |t|
@@ -72,15 +63,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_140000) do
     t.string "base_sha"
     t.string "branch_name"
     t.datetime "created_at", null: false
-    t.string "last_pull_request_comment_id"
     t.json "launch_artifacts", default: [], null: false
+    t.text "launch_error"
     t.string "launched_by"
     t.string "launcher_variant", default: "claude", null: false
-    t.datetime "publication_completed_at"
-    t.text "publication_error"
-    t.datetime "publication_started_at"
-    t.string "publication_status"
-    t.string "pull_request_url"
     t.string "run_id", null: false
     t.string "source_root"
     t.datetime "started_at"
@@ -91,7 +77,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_140000) do
     t.datetime "updated_at", null: false
     t.integer "workspace_id", null: false
     t.string "worktree_name"
-    t.index ["publication_status"], name: "index_runs_on_publication_status"
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
     t.index ["workspace_id"], name: "index_runs_on_workspace_id"

@@ -4,20 +4,23 @@
 # concurrency slot frees, handed to one interactive session that owns it from
 # start to finish (RunSession), and ends when that session reports back.
 class Run < ApplicationRecord
-  # Removed in 20260709175910_remove_scenario_and_frontend_url_from_runs and
-  # 20260817120200_simplify_runs. Kept ignored so a long-lived Rails process
+  # Removed in 20260709175910_remove_scenario_and_frontend_url_from_runs,
+  # 20260817120200_simplify_runs and 20260926160000_remove_pull_request_publication.
+  # Kept ignored so a long-lived Rails process
   # with stale schema metadata does not try to write them.
   self.ignored_columns += %w[
     scenario frontend_url active_branch_key phase phase_owner phase_summary phase_updated_at
     supervisor_pid capacity_available_at interactive_mode log_path parent_run_id
     github_issue_url github_issue_status conversation_pr_status
+    publication_status publication_started_at publication_completed_at publication_error
+    pull_request_url last_pull_request_comment_id
   ]
 
   LAUNCHER_VARIANTS = %w[claude codex opencode].freeze
   # queued          -- created, waiting for a concurrency slot
   # launching       -- claimed by the dispatcher; worktree/session coming up
   # running         -- a live session owns it
-  # awaiting_review -- session finished, PR open, waiting on a human to merge
+  # awaiting_review -- session reported idle; the operator decides what next
   STATUSES = %w[queued launching running awaiting_review stopped completed failed].freeze
   NON_TERMINAL_STATUSES = %w[queued launching running awaiting_review].freeze
 
@@ -31,7 +34,6 @@ class Run < ApplicationRecord
   has_many :checkpoints, -> { chronological }, class_name: "RunCheckpoint", inverse_of: :run, dependent: :destroy
 
   has_many :bus_events, foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
-  has_many :outbound_comments, class_name: "RunOutboundComment", foreign_key: :run_id, primary_key: :run_id, inverse_of: :run, dependent: :destroy
 
   validates :run_id, presence: true, uniqueness: true
   validates :task, presence: true
@@ -81,8 +83,7 @@ class Run < ApplicationRecord
   end
 
   # The one session currently holding this run's concurrency slot, if any. A
-  # run accumulates sessions over its life (a pull-request comment can reopen
-  # a closed one) but never has two live at once -- see the partial unique
+  # run never has two live sessions at once -- see the partial unique
   # index on run_sessions.
   def live_session
     run_sessions.live.order(created_at: :desc).first
@@ -94,23 +95,6 @@ class Run < ApplicationRecord
 
   def managed_worktree?
     worktree_name.present?
-  end
-
-  # branch_name is only ever set by GitWorktree.provision! after it actually
-  # succeeds -- worktree_name alone is not proof of that: it is assigned
-  # eagerly at run creation, before StartRunSessionJob attempts provisioning,
-  # so a run whose provisioning failed (a dirty source checkout, say) can
-  # carry a worktree_name with no real worktree behind it.
-  # Publication is an operator decision now, not something a finished session
-  # triggers, so the run screen offers it for any run with a real branch rather
-  # than only after a failed automatic attempt. "publishing" is excluded so a
-  # double click cannot race two PublishRunJobs into `gh pr create`.
-  def publishable?
-    managed_worktree? && branch_name.present? && publication_status != "publishing"
-  end
-
-  def publication_retryable?
-    publishable? && publication_status == "failed"
   end
 
   def to_param

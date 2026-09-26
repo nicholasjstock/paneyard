@@ -3,8 +3,8 @@
 # there for real (production) use are otherwise visible to every spec run
 # too, on whichever machine has them set. Specs that assume the App is
 # unconfigured (the ENV-only "when GitHub App ID is missing" style
-# contexts throughout github_app_auth_spec.rb, plus run_publication_spec.rb
-# and worker_spawner_spec.rb exercising the pre-GitHubAppAuth ambient-gh
+# contexts throughout github_app_auth_spec.rb, plus the since-removed
+# run_publication_spec.rb and worker_spawner_spec.rb exercising the pre-GitHubAppAuth ambient-gh
 # fallback against fake tmpdir "repos") broke exactly this way the first
 # time real credentials were added locally. Force the credentials-backed
 # fallback to nil by default in every spec; ENV["GITHUB_APP_ID"] /

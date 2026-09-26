@@ -4,7 +4,7 @@ default: &default
       batch_size: 500
   workers:
     # Everything except the chat queue below: RunDispatchJob, the
-    # reconcilers, publication, and the Telegram pollers. These are all
+    # reconcilers and the Telegram pollers. These are all
     # short, frequent jobs -- naming the queue explicitly (rather than "*")
     # keeps them from sharing a thread pool with WorkspaceAdminChatTurnJob,
     # which blocks a thread for an entire CLI subprocess turn.

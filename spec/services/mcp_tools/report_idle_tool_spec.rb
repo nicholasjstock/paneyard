@@ -4,8 +4,8 @@ RSpec.describe McpTools::ReportIdleTool do
   before { allow(Orchestrator::Herdr).to receive(:notify) }
 
   # The whole point of the rewrite: reporting idle leaves the session running so
-  # the operator can read the pane, and publishes nothing.
-  it "records a checkpoint and leaves the session live without publishing" do
+  # the operator can read the report and decide what happens next.
+  it "records a checkpoint and leaves the session live" do
     run, session = create_run_and_session(prefix: "report-idle")
 
     response = described_class.call(
@@ -16,15 +16,8 @@ RSpec.describe McpTools::ReportIdleTool do
     expect(response.error?).to be_falsey
     expect(session.reload).to have_attributes(status: "done", outcome: "done", ended_at: nil)
     expect(session).to be_live
-    expect(run.reload).to have_attributes(status: "awaiting_review", publication_status: nil)
+    expect(run.reload).to have_attributes(status: "awaiting_review")
     expect(run.checkpoints.map(&:summary)).to eq([ "Added the index and a regression test." ])
-  end
-
-  it "never enqueues publication" do
-    run, session = create_run_and_session(prefix: "report-idle-nopub")
-
-    expect { described_class.call(runId: run.run_id, outcome: "done", summary: "Done.", server_context: { run_session_id: session.id }) }
-      .not_to have_enqueued_job(PublishRunJob)
   end
 
   it "does not close the herdr pane or kill the process" do

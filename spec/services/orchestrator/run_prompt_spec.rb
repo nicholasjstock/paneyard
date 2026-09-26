@@ -20,7 +20,8 @@ RSpec.describe Orchestrator::RunPrompt do
   # Everything downstream depends on report_idle arriving: the run's
   # terminal status, and the concurrency slot.
   it "spells out the finish contract, including why not calling report_idle is not an option" do
-    expect(prompt).to include("run-summary.md")
+    expect(prompt).not_to include("run-summary.md")
+    expect(prompt).to include("full report in\nMarkdown")
     expect(prompt).to include("git push -u origin workflow/run-prompt-a1b2")
     expect(prompt).to include("report_idle")
     expect(prompt).to include("concurrency slot")

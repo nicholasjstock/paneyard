@@ -38,9 +38,6 @@
         <% if run.branch_name.present? %>
           <p class="muted mono"><%= run.branch_name %></p>
         <% end %>
-        <% if run.pull_request_url.present? %>
-          <p><%= link_to "Pull request", run.pull_request_url, target: "_blank", rel: "noopener" %></p>
-        <% end %>
         <p class="muted">
           <%= run.launcher_variant %>
           &middot;

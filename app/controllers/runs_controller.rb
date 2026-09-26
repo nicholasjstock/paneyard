@@ -3,7 +3,7 @@ require "fileutils"
 class RunsController < ApplicationController
   before_action :require_workspace
   before_action :require_initialized_workspace, only: %i[new create]
-  before_action :set_run, only: %i[show stop send_message remove_worktree publish close_session retry_publication]
+  before_action :set_run, only: %i[show stop send_message remove_worktree close_session]
 
   def index
     @runs = current_workspace.runs.order(created_at: :desc).limit(50).to_a
@@ -69,21 +69,6 @@ class RunsController < ApplicationController
   rescue Orchestrator::WorktreeJanitor::Error => error
     redirect_to workspace_run_path(current_workspace, @run), alert: error.message
   end
-
-  # Opening the pull request. A session going idle no longer does this: it
-  # reports and waits, and the operator decides here after reading the pane.
-  def publish
-    unless @run.publishable?
-      redirect_to workspace_run_path(current_workspace, @run), alert: "This run has nothing to publish."
-      return
-    end
-
-    @run.update!(publication_status: "publishing")
-    PublishRunJob.perform_later(@run.id)
-    redirect_to workspace_run_path(current_workspace, @run), notice: "Opening the pull request…"
-  end
-
-  alias_method :retry_publication, :publish
 
   # Ends a session the operator is finished looking at: kills the CLI, closes
   # the herdr pane, and releases the concurrency slot. Until this is called an

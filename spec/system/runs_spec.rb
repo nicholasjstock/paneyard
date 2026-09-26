@@ -62,30 +62,29 @@ RSpec.describe "workspace runs", type: :system do
     expect(Orchestrator::RunSessionRunner).not_to have_received(:snapshot)
   end
 
-  it "offers no message box once the session has ended, and reports its outcome" do
-    run = create_run(workspace:, prefix: "runs-ui-finished", status: "awaiting_review")
+  it "offers no message box once the session has ended" do
+    run = create_run(workspace:, prefix: "runs-ui-finished", status: "completed")
     _run, session = create_run_and_session(run:)
     session.update!(status: "done", outcome: "done", result: "Added the index and a test.", ended_at: Time.current)
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_text("Added the index and a test.")
+    expect(page).to have_text("done")
     expect(page).to have_no_field("Send a message to this session")
     expect(page).to have_no_button("Stop run")
   end
 
-  it "surfaces the pull request and a worktree removal action once a run is over" do
+  it "offers worktree removal once a run is over, and nothing about pull requests" do
     run = create_run(
-      workspace:, prefix: "runs-ui-published", status: "completed", stopped_at: 1.hour.ago,
-      worktree_name: "runs-ui-published-a1b2", branch_name: "workflow/runs-ui-published-a1b2",
-      pull_request_url: "https://github.com/example/repo/pull/7"
+      workspace:, prefix: "runs-ui-finished", status: "completed", stopped_at: 1.hour.ago,
+      worktree_name: "runs-ui-finished-a1b2", branch_name: "workflow/runs-ui-finished-a1b2"
     )
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_link("Pull request", href: run.pull_request_url)
-    expect(page).to have_text("workflow/runs-ui-published-a1b2")
+    expect(page).to have_text("workflow/runs-ui-finished-a1b2")
     expect(page).to have_button("Remove worktree")
+    expect(page).to have_no_text(/pull request/i)
   end
 
   it "stops a live run from the detail page" do

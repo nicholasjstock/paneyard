@@ -5,9 +5,9 @@ module Orchestrator
   # releasing its concurrency slot.
   #
   # A session merely going idle does NOT come through here -- see
-  # RunIdleReport. Nothing in this module publishes: opening a pull request is
-  # the operator's decision, taken from the run screen after reading the pane,
-  # not something a finished session triggers on its way out.
+  # RunIdleReport. Nothing in this module pushes or talks to GitHub: the
+  # session pushed its own branch, and what happens to it there is the
+  # operator's business.
   module RunCompletion
     module_function
 
@@ -15,10 +15,7 @@ module Orchestrator
       run.with_lock do
         case outcome
         when "done"
-          # Non-terminal on purpose: the work may be worth publishing and only
-          # the operator decides that, so the run waits for them rather than
-          # being closed out or pushed to GitHub automatically.
-          run.update!(status: "awaiting_review")
+          run.update!(status: "completed", stopped_at: Time.current)
         when "blocked"
           run.update!(status: "stopped", stopped_at: Time.current)
         when "failed"

@@ -1,17 +1,17 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::RunCompletion do
-  # Publication is the operator's decision, taken from the run screen after
-  # they have read the pane. A run whose session is over is waiting for that
-  # decision, so it is left non-terminal and nothing is pushed or opened.
-  it "leaves a done run awaiting the operator rather than publishing it" do
-    run = create_run(prefix: "completion-done", status: "running")
+  # There is nothing left for Rails to do with a done run once its session is
+  # over -- the branch is pushed and GitHub is the operator's business -- so it
+  # is terminal, which is also what lets WorktreeJanitor reclaim it later.
+  it "completes a done run" do
+    run = create_run(prefix: "completion-done", status: "awaiting_review")
 
-    expect { described_class.call(run:, outcome: "done", summary: "Shipped it.") }
-      .not_to have_enqueued_job(PublishRunJob)
+    described_class.call(run:, outcome: "done", summary: "Shipped it.")
 
-    expect(run.reload).to have_attributes(status: "awaiting_review", publication_status: nil)
-    expect(run).to be_active
+    expect(run.reload).to have_attributes(status: "completed")
+    expect(run.stopped_at).to be_present
+    expect(run).to be_terminal
   end
 
   it "stops a blocked run and fails a failed one" do

@@ -6,11 +6,13 @@ module McpTools
   # to type something, so only the session itself can say which.
   #
   # This reports; it does not end the run. The pane stays open, the session
-  # keeps its concurrency slot, and nothing is pushed, published, or torn down.
-  # What happens next -- open a pull request, send more work, close the session
-  # -- is the operator's decision, made after looking at this pane. That is the
-  # whole point: the previous tool ended the run and opened a pull request in
-  # the same call, which left nothing to look at and no decision to make.
+  # keeps its concurrency slot, and nothing is pushed or torn down. What
+  # happens next -- send more work, close the session -- is the operator's
+  # decision.
+  #
+  # The summary is the substance, not a status line: the run screen shows the
+  # checkpoints and not the pane, so each one has to stand on its own as a
+  # report of what was done.
   #
   # A session reports more than once over a run: it goes idle, the operator
   # sends more work, it goes idle again. Each report is a checkpoint covering
@@ -22,19 +24,22 @@ module McpTools
     description "Report that you have stopped working and say where the run stands. Call it every time you " \
       "go idle: when you have finished the task (outcome `done`), need the operator and cannot continue " \
       "(`blocked`), or have concluded the task cannot be done as specified (`failed`). Before reporting " \
-      "`done`: write run-summary.md via write_workflow_artifact, commit, and push your branch. This does " \
-      "NOT end the run and does NOT open a pull request -- the operator reads this pane and decides what " \
-      "happens next, and may well send you more work; when you go idle after that, report again. Each " \
-      "report is a checkpoint covering only the interval since your previous one, and they are kept as the " \
-      "run's history, so do not restate earlier reports: say what you attempted in this slice of work, " \
-      "what landed, what failed, what state you are leaving behind, and what you think should happen next. " \
+      "`done`, commit and push your branch. This does NOT end the run -- the operator reads your reports " \
+      "and decides what happens next, and may well send you more work; when you go idle after that, report " \
+      "again. Each report is a checkpoint covering only the interval since your previous one, and they are " \
+      "kept as the run's history, so do not restate earlier reports. " \
       "Not calling it is the one real failure: until you do, Rails cannot tell you are idle rather than " \
       "still working."
     input_schema(
       properties: {
         runId: { type: "string" },
         outcome: { type: "string", enum: RunSession::OUTCOMES },
-        summary: { type: "string", description: "Where the run stands, in a sentence or two, for the operator." }
+        summary: {
+          type: "string",
+          description: "A full Markdown report of this slice of work -- the operator reads these instead of " \
+            "the pane. What you changed and why, how you verified it (commands and results), what failed or " \
+            "was left out, the state of the worktree and branch, and what should happen next."
+        }
       },
       required: %w[runId outcome summary]
     )

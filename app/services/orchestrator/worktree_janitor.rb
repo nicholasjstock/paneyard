@@ -3,10 +3,9 @@ require "open3"
 module Orchestrator
   # Reclaims run worktrees.
   #
-  # Before this existed the only removal in the system was the post-merge one
-  # in RunPublication.cleanup_merged_run!, so every stopped, failed, or
-  # abandoned run left its worktree on disk forever -- a real and growing mess
-  # given every run gets one.
+  # The only automatic removal in the system: Rails does not follow a branch
+  # onto GitHub, so it never learns about a merge, and every finished run's
+  # worktree is reclaimed here once it has been terminal long enough.
   #
   # Two rules make this safe to run unattended:
   #

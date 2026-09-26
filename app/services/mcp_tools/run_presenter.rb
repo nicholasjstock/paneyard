@@ -13,8 +13,6 @@ module McpTools
         task: run.task.to_s.squish.truncate(160),
         driver: run.launcher_variant,
         branch: run.branch_name,
-        pull_request_url: run.pull_request_url,
-        publication_status: run.publication_status,
         session: session && session_summary(session),
         started_at: run.started_at&.iso8601,
         stopped_at: run.stopped_at&.iso8601
@@ -26,7 +24,7 @@ module McpTools
         task: run.task,
         worktree: run.target_root,
         worktree_name: run.worktree_name,
-        publication_error: run.publication_error,
+        launch_error: run.launch_error,
         launched_by: run.launched_by,
         recent_events: run.bus_events.order(created_at: :desc).limit(10).map do |event|
           { at: event.created_at.iso8601, type: event.event_type, payload: event.payload }
