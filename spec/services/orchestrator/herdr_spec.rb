@@ -92,18 +92,54 @@ RSpec.describe Orchestrator::Herdr do
   end
 
   describe ".request" do
-    it "wraps a connection failure as a Herdr::Error" do
+    it "wraps a connection failure as a Herdr::Unreachable" do
       allow(UNIXSocket).to receive(:new).and_raise(Errno::ENOENT, "no such file or directory")
 
-      expect { described_class.request!("ping") }.to raise_error(described_class::Error, /herdr is not running/)
+      expect { described_class.request!("ping") }
+        .to raise_error(described_class::Unreachable, /herdr is not running/)
     end
 
-    it "raises when herdr answers with an error envelope" do
+    # Regression: RunSessionRunner.refresh! must be able to tell "herdr never
+    # answered" apart from "herdr answered and said no such pane" -- conflating
+    # them once caused a socket blip to permanently fail a run whose session
+    # had already reported done. Unreachable is a Herdr::Error subclass, so
+    # every existing `rescue Herdr::Error` still catches it.
+    it "raises Unreachable, not a bare Error, for a timeout" do
+      allow(Timeout).to receive(:timeout).and_raise(Timeout::Error)
+
+      expect { described_class.request!("agent.get", target: "w1:p1") }
+        .to raise_error(described_class::Unreachable, /timed out/)
+    end
+
+    it "raises Unreachable when herdr sends back unparseable JSON" do
+      socket = instance_double(UNIXSocket, write: nil, gets: "not json", close: nil)
+      allow(UNIXSocket).to receive(:new).and_return(socket)
+
+      expect { described_class.request!("agent.get", target: "w1:p1") }
+        .to raise_error(described_class::Unreachable, /unparseable/)
+    end
+
+    it "raises Unreachable when the socket closes without a line back" do
+      socket = instance_double(UNIXSocket, write: nil, gets: nil, close: nil)
+      allow(UNIXSocket).to receive(:new).and_return(socket)
+
+      expect { described_class.request!("agent.get", target: "w1:p1") }
+        .to raise_error(described_class::Unreachable, /closed without a response/)
+    end
+
+    it "raises a plain Error, not Unreachable, when herdr answers with an error envelope" do
       allow(described_class).to receive(:request).with("agent.get", target: "w1:p1")
         .and_return("error" => { "code" => "pane_not_found", "message" => "no such pane" })
 
-      expect { described_class.request!("agent.get", target: "w1:p1") }
-        .to raise_error(described_class::Error, "no such pane")
+      error = nil
+      begin
+        described_class.request!("agent.get", target: "w1:p1")
+      rescue described_class::Error => e
+        error = e
+      end
+
+      expect(error.message).to eq("no such pane")
+      expect(error).not_to be_a(described_class::Unreachable)
     end
   end
 end

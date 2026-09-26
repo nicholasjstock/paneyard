@@ -116,6 +116,13 @@ module Orchestrator
 
       begin
         agent = Herdr.agent_get(session.herdr_pane_id)
+      rescue Herdr::Unreachable
+        # herdr never answered at all -- a socket blip or a restart, not
+        # confirmation the pane is gone. Re-raise so RunSessionReconcileJob's
+        # own rescue leaves every live session alone and retries next minute,
+        # instead of this session's real "done"/"blocked" report (already
+        # recorded by RunIdleReport) getting overwritten with a false "failed".
+        raise
       rescue Herdr::Error
         return mark_pane_lost!(session)
       end

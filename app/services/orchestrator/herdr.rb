@@ -70,6 +70,14 @@ module Orchestrator
 
     class Error < StandardError; end
 
+    # A stricter signal than Error: herdr never actually answered, so nothing
+    # is known about the pane/workspace in question -- unlike an error
+    # *envelope* (herdr is up and told us "no such pane"), which stays a plain
+    # Error. RunSessionRunner.refresh! relies on that distinction to avoid
+    # treating a transient socket blip as proof a pane is gone -- see its
+    # comment.
+    class Unreachable < Error; end
+
     REQUEST_TIMEOUT_SECONDS = 5
 
     def socket_path
@@ -171,7 +179,7 @@ module Orchestrator
         begin
           socket.write("#{JSON.generate(id:, method:, params:)}\n")
           line = socket.gets
-          raise Error, "herdr socket closed without a response for #{method}" if line.nil?
+          raise Unreachable, "herdr socket closed without a response for #{method}" if line.nil?
 
           JSON.parse(line)
         ensure
@@ -179,11 +187,11 @@ module Orchestrator
         end
       end
     rescue Errno::ENOENT, Errno::ECONNREFUSED => e
-      raise Error, "herdr is not running (#{e.message})"
+      raise Unreachable, "herdr is not running (#{e.message})"
     rescue Timeout::Error
-      raise Error, "herdr #{method} timed out after #{REQUEST_TIMEOUT_SECONDS}s"
+      raise Unreachable, "herdr #{method} timed out after #{REQUEST_TIMEOUT_SECONDS}s"
     rescue JSON::ParserError => e
-      raise Error, "herdr sent an unparseable response to #{method}: #{e.message}"
+      raise Unreachable, "herdr sent an unparseable response to #{method}: #{e.message}"
     end
 
     # herdr's env map has no "unset this variable" representation, and every

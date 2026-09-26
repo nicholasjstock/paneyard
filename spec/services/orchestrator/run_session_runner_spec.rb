@@ -289,6 +289,22 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(session.result).to include("exited without reporting a result")
     end
 
+    # Regression: a transient herdr blip (socket refused, timeout) must not be
+    # treated as confirmation the pane is gone -- that once permanently failed
+    # a run whose session had already reported "done" and was just sitting
+    # idle waiting on the operator. Unreachable must propagate so the caller's
+    # own retry-next-minute safety net (RunSessionReconcileJob) applies.
+    it "re-raises and leaves the session alone when herdr is merely unreachable" do
+      _run, session = create_run_and_session(run:, prefix: "session-runner")
+      session.update!(status: "done", outcome: "done", result: "Finished.")
+      allow(Orchestrator::Herdr).to receive(:agent_get)
+        .and_raise(Orchestrator::Herdr::Unreachable, "herdr is not running")
+
+      expect { described_class.refresh!(session) }.to raise_error(Orchestrator::Herdr::Unreachable)
+
+      expect(session.reload).to have_attributes(status: "done", outcome: "done", ended_at: nil)
+    end
+
     it "leaves an already-ended session alone" do
       _run, session = create_run_and_session(run:, prefix: "session-runner")
       session.update!(status: "done", outcome: "done", ended_at: Time.current)

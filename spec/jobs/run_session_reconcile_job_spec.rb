@@ -59,4 +59,22 @@ RSpec.describe RunSessionReconcileJob do
     expect(first.reload.status).to eq("running")
     expect(second.reload.status).to eq("running")
   end
+
+  # Regression: this exercises RunSessionRunner.refresh! for real (the other
+  # "herdr unreachable" example above stubs refresh! itself, which is exactly
+  # why it kept passing while a real socket blip inside agent_get still
+  # permanently failed an idle, already-"done" run). A session that already
+  # reported done and is waiting on the operator must survive a transient
+  # herdr outage untouched, not get overwritten with a false "failed".
+  it "leaves an idle, already-done session untouched when herdr is briefly unreachable" do
+    run, session = create_run_and_session(prefix: "reconcile-blip")
+    Orchestrator::RunIdleReport.call(run:, session:, outcome: "done", summary: "Finished; over to you.")
+    allow(Orchestrator::Herdr).to receive(:agent_get)
+      .and_raise(Orchestrator::Herdr::Unreachable, "herdr agent.get timed out after 5s")
+
+    expect { described_class.perform_now }.not_to raise_error
+
+    expect(session.reload).to have_attributes(status: "done", outcome: "done", ended_at: nil)
+    expect(run.reload).to have_attributes(status: "awaiting_review", stopped_at: nil)
+  end
 end
