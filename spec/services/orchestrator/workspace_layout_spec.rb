@@ -132,4 +132,40 @@ RSpec.describe Orchestrator::WorkspaceLayout do
       expect(described_class.for(workspace).first.panes.map(&:name)).to eq(%w[agent editor])
     end
   end
+
+  describe ".dump" do
+    it "writes canonical YAML that parses back to the same layout, from JSON as the form's editor sends it" do
+      json = '{"tabs":[{"name":"main","panes":["agent",{"name":"editor","command":"nvim .",' \
+             '"split":{"of":"agent","direction":"right","ratio":0.6}}]},{"panes":[{"name":"logs"}]}]}'
+      tabs = described_class.parse(json)
+
+      yaml = described_class.dump(tabs)
+
+      expect(yaml).to start_with("tabs:\n- name: main\n")
+      expect(yaml).not_to include("command: \n")
+      expect(described_class.parse(yaml)).to eq(tabs)
+    end
+  end
+
+  describe ".editor_data" do
+    it "gives the editor the default layout when there is none" do
+      expect(described_class.editor_data(nil)).to eq([
+        { "name" => nil, "panes" => [ { "name" => "agent" },
+                                       { "name" => "editor", "command" => "nvim .",
+                                         "split" => { "of" => "agent", "direction" => "right" } } ] }
+      ])
+    end
+
+    # A submitted layout with a mistake must come back as the operator left
+    # it, beside its error, not be reset.
+    it "hands back an invalid but tab-shaped layout unvalidated" do
+      data = described_class.editor_data("tabs:\n  - panes: [agent, { name: agent }]\n")
+
+      expect(data).to eq([ { "name" => nil, "panes" => [ { "name" => "agent" }, { "name" => "agent" } ] } ])
+    end
+
+    it "starts over from the default for something that is not a layout at all" do
+      expect(described_class.editor_data("just words")).to eq(described_class.editor_data(nil))
+    end
+  end
 end

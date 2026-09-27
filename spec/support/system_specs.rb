@@ -23,6 +23,9 @@ Capybara.register_driver :headless_chrome do |app|
 end
 
 Capybara.server = :puma, { Silent: true }
+# Lets specs find inputs that are labelled for screen readers only (the
+# workspace layout editor labels its per-pane fields this way).
+Capybara.enable_aria_label = true
 
 RSpec.configure do |config|
   config.before(:each, type: :system) do

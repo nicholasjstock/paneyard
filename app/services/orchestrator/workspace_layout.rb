@@ -105,6 +105,49 @@ module Orchestrator
       error.message.split("; ")
     end
 
+    # The layout as the workspace form's editor works on it: plain hashes, the
+    # agent as {"name" => "agent"}. Structure only, not validated -- a layout
+    # the operator just submitted with a mistake in it comes back as they
+    # left it, next to its errors, rather than reset to the default. Anything
+    # that is not even tab-shaped starts over from the default.
+    def editor_data(text)
+      data = text.present? ? (load_yaml(text) rescue nil) : nil
+      data = load_yaml(DEFAULT_YAML) unless data.is_a?(Hash) && data["tabs"].is_a?(Array)
+
+      data["tabs"].filter_map do |tab|
+        next unless tab.is_a?(Hash)
+
+        panes = Array(tab["panes"]).filter_map do |pane|
+          pane = { "name" => AGENT } if pane == AGENT
+          pane.slice("name", "command", "split") if pane.is_a?(Hash)
+        end
+        { "name" => tab["name"], "panes" => panes }
+      end
+    end
+
+    # Canonical YAML for a valid layout, which is what Workspace stores
+    # whichever way it arrived (the form's editor submits JSON, which is also
+    # YAML). The agent is written as a bare `agent`, and unset keys are left
+    # out.
+    def dump(tabs)
+      data = tabs.map do |tab|
+        panes = tab.panes.map do |pane|
+          next AGENT if pane.agent?
+
+          entry = { "name" => pane.name }
+          entry["command"] = pane.command if pane.command
+          if pane.split_of
+            split = { "of" => pane.split_of, "direction" => pane.direction }
+            split["ratio"] = pane.ratio if pane.ratio
+            entry["split"] = split
+          end
+          entry
+        end
+        (tab.name ? { "name" => tab.name } : {}).merge("panes" => panes)
+      end
+      YAML.dump("tabs" => data).delete_prefix("---\n")
+    end
+
     def load_yaml(text)
       YAML.safe_load(text.to_s)
     rescue Psych::Exception => error

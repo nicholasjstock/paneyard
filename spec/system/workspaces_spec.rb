@@ -108,22 +108,83 @@ RSpec.describe "workspaces", type: :system do
     )
   end
 
-  it "saves a workspace's layout from the edit form and shows why an invalid one is refused" do
-    workspace = Workspace.create!(name: "layout-#{SecureRandom.hex(4)}", root_path: "/tmp/layout-#{SecureRandom.hex(4)}")
-    layout = "tabs:\n  - panes: [agent]\n  - name: logs\n    panes: [{ name: dev-log, command: tail -f log/development.log }]"
+  describe "the layout editor", js: true do
+    let(:workspace) do
+      Workspace.create!(name: "layout-#{SecureRandom.hex(4)}", root_path: "/tmp/layout-#{SecureRandom.hex(4)}")
+    end
 
-    visit edit_workspace_path(workspace)
-    fill_in "Layout", with: layout
-    click_button "Save"
+    it "builds named tabs and splits without any YAML, and saves them as the workspace's layout" do
+      visit edit_workspace_path(workspace)
 
-    expect(page).to have_text("Updated workspace #{workspace.name}.")
-    expect(workspace.reload.layout).to eq(layout)
+      expect(page).to have_text("Using the default layout.")
+      expect(page).to have_css(".layout-preview-pane.agent", text: "agent")
+      expect(page).to have_css(".layout-preview-pane", text: "editor")
 
-    visit edit_workspace_path(workspace)
-    fill_in "Layout", with: "tabs:\n  - panes: [{ name: logs }]"
-    click_button "Save"
+      fill_in "Tab 1 name", with: "main"
+      click_button "Add tab"
+      fill_in "Tab 2 name", with: "logs"
+      fill_in "Pane shell name", with: "dev-log"
+      fill_in "Pane shell command", with: "tail -f log/development.log"
+      click_button "Add pane to tab 2"
+      fill_in "Pane pane-1 name", with: "test-log"
+      fill_in "Pane pane-1 command", with: "tail -f log/test.log"
+      select "below", from: "Pane pane-1 direction"
+      fill_in "Pane pane-1 share kept by the split pane", with: "0.7"
 
-    expect(page).to have_text("`agent` must be the first pane of the first tab")
-    expect(workspace.reload.layout).to eq(layout)
+      expect(page).to have_text("This workspace's own layout.")
+      expect(page).to have_css(".layout-preview-pane", text: "test-log")
+      click_button "Save"
+
+      expect(page).to have_text("Updated workspace #{workspace.name}.")
+      expect(workspace.reload.layout).to eq(<<~YAML)
+        tabs:
+        - name: main
+          panes:
+          - agent
+          - name: editor
+            command: nvim .
+            split:
+              of: agent
+              direction: right
+        - name: logs
+          panes:
+          - name: dev-log
+            command: tail -f log/development.log
+          - name: test-log
+            command: tail -f log/test.log
+            split:
+              of: dev-log
+              direction: down
+              ratio: 0.7
+      YAML
+
+      visit edit_workspace_path(workspace)
+      expect(page).to have_field("Tab 2 name", with: "logs")
+      expect(page).to have_field("Pane test-log command", with: "tail -f log/test.log")
+    end
+
+    it "keeps an invalid layout on screen beside its error" do
+      visit edit_workspace_path(workspace)
+
+      fill_in "Pane editor name", with: "agent"
+      click_button "Save"
+
+      expect(page).to have_text("duplicate pane name `agent`")
+      expect(workspace.reload.layout).to be_nil
+    end
+
+    it "goes back to the default layout" do
+      workspace.update!(layout: "tabs:\n  - panes: [agent]\n  - name: logs\n    panes: [{ name: dev-log }]\n")
+
+      visit edit_workspace_path(workspace)
+      expect(page).to have_field("Tab 2 name", with: "logs")
+      click_button "Reset to default"
+      expect(page).to have_text("Using the default layout.")
+      expect(page).to have_no_field("Tab 2 name")
+      click_button "Save"
+
+      expect(page).to have_text("Updated workspace #{workspace.name}.")
+      expect(workspace.reload.layout).to be_nil
+    end
   end
 end

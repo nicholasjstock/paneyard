@@ -128,7 +128,7 @@ From the workspace's runs page, choose a new run, give it a task, and pick a dri
 
 ### Workspace layouts
 
-Each workspace's edit form has a **Layout** field: the herdr tabs and panes its runs open with, as YAML. Leave it blank for the default (the agent with `nvim .` split beside it).
+Each workspace's new and edit forms have a **Layout** editor: the herdr tabs and panes its runs open with. Name each tab. Add panes, give each a command, and pick which earlier pane it splits off, to the right or below, and how much of the space that pane keeps. A live sketch of each tab shows the result. Until you change anything, the workspace uses the default layout (the agent with `nvim .` split beside it), and **Reset to default** goes back to it. The layout is stored as YAML (`workspaces.layout`), in this shape:
 
 ```yaml
 tabs:

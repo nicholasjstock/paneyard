@@ -27,6 +27,12 @@ RSpec.describe Workspace do
       expect(workspace.reload.layout).to be_nil
     end
 
+    it "stores the editor's JSON as canonical YAML" do
+      workspace.update!(layout: '{"tabs":[{"name":"main","panes":["agent"]}]}')
+
+      expect(workspace.reload.layout).to eq("tabs:\n- name: main\n  panes:\n  - agent\n")
+    end
+
     it "refuses an invalid layout with a readable error" do
       expect(workspace.update(layout: "tabs:\n  - panes: [{ name: logs }]\n")).to be(false)
       expect(workspace.errors[:layout]).to include("`agent` must be the first pane of the first tab")

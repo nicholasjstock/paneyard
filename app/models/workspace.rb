@@ -14,9 +14,20 @@ class Workspace < ApplicationRecord
   validate :source_checkout_is_not_changed_while_runs_are_active
   validate :layout_is_valid
 
-  # A blank layout is stored as NULL, which means the default. A browser
-  # textarea submits CRLF line endings.
-  normalizes :layout, with: ->(text) { text.gsub("\r\n", "\n").strip.presence }
+  # A blank layout is stored as NULL, which means the default. A valid one is
+  # stored as canonical YAML whatever form it arrived in (the workspace form's
+  # layout editor submits JSON); an invalid one is kept as submitted so the
+  # form can show it back beside its errors.
+  normalizes :layout, with: ->(text) { normalize_layout(text) }
+
+  def self.normalize_layout(text)
+    text = text.gsub("\r\n", "\n").strip.presence
+    return if text.nil?
+
+    Orchestrator::WorkspaceLayout.dump(Orchestrator::WorkspaceLayout.parse(text))
+  rescue Orchestrator::WorkspaceLayout::Invalid
+    text
+  end
 
   def self.default
     order(:created_at).first

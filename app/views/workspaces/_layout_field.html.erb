@@ -1,10 +1,26 @@
-<div class="field">
-  <%= form.label :layout, "Layout" %>
+<%# The layout editor writes the layout into the hidden `layout` field as JSON;
+    Workspace validates it and stores it as YAML. A blank field means the
+    default layout, so the field stays blank until something is changed. %>
+<div class="field layout-editor"
+     data-controller="layout-editor"
+     data-layout-editor-tabs-value="<%= Orchestrator::WorkspaceLayout.editor_data(form.object.layout).to_json %>"
+     data-layout-editor-default-tabs-value="<%= Orchestrator::WorkspaceLayout.editor_data(nil).to_json %>"
+     data-layout-editor-using-default-value="<%= form.object.layout.blank? %>">
+  <label>Layout</label>
   <p class="muted">
-    The herdr tabs and panes each run's workspace opens with, as YAML. The agent is always the
-    first pane of the first tab, and that is the tab a run opens on; every other tab and split is
-    optional. Each pane's <span class="mono">command</span> is typed into its own shell in the run's
-    worktree, with the same environment as the agent. Leave blank for the default shown here.
+    The herdr tabs and panes each run opens with. The agent is always the first pane of the first
+    tab, and that is the tab a run opens on. Each pane's command is typed into its own shell in the
+    run's worktree, with the same environment as the agent. A pane with no command is a plain shell.
   </p>
-  <%= form.text_area :layout, rows: 14, class: "mono", placeholder: Orchestrator::WorkspaceLayout::DEFAULT_YAML %>
+
+  <%= form.hidden_field :layout, data: { layout_editor_target: "input" } %>
+
+  <div class="layout-editor-status">
+    <span class="muted" data-layout-editor-target="status"></span>
+    <button type="button" class="btn" data-layout-editor-target="reset" data-action="layout-editor#resetToDefault">Reset to default</button>
+  </div>
+
+  <div data-layout-editor-target="tabs"></div>
+
+  <button type="button" class="btn" data-action="layout-editor#addTab">Add tab</button>
 </div>

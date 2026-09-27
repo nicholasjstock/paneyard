@@ -123,7 +123,7 @@ change its own layout.
 
 ## 3. Schema
 
-Stored as YAML text, so the operator can keep comments. Parsed and validated
+Stored as YAML text, and edited through the visual layout editor on the workspace form. Parsed and validated
 by a new `Orchestrator::WorkspaceLayout`, both on `Workspace` save (errors
 appear on the edit form) and again at session start.
 
@@ -344,7 +344,7 @@ default.
 | Giving extra panes a reduced env (no token, no `GH_TOKEN`) | Operator decision: every pane gets every env var, so a spare shell or nvim can push and talk to the run exactly like the agent. |
 | `{{…}}` interpolation and per-run port allocation | Operator decision: panes don't need allocated ports, and env vars already cover run-specific values. |
 | Auto-detecting from `Procfile.dev`/`bin/dev` | Too magic, and one `bin/dev` pane (foreman multiplexes) already covers it explicitly. |
-| JSON column with a structured form builder | The form would cost more than the feature. YAML text with validation is enough for one operator. |
+| Raw YAML textarea as the only editor | Replaced by the visual editor at the operator's request. Storage stays YAML text: JSON is valid YAML, and the editor's JSON is stored as canonical YAML. |
 
 ## What changed
 
@@ -372,9 +372,22 @@ default.
   - `start!` builds through `SessionLayout`; the `open_editor_pane` and
     `EDITOR_*` constants moved into the layout default.
   - `mark_pane_lost!` now closes the whole workspace.
-- `app/controllers/workspaces_controller.rb`, `app/views/workspaces/*`: a
-  Layout textarea (with the default as its placeholder) on the new and edit
-  forms, plus validation errors.
+- `app/controllers/workspaces_controller.rb`, `app/views/workspaces/*`,
+  **new** `app/javascript/controllers/layout_editor_controller.js`: a visual
+  layout editor on the new and edit forms, and the form's validation errors.
+  - Each tab is a card: a name field, and a pane list where each pane has a
+    name, a command, the earlier pane it splits off, right or below, and the
+    share that pane keeps.
+  - Tabs after the first can be moved or removed.
+  - Each tab shows a to-scale sketch computed the way herdr splits.
+  - The agent row is fixed.
+  - The editor writes JSON into the hidden `layout` field (JSON is YAML).
+    `Workspace` normalises any valid layout to canonical YAML
+    (`WorkspaceLayout.dump`) and keeps an invalid one as submitted.
+    `WorkspaceLayout.editor_data` hands it back to the editor unvalidated,
+    so the operator's work stays on screen beside the error.
+  - The field stays blank, meaning the default, until something is changed;
+    **Reset to default** blanks it again.
 - `README.md` ("Workspace layouts"), `AGENTS.md`, `CLAUDE.md`.
 
 ## Spec coverage
