@@ -175,11 +175,12 @@ Commands:
 | --- | --- |
 | `/panes` | Every live session: its run, workspace, what herdr says it is doing, and its last report. |
 | `/idle` | Only the live sessions that aren't working: idle, finished, blocked at a prompt, or reported idle. |
-| `/pane <run> [lines]` | The newest lines of that session's pane (default 40, up to 200). |
-| `/report <run>` | That run's newest checkpoint, rendered as Markdown. This also works after the session is closed. |
+| `/pane <run>` | Where that session stands. If it has reported (`report_idle`) and hasn't gone back to work since, you get that recap. Otherwise you get its live pane, and the message updates itself every few seconds for 3 minutes. If the session reports during that time, the message says so and the recap follows. |
+| `/screen <run> [lines]` | The raw newest lines of the pane, once (default 40, up to 200). |
+| `/report <run>` | That run's newest recap, rendered as Markdown. This also works after the session is closed. |
 | `/send <run> <text>` | Types `<text>` into the session as live input, exactly like the run screen's message box. |
 
-`<run>` is the run id's last four characters (the lists print `/pane_33bd` and `/report_33bd`, which you can tap), a prefix of the worktree name, or the full run id. Every message the bot sends about a run starts with `run <id> ·`, and **replying to one of those messages sends your reply to that run**.
+`<run>` is the run id's last four characters (the lists print `/pane_33bd` and `/screen_33bd`, which you can tap), a prefix of the worktree name, or the full run id. Every message the bot sends about a run starts with `run <id> ·`, and **replying to one of those messages sends your reply to that run**.
 
 Session status comes from herdr and is refreshed every 30 seconds, so it can lag by up to that much.
 

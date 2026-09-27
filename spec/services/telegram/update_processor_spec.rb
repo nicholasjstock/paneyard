@@ -7,7 +7,12 @@ RSpec.describe Telegram::UpdateProcessor do
 
   before do
     allow(Telegram::Client).to receive(:new).and_return(client)
-    allow(client).to receive(:send_message) { |**args| sent_texts << args[:text] }
+    allow(client).to receive(:send_message) do |**args|
+      sent_texts << args[:text]
+      { "message_id" => 77 }
+    end
+    # What herdr says the agent is doing right now; nil unless a spec says.
+    allow(Orchestrator::Herdr).to receive(:agent_get).and_return({})
     allow(Telegram::Configuration).to receive(:authorized_user?).and_return(false)
     allow(Telegram::Configuration).to receive(:authorized_user?).with("42").and_return(true)
   end
@@ -60,7 +65,7 @@ RSpec.describe Telegram::UpdateProcessor do
 
       text = sent_texts.join("\n")
       expect(text).to include("2 live sessions")
-      expect(text).to include("aaaa · #{workspace.name} · working", "/pane_aaaa /report_aaaa")
+      expect(text).to include("aaaa · #{workspace.name} · working", "/pane_aaaa /screen_aaaa")
       expect(text).to include("bbbb · #{workspace.name} · idle (idle)", "last report: done")
       expect(text).not_to include("cccc")
     end
@@ -87,17 +92,62 @@ RSpec.describe Telegram::UpdateProcessor do
   end
 
   describe "/pane" do
-    it "sends the newest lines of the pane, HTML-escaped, from the tappable form" do
+    it "shows the latest recap when the session has reported and is not working again" do
+      run, session = live_run("aaaa", worktree: "layouts-aaaa", agent_status: "idle")
+      run.checkpoints.create!(run_session: session, outcome: "done", summary: "## Shipped\n\nAll green.")
+      allow(Orchestrator::Herdr).to receive(:agent_get).with("w1:p1").and_return("agent_status" => "idle")
+      allow(Orchestrator::RunSessionRunner).to receive(:snapshot)
+
+      described_class.call(message("/pane_aaaa"))
+
+      expect(sent_texts.first).to start_with("run aaaa · layouts-aaaa\nRecap: done")
+      expect(sent_texts.first).to include("/screen_aaaa for the raw pane")
+      expect(client).to have_received(:send_rich_message).with(chat_id: 42, markdown: "## Shipped\n\nAll green.")
+      expect(Orchestrator::RunSessionRunner).not_to have_received(:snapshot)
+      expect(StreamTelegramPaneJob).not_to have_been_enqueued
+    end
+
+    it "shows the live pane, and keeps it updating, when the session has not reported yet" do
+      _run, session = live_run("aaaa", worktree: "layouts-aaaa")
+      allow(Orchestrator::RunSessionRunner).to receive(:snapshot).and_return("thinking...\n")
+
+      described_class.call(message("/pane aaaa"))
+
+      expect(client).to have_received(:send_message).with(
+        chat_id: 42, parse_mode: "HTML", text: "run aaaa · layouts-aaaa\nNo report yet · live for 3 min\n<pre>thinking...</pre>"
+      )
+      expect(StreamTelegramPaneJob).to have_been_enqueued.with(
+        hash_including(chat_id: 42, message_id: 77, session_id: session.id, since_checkpoint_id: 0)
+      )
+    end
+
+    it "shows the live pane rather than a stale recap when herdr says it is working again" do
+      run, session = live_run("aaaa", worktree: "layouts-aaaa", agent_status: "idle")
+      checkpoint = run.checkpoints.create!(run_session: session, outcome: "done", summary: "Old news.")
+      allow(Orchestrator::Herdr).to receive(:agent_get).with("w1:p1").and_return("agent_status" => "working")
+      allow(Orchestrator::RunSessionRunner).to receive(:snapshot).and_return("editing...")
+
+      described_class.call(message("/pane aaaa"))
+
+      expect(sent_texts.first).to include("Working again since its last report")
+      expect(client).not_to have_received(:send_rich_message)
+      expect(StreamTelegramPaneJob).to have_been_enqueued.with(hash_including(since_checkpoint_id: checkpoint.id))
+    end
+  end
+
+  describe "/screen" do
+    it "sends the newest lines of the pane once, HTML-escaped, from the tappable form" do
       _run, session = live_run("aaaa", worktree: "layouts-aaaa")
       allow(Orchestrator::RunSessionRunner).to receive(:snapshot).and_return("line 1\n<b>line 2</b>\n")
 
-      described_class.call(message("/pane_aaaa 80"))
+      described_class.call(message("/screen_aaaa 80"))
 
       expect(Orchestrator::RunSessionRunner).to have_received(:snapshot).with(session, lines: 80)
       expect(client).to have_received(:send_message).with(
         chat_id: 42, parse_mode: "HTML",
-        text: "run aaaa · layouts-aaaa\n<pre>line 1\n&lt;b&gt;line 2&lt;/b&gt;</pre>"
+        text: "run aaaa · layouts-aaaa\nScreen · working\n<pre>line 1\n&lt;b&gt;line 2&lt;/b&gt;</pre>"
       )
+      expect(StreamTelegramPaneJob).not_to have_been_enqueued
     end
 
     it "trims a long pane from the top so the newest lines fit one message" do
@@ -105,7 +155,7 @@ RSpec.describe Telegram::UpdateProcessor do
       lines = (1..400).map { |i| "line #{i} #{'x' * 20}\n" }.join
       allow(Orchestrator::RunSessionRunner).to receive(:snapshot).and_return(lines)
 
-      described_class.call(message("/pane aaaa"))
+      described_class.call(message("/screen aaaa"))
 
       expect(client).to have_received(:send_message) do |**args|
         expect(args[:text].length).to be <= Telegram::Client::MAX_MESSAGE_LENGTH
@@ -118,7 +168,7 @@ RSpec.describe Telegram::UpdateProcessor do
       _run, session = live_run("aaaa", worktree: "layouts-aaaa")
       allow(Orchestrator::RunSessionRunner).to receive(:snapshot).and_return("ok")
 
-      described_class.call(message("/pane layouts"))
+      described_class.call(message("/screen layouts"))
 
       expect(Orchestrator::RunSessionRunner).to have_received(:snapshot).with(session, lines: 40)
     end
@@ -149,7 +199,7 @@ RSpec.describe Telegram::UpdateProcessor do
 
       described_class.call(message("/report_aaaa"))
 
-      expect(sent_texts.first).to start_with("run aaaa · layouts-aaaa\nReport: done")
+      expect(sent_texts.first).to start_with("run aaaa · layouts-aaaa\nRecap: done")
       expect(client).to have_received(:send_rich_message).with(chat_id: 42, markdown: "## Done\n\nAll green.")
     end
 
@@ -223,6 +273,6 @@ RSpec.describe Telegram::UpdateProcessor do
   it "answers anything else with the command list" do
     described_class.call(message("/start"))
 
-    expect(sent_texts.last).to include("/panes", "/idle", "/pane <run>", "/report <run>", "/send <run> <text>")
+    expect(sent_texts.last).to include("/panes", "/idle", "/pane <run>", "/screen <run>", "/report <run>", "/send <run> <text>")
   end
 end

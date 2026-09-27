@@ -16,6 +16,10 @@ module Telegram
       call("sendMessage", chat_id:, text:, parse_mode:)
     end
 
+    def edit_message_text(chat_id:, message_id:, text:, parse_mode: nil)
+      call("editMessageText", chat_id:, message_id:, text:, parse_mode:)
+    end
+
     # Renders a checkpoint's Markdown (headings, tables, fences) natively.
     # Confirmed to deliver against this bot in production.
     def send_rich_message(chat_id:, markdown:)

@@ -19,8 +19,15 @@ commands**. That landed on the same branch, ahead of the phased plan below:
 - **Kept:** `Telegram::Client` (trimmed to `sendMessage`, `sendRichMessage`,
   `getUpdates` and `deleteWebhook`), `Telegram::Configuration`,
   `PollTelegramUpdatesJob` and `TelegramUpdateCursor`.
-- **New `Telegram::UpdateProcessor`:** `/panes`, `/idle`, `/pane <run>
-  [lines]`, `/report <run>`, `/send <run> <text>`, and reply routing. A reply
+- **New `Telegram::UpdateProcessor`:** `/panes`, `/idle`, `/pane <run>`,
+  `/screen <run> [lines]`, `/report <run>`, `/send <run> <text>`, and reply
+  routing.
+  - `/pane` shows the session's latest recap if it has reported and herdr
+    (asked live) doesn't say it's working again.
+  - Otherwise `/pane` sends the live pane, and `StreamTelegramPaneJob` edits
+    that message every 5 s for 3 minutes. If the session reports in the
+    meantime, it marks the message and sends the recap under it.
+  - `/screen` is the one-off raw pane. A reply
   to any bot message that starts with `run <id> ·` goes to that run.
   - Everything the bot does maps directly onto `RunSessionRunner.snapshot` or
     `prompt!`, or onto the checkpoints.

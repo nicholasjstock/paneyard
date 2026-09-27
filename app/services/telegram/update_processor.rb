@@ -1,3 +1,5 @@
+require "digest"
+
 module Telegram
   # Remote control for the operator's live run sessions, from their phone.
   #
@@ -16,8 +18,9 @@ module Telegram
     HELP = <<~TEXT.freeze
       /panes — every live session
       /idle — live sessions that are not working
-      /pane <run> [lines] — the newest lines of a session's pane
-      /report <run> — its newest checkpoint
+      /pane <run> — its latest recap, or its live pane if it hasn't reported since it last started working
+      /screen <run> [lines] — the raw newest lines of its pane, once
+      /report <run> — its newest recap, even after the session is closed
       /send <run> <text> — type an instruction into its pane
 
       <run> is the run id's last four characters (e.g. 33bd), a prefix of its worktree name, or the full run id.
@@ -69,9 +72,10 @@ module Telegram
       case command
       when "panes" then list_panes(idle_only: false)
       when "idle" then list_panes(idle_only: true)
-      when "pane"
+      when "pane" then show_pane(rest.split(/\s+/).first)
+      when "screen"
         ref, lines = rest.split(/\s+/, 2)
-        show_pane(ref, lines)
+        show_screen(ref, lines)
       when "report" then show_report(rest.split(/\s+/).first)
       when "send"
         ref, body = rest.split(/\s+/, 2)
@@ -100,20 +104,50 @@ module Telegram
         "#{ref} · #{run.workspace.name} · #{activity(session)}",
         "  #{run.worktree_name.presence || run.run_id}",
         ("  last report: #{checkpoint.outcome}, #{ago(checkpoint.created_at)}" if checkpoint),
-        "  /pane_#{ref} /report_#{ref}"
+        "  /pane_#{ref} /screen_#{ref}"
       ].compact.join("\n")
     end
 
-    def show_pane(ref, lines)
+    # What the operator wants to know about a session: if it has reported and
+    # not gone back to work since, its recap says where things stand. If not,
+    # the pane is all there is, so show it live until the session reports
+    # (StreamTelegramPaneJob), when the recap follows on its own.
+    def show_pane(ref)
+      run = resolve(ref) or return
+      session = run.live_session
+      if (checkpoint = RunViews.current_recap(session))
+        return RunViews.send_recap(@client, @chat_id, run, checkpoint, footer: "/screen_#{short_ref(run)} for the raw pane")
+      end
+
+      stream_pane(run, session)
+    end
+
+    def stream_pane(run, session)
+      text = Orchestrator::RunSessionRunner.snapshot(session, lines: RunViews::LIVE_PANE_LINES)
+      return reply("#{header(run)}\nherdr could not read this session's pane.") if text.nil?
+
+      last_checkpoint = session.checkpoints.last
+      minutes = StreamTelegramPaneJob::DURATION.in_minutes.to_i
+      note = "#{last_checkpoint ? 'Working again since its last report' : 'No report yet'} · live for #{minutes} min"
+      sent = @client.send_message(chat_id: @chat_id, parse_mode: "HTML", text: RunViews.pane_html(run, text, note:))
+      return unless sent.is_a?(Hash) && sent["message_id"]
+
+      StreamTelegramPaneJob.set(wait: StreamTelegramPaneJob::INTERVAL).perform_later(
+        chat_id: @chat_id, message_id: sent["message_id"], session_id: session.id,
+        since_checkpoint_id: last_checkpoint&.id.to_i, until_time: StreamTelegramPaneJob::DURATION.from_now.iso8601,
+        last_digest: Digest::SHA256.hexdigest(text)
+      )
+    end
+
+    def show_screen(ref, lines)
       run = resolve(ref) or return
       session = run.live_session
       count = (lines.presence || DEFAULT_PANE_LINES).to_i.clamp(1, MAX_PANE_LINES)
       text = Orchestrator::RunSessionRunner.snapshot(session, lines: count)
       return reply("#{header(run)}\nherdr could not read this session's pane.") if text.nil?
 
-      head = ERB::Util.html_escape(header(run))
-      body = Chunker.tail(text, limit: Client::MAX_MESSAGE_LENGTH - head.length - 64)
-      @client.send_message(chat_id: @chat_id, parse_mode: "HTML", text: "#{head}\n<pre>#{ERB::Util.html_escape(body)}</pre>")
+      note = "Screen · #{session.agent_status.presence || session.status}"
+      @client.send_message(chat_id: @chat_id, parse_mode: "HTML", text: RunViews.pane_html(run, text, note:))
     end
 
     def show_report(ref)
@@ -121,13 +155,7 @@ module Telegram
       checkpoint = run.checkpoints.last
       return reply("#{header(run)}\nNo report yet.") unless checkpoint
 
-      reply("#{header(run)}\nReport: #{checkpoint.outcome}, #{ago(checkpoint.created_at)}")
-      Chunker.split(checkpoint.summary.presence || "(empty summary)").each do |chunk|
-        @client.send_rich_message(chat_id: @chat_id, markdown: chunk)
-      rescue StandardError
-        # Rendering is a nicety; the report itself must still arrive.
-        @client.send_message(chat_id: @chat_id, text: chunk)
-      end
+      RunViews.send_recap(@client, @chat_id, run, checkpoint)
     end
 
     def send_to(ref, text)
@@ -183,17 +211,9 @@ module Telegram
       message.dig("reply_to_message", "text").to_s.lines.first.to_s[RUN_HEADER, 1]
     end
 
-    def header(run)
-      "run #{short_ref(run)} · #{run.worktree_name.presence || run.run_id}"
-    end
-
-    def short_ref(run)
-      run.run_id.split("-").last
-    end
-
-    def ago(time)
-      "#{ActionController::Base.helpers.time_ago_in_words(time)} ago"
-    end
+    def header(run) = RunViews.header(run)
+    def short_ref(run) = RunViews.short_ref(run)
+    def ago(time) = RunViews.ago(time)
 
     def reply(text)
       @client.send_message(chat_id: @chat_id, text:)
