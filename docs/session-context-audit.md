@@ -614,7 +614,7 @@ Then, per the operator's follow-up decisions:
   `~/.config/codex/skills/bus-handoff/`. Neither change is in the repo.
 
 Still not done:
-- F12: making `runId` optional.
+- F12: done later on this branch. `runId` is optional on `report_idle` and `record_workspace_env_var`, and the prompt no longer passes it.
 - F17: `WORKFLOW_RUN_TOKEN` in non-codex panes.
 - The CLAUDE.md `@AGENTS.md` import.
 

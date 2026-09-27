@@ -8,18 +8,21 @@ module McpTools
       "in plain text and injected into every future session, so never record a secret."
     input_schema(
       properties: {
-        runId: { type: "string", description: "This run's id, from your startup prompt." },
+        runId: { type: "string", description: "Optional: your own run is used by default." },
         name: { type: "string" },
         value: { type: "string" },
         evidenceRef: { type: "string", description: "One line on why it is needed, e.g. the failing command and its error." }
       },
-      required: %w[runId name value evidenceRef]
+      required: %w[name value evidenceRef]
     )
 
-    def self.call(runId:, name:, value:, evidenceRef:, server_context:)
+    # runId is optional for the same reason as report_idle's: the capability
+    # already identifies the run.
+    def self.call(name:, value:, evidenceRef:, server_context:, runId: nil)
       session = SessionAuthorization.session!(server_context:, run_id: runId)
+      run_id = session&.run&.run_id || runId.presence || raise(ArgumentError, "runId is required")
       entry = Orchestrator::WorkspaceEnvVars.record!(
-        run_id: runId, name: name, value: value, evidence_ref: evidenceRef,
+        run_id:, name: name, value: value, evidence_ref: evidenceRef,
         recorded_by: session&.driver || "session"
       )
       ToolResponse.structured(entry.as_json)

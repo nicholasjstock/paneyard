@@ -16,6 +16,18 @@ RSpec.describe McpTools::RecordWorkspaceEnvVarTool do
     expect(entry.recorded_by).to eq("claude")
   end
 
+  it "takes the run from the capability when runId is omitted" do
+    run, session = create_run_and_session(prefix: "record-env-var-no-id")
+
+    response = described_class.call(
+      name: "BUNDLE_WITHOUT", value: "production", evidenceRef: "bundle install failed",
+      server_context: { run_session_id: session.id }
+    )
+
+    expect(response.error?).to be_falsey
+    expect(run.workspace.workspace_env_vars.find_by!(name: "BUNDLE_WITHOUT").value).to eq("production")
+  end
+
   it "rejects a capability belonging to a different run" do
     _run, session = create_run_and_session(prefix: "record-env-var-a")
     other_run = create_run(prefix: "record-env-var-b")

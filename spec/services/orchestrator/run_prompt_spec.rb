@@ -32,9 +32,8 @@ RSpec.describe Orchestrator::RunPrompt do
   # an idle session from a working one otherwise.
   it "spells out when to report and that questions belong in a blocked report" do
     expect(prompt).to include("report_idle")
-    expect(prompt).to include(run.run_id)
-    expect(prompt).to include("`done`, `blocked` or `failed`")
-    expect(prompt).to include("question goes in a `blocked` summary")
+    expect(prompt).to include("`done`,\n`blocked` or `failed`")
+    expect(prompt).to include("question goes in a `blocked`\nsummary")
     expect(prompt).to include("does not end the run")
   end
 

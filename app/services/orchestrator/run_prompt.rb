@@ -21,7 +21,7 @@ module Orchestrator
       [
         header_section(run),
         changes_section(run),
-        reporting_section(run:, session_driver:),
+        reporting_section(session_driver),
         attachments_section(run),
         task_section(run)
       ].compact.join("\n")
@@ -49,11 +49,11 @@ module Orchestrator
       SECTION
     end
 
-    def reporting_section(run:, session_driver:)
+    def reporting_section(session_driver)
       section = <<~SECTION
-        Whenever you stop -- finished, stuck, or giving up -- call `report_idle` (MCP server `workflow`, runId
-        `#{run.run_id}`) with `done`, `blocked` or `failed`. The operator reads these reports, not this terminal, so a
-        question goes in a `blocked` summary. Reporting does not end the run; if more work comes, report again.
+        Whenever you stop -- finished, stuck, or giving up -- call `report_idle` (MCP server `workflow`) with `done`,
+        `blocked` or `failed`. The operator reads these reports, not this terminal, so a question goes in a `blocked`
+        summary. Reporting does not end the run; if more work comes, report again.
       SECTION
       # Only Claude Code defers MCP tools behind ToolSearch; codex and opencode
       # have no such tool and name MCP tools differently.

@@ -20,6 +20,22 @@ RSpec.describe McpTools::ReportIdleTool do
     expect(run.checkpoints.map(&:summary)).to eq([ "Added the index and a regression test." ])
   end
 
+  # The capability already identifies the run, so the session need not
+  # repeat it -- and the prompt no longer tells it the id to pass.
+  it "takes the run from the capability when runId is omitted" do
+    run, session = create_run_and_session(prefix: "report-idle-no-id")
+
+    response = described_class.call(outcome: "done", summary: "Done.", server_context: { run_session_id: session.id })
+
+    expect(response.error?).to be_falsey
+    expect(response.structured_content).to include(runId: run.run_id)
+    expect(run.reload.checkpoints.map(&:summary)).to eq([ "Done." ])
+  end
+
+  it "does not require runId in its schema" do
+    expect(described_class.input_schema.to_h[:required]).to contain_exactly("outcome", "summary")
+  end
+
   it "does not close the herdr pane or kill the process" do
     run, session = create_run_and_session(prefix: "report-idle-pane")
     allow(Orchestrator::Herdr).to receive(:workspace_close)

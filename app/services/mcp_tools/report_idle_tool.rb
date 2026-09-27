@@ -28,7 +28,7 @@ module McpTools
       "again when you next stop."
     input_schema(
       properties: {
-        runId: { type: "string", description: "This run's id, from your startup prompt." },
+        runId: { type: "string", description: "Optional: your own run is used by default." },
         outcome: { type: "string", enum: RunSession::OUTCOMES },
         summary: {
           type: "string",
@@ -38,18 +38,21 @@ module McpTools
             "can try it, and what should happen next. For `blocked`, lead with the question."
         }
       },
-      required: %w[runId outcome summary]
+      required: %w[outcome summary]
     )
 
-    def self.call(runId:, outcome:, summary:, server_context:)
+    # runId is optional: the capability already says which run is calling,
+    # so it only needs checking when given (SessionAuthorization rejects a
+    # mismatch). Still accepted so a session briefed to pass it keeps working.
+    def self.call(outcome:, summary:, server_context:, runId: nil)
       session = SessionAuthorization.session!(server_context:, run_id: runId)
-      run = Run.find_by!(run_id: runId)
+      run = session&.run || Run.find_by!(run_id: runId.presence || raise(ArgumentError, "runId is required"))
       session ||= run.live_session
-      raise ArgumentError, "run #{runId} has no live session" unless session
+      raise ArgumentError, "run #{run.run_id} has no live session" unless session
 
       Orchestrator::RunIdleReport.call(run:, session:, outcome:, summary:)
 
-      ToolResponse.structured(run_id: runId, outcome:, status: run.reload.status)
+      ToolResponse.structured(run_id: run.run_id, outcome:, status: run.reload.status)
     rescue ArgumentError, ActiveRecord::RecordNotFound => error
       ToolResponse.error(error.message)
     end
