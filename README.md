@@ -1,6 +1,6 @@
 # Workflow Orchestrator
 
-Queue a job against a workspace. When a slot frees, it gets its own git worktree and one live `claude`/`codex`/`opencode` session you can watch and talk to, which does the work end to end and pushes its branch. Runs, sessions, events, artifacts, and operator chat all stay scoped to their workspace.
+Queue a job against a workspace. When a slot frees, it gets its own git worktree and one live `claude`/`codex`/`opencode` session you can watch and talk to, which does the work end to end and pushes its branch. Runs, sessions, checkpoints, and artifacts all stay scoped to their workspace.
 
 Rails schedules; it does not orchestrate. It decides when a run starts, gives it a worktree, and reclaims that worktree afterwards. Everything in between belongs to the session. There is no planner, no step queue, and no pull-request publishing: the session pushes its branch, and opening and merging a PR is up to you.
 
@@ -150,9 +150,9 @@ If a session dies without reporting (pane closed, CLI crashed), `RunSessionRecon
 
 See AGENTS.md's "MCP Boundary" for the design rules behind both.
 
-## Telegram admin chat
+## Telegram remote control
 
-The optional Telegram bot fronts the existing workspace admin chats. It only accepts messages from the Telegram user IDs configured below.
+The optional Telegram bot lets you check on and steer your live run sessions from your phone. It answers only the Telegram user IDs configured below, and only in your private chat with the bot, never in a group.
 
 Add these values to Rails credentials (or set equivalent environment variables):
 
@@ -169,7 +169,21 @@ The app polls Telegram every five seconds, so it only needs outbound internet ac
 bin/rails runner 'Telegram::Client.new.delete_webhook'
 ```
 
-In Telegram, send `/workspaces`, select a workspace, and then chat normally. `/stop` cancels that workspace's current admin-chat turn.
+Commands:
+
+| Command | What it does |
+| --- | --- |
+| `/panes` | Every live session: its run, workspace, what herdr says it is doing, and its last report. |
+| `/idle` | Only the live sessions that aren't working: idle, finished, blocked at a prompt, or reported idle. |
+| `/pane <run> [lines]` | The newest lines of that session's pane (default 40, up to 200). |
+| `/report <run>` | That run's newest checkpoint, rendered as Markdown. This also works after the session is closed. |
+| `/send <run> <text>` | Types `<text>` into the session as live input, exactly like the run screen's message box. |
+
+`<run>` is the run id's last four characters (the lists print `/pane_33bd` and `/report_33bd`, which you can tap), a prefix of the worktree name, or the full run id. Every message the bot sends about a run starts with `run <id> ·`, and **replying to one of those messages sends your reply to that run**.
+
+Session status comes from herdr and is refreshed every 30 seconds, so it can lag by up to that much.
+
+Be aware of what this exposes. Anyone on the allow-list can type into sessions that have full access to their worktrees, which amounts to a shell on this machine. Pane text and checkpoints also pass through Telegram's servers, and bot chats aren't end-to-end encrypted, so anything a session prints can end up there.
 
 ## Verification
 

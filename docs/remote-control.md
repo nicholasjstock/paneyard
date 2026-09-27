@@ -1,7 +1,48 @@
 # Remote control for live run sessions
 
-Status: **design only, nothing here is implemented.** Written 2026-09-27 on
+Status: **partly implemented.** Written 2026-09-27 on
 `workflow/plan-do-not-implement-replacing-the-workspace-ad-33bd`.
+
+## Update, 2026-09-27: what shipped
+
+The operator decided to **remove the admin chat outright (D2), keep the
+Telegram plumbing, and redesign the Telegram side from scratch as plain
+commands**. That landed on the same branch, ahead of the phased plan below:
+
+- **Removed:** everything in §6.1. That is the admin-chat models, driver and
+  providers, `AdminChatPolicy`, the dormant MCP tools and
+  `AdminChatAuthorization`, the turn, delivery and progress jobs, the
+  controllers, routes, views, drawer JS and CSS, the `chat` worker pool, the
+  progress recurring job, the specs, and the tables
+  (`20260927090000_drop_workspace_admin_chats`, which also drops
+  `telegram_conversations`).
+- **Kept:** `Telegram::Client` (trimmed to `sendMessage`, `sendRichMessage`,
+  `getUpdates` and `deleteWebhook`), `Telegram::Configuration`,
+  `PollTelegramUpdatesJob` and `TelegramUpdateCursor`.
+- **New `Telegram::UpdateProcessor`:** `/panes`, `/idle`, `/pane <run>
+  [lines]`, `/report <run>`, `/send <run> <text>`, and reply routing. A reply
+  to any bot message that starts with `run <id> ·` goes to that run.
+  - Everything the bot does maps directly onto `RunSessionRunner.snapshot` or
+    `prompt!`, or onto the checkpoints.
+  - It is stateless: the new design needs no Telegram tables at all.
+  - It answers allow-listed users in their private chat with the bot, and no
+    one else.
+  - Tappable `/pane_33bd`-style commands stand in for inline keyboards.
+- **New `Telegram::Chunker`:** splits on line boundaries and never breaks a
+  fenced code block; pane tails are trimmed from the top.
+
+**Still open from the plan below:**
+
+| Item | Where |
+| --- | --- |
+| D1, loopback binding | phase 0 |
+| `RunActions` extraction | phase 1 |
+| Raw keys and the pane panel on the web | phase 2 |
+| Pushed notifications | phase 3 |
+| Queue, Close session and Remove worktree from Telegram, with confirmations | phase 4 |
+
+Read those sections as the plan for what's left. Where they describe the old
+admin chat as still present, that is now history.
 
 The proposal: remove the "workspace admin chat" and its Telegram front end, and
 put a thin remote-control transport in their place. It acts directly on the
