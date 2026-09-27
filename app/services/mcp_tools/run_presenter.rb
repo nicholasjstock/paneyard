@@ -1,5 +1,5 @@
 module McpTools
-  # Shared shape for how a run is described to the admin chat. One place, so
+  # Shared shape for how a run is described to MCP callers. One place, so
   # `list_runs` and `get_run` can never drift into disagreeing about what a
   # run's state is.
   module RunPresenter
