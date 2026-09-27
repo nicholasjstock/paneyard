@@ -7,7 +7,6 @@
 class Workspace < ApplicationRecord
   has_many :runs, dependent: :restrict_with_error
   has_many :workspace_env_vars, dependent: :destroy
-  has_one :workspace_admin_chat, dependent: :destroy
 
   validates :name, presence: true, uniqueness: true
   validates :root_path, presence: true, uniqueness: true

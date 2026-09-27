@@ -27,11 +27,6 @@ Rails.application.routes.draw do
   root "workspaces#index"
 
   resources :workspaces, only: %i[index show new create edit update destroy] do
-    resource :workspace_admin_chat, controller: "workspace_admin_chats", only: %i[update] do
-      post :cancel
-      post :reset
-    end
-    resources :workspace_admin_chat_messages, controller: "workspace_admin_chat_messages", only: %i[create]
     resources :runs, only: %i[index new create show] do
       member do
         post :stop
