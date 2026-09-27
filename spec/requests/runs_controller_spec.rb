@@ -120,6 +120,23 @@ RSpec.describe "runs", type: :request do
     expect(response.body).to include("no live session")
   end
 
+  # A launch that fails leaves no checkpoint and no pane, so the session's
+  # result -- the error and the agent pane's last screen -- is the only record.
+  it "shows a failed launch's error and last pane screen, but not a finished session's result" do
+    run, session = create_run_and_session(prefix: "runs-controller-failed-launch", status: "starting", started_at: nil)
+    session.update!(
+      status: "failed", outcome: "failed", ended_at: Time.current,
+      result: "herdr never detected claude starting\n\n--- Last screen of agent pane w1:p1 ---\nzsh: no such file"
+    )
+
+    get workspace_run_path(run.workspace, run)
+    expect(response.body).to include("Last screen of agent pane w1:p1").and include("zsh: no such file")
+
+    session.update!(started_at: Time.current, result: "Finished the audit.")
+    get workspace_run_path(run.workspace, run)
+    expect(response.body).not_to include("Finished the audit.")
+  end
+
   # Nothing tears a pane down but the operator, so this is the only path that
   # kills the CLI and hands the concurrency slot back.
   describe "close_session" do
