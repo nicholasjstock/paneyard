@@ -16,6 +16,8 @@ Rails does not do pull requests. A session pushes its own branch; opening, revie
 
 herdr owns every pty and process. `Orchestrator::Herdr` is a thin JSON-RPC client for it; Rails only remembers which pane, which pid, and which CLI session id. The per-driver flags in `Orchestrator::SessionArgs` were established by running the CLIs live inside a pane and several contradict their own `--help` — do not simplify one away without re-verifying it the same way.
 
+A run's panes come from its `Workspace`'s layout (`Orchestrator::WorkspaceLayout`/`SessionLayout`, see `docs/workspace-layouts.md`). The agent pane is the only obligatory one and the only one Rails tracks. The rest are set up once at session start and never supervised. They die with the herdr workspace.
+
 A session produces no structured JSON output, so there is no cost or token accounting for it. That is the accepted price of watching the real thing instead of a transcript of it, not a bug to fix.
 
 ## Worktrees

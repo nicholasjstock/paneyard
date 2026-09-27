@@ -59,13 +59,29 @@ module Orchestrator
   #     --print/exec process a real interactive CLI never exits on its own.
   #     That group id is what Rails records as the session pid and what it must
   #     explicitly kill for "session over" to mean "process gone".
-  #   - pane.split {target_pane_id, direction, cwd, focus} -> {pane: {pane_id,
-  #     ...}}. direction is right|down. It takes no command to run: the new pane
-  #     is a plain shell, so anything in it is launched with pane.send_input
-  #     {pane_id, text, keys}. Confirmed live that input sent straight after the
-  #     split, while the shell is still running its rc files, is held as
-  #     typeahead and runs once the prompt comes up, and that workspace.close
-  #     takes every pane in the workspace (and the process in it) down with it.
+  #   - pane.split {target_pane_id, direction, ratio, cwd, env, focus} ->
+  #     {pane: {pane_id, ...}}. direction is right|down; ratio is the share the
+  #     split (target) pane keeps (confirmed live: 0.3 left the target 23 of 78
+  #     columns). It takes no command to run: the new pane is a plain shell, so
+  #     anything in it is launched with pane.send_input {pane_id, text, keys}.
+  #     Confirmed live that input sent straight after the split, while the
+  #     shell is still running its rc files, is held as typeahead and runs once
+  #     the prompt comes up, and that workspace.close takes every pane in the
+  #     workspace (and the process in it) down with it.
+  #   - tab.create {workspace_id, label, cwd, env, focus} -> {tab: {tab_id,
+  #     ...}, root_pane: {pane_id, ...}}. Confirmed live that focus: false in an
+  #     unfocused workspace leaves both the workspace unfocused and its active
+  #     tab where it was, and that workspace.close kills the processes in every
+  #     tab, not just the first.
+  #   - env on workspace.create / tab.create / pane.split applies to that one
+  #     new pane only. Confirmed live: a split or a new tab inherits nothing
+  #     from the workspace's root pane, so every pane gets exactly the env its
+  #     own creating call passed (plus herdr's HERDR_* vars).
+  #   - focus: true on pane.split does NOT just pick the tab's active pane: it
+  #     was confirmed live to focus the whole herdr workspace and switch to that
+  #     tab, taking over the operator's screen. Never pass it for a run.
+  #   - pane.rename {pane_id, label} / tab.rename {tab_id, label} set the labels
+  #     herdr shows (layout.export reports a pane's label back).
   #   - pane.read {pane_id, source} -> {text, truncated, ...}; source is one of
   #     visible|recent|recent_unwrapped|detection.
   #   - pane.get / workspace.get / workspace.close take {pane_id}/
@@ -144,8 +160,23 @@ module Orchestrator
     # that already rescue Herdr::Error -- RunSessionRunner.snapshot, whose
     # whole job is to degrade to nil rather than take the run screen down --
     # keep working.
-    def pane_split(target_pane_id:, direction:, cwd:, focus: false)
-      request!("pane.split", target_pane_id:, direction:, cwd:, focus:).fetch("pane")
+    def pane_split(target_pane_id:, direction:, cwd:, focus: false, ratio: nil, env: nil)
+      params = { target_pane_id:, direction:, cwd:, focus: }
+      params[:ratio] = ratio if ratio
+      params[:env] = compact_env(env) if env
+      request!("pane.split", **params).fetch("pane")
+    end
+
+    def pane_rename(pane_id, label)
+      request!("pane.rename", pane_id:, label:)
+    end
+
+    def tab_create(workspace_id:, cwd:, label: nil, env: {}, focus: false)
+      request!("tab.create", workspace_id:, label:, cwd:, env: compact_env(env), focus:)
+    end
+
+    def tab_rename(tab_id, label)
+      request!("tab.rename", tab_id:, label:)
     end
 
     def pane_send_input(pane_id, text:, keys: [])

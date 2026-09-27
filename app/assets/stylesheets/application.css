@@ -1376,3 +1376,76 @@ pre.log.live-log {
 .markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
 .markdown th, .markdown td { border: 1px solid var(--border); padding: 0.25rem 0.5rem; text-align: left; }
 .markdown a { color: var(--accent); }
+
+/* Workspace layout editor (layout_editor_controller.js) */
+.layout-editor [hidden] { display: none; }
+.layout-editor-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.layout-tab { margin: 0 0 0.75rem; min-width: 0; }
+.layout-tab-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.layout-tab-number { color: var(--muted); font-weight: 600; font-size: 0.8rem; white-space: nowrap; }
+.field .layout-tab-header input[type="text"] { flex: 1 1 12rem; width: auto; }
+.layout-tab-body { display: grid; gap: 0.75rem; }
+.layout-panes { display: grid; gap: 0.5rem; align-content: start; }
+.layout-pane {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.layout-pane-agent { border-color: var(--accent); }
+.layout-pane-split { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.field .layout-pane-split select { width: auto; flex: 1 1 8rem; }
+.field .layout-pane input.layout-pane-ratio { width: 6rem; flex: 0 0 6rem; }
+.field .layout-pane input[type="number"] {
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  min-height: 44px;
+  font-size: 1rem;
+}
+.layout-preview {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  max-height: 220px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.layout-preview-pane {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.layout-preview-pane.agent { color: var(--accent); border-color: var(--accent); }
+
+@media (min-width: 768px) {
+  .layout-tab-body { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  .layout-pane { grid-template-columns: minmax(8rem, 1fr) minmax(0, 2fr) auto; align-items: center; }
+  .layout-pane-agent { grid-template-columns: auto 1fr; }
+  .layout-pane-split, .layout-pane-root { grid-column: 1 / 3; }
+}
