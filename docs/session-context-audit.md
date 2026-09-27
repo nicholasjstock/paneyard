@@ -289,7 +289,9 @@ reporting leaves Rails believing the session is still working.
 - `WorktreeJanitor` treats a worktree whose HEAD is on `main` as releasable, which is consistent with either
   reading.
 
-A session in this repo can reasonably conclude it should merge itself. This needs an operator decision (D1).
+A session in this repo can reasonably conclude it should merge itself. **Resolved (D1):** the operator confirms
+that a session may merge straight into `main`, on request like any other commit. AGENTS.md is right. The prompt
+now says how to do it, and CLAUDE.md should stop implying that pushing a branch is as far as a session goes.
 
 **F6 (M, this repo only): Stale root docs a session is likely to open.**
 - `ARCHITECTURE.md` opens with "Rails owns orchestration state, planning, retries… one bounded planner decision,
@@ -425,8 +427,9 @@ only when there are attachments.
 Worktree `{worktree}`, branch `{branch}` (from `main` at {base_sha_short}). It is yours alone. Follow the repo's
 own AGENTS.md / CLAUDE.md.
 
-Leave your changes uncommitted: the operator tries them out and decides what to keep. Do not commit, push or open
-a pull request unless asked. When asked, commit on this branch and `git push -u origin {branch}`.
+Leave your changes uncommitted: the operator tries them out and decides what to keep. Do not commit, push or merge
+unless asked. When asked: commit on this branch, push with `git push -u origin {branch}`, and merge from the main
+checkout (`git -C {source_root} merge {branch}`), since `main` is checked out there.
 
 Whenever you stop (finished, stuck, or giving up), call `report_idle` (MCP server `workflow`, runId `{run_id}`)
 with `done`, `blocked` or `failed`. The operator reads these reports, not this terminal, so a question goes in a
@@ -525,6 +528,10 @@ If they are kept instead, fix `read`, move storage out of the worktree, and use 
 
 These are ordinary edits a later run can make. Rails injects none of them.
 
+- **CLAUDE.md, Worktrees**: "never removes a worktree whose work is not both committed and pushed or merged"
+  becomes "…not merged into `main`" (D1).
+- **README.md, git requirements** (lines 72–80): drop the "or contained in some remote-tracking branch" condition
+  and the sentence saying a plain push is enough. Apply the same change to the orphan-worktree paragraph.
 - **Commit rule (F0)**, in CLAUDE.md, AGENTS.md, README.md and GITHUB_APP_SETUP.md: replace "the session commits
   and pushes its branch" with "the session leaves its changes uncommitted for the operator to try; it commits and
   pushes its branch only when asked". Specifically:
@@ -532,8 +539,9 @@ These are ordinary edits a later run can make. Rails injects none of them.
   - README's "It worked when…" check, which expects a pushed branch;
   - README's line 87, which says the prompt asks for commit and push.
 - **AGENTS.md**:
-  - Resolve F5 per D1. Delete "may commit and merge straight into `main`" and "may be merged directly into
-    `main`", or scope them to the operator.
+  - Keep "a session may merge straight into `main`" (D1), and add "when asked".
+  - Worktrees section: a worktree is removed only once its HEAD is merged into `main`. Pushed alone is no longer
+    enough (D1).
   - Scope the `bin/service restart` paragraph to the operator's own session in `main`, and state that run
     sessions must not restart the production instance (F7).
   - In "Commit & Pull Request Guidelines", drop "Run `bin/ci` before opening a PR" and the PR-description advice,
@@ -568,6 +576,10 @@ These are ordinary edits a later run can make. Rails injects none of them.
    panes (F17).
 6. Specs: extend `run_prompt` coverage for the driver branch and attachments, and add a spec for
    `read_workflow_artifact` (if kept) that would have caught F1.
+7. `WorktreeJanitor` (D1): remove the `git branch --remotes --contains HEAD` branch of `work_saved?`, so only
+   "HEAD is an ancestor of local `main`" counts. Update the class comment, `Run#kept_worktree?` wording, and the
+   run-screen and runs-list copy ("kept until you push, merge, or remove it" becomes "…until you merge or remove
+   it"). Update `worktree_janitor_spec.rb`: a clean, pushed, unmerged worktree must now be kept.
 
 ### 4.6 Operator-machine changes (outside the repo)
 
@@ -583,17 +595,17 @@ These are ordinary edits a later run can make. Rails injects none of them.
 
 ## 5. Decisions for the operator
 
-- **D1: Commit policy. Decided: leave changes uncommitted.** A session commits and pushes only when the operator
-  asks. §4.2 and §4.3 reflect this. Knock-on effects to confirm:
-  - **Every run's worktree will now be "kept".** `WorktreeJanitor` never removes a dirty worktree, so Close
-    session will leave every run's worktree in place, flagged with the "worktree kept" attention badge. That is
-    safe, but the badge's warning tone becomes the normal state. Consider rewording it, or distinguishing "has
-    uncommitted changes" from "unpushed commits".
-  - **Close session with uncommitted work.** If the operator closes a session before asking it to commit, they
-    have to commit in the worktree themselves, since the session is gone. Should Close session warn when the
-    worktree is dirty?
-  - **Merging into `main`.** AGENTS.md's "a session may merge straight into `main`" is now clearly wrong for a
-    run session, and should be removed or scoped to the operator (§4.4).
+- **D1: Commit, merge and cleanup policy. Decided.**
+  - A session leaves its changes uncommitted, and commits, pushes or merges only when the operator asks.
+  - A session **may** merge straight into `main` when asked. AGENTS.md already says so, and it stays.
+  - **A worktree that is not merged into `main` is never cleaned up automatically**, even if it is clean and
+    pushed, in case the session was closed by mistake. This is a behavior change: today
+    `WorktreeJanitor.work_saved?` (lines 124–129) also treats "HEAD is on a remote branch" as saved. See §4.5 item 7.
+    A worktree whose HEAD is still the base commit (the session changed nothing) is an ancestor of `main`, so it
+    is still reclaimed. That is fine, since it holds nothing.
+  - Still open: the "worktree kept" badge will now show on most runs until they are merged. Should its wording
+    lose the warning tone ("not merged yet" rather than "attention")? And should Close session warn when the
+    worktree has uncommitted changes? The worktree is kept either way, so the warning is only a courtesy.
 - **D2: Keep the artifact store?** The recommendation is to remove `write_workflow_artifact` and
   `read_workflow_artifact` from `/mcp/run`, and to deliver launch attachments as a filesystem path. The run page's
   artifacts panel would then only show launch files. The alternative is to fix `read`, move storage out of the
