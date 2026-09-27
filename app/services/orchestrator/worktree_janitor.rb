@@ -24,7 +24,7 @@ module Orchestrator
     module_function
 
     def sweep_all
-      Workspace.find_each.sum { |workspace| sweep(workspace) }
+      Workspace.find_each.select { |workspace| Sandbox.allows_path?(workspace.root_path) }.sum { |workspace| sweep(workspace) }
     end
 
     # Whether `path` is a worktree git itself knows about, as opposed to a
@@ -132,12 +132,14 @@ module Orchestrator
     end
 
     def remove_worktree!(source_root, path, force: false)
+      guard_sandbox!(path)
       args = [ "worktree", "remove" ]
       args << "--force" if force
       git!(source_root, *args, path.to_s)
     end
 
     def prune!(source_root)
+      guard_sandbox!(source_root)
       git!(source_root, "worktree", "prune")
     end
 
@@ -171,6 +173,12 @@ module Orchestrator
       remove_worktree!(source_root, path)
       prune!(source_root)
       true
+    end
+
+    def guard_sandbox!(path)
+      Sandbox.guard_path!(path, "remove worktrees in")
+    rescue Sandbox::Violation => error
+      raise Error, error.message
     end
 
     def git_success?(root, *args)

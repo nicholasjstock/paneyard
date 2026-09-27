@@ -12,6 +12,7 @@ class Workspace < ApplicationRecord
   validates :root_path, presence: true, uniqueness: true
   validate :source_checkout_is_not_changed_while_runs_are_active
   validate :layout_is_valid
+  validate :root_path_is_inside_the_sandbox
 
   # A blank layout is stored as NULL, which means the default. A valid one is
   # stored as canonical YAML whatever form it arrived in (the workspace form's
@@ -45,6 +46,14 @@ class Workspace < ApplicationRecord
     return if layout.blank?
 
     Orchestrator::WorkspaceLayout.errors_for(layout).each { |message| errors.add(:layout, message) }
+  end
+
+  # A sandbox instance (Orchestrator::Sandbox) only manages scratch repos of
+  # its own, so it can never be pointed at a real project's worktrees.
+  def root_path_is_inside_the_sandbox
+    return if root_path.blank? || Orchestrator::Sandbox.allows_path?(root_path)
+
+    errors.add(:root_path, "must be inside the sandbox root #{Orchestrator::Sandbox.root}")
   end
 
   def source_checkout_is_not_changed_while_runs_are_active

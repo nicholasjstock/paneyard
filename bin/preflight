@@ -1,0 +1,181 @@
+#!/usr/bin/env ruby
+# Boots THIS checkout's code the way `bin/service restart` would, but on a
+# scratch database and a free port, and fails fast on the class of bug that
+# otherwise only shows up after a restart: config read once at boot
+# (queue.yml, recurring.yml, credentials), code that only breaks when eager
+# loaded, migrations, and Puma plus Solid Queue actually coming up.
+#
+#   bin/preflight               against a fresh, empty database
+#   bin/preflight --prod-copy   against a copy of the production database, so
+#                               pending migrations run on real data first
+#
+# --prod-copy takes an online, read-only sqlite backup of the main checkout's
+# storage/production.sqlite3 into tmp/preflight/ (never writes the original).
+# The booted copy runs with WORKFLOW_SANDBOX=1, so none of the real
+# workspaces, worktrees or session pids in it can be acted on, with a fresh
+# job queue and no recurring jobs, so nothing is dispatched from it.
+#
+# bin/service restart runs `bin/preflight --prod-copy` before stopping the
+# running instance and leaves it running if this fails.
+
+require "bundler/setup"
+require "fileutils"
+require "sqlite3"
+require_relative "../lib/workflow_sandbox/instance"
+require_relative "../lib/workflow_sandbox/mcp_client"
+
+APP_ROOT = File.expand_path("..", __dir__)
+ROOT = File.join(APP_ROOT, "tmp", "preflight")
+STORAGE = File.join(ROOT, "storage")
+PROD_COPY = ARGV.include?("--prod-copy")
+# Only the primary database has migrations (db/migrate); queue, cache and
+# cable are loaded from their schema files when created, so the instance gets
+# fresh ones -- which also means none of production's pending jobs come along.
+DATABASES = %w[production].freeze
+
+$stdout.sync = true
+@failed = false
+
+def step(name)
+  started = Time.now
+  detail = yield
+  puts "  ok   #{name}#{" -- #{detail}" if detail.is_a?(String)} (#{(Time.now - started).round(1)}s)"
+  true
+rescue StandardError => error
+  @failed = true
+  puts "  FAIL #{name}: #{error.message}"
+  false
+end
+
+# The main checkout holds the production database. From a worktree that is
+# the checkout owning the shared .git; from main it is this checkout.
+def production_storage
+  return ENV["WORKFLOW_PREFLIGHT_SOURCE_STORAGE"] if ENV["WORKFLOW_PREFLIGHT_SOURCE_STORAGE"]
+
+  common_dir = IO.popen([ "git", "-C", APP_ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir" ], &:read).strip
+  File.join(File.dirname(common_dir), "storage")
+end
+
+def schema_version(path)
+  return nil unless File.exist?(path)
+
+  db = SQLite3::Database.new(path, readonly: true)
+  db.get_first_value("SELECT MAX(CAST(version AS INTEGER)) FROM schema_migrations")
+rescue SQLite3::Exception
+  nil
+ensure
+  db&.close
+end
+
+def copy_production_databases
+  source = production_storage
+  copied = DATABASES.filter_map do |name|
+    path = File.join(source, "#{name}.sqlite3")
+    next unless File.exist?(path)
+
+    SQLite3::Database.new(path, readonly: true) do |from|
+      SQLite3::Database.new(File.join(STORAGE, "#{name}.sqlite3")) do |to|
+        backup = SQLite3::Backup.new(to, "main", from, "main")
+        backup.step(-1)
+        backup.finish
+      end
+    end
+    "#{name} (#{(File.size(path) / 1024.0 / 1024).round(1)} MB)"
+  end
+  raise "no production databases in #{source}" if copied.empty?
+
+  "#{copied.join(', ')} from #{source}"
+end
+
+puts "bin/preflight: #{PROD_COPY ? 'production copy' : 'empty database'}, scratch dir #{ROOT}"
+FileUtils.rm_rf(ROOT)
+FileUtils.mkdir_p(STORAGE)
+instance = WorkflowSandbox::Instance.new(
+  app_root: APP_ROOT, root: ROOT, storage_dir: STORAGE,
+  # A production copy holds real queued runs and live sessions: no recurring
+  # dispatch or reconcile against it (Orchestrator::Sandbox would refuse to
+  # act on them anyway). bin/sandbox verify boots the recurring schedule.
+  env: PROD_COPY ? { "SOLID_QUEUE_SKIP_RECURRING" => "true" } : {}
+)
+
+begin
+  step("bundle is complete") do
+    raise "run bin/setup" unless system("bundle", "check", out: File::NULL, err: File::NULL)
+  end
+  step("copy production databases (read-only backup)") { copy_production_databases } if PROD_COPY && !@failed
+
+  step("migrations (db:prepare)") do
+    before = schema_version(File.join(STORAGE, "production.sqlite3"))
+    output, ok = instance.run("bin/rails", "db:prepare")
+    raise "db:prepare failed:\n#{output}" unless ok
+
+    after = schema_version(File.join(STORAGE, "production.sqlite3"))
+    before == after ? "schema at #{after}, nothing pending" : "migrated #{before || 'empty'} -> #{after}"
+  end unless @failed
+
+  unless @failed
+    output, ok = instance.run("bin/rails", "runner", "script/preflight_checks.rb")
+    output = output.lines.grep_v(/GitHub App credentials not configured/).join
+    @failed = true unless ok
+    if ok || output.match?(/^\s+(ok|FAIL) /)
+      puts output
+    else
+      # The app did not even boot for the runner: in production that includes
+      # eager loading every file.
+      puts "  FAIL boot the app in production (eager loads everything):"
+      puts output.lines.first(12).map { |line| "       #{line}" }.join
+    end
+  end
+
+  step("boot bin/production (Puma + Solid Queue)") do
+    instance.start!
+    "up at #{instance.url}"
+  end unless @failed
+
+  if instance.running?
+    step("Solid Queue supervisor, worker#{' and scheduler' unless PROD_COPY} started") do
+      wanted = [ "Started Worker", ("Started Scheduler" unless PROD_COPY) ].compact
+      deadline = Time.now + 30
+      sleep 0.2 until wanted.all? { |line| File.read(instance.log_path).include?(line) } || Time.now > deadline
+      missing = wanted.reject { |line| File.read(instance.log_path).include?(line) }
+      raise "never logged #{missing.join(', ')}:\n#{instance.log_tail(40)}" if missing.any?
+
+      sleep 3
+      raise "bin/production exited after boot:\n#{instance.log_tail(40)}" unless instance.running?
+    end
+
+    step("pages render") do
+      paths = [ "/up", "/" ]
+      if PROD_COPY
+        SQLite3::Database.new(File.join(STORAGE, "production.sqlite3"), readonly: true) do |db|
+          workspace_id = db.get_first_value("SELECT id FROM workspaces ORDER BY id LIMIT 1")
+          paths << "/workspaces/#{workspace_id}" << "/workspaces/#{workspace_id}/runs" if workspace_id
+          workspace_id, run_id = db.get_first_row("SELECT workspace_id, run_id FROM runs ORDER BY id DESC LIMIT 1")
+          paths << "/workspaces/#{workspace_id}/runs/#{run_id}" if run_id
+        end
+      end
+      bad = paths.filter_map do |path|
+        code = instance.get(path).code
+        "#{path} -> #{code}" if code.to_i >= 400
+      end
+      raise bad.join(", ") if bad.any?
+
+      paths.join(" ")
+    end
+
+    step("/mcp/admin answers") do
+      client = WorkflowSandbox::McpClient.new("#{instance.url}/mcp/admin")
+      tools = client.tool_names
+      workspaces = client.call_tool("list_workspaces").fetch("workspaces")
+      "#{tools.size} tools, #{workspaces.size} workspaces"
+    end
+  end
+ensure
+  instance.stop!
+end
+
+if @failed
+  puts "bin/preflight: FAILED. Instance log: #{instance.log_path}"
+  exit 1
+end
+puts "bin/preflight: all green"

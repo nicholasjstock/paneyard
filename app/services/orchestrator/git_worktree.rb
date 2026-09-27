@@ -7,6 +7,7 @@ module Orchestrator
 
     def provision!(run)
       source_root = Pathname(run.workspace.source_root)
+      Sandbox.guard_path!(source_root, "provision a worktree in")
       name = run.worktree_name.presence || name_for(run)
       branch = "workflow/#{name}"
       worktree = source_root.parent.join(name)

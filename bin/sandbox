@@ -1,0 +1,168 @@
+#!/usr/bin/env ruby
+# An isolated instance of THIS checkout's code -- bin/production (Puma plus
+# Solid Queue with this checkout's queue.yml and recurring.yml) on a free
+# loopback port, against its own sqlite files under tmp/, beside a fake herdr
+# whose "agents" are scripted processes that never touch a model. Safe to run
+# from a run session's worktree: WORKFLOW_SANDBOX=1 (Orchestrator::Sandbox)
+# refuses the operator's herdr socket, Telegram, GitHub tokens, and any git
+# worktree or process outside the sandbox. It never touches
+# storage/production*.sqlite3, tmp/pids/production.pid or the production port.
+#
+# Usage:
+#   bin/sandbox start [--real-herdr] [--telegram]
+#                        boot tmp/sandbox, seed a scratch workspace, print its URL
+#   bin/sandbox status
+#   bin/sandbox stop
+#   bin/sandbox reset    stop and delete tmp/sandbox
+#   bin/sandbox verify [--keep]
+#                        boot a fresh instance under tmp/sandbox-verify and run a
+#                        run lifecycle through it end to end (see
+#                        WorkflowSandbox::Verify); exits non-zero on failure
+#
+# Queue a run with a `[fake-agent: done|blocked|failed|dirty|crash|manual]`
+# directive in its task to choose what the fake agent does (default: done).
+#
+# To try the real thing, opt integrations back in, one at a time:
+#
+#   --real-herdr  runs open in YOUR herdr (workspaces labelled "[sandbox] ..."),
+#                 running the real claude/codex/opencode CLI -- real model
+#                 usage -- on throwaway tasks in the sandbox's scratch repo.
+#                 Their MCP reports go to this sandbox, not production.
+#   --telegram    the sandbox polls and answers Telegram for real, as a SECOND
+#                 bot: getUpdates hands each message to one poller, so sharing
+#                 production's bot would take messages away from it. Create
+#                 one with @BotFather and put its token and your user id in
+#                 the environment or in ~/.config/workflow-orchestrator/sandbox.env:
+#                   SANDBOX_TELEGRAM_BOT_TOKEN=123456:ABC...
+#                   SANDBOX_TELEGRAM_ALLOWED_USER_IDS=11111111
+#
+# Everything else stays isolated either way: its own database, port and
+# scratch repos, and no GitHub tokens.
+
+require "fileutils"
+require "json"
+require "net/http"
+require_relative "../lib/workflow_sandbox/instance"
+require_relative "../lib/workflow_sandbox/verify"
+
+APP_ROOT = File.expand_path("..", __dir__)
+
+SANDBOX_ENV_FILE = File.expand_path("~/.config/workflow-orchestrator/sandbox.env")
+
+def instance(name, env: {}, fake_herdr: true)
+  WorkflowSandbox::Instance.new(app_root: APP_ROOT, root: File.join(APP_ROOT, "tmp", name), env:, fake_herdr:)
+end
+
+def sandbox_setting(key)
+  return ENV[key] if ENV[key].to_s.strip != ""
+  return nil unless File.exist?(SANDBOX_ENV_FILE)
+
+  File.readlines(SANDBOX_ENV_FILE, chomp: true).each do |line|
+    name, value = line.strip.split("=", 2)
+    return value.strip.delete_prefix('"').delete_suffix('"') if name == key && value
+  end
+  nil
+end
+
+def real_herdr_env
+  socket = ENV["HERDR_SOCKET_PATH"].to_s.strip.empty? ? File.expand_path("~/.config/herdr/herdr.sock") : ENV["HERDR_SOCKET_PATH"]
+  abort "bin/sandbox: --real-herdr, but there is no herdr socket at #{socket}" unless File.socket?(socket)
+
+  { "WORKFLOW_SANDBOX_REAL_HERDR" => "1", "HERDR_SOCKET_PATH" => socket }
+end
+
+# Asks Telegram which bot the token belongs to (getMe reads nothing from the
+# update queue), so the operator can see it is not production's.
+def telegram_env
+  token = sandbox_setting("SANDBOX_TELEGRAM_BOT_TOKEN")
+  users = sandbox_setting("SANDBOX_TELEGRAM_ALLOWED_USER_IDS")
+  if token.nil? || users.nil?
+    abort "bin/sandbox: --telegram needs SANDBOX_TELEGRAM_BOT_TOKEN and SANDBOX_TELEGRAM_ALLOWED_USER_IDS, in the " \
+          "environment or in #{SANDBOX_ENV_FILE}. Use a bot of its own (@BotFather), never production's: getUpdates " \
+          "hands each message to one poller, so sharing it would take messages away from production."
+  end
+
+  api = ENV.fetch("TELEGRAM_BOT_API_URL", "https://api.telegram.org").delete_suffix("/")
+  me = JSON.parse(Net::HTTP.get(URI("#{api}/bot#{token}/getMe")))
+  abort "bin/sandbox: Telegram rejected SANDBOX_TELEGRAM_BOT_TOKEN: #{me['description']}" unless me["ok"]
+
+  @telegram_bot = "@#{me.dig('result', 'username')}"
+  { "WORKFLOW_SANDBOX_TELEGRAM" => "1", "TELEGRAM_BOT_TOKEN" => token, "TELEGRAM_ALLOWED_USER_IDS" => users }
+rescue SocketError, SystemCallError, JSON::ParserError => error
+  abort "bin/sandbox: could not reach Telegram to check the sandbox bot: #{error.message}"
+end
+
+def seed!(instance)
+  output, ok = instance.run("bin/rails", "sandbox:seed")
+  abort "bin/sandbox: seeding failed:\n#{output}" unless ok
+
+  name, id, root = output.lines.last.split(" ", 3)
+  [ name, id, root.strip ]
+end
+
+def boot(instance, modes: [])
+  started = Time.now
+  instance.start!(modes:)
+  name, id, root = seed!(instance)
+  puts "bin/sandbox: up at #{instance.url} in #{(Time.now - started).round(1)}s"
+  puts "  herdr      #{modes.include?('real-herdr') ? 'YOUR herdr: runs launch real CLIs, labelled [sandbox]' : 'fake (scripted agents, no model)'}"
+  puts "  telegram   #{modes.include?('telegram') ? "live, as #{@telegram_bot}" : 'off'}"
+  puts "  workspace  #{name} -> #{instance.url}/workspaces/#{id} (scratch repo #{root})"
+  puts "  mcp admin  #{instance.url}/mcp/admin"
+  puts "  database   #{instance.storage_dir}"
+  puts "  log        #{instance.log_path}"
+  [ name, id ]
+rescue WorkflowSandbox::Instance::Error => error
+  abort "bin/sandbox: #{error.message}"
+end
+
+case ARGV.first
+when "start"
+  sandbox = instance("sandbox")
+  if sandbox.running?
+    puts "bin/sandbox: already running at #{sandbox.url} (#{sandbox.modes.join(', ').then { |m| m.empty? ? 'fake herdr, no telegram' : m }}); " \
+         "bin/sandbox stop first to change modes"
+  else
+    modes = []
+    env = {}
+    env.merge!(real_herdr_env) && modes << "real-herdr" if ARGV.include?("--real-herdr")
+    env.merge!(telegram_env) && modes << "telegram" if ARGV.include?("--telegram")
+    boot(instance("sandbox", env:, fake_herdr: !modes.include?("real-herdr")), modes:)
+    puts "Stop it with bin/sandbox stop."
+  end
+when "status"
+  sandbox = instance("sandbox")
+  if sandbox.running?
+    puts "bin/sandbox: running at #{sandbox.url}#{" (#{sandbox.modes.join(', ')})" if sandbox.modes.any?}"
+  else
+    puts "bin/sandbox: not running"
+  end
+when "stop"
+  instance("sandbox").stop!
+  puts "bin/sandbox: stopped"
+when "reset"
+  sandbox = instance("sandbox")
+  sandbox.stop!
+  FileUtils.rm_rf(sandbox.root)
+  puts "bin/sandbox: removed #{sandbox.root}"
+when "verify"
+  sandbox = instance("sandbox-verify")
+  sandbox.stop!
+  FileUtils.rm_rf(sandbox.root)
+  passed = false
+  begin
+    name, id = boot(sandbox)
+    passed = WorkflowSandbox::Verify.new(sandbox, workspace: name, workspace_id: id).call
+    puts "Last lines of #{sandbox.log_path}:\n#{sandbox.log_tail(80)}" unless passed
+  ensure
+    if ARGV.include?("--keep")
+      puts "bin/sandbox: kept running at #{sandbox.url} (stop with: kill -TERM -#{JSON.parse(File.read(File.join(sandbox.root, 'instance.json')))['pid']})"
+    else
+      sandbox.stop!
+    end
+  end
+  exit(passed ? 0 : 1)
+else
+  warn "Usage: bin/sandbox start|status|stop|reset|verify [--keep]"
+  exit 1
+end

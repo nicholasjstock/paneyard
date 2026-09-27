@@ -103,12 +103,18 @@ module Orchestrator
 
     REQUEST_TIMEOUT_SECONDS = 5
 
+    # A sandbox instance (Orchestrator::Sandbox) only ever talks to its own
+    # fake herdr, whatever HERDR_SOCKET_PATH it inherited -- a run session's
+    # shell has the operator's real socket in it -- unless it was started
+    # with --real-herdr.
     def socket_path
+      return Sandbox.herdr_socket_path if Sandbox.enabled? && !Sandbox.real_herdr?
+
       ENV["HERDR_SOCKET_PATH"].presence || File.expand_path("~/.config/herdr/herdr.sock")
     end
 
     def workspace_create(label:, cwd:, env: {}, focus: false)
-      request!("workspace.create", label:, cwd:, env: compact_env(env), focus:)
+      request!("workspace.create", label: Sandbox.label(label), cwd:, env: compact_env(env), focus:)
     end
 
     def workspace_get(workspace_id)
@@ -206,7 +212,7 @@ module Orchestrator
     # the caller's real work (finishing a run, publishing a PR), so unlike
     # every other method this one swallows its error.
     def notify(title:, body: nil, sound: "done")
-      request("notification.show", title:, body:, sound:)
+      request("notification.show", title: Sandbox.label(title), body:, sound:)
     rescue Error
       nil
     end

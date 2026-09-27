@@ -1,0 +1,6 @@
+#!/usr/bin/env ruby
+# Stands in for claude/codex/opencode under FakeHerdr::Server. See
+# lib/fake_herdr/agent.rb. Plain Ruby: it never loads Rails or Bundler.
+require_relative "../lib/fake_herdr/agent"
+
+FakeHerdr::Agent.new.run

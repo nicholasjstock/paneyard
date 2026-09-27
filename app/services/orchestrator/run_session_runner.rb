@@ -220,6 +220,7 @@ module Orchestrator
 
     def kill_process(session)
       return if session.pid.blank? || session.pid.to_i <= 0
+      return unless Sandbox.allows_signal?(session.pid)
 
       Process.kill("SIGTERM", -session.pid)
     rescue Errno::ESRCH, Errno::EPERM

@@ -13,6 +13,20 @@
 # it.
 #
 # See https://rubydoc.info/gems/rspec-core/RSpec/Core/Configuration
+
+# A run session's shell carries HERDR_SOCKET_PATH pointing at the operator's
+# real herdr, and specs stub Orchestrator::Herdr call by call. Point the
+# client at a socket that cannot exist, so a call a spec forgot to stub fails
+# with Herdr::Unreachable instead of opening a workspace on the operator's
+# screen. Specs that want a herdr start FakeHerdr::Server and set their own.
+# (Under Dir.tmpdir: a Unix socket path over 104 bytes raises ArgumentError
+# rather than failing to connect.)
+require "tmpdir"
+ENV["HERDR_SOCKET_PATH"] = File.join(Dir.tmpdir, "workflow-specs-have-no-herdr.sock")
+# Specs describe the real instance; sandbox behaviour is opted into per spec.
+ENV.delete("WORKFLOW_SANDBOX")
+ENV.delete("WORKFLOW_SANDBOX_ROOT")
+
 RSpec.configure do |config|
   # rspec-expectations config goes here. You can use an alternate
   # assertion/expectation library such as wrong or the stdlib/minitest

@@ -1,0 +1,18 @@
+#!/usr/bin/env ruby
+# Runs FakeHerdr::Server on a Unix socket until TERM/INT. Used by bin/sandbox
+# and bin/preflight; never point HERDR_SOCKET_PATH at the operator's real
+# herdr from a sandbox instance.
+#
+# Usage: script/fake_herdr SOCKET_PATH
+require_relative "../lib/fake_herdr/server"
+
+socket_path = ARGV.fetch(0) { abort "Usage: script/fake_herdr SOCKET_PATH" }
+server = FakeHerdr::Server.new(socket_path:, log: $stdout).start
+$stdout.sync = true
+puts "[fake_herdr] listening on #{socket_path}"
+
+stop = Queue.new
+%w[INT TERM].each { |signal| trap(signal) { stop << signal } }
+stop.pop
+server.stop
+puts "[fake_herdr] stopped"

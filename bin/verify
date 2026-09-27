@@ -1,0 +1,35 @@
+#!/usr/bin/env ruby
+# Everything a change to this repo should pass before it is merged, runnable
+# from the worktree it was made in without touching the production instance:
+#
+#   bundle exec rspec        unit, service, job, request, system and the
+#                            in-process run lifecycle (spec/integration)
+#   bin/rubocop
+#   git diff --check
+#   bin/preflight            this code booted as production on a scratch DB
+#   bin/sandbox verify       a run lifecycle through a live isolated instance
+#
+# Usage: bin/verify [--prod-copy]   (--prod-copy is passed to bin/preflight)
+
+APP_ROOT = File.expand_path("..", __dir__)
+preflight = [ "bin/preflight", *(ARGV.include?("--prod-copy") ? [ "--prod-copy" ] : []) ]
+
+steps = [
+  [ "rspec", %w[bundle exec rspec] ],
+  [ "rubocop", %w[bin/rubocop] ],
+  [ "git diff --check", %w[git diff --check] ],
+  [ "preflight", preflight ],
+  [ "sandbox verify", %w[bin/sandbox verify] ]
+]
+
+$stdout.sync = true
+results = steps.map do |name, command|
+  puts "\n== #{name}: #{command.join(' ')}"
+  started = Time.now
+  ok = system(*command, chdir: APP_ROOT)
+  [ name, ok, Time.now - started ]
+end
+
+puts "\n== bin/verify summary"
+results.each { |name, ok, seconds| puts format("  %-4s %-18s %5.1fs", ok ? "ok" : "FAIL", name, seconds) }
+exit(results.all? { |_, ok, _| ok } ? 0 : 1)

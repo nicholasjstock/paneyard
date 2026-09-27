@@ -7,13 +7,23 @@
 # can invoke directly to apply a config change (recurring.yml, queue.yml,
 # credentials) without asking a human to manage a foreground pane.
 #
-# Usage: bin/service start|stop|restart|status
+# `restart` runs `bin/preflight --prod-copy` first -- this checkout's code
+# booted on a scratch port against a copy of the production database -- and
+# leaves the running instance alone if that fails, so a change that cannot
+# boot never takes the working instance down. `start` then waits for /up to
+# answer rather than only for the process to survive its first second.
+#
+# Usage: bin/service start|stop|restart [--skip-preflight]|status
+
+require "net/http"
 
 ROOT_DIR = File.expand_path("..", __dir__)
 PID_FILE = File.join(ROOT_DIR, "tmp/pids/production.pid")
 LOG_FILE = File.join(ROOT_DIR, "log/production_service.log")
 STOP_GRACE_PERIOD = 15
-STARTUP_GRACE_PERIOD = 1
+# db:prepare, then Puma and Solid Queue booting: seconds normally, so this is
+# only a ceiling.
+STARTUP_TIMEOUT = 120
 STARTUP_POLL_INTERVAL = 0.2
 DEFAULT_PORT = "3001"
 
@@ -47,9 +57,12 @@ def start
   Process.detach(pid)
   File.write(PID_FILE, pid.to_s)
 
-  deadline = Time.now + STARTUP_GRACE_PERIOD
-  while Time.now < deadline && process_alive?(pid)
-    sleep(STARTUP_POLL_INTERVAL)
+  port = ENV.fetch("PORT", DEFAULT_PORT)
+  deadline = Time.now + STARTUP_TIMEOUT
+  ready = false
+  until ready || !process_alive?(pid) || Time.now >= deadline
+    ready = up?(port)
+    sleep(STARTUP_POLL_INTERVAL) unless ready
   end
 
   unless process_alive?(pid)
@@ -62,7 +75,27 @@ def start
     exit 1
   end
 
-  puts "bin/service: started (pid #{pid}). Logging to #{LOG_FILE}."
+  unless ready
+    warn "bin/service: pid #{pid} is running but http://127.0.0.1:#{port}/up did not answer within #{STARTUP_TIMEOUT}s. See #{LOG_FILE}."
+    exit 1
+  end
+
+  puts "bin/service: started (pid #{pid}), answering on http://127.0.0.1:#{port}. Logging to #{LOG_FILE}."
+end
+
+def up?(port)
+  Net::HTTP.get_response(URI("http://127.0.0.1:#{port}/up")).is_a?(Net::HTTPSuccess)
+rescue SystemCallError, Net::OpenTimeout, Net::ReadTimeout, EOFError
+  false
+end
+
+def preflight!
+  puts "bin/service: preflight (this checkout's code against a copy of the production database)..."
+  return if system(File.join(ROOT_DIR, "bin/preflight"), "--prod-copy", chdir: ROOT_DIR)
+
+  warn "bin/service: preflight failed, so the running instance was left alone. Fix the failure above, " \
+       "or restart anyway with: bin/service restart --skip-preflight"
+  exit 1
 end
 
 def stop
@@ -98,17 +131,22 @@ end
 
 require "fileutils"
 
-case ARGV.first
-when "start"
-  start
-when "stop"
-  stop
-when "restart"
-  stop
-  start
-when "status"
-  status
-else
-  warn "Usage: bin/service start|stop|restart|status"
-  exit 1
+def run_command(argv)
+  case argv.first
+  when "start"
+    start
+  when "stop"
+    stop
+  when "restart"
+    preflight! unless argv.include?("--skip-preflight")
+    stop
+    start
+  when "status"
+    status
+  else
+    warn "Usage: bin/service start|stop|restart [--skip-preflight]|status"
+    exit 1
+  end
 end
+
+run_command(ARGV)

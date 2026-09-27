@@ -16,7 +16,7 @@ If you are a session spawned by this very system -- a run working in a worktree 
 This repository is a Rails 8 application organized around `Workspace` as the top-level boundary. New work should start from a specific workspace, and related runs, sessions, events, and artifacts should stay nested under that workspace in code and UI flow. Core server code lives in `app/`: controllers in `app/controllers`, persistence models in `app/models`, background jobs in `app/jobs`, and orchestration logic in `app/services/orchestrator` and `app/services/mcp_tools`. Frontend code uses importmap + Stimulus under `app/javascript`, with views in `app/views` and static assets in `public/`. Database schema and migrations live in `db/`.
 
 ## Build, Test, and Development Commands
-Run `bin/setup` to install gems, prepare the database, and clear stale logs/tmp files. Use `bin/dev` for local development; it starts both the Rails server and the Solid Queue worker process so recurring jobs fire. Use `bin/rails db:prepare` after schema changes, and `bin/rails console` for local inspection. `bin/ci` executes setup, RuboCop, `bundler-audit`, `bin/importmap audit`, and Brakeman.
+Run `bin/setup` to install gems, prepare the database, and clear stale logs/tmp files. Use `bin/dev` for local development; it starts both the Rails server and the Solid Queue worker process so recurring jobs fire. `bin/dev` is **not** isolated -- it runs the full recurring schedule (Telegram polling, the worktree janitor) against whatever herdr socket the shell has -- so a run session must use `bin/sandbox` instead (see "Testing Guidelines"). Use `bin/rails db:prepare` after schema changes, and `bin/rails console` for local inspection. `bin/ci` executes setup, RuboCop, `bundler-audit`, `bin/importmap audit`, and Brakeman.
 
 ### Restarting the long-running production instance
 
@@ -25,11 +25,13 @@ Run `bin/setup` to install gems, prepare the database, and clear stale logs/tmp 
 Don't start `bin/production` directly and don't kill its pid by hand -- use `bin/service` instead, which daemonizes it (detached from any terminal, logs to `log/production_service.log`, tracks its pid in `tmp/pids/production.pid`):
 
 ```bash
-bin/service start    # no-ops if already running
+bin/service start    # no-ops if already running; waits for /up to answer
 bin/service stop
 bin/service restart  # apply a queue.yml/recurring.yml/credentials change
 bin/service status
 ```
+
+`restart` runs `bin/preflight --prod-copy` first (see "Testing Guidelines") and **leaves the running instance alone if it fails** -- a change that cannot boot, migrate, or parse its schedule never takes the working instance down. `bin/service restart --skip-preflight` is the escape hatch. `start` fails if `/up` has not answered within two minutes, with the log path.
 
 An agent session working in the `main` checkout should run `bin/service restart` directly after a config change that needs it, rather than asking the operator to manage a foreground terminal pane. A run session must not: it works in a worktree, so a restart would reload `main`'s code rather than its own, and would briefly take down the `/mcp/run` endpoint it reports through. Say in the report that a restart is needed once the change is merged.
 
@@ -78,7 +80,32 @@ The repository uses RSpec under `spec/`. Add service and job regression coverage
 
 Stub `Orchestrator::Herdr` in specs — never open a live socket, because herdr's mutating calls have real, visible effects in the operator's own session. Do not consume live model capacity to verify dispatch or arg building.
 
+Specs cannot reach herdr by accident: `spec/spec_helper.rb` points `HERDR_SOCKET_PATH` at a socket that does not exist (a run session's shell otherwise has the operator's real one), so a call a spec forgot to stub fails with `Herdr::Unreachable`.
+
 Use real git where git behavior is the thing under test (`spec/services/orchestrator/worktree_janitor_spec.rb` builds actual repos, worktrees, and a bare `origin`): the rules that matter — is this worktree dirty, is there anything to push — are only meaningful against real git. `spec/support/run_fixtures.rb` provides `create_workspace`/`create_run`/`create_run_and_session`.
+
+### Verifying a change from its worktree, before it is merged
+
+The production instance only runs `main`, so it cannot tell you whether a worktree's change works. Verify it where it was made, at the level of fidelity it needs, with one command:
+
+```bash
+bin/verify               # rspec, rubocop, git diff --check, bin/preflight, bin/sandbox verify (~1 min)
+bin/verify --prod-copy   # same, with bin/preflight migrating a copy of the production database
+```
+
+The layers, and what belongs in each:
+
+- **Unit/service/job/request specs** (`spec/services`, `spec/jobs`, `spec/requests`): one behaviour each, `Orchestrator::Herdr` stubbed call by call.
+- **Fake herdr** (`lib/fake_herdr/`): `FakeHerdr::Server` speaks herdr's newline-delimited JSON-RPC on a Unix socket, with the response shapes `Orchestrator::Herdr` documents, and `agent.start` spawns a real process (`script/fake_agent`, `FakeHerdr::Agent`) in its own process group, so session pids, `kill_process`, and "the CLI exited" are real. The agent never runs a model: it reports through `/mcp/run` with the capability it was launched with, as a `[fake-agent: done|blocked|failed|dirty|crash|manual]` directive in the task says (default `done`). Tag an example `:fake_herdr` (`spec/support/fake_herdr.rb`) to get one; `spec/lib/fake_herdr/server_spec.rb` pins it to the real client's expectations -- extend both together when `Orchestrator::Herdr` learns a new call.
+- **Lifecycle** (`spec/integration/run_lifecycle_spec.rb`): a run end to end in process -- `queue_run` over `/mcp/admin`, dispatch, a real worktree, `RunSessionRunner.start!` against the fake herdr, `report_idle` over `/mcp/run`, the message box, reconcile, Close session, the janitor -- plus crash, closed-by-hand and failed-launch paths. Changes to run/session state belong here as well as in a unit spec.
+- **System specs** (`spec/system`): UI behaviour.
+- **Boot smoke, `bin/preflight [--prod-copy]`**: boots this checkout as production would, on a scratch database and a free port, and fails on what otherwise only breaks after `bin/service restart`: eager loading, routes, `config/queue.yml` and the `production:` schedule in `config/recurring.yml` (including a schedule that silently lost `RunDispatchJob`/`RunSessionReconcileJob`), credentials (only where `config/master.key` exists, i.e. in `main`), migrations, and Puma plus Solid Queue actually starting and serving `/`, `/up` and `/mcp/admin`. `--prod-copy` first takes a read-only sqlite backup of the main checkout's `storage/production.sqlite3` into `tmp/preflight/` and migrates that; the copy boots with a fresh queue and no recurring jobs.
+- **Isolated instance, `bin/sandbox`**: this checkout's `bin/production` (real Puma, real Solid Queue, real recurring schedule) on a free loopback port, with its own sqlite files, pid and log under `tmp/sandbox/`, beside a fake herdr. `bin/sandbox start` prints its URL (UI, `/mcp/admin`) and seeds a scratch repo as its only workspace; queue runs into it from the UI or `/mcp/admin` and drive them with fake-agent directives; `bin/sandbox stop`/`reset`. `bin/sandbox verify` boots a fresh one under `tmp/sandbox-verify/` and drives a run lifecycle through it from outside -- `/mcp/admin`, the fake agent reporting over real HTTP, the run screen's own forms, and the recurring reconcile noticing a crash.
+- **The real thing, opt-in: `bin/sandbox start --real-herdr --telegram`** (either flag alone works). `--real-herdr` opens the sandbox's runs in the operator's own herdr, labelled `[sandbox] ...`, running the real CLI (real model usage) on throwaway tasks in the scratch repo, with their MCP reports going to the sandbox. `--telegram` makes the sandbox poll and answer Telegram for real as a **second bot** (`SANDBOX_TELEGRAM_BOT_TOKEN`/`SANDBOX_TELEGRAM_ALLOWED_USER_IDS`, from the environment or `~/.config/workflow-orchestrator/sandbox.env`; `bin/sandbox` prints which bot it is). Never give it production's bot: `getUpdates` hands each message to one poller, so two instances sharing a bot split the operator's messages. These are for the operator to try a change by hand; a run session should not start a real-herdr sandbox without being asked, since it spends model capacity and puts workspaces on the operator's screen. `bin/preflight` never enables either.
+
+A sandbox or preflight instance runs with `WORKFLOW_SANDBOX=1`, and `Orchestrator::Sandbox` then refuses everything that reaches outside it, whatever its database holds: only its own fake herdr socket (never an inherited `HERDR_SOCKET_PATH`), no Telegram bot token (a second poller would take the operator's messages), no GitHub token for sessions, no workspace, worktree provisioning or removal outside its root, and no signal to a pid that is not a fake agent (with `--real-herdr`: that its own sessions did not record). The two opt-ins above lift exactly the herdr and Telegram guards and nothing else. `WORKFLOW_STORAGE_DIR` moves the production database files (`config/database.yml`). None of it touches `storage/production*.sqlite3` (other than `--prod-copy`'s read), `tmp/pids/production.pid`, or the production port. If you add a new way for the app to reach outside itself, add its sandbox guard to `Orchestrator::Sandbox` and `spec/services/orchestrator/sandbox_spec.rb`.
+
+A run session working on this repo should run `bin/verify` before reporting `done`, say in its report which layers it ran and whether they passed, and say whether the change needs `bin/service restart` once merged (anything in `config/queue.yml`, `config/recurring.yml`, credentials, `bin/production`/`bin/service`, or an initializer).
 
 ## Commit & Pull Request Guidelines
 Recent commit history favors short, imperative summaries such as `Flatten ops/ into the repo root` and `Port the TS orchestrator engine to Ruby`. Keep commits focused and descriptive. A run session commits only when the operator asks (see Sessions, Not Orchestration). If the operator opens a PR, it should include a concise problem statement, the implementation approach, any schema or job-queue impact, and manual verification steps. Link related issues when available and include screenshots only for UI changes.

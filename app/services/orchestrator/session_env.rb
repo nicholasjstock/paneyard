@@ -83,10 +83,15 @@ module Orchestrator
     # guarantees an unreachable keychain helper fails fast instead of blocking
     # on a prompt nothing can answer.
     #
+    # A sandbox instance (Orchestrator::Sandbox) mints nothing: its sessions
+    # are fake agents in scratch repos with a local origin.
+    #
     # Prefers a GitHub App installation token -- scoped to this one
     # repository/installation rather than the operator's whole identity --
     # falling back to ambient `gh auth token` when the App is not configured.
     def git_env(run)
+      return {} if Sandbox.enabled?
+
       token = git_token(run)
       return {} if token.blank?
 
