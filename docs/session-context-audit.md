@@ -235,6 +235,19 @@ contradictory but usually survivable), or **L** (noise or polish).
 
 ### Broken or actively misleading
 
+**F0 (H, operator feedback): The commit instructions are wrong, and the prompt is too verbose.** The operator now
+wants a session to **leave its changes uncommitted**, so they can try them out first. The session commits and
+pushes only when told to. Every place that tells a session to commit and push on finishing is now wrong:
+- `RunPrompt#working_agreement`: "1. Commit your work and push the branch".
+- The `report_idle` description: "Before reporting `done`, commit and push your branch".
+- The `queue_run` description: "ends with that branch pushed".
+- This repo's `CLAUDE.md` ("A session pushes its own branch") and `AGENTS.md` ("it explores, edits, runs tests,
+  commits, and pushes"; "The session pushes its own branch").
+- `README.md` (lines 3, 68, 87, 129 and 135) and `GITHUB_APP_SETUP.md` line 3. These describe the push as the end
+  of every run.
+
+The operator also finds the 2.9 KB wrapper much too verbose. §4.2 has the revised proposal.
+
 **F1 (H): Launch attachments. The prompt tells the session to use a tool that always crashes, and the files are not
 in the worktree.**
 - `read_workflow_artifact` calls `run.artifact_source_run` and `run.available_launch_artifacts`. Neither method
@@ -336,15 +349,17 @@ differently. `compose` already receives `session_driver:` and ignores it.
 - **The base commit.** The branch is cut from *local* `main` at `run.base_sha`, which may be behind
   `origin/main`. The session is never told the base, and never told not to rebase or merge `main` unasked.
 - **What `done` means when nothing changed.** Tasks like this audit, or "investigate X", may have nothing to
-  commit. "Commit your work and push" plus "Before reporting done, commit and push" reads as mandatory.
+  commit. "Commit your work and push" plus "Before reporting done, commit and push" reads as mandatory. The
+  uncommitted rule in F0 makes this moot.
 - **The repo's instructions.** Nothing tells a claude session in an AGENTS.md-only target repo that AGENTS.md
   exists, and nothing states the precedence: the repo's conventions win for code, the run lifecycle wins for
   push, PR and reporting.
 - **Where the push credentials come from.** `GH_TOKEN` and a credential helper are preset, with
   `GIT_TERMINAL_PROMPT=0`. If a push fails, the session should report `blocked` with the error rather than try to
-  fix auth. At the moment it may try `gh auth login`, which hangs.
+  fix auth. At the moment it may try `gh auth login`, which hangs. Under F0, pushing happens only on request, with
+  the operator already present, so this no longer needs to be in the prompt.
 - **No PR and no main.** Beyond saying nothing about PRs, the wrapper should state "do not open a PR, do not push
-  to main" (pending D1).
+  to main". F0 covers this.
 - **What a good checkpoint looks like.** This is covered, and the text is decent, but it appears twice (see F15).
 
 **F15 (L): The wrapper duplicates itself.**
@@ -365,9 +380,8 @@ low risk given the local, no-auth trust model, but it is unnecessary for claude 
 
 ### What is accurate and should stay
 
-The wrapper's core lifecycle is current:
+Apart from the commit rule (F0), the wrapper's core lifecycle is current:
 - the session owns the worktree;
-- it pushes `workflow/<name>` itself;
 - `report_idle` is a non-terminal checkpoint;
 - the outcomes are done, blocked and failed;
 - a report covers only its interval;
@@ -387,7 +401,7 @@ planner, steps or a GitHub question protocol except F3 (machine-global) and F6 (
 | Content | Home | Why |
 |---|---|---|
 | Run identity (runId, branch, worktree, base) | **Prompt** | Only Rails knows it. Every driver reliably sees a first user message. |
-| Run lifecycle (push only this branch, no PR or main, report_idle when and how, questions go in `blocked`) | **Prompt**, short | It must work in every repo, for every driver, and before the model has looked at any tool. |
+| Run lifecycle (leave changes uncommitted, commit and push only when asked, report_idle when and how, questions go in `blocked`) | **Prompt**, short | It must work in every repo, for every driver, and before the model has looked at any tool. |
 | How to call each tool and what its params mean | **MCP tool descriptions** | Read at the point of use. Shared tools must stay neutral about who is calling (run session or admin client). |
 | A one-paragraph map of the server | **MCP server `instructions`** | Belt and braces for clients that surface it (Claude Code does; codex and opencode support is unverified). It must not be the only place the lifecycle lives. |
 | How to build, test and commit *in this repo* | **Repo files** (AGENTS.md, CLAUDE.md) | Different per target repo, and the session reads them itself. Rails injects none of it. |
@@ -399,100 +413,81 @@ docs. Every one of those is meaningless in an arbitrary target repo.
 
 ### 4.2 Proposed task wrapper (full text)
 
-Placeholders are in `{}`. Lines marked `[claude]` are emitted only for that driver, and the `## Attached files`
-section only when there are attachments.
+**Revised after operator feedback (see F0):** the prompt should be much shorter, and a session should leave its
+changes **uncommitted** so the operator can try them out. It commits and pushes only when told to.
+
+Placeholders are in `{}`. The `[claude]` line is emitted only for that driver. The attachments line is emitted
+only when there are attachments.
 
 ```text
 # Run {run_id}
 
-You are an agent session for one queued job in workspace `{workspace}`.
+Worktree `{worktree}`, branch `{branch}` (from `main` at {base_sha_short}). It is yours alone. Follow the repo's
+own AGENTS.md / CLAUDE.md.
 
-- Worktree: `{worktree}` — a git worktree only you are using.
-- Branch: `{branch}`, created from local `main` at `{base_sha_short}`.
+Leave your changes uncommitted: the operator tries them out and decides what to keep. Do not commit, push or open
+a pull request unless asked. When asked, commit on this branch and `git push -u origin {branch}`.
 
-The repository's own instructions (AGENTS.md, CLAUDE.md, CONTRIBUTING, …) govern how you work on the code;
-read them if your CLI has not already loaded them. The rules below govern this run and win where they differ.
+Whenever you stop (finished, stuck, or giving up), call `report_idle` (MCP server `workflow`, runId `{run_id}`)
+with `done`, `blocked` or `failed`. The operator reads these reports, not this terminal, so a question goes in a
+`blocked` summary. Reporting does not end the run; if more work comes, report again.
+[claude] If report_idle is not listed, load it with ToolSearch: `select:mcp__workflow__report_idle`.
 
-## How this run works
-
-- You own this job end to end: explore, edit, test and commit in this worktree without asking permission.
-- If you changed anything, commit it and push this branch: `git push -u origin {branch}`. Git credentials are
-  already configured; if a push fails, report `blocked` with the error instead of changing auth.
-- Do not open a pull request, push to or merge into `main`, or rebase onto a newer `main` unless the task asks.
-  The operator handles all of that.
-- The operator can type into this terminal, but mostly reads your reports rather than watching it.
-
-## Reporting
-
-Call the `report_idle` tool (MCP server `workflow`) every time you stop and wait for the operator. Pass
-runId `{run_id}`.
-[claude] If it is not in your tool list, load it with ToolSearch: `select:mcp__workflow__report_idle`.
-
-- `done`: the task is finished, with changes committed and pushed.
-- `blocked`: you need a decision or something only the operator can give. Put the question in the summary,
-  because a question asked only in this terminal may go unseen.
-- `failed`: the task cannot be done as specified. Say why.
-
-Reporting does not end the run or close anything. The operator may reply with more work; do it and report again.
-Never end a turn without reporting, and never claim you reported if the call failed. Say it failed instead.
-
-## Attached files
-
-The operator attached these files, readable at `{attachments_dir}`: {names}.
+Attached files: {names}, in `{attachments_dir}`.
 
 # Task
 
 {task}
 ```
 
-About 1.7 KB before the task, down from 2.9 KB. What changed and why:
+That is about 750 bytes before the task, down from 2.9 KB. What was cut, and where it went:
 
-- One identity block, with the base commit added (F14, F15).
-- Repo instructions are named generically, with an explicit precedence rule (F14, F5).
-- Push and credentials guidance, and no PR, main or rebase (F14, F5). The main clause depends on **D1**.
-- Questions go in the `blocked` summary (F4).
-- The ToolSearch text is claude-only (F13).
-- "Done" no longer implies a mandatory commit (F14).
-- The detailed "what a good summary contains" moves to the tool's `summary` description, so it is read when
-  writing one (F15).
-- Attachments are given as a path, not a broken tool (F1). This needs the attachment fix in §4.5.
+- **Identity block and the "authoritative / do not invent identity" text**: collapsed into the first line (F15).
+- **"You own this worktree… no pre-approved file list"**: cut down to "It is yours alone". That is all a modern
+  CLI needs.
+- **"An operator is watching… ask here and wait"**: replaced, because questions go in a `blocked` summary (F4).
+- **What a good summary contains** (a paragraph): moved to the `report_idle` `summary` parameter description,
+  which is read at the moment the summary is written.
+- **"Do not end your turn without calling it… concurrency slot"**: covered by "Whenever you stop". The session
+  does not need to know about slots.
+- **"Never claim you called a tool you didn't"**: dropped. Put it back as one clause if it was added after a real
+  incident. The operator will know whether it was.
+- **Credentials guidance**: dropped. Pushing now happens only on request, while the operator is engaged.
 
 ### 4.3 Proposed MCP text
 
 **Server `instructions`** (`RunMcpServer.build(instructions: …)`, run endpoint only):
 
 ```text
-Tools for an agent session running one orchestrator job. The job is yours; these tools cover only what the
-orchestrator itself knows. report_idle is required: call it every time you stop working. The rest are optional:
-queue_run, list_runs, get_run and list_workspaces spin off or inspect other jobs, and record_workspace_env_var
-saves an environment fix for future jobs in this workspace. There is deliberately no tool for files, shell or
-git; do those yourself in your worktree.
+Orchestrator tools for an agent session. Call report_idle every time you stop working. The rest are optional:
+queue_run / list_runs / get_run / list_workspaces for other jobs, and record_workspace_env_var to save an env fix
+for future jobs in this workspace. Files, shell and git are yours to do directly; there are no tools for them.
 ```
 
 **`report_idle`** (run-only):
 
 ```text
-description: Tell the operator you have stopped working and where things stand. Call it every time you go idle:
-  `done` when the task is finished (commit and push first if you changed anything), `blocked` when you need the
-  operator (put your question in the summary), or `failed` when the task cannot be done as specified (say why).
-  It does not end the run, close your terminal or push anything. The operator reads these reports instead of
-  your terminal, and may send more work; report again when you next stop.
+description: Tell the operator you have stopped and where things stand. Call it every time you go idle: `done`
+  (task finished), `blocked` (you need the operator; put the question in the summary) or `failed` (cannot be
+  done as specified; say why). It does not end the run, close your terminal, commit or push anything. The operator
+  reads these reports instead of your terminal and may send more work; report again when you next stop.
 runId: This run's id, from your startup prompt.
-summary: A Markdown report of the work since your previous report only; earlier reports are kept, so do not
-  repeat them. Cover what you changed and why, how you verified it (commands and results), what failed or was
-  skipped, the branch state (pushed commit, anything uncommitted), and what should happen next. For `blocked`,
-  start with the question you need answered.
+summary: Markdown report of the work since your previous report only. Cover what you changed and why, how you
+  verified it (commands and results), what failed or was skipped, what is uncommitted in the worktree, how the
+  operator can try it, and what should happen next. For `blocked`, lead with the question.
 ```
+
+The phrase "how the operator can try it" is new. It follows from the uncommitted workflow: the operator's next
+step is to try the changes, so the report should say how.
 
 **`queue_run`** (shared, caller-neutral; this fixes F2):
 
 ```text
-description: Queue a separate job. It gets its own worktree, `workflow/<name>` branch and agent session, which
-  pushes that branch when finished (no pull request is opened). It starts when a concurrency slot frees and shares
-  none of your context, so write the task as a complete brief: goal, constraints, relevant files, and how to tell
-  it worked. From inside a run, use it only for follow-up work the operator asked for, never to hand off your
-  own task. Defaults to the calling run's workspace (or the default workspace from outside a run); pass workspace
-  to target another.
+description: Queue a separate job. It gets its own worktree, `workflow/<name>` branch and agent session, starts
+  when a concurrency slot frees, and shares none of your context, so write the task as a complete brief: goal,
+  constraints, relevant files, and how to tell it worked. From inside a run, use it only for follow-up work the
+  operator asked for, never to hand off your own task. Defaults to the calling run's workspace (or the default
+  workspace from outside a run); pass workspace to target another.
 driver: Which agent runs it (default claude).
 ```
 
@@ -530,8 +525,14 @@ If they are kept instead, fix `read`, move storage out of the worktree, and use 
 
 These are ordinary edits a later run can make. Rails injects none of them.
 
+- **Commit rule (F0)**, in CLAUDE.md, AGENTS.md, README.md and GITHUB_APP_SETUP.md: replace "the session commits
+  and pushes its branch" with "the session leaves its changes uncommitted for the operator to try; it commits and
+  pushes its branch only when asked". Specifically:
+  - README's step 3 ("Work") and step 6 ("Clean up");
+  - README's "It worked when…" check, which expects a pushed branch;
+  - README's line 87, which says the prompt asks for commit and push.
 - **AGENTS.md**:
-  - Resolve F5 per D1. Either delete "may commit and merge straight into `main`" and "may be merged directly into
+  - Resolve F5 per D1. Delete "may commit and merge straight into `main`" and "may be merged directly into
     `main`", or scope them to the operator.
   - Scope the `bin/service restart` paragraph to the operator's own session in `main`, and state that run
     sessions must not restart the production instance (F7).
@@ -582,10 +583,17 @@ These are ordinary edits a later run can make. Rails injects none of them.
 
 ## 5. Decisions for the operator
 
-- **D1: May a run session merge into `main`?** The prompt and CLAUDE.md say push-only. AGENTS.md says a session may
-  merge straight into `main`. The proposal assumes push-only ("do not push to or merge into main unless the task
-  asks"). If sessions should be allowed to merge in some workspaces, that is a per-workspace setting, and it
-  should be injected, not left to prose that differs between repos.
+- **D1: Commit policy. Decided: leave changes uncommitted.** A session commits and pushes only when the operator
+  asks. §4.2 and §4.3 reflect this. Knock-on effects to confirm:
+  - **Every run's worktree will now be "kept".** `WorktreeJanitor` never removes a dirty worktree, so Close
+    session will leave every run's worktree in place, flagged with the "worktree kept" attention badge. That is
+    safe, but the badge's warning tone becomes the normal state. Consider rewording it, or distinguishing "has
+    uncommitted changes" from "unpushed commits".
+  - **Close session with uncommitted work.** If the operator closes a session before asking it to commit, they
+    have to commit in the worktree themselves, since the session is gone. Should Close session warn when the
+    worktree is dirty?
+  - **Merging into `main`.** AGENTS.md's "a session may merge straight into `main`" is now clearly wrong for a
+    run session, and should be removed or scoped to the operator (§4.4).
 - **D2: Keep the artifact store?** The recommendation is to remove `write_workflow_artifact` and
   `read_workflow_artifact` from `/mcp/run`, and to deliver launch attachments as a filesystem path. The run page's
   artifacts panel would then only show launch files. The alternative is to fix `read`, move storage out of the
