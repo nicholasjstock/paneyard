@@ -616,7 +616,7 @@ Then, per the operator's follow-up decisions:
 Still not done:
 - F12: done later on this branch. `runId` is optional on `report_idle` and `record_workspace_env_var`, and the prompt no longer passes it.
 - F17: `WORKFLOW_RUN_TOKEN` in non-codex panes.
-- The CLAUDE.md `@AGENTS.md` import.
+- ~~The CLAUDE.md `@AGENTS.md` import~~. Superseded: `CLAUDE.md` is deleted. Claude Code 2.1.277+ loads `AGENTS.md` in a project with no `CLAUDE.md` (confirmed in the 2.1.283 binary's changelog and loader), so all three drivers now read the same file. Its two points that `AGENTS.md` lacked were moved into it.
 
 ## 5. Decisions for the operator
 
