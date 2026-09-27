@@ -55,7 +55,8 @@ RSpec.describe Orchestrator::SessionArgs do
       )
 
       expect(command).to eq("claude")
-      expect(env).to eq({})
+      # The operator's own per-repo auto-memory is not a run's business.
+      expect(env).to eq("CLAUDE_CODE_DISABLE_AUTO_MEMORY" => "1")
       expect(args).to include("--permission-mode", "bypassPermissions")
       expect(args).to include("--add-dir", "/repos/app-1")
       expect(args).to include("--mcp-config", "/tmp/mcp.json")

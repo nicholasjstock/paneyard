@@ -51,8 +51,7 @@ RSpec.describe "the run MCP endpoint", type: :request do
     names = Orchestrator::RunMcpServer::TOOLS.map(&:tool_name)
 
     expect(names).to contain_exactly(
-      "report_idle", "write_workflow_artifact", "read_workflow_artifact",
-      "record_workspace_env_var", "queue_run", "list_runs", "get_run", "list_workspaces"
+      "report_idle", "record_workspace_env_var", "queue_run", "list_runs", "get_run", "list_workspaces"
     )
   end
 end

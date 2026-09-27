@@ -67,7 +67,7 @@ RSpec.describe "runs", type: :request do
     end
   end
 
-  it "stores uploaded files in the run's artifact store so the session can read them" do
+  it "stores uploaded files under the main checkout, where the prompt points the session" do
     workspace = create_workspace(prefix: "runs-controller-upload")
     first = Tempfile.new([ "first", ".db" ])
     second = Tempfile.new([ "second", ".log" ])
@@ -96,6 +96,14 @@ RSpec.describe "runs", type: :request do
     )
     expect(File.read(Orchestrator::ArtifactStore.resolve_path(run.target_root, run.run_id, "first.db"))).to eq("first artifact")
     expect(File.read(Orchestrator::ArtifactStore.resolve_path(run.target_root, run.run_id, "second.log"))).to eq("second artifact")
+    expect(Orchestrator::RunPrompt.compose(run:, session_driver: "claude"))
+      .to include(File.dirname(Orchestrator::ArtifactStore.resolve_path(workspace.source_root, run.run_id, "first.db")))
+
+    # Once the worktree is provisioned target_root moves, but the run screen
+    # still lists the files from where they were stored.
+    run.update!(target_root: File.join(File.dirname(workspace.source_root), "some-worktree"))
+    get workspace_run_path(workspace, run)
+    expect(response.body).to include("second.log", "second artifact")
   ensure
     first&.close!
     second&.close!

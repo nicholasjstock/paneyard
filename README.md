@@ -141,7 +141,7 @@ If a session dies without reporting (pane closed, CLI crashed), `RunSessionRecon
 
 ## MCP endpoints
 
-- **`/mcp/run`** is what each session talks to, authenticated by a per-session bearer token that dies with the session. It has `report_idle`, `write_workflow_artifact`/`read_workflow_artifact`, `record_workspace_env_var`, and the shared tools below. Rails wires it into each CLI automatically, so you don't configure anything.
+- **`/mcp/run`** is what each session talks to, authenticated by a per-session bearer token that dies with the session. It has `report_idle`, `record_workspace_env_var`, and the shared tools below. Rails wires it into each CLI automatically, so you don't configure anything.
 - **`/mcp/admin`** is unauthenticated (Puma binds `127.0.0.1` only) and lets your own MCP clients queue and inspect runs without the web UI. Its tools are `queue_run` (task, optional `workspace` name and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one is the default when `workspace` is omitted), and `ping_tool`. For example, to add it to Claude Code:
 
   ```sh

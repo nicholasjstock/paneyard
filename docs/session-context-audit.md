@@ -597,14 +597,24 @@ following is done:
   removed, and the "before opening a PR" wording is gone.
 - **Deleted**: the inert `.claude/skills/infrastructure/` and `.codex/skills/infrastructure/` stubs.
 
-Not done, because each still waits on a decision:
-- D2: the artifact tools, including the `read_workflow_artifact` crash from F1. The tool is still broken, but the
-  prompt no longer points at it.
-- D3 and D4: machine-global config.
-- F6: the stale root docs.
+Then, per the operator's follow-up decisions:
+
+- **D2, done.** `write_workflow_artifact` and `read_workflow_artifact` are deleted, along with the dead
+  planner-era `spec/support/fake_agent_*` harness, which was their only other caller. Launch files stay where
+  `RunsController` stores them, under the main checkout. The prompt gives their path, and the run screen now
+  reads them from there too. It used to read from `target_root`, which moves to the worktree, so attachments
+  disappeared from the run screen once a run started.
+- **D3, done.** Claude sessions get `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (`SessionArgs::CLAUDE_ENV`), which I
+  confirmed in the 2.1.283 binary. The operator's own sessions keep their memory.
+- **F6, done.** `ARCHITECTURE.md`, `PLAN.md`, `TODO.md`, `COST_ANALYSIS.md` and `TEST_COVERAGE_MATRIX.md` are
+  deleted. Git history keeps them.
+
+Still not done:
+- D4: codex reasoning effort.
 - F12: making `runId` optional.
 - F17: `WORKFLOW_RUN_TOKEN` in non-codex panes.
-- CLAUDE.md `@AGENTS.md` import.
+- The CLAUDE.md `@AGENTS.md` import.
+- The codex `bus-handoff` skill in `~/.config/codex`, which is outside the repo.
 
 ## 5. Decisions for the operator
 

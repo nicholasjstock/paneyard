@@ -129,8 +129,9 @@ class RunsController < ApplicationController
     params.fetch(:run, {}).permit(launch_files: [])[:launch_files]
   end
 
-  # Files the operator attached at launch, copied into the run's artifact
-  # store so the session can read them with read_workflow_artifact.
+  # Files the operator attached at launch. Stored under the workspace's main
+  # checkout (target_root is not the worktree yet); RunPrompt gives the
+  # session their absolute path and the run screen lists them.
   def uploaded_artifacts(files)
     Array(files).filter_map do |uploaded|
       next unless uploaded.respond_to?(:original_filename) && uploaded.original_filename.present?
@@ -147,9 +148,12 @@ class RunsController < ApplicationController
     "run-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}"
   end
 
+  # Launch files live under the main checkout, not the run's worktree (see
+  # #uploaded_artifacts), so read them from there once target_root has moved.
   def collect_artifacts
-    Orchestrator::ArtifactStore.names(@run.target_root, @run.run_id).map do |name|
-      { name:, content: Orchestrator::ArtifactStore.read(@run.target_root, @run.run_id, name) }
+    root = current_workspace.source_root
+    Orchestrator::ArtifactStore.names(root, @run.run_id).map do |name|
+      { name:, content: Orchestrator::ArtifactStore.read(root, @run.run_id, name) }
     end
   rescue Errno::ENOENT
     []

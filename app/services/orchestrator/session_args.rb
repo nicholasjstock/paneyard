@@ -42,12 +42,20 @@ module Orchestrator
       end
     end
 
+    # Claude Code resolves a worktree's auto-memory to its main checkout, so
+    # without this every claude run loads the operator's own per-repo memory
+    # -- notes written for their everyday session, some of which contradict a
+    # run's job (e.g. "queue a run instead of implementing it"). Confirmed in
+    # the 2.1.283 binary: a truthy CLAUDE_CODE_DISABLE_AUTO_MEMORY turns auto
+    # memory off.
+    CLAUDE_ENV = { "CLAUDE_CODE_DISABLE_AUTO_MEMORY" => "1" }.freeze
+
     # Returns [command, args, extra_env] for the given driver. extra_env is
     # merged into the pane's environment (opencode carries its whole MCP
     # config that way; the others point at a file or use -c overrides).
     def build(driver:, root_dir:, mcp_config_path:, capability_token:, resume_session_id: nil, model: nil)
       case driver
-      when "claude" then [ "claude", claude_args(root_dir:, mcp_config_path:, resume_session_id:, model:), {} ]
+      when "claude" then [ "claude", claude_args(root_dir:, mcp_config_path:, resume_session_id:, model:), CLAUDE_ENV.dup ]
       when "codex" then [ "codex", codex_args(root_dir:, resume_session_id:, model:), {} ]
       when "opencode" then [ "opencode", *opencode_args(root_dir:, capability_token:, resume_session_id:, model:) ]
       else raise ArgumentError, "unsupported driver: #{driver.inspect}"
