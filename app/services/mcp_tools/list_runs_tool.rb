@@ -2,7 +2,7 @@ module McpTools
   class ListRunsTool < MCP::Tool
     tool_name "list_runs"
     description "List a workspace's runs, newest first, with enough state to answer \"what is happening right " \
-      "now\" -- status, which agent, whether a session is live and what it is doing, branch, and pull request. " \
+      "now\" -- status, which agent, whether a session is live and what it is doing, and branch. " \
       "Defaults to runs that are still in flight; pass includeFinished for recent history too. Defaults to the " \
       "calling run's own workspace, or the oldest registered workspace if called from outside a run; pass " \
       "workspace to target a different one."

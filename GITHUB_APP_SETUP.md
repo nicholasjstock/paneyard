@@ -1,6 +1,6 @@
 # GitHub App Authentication Setup
 
-Rails itself makes no GitHub calls: it does not open, update, or watch pull requests. What needs GitHub credentials is each run's session, which commits and pushes its own `workflow/<name>` branch (and may run `gh` if you ask it to). When a GitHub App is configured, `Orchestrator::SessionEnv` gives every session an installation token for the app instead of letting it act as you with your own `gh auth` identity. The token reaches exactly the repositories that installation was granted, which is why "Only select repositories" below is recommended.
+Rails itself makes no GitHub calls: it does not open, update, or watch pull requests. What needs GitHub credentials is each run's session, which pushes its own `workflow/<name>` branch when you ask it to (and may run `gh` if you ask it to). When a GitHub App is configured, `Orchestrator::SessionEnv` gives every session an installation token for the app instead of letting it act as you with your own `gh auth` identity. The token reaches exactly the repositories that installation was granted, which is why "Only select repositories" below is recommended.
 
 ## Prerequisites
 

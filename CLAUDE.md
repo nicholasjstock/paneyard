@@ -2,7 +2,7 @@
 
 Read [AGENTS.md](./AGENTS.md) before changing this repository. It is the shared source of truth for structure, commands, testing, and run behavior -- read its "Operating Context" section first: this is a single-operator local tool that edits its own source (this repo is one of its own registered `Workspace`s) alongside other, unrelated target repos, with no runtime auth and a real remote-control surface (Telegram, GitHub App). If you are a session spawned by this very system, that context applies to you directly, not just hypothetically.
 
-The most important architectural rule is that **Rails schedules; it does not orchestrate**. A run is a queued job. Rails decides when it starts, gives it a git worktree, and reclaims that worktree afterwards. One continuous interactive `claude`/`codex`/`opencode` session then owns the whole job — exploring, editing, testing, committing, pushing — in a herdr pane the operator can watch and type into.
+The most important architectural rule is that **Rails schedules; it does not orchestrate**. A run is a queued job. Rails decides when it starts, gives it a git worktree, and reclaims that worktree afterwards. One continuous interactive `claude`/`codex`/`opencode` session then owns the whole job — exploring, editing, testing — in a herdr pane the operator can watch and type into.
 
 Do not reintroduce a planner, a step queue, per-step workers, a chaperone, acceptance-criteria trees, or a GitHub-mediated question protocol. All of that existed to compensate for headless one-shot workers that had no continuity and no operator in the loop. A session has both. If a run needs to change direction, talk to it (`Orchestrator::RunSessionRunner.prompt!`).
 
@@ -10,7 +10,7 @@ A session reports going idle with the `report_idle` MCP tool; it does not end th
 
 Only the operator ends a session, with **Close session** on the run screen (kills the CLI, closes the herdr workspace, frees the slot). Never make a session's report tear down its own pane. `RunSessionReconcileJob` remains the safety net for a session that genuinely died; an idle session is not an anomaly to it.
 
-Rails does not do pull requests. A session pushes its own branch; opening, reviewing and merging a PR is the operator's business, outside this app. Do not reintroduce publishing, merge polling, or PR-comment resumption.
+A session leaves its changes uncommitted so the operator can try them first; it commits, pushes its `workflow/<name>` branch, or merges straight into `main` only when the operator asks. Rails does not do pull requests: opening, reviewing and merging a PR is the operator's business, outside this app. Do not reintroduce publishing, merge polling, or PR-comment resumption.
 
 ## herdr
 

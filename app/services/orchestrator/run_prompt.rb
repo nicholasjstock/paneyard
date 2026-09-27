@@ -1,90 +1,81 @@
-require "shellwords"
-
 module Orchestrator
-  # The single document handed to a run's session via Herdr.agent_prompt.
+  # The single document handed to a run's session via Herdr.agent_prompt, as
+  # its first user message. There is no system prompt and no MCP-server
+  # instructions carrying the lifecycle, so this is the one place every driver
+  # is guaranteed to read it.
   #
-  # This replaces the old three-layer assembly (workspace memory + per-worker
-  # identity + a role persona file + "Current task:"). There are no roles left
-  # to have personas for: one session does the whole job, so it gets one flat
-  # briefing.
+  # Deliberately short, and meaningful in any target repo. The session is a
+  # real interactive CLI in the worktree and reads the repo's own
+  # CLAUDE.md/AGENTS.md for how to work on the code; this covers only what the
+  # repo cannot tell it: which run it is, what to do with its changes, and how
+  # to report back. How to write a good report lives in report_idle's own
+  # `summary` description, where it is read at the moment of writing one.
   #
-  # Deliberately short. The session is a real interactive CLI running in the
-  # worktree, so it loads the target repo's own CLAUDE.md/AGENTS.md the way it
-  # would for the operator -- this prompt covers only what the repo cannot
-  # tell it: which run it is, how to report back, and what Rails will do with
-  # the branch afterwards.
+  # A session leaves its changes uncommitted so the operator can try them
+  # first; committing, pushing and merging into main happen only when asked.
+  # See docs/session-context-audit.md for why each line is here.
   module RunPrompt
     module_function
 
     def compose(run:, session_driver:)
-      sections = [
-        identity_section(run:, session_driver:),
-        working_agreement(run),
+      [
+        header_section(run),
+        changes_section(run),
+        reporting_section(run:, session_driver:),
+        attachments_section(run),
         task_section(run)
-      ]
-      sections.compact_blank.join("\n")
+      ].compact.join("\n")
     end
 
-    def identity_section(run:, session_driver:)
+    def header_section(run)
+      base = run.base_sha.present? ? " (from `main` at #{run.base_sha.first(12)})" : ""
+
       <<~SECTION
-        # Runtime identity (authoritative)
+        # Run #{run.run_id}
 
-        - runId: #{run.run_id}
-        - workspace: #{run.workspace.name}
-        - worktree: #{run.target_root}
-        - branch: #{run.branch_name || "(not provisioned)"}
-
-        Rails authenticates your MCP calls with this session's private capability -- do not invent or
-        alter identity fields. The workflow tools are MCP tools registered under the `mcp__workflow__`
-        prefix (e.g. `mcp__workflow__report_idle`). If they are not directly callable they are deferred:
-        load them FIRST with ToolSearch using their full prefixed names (e.g. query
-        `select:mcp__workflow__report_idle`) -- bare, unprefixed names will not match. Never state or imply
-        that you called a tool you did not actually invoke; if a required tool cannot be loaded or
-        called, say exactly that instead of narrating a call that never happened.
+        Worktree `#{run.target_root}`, branch `#{run.branch_name}`#{base}. It is yours alone. Follow the repo's own
+        AGENTS.md / CLAUDE.md.
       SECTION
     end
 
-    def working_agreement(run)
+    def changes_section(run)
+      main_checkout = run.source_root.presence || run.workspace.source_root
+
       <<~SECTION
-        # How this run works
-
-        You own this worktree end to end. It is a real git worktree on branch `#{run.branch_name}`,
-        checked out at `#{run.target_root}`, and nobody else is working in it -- you do not need to
-        coordinate, ask permission for ordinary changes, or scope your edits to a pre-approved file list.
-
-        An operator is watching this pane and can type into it. If you are genuinely blocked on a
-        decision only they can make, ask here and wait -- that is cheaper than guessing.
-
-        When the work is finished:
-
-        1. Commit your work and push the branch: `git push -u origin #{run.branch_name}`.
-        2. Call `report_idle` with outcome `done`.
-
-        `report_idle` does not end the run. It tells the operator you have stopped working, and its
-        summary is the record of what you did: the run screen shows the reports in order and nothing
-        else, so the operator reads them instead of this pane. Write each summary as a full report in
-        Markdown, not a one-liner -- what you changed and why, how it was verified (commands run and their
-        results), what failed or was left out, what state the worktree and branch are in, and what you
-        think should happen next. The operator may send you more work; if so, do it and call
-        `report_idle` again when you next go idle. Each report covers only the interval since your
-        previous one and they are kept as the run's history, so do not restate earlier reports.
-
-        If you cannot finish, report anyway -- `blocked` if you need the operator, `failed` if the task
-        cannot be done as specified -- and say why. Do not end your turn without calling it: until you do,
-        Rails cannot tell you are idle rather than still working, and the run holds a concurrency slot.
+        Leave your changes uncommitted: the operator tries them out and decides what to keep. Do not commit, push or
+        merge unless asked. When asked: commit on this branch, push with `git push -u origin #{run.branch_name}`, and
+        merge from the main checkout (`git -C #{main_checkout} merge #{run.branch_name}`), since `main` is checked out
+        there.
       SECTION
+    end
+
+    def reporting_section(run:, session_driver:)
+      section = <<~SECTION
+        Whenever you stop -- finished, stuck, or giving up -- call `report_idle` (MCP server `workflow`, runId
+        `#{run.run_id}`) with `done`, `blocked` or `failed`. The operator reads these reports, not this terminal, so a
+        question goes in a `blocked` summary. Reporting does not end the run; if more work comes, report again.
+      SECTION
+      # Only Claude Code defers MCP tools behind ToolSearch; codex and opencode
+      # have no such tool and name MCP tools differently.
+      section += "If report_idle is not listed, load it with ToolSearch: `select:mcp__workflow__report_idle`.\n" if session_driver == "claude"
+      section
+    end
+
+    # Launch uploads are copied (RunsController#uploaded_artifacts) while the
+    # run's target_root is still the workspace's main checkout, so they live
+    # there, not in the worktree provisioned later.
+    def attachments_section(run)
+      names = Array(run.launch_artifacts).filter_map { |artifact| artifact["name"] || artifact[:name] }
+      return if names.empty?
+
+      dir = File.join(ArtifactStore.output_dir(run.workspace.source_root), ArtifactStore.sanitize_run_id(run.run_id))
+      "Attached files: #{names.join(', ')}, in `#{dir}`.\n"
     end
 
     def task_section(run)
-      artifacts = Array(run.launch_artifacts).filter_map { |artifact| artifact["name"] || artifact[:name] }
-      attached =
-        if artifacts.any?
-          "\nFiles attached at launch (read them with `read_workflow_artifact`): #{artifacts.join(', ')}.\n"
-        end
-
       <<~SECTION
         # Task
-        #{attached}
+
         #{run.task}
       SECTION
     end

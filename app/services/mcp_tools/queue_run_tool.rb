@@ -1,18 +1,19 @@
 module McpTools
   class QueueRunTool < MCP::Tool
     tool_name "queue_run"
-    description "Queue a new run. This is the only way you can cause code to change -- you yourself cannot write " \
-      "to any repository. A queued run gets its own git worktree, its own branch, and its own session, and ends " \
-      "with that branch pushed for the operator to review (it does not open a pull request). It starts when a " \
-      "slot frees, not immediately. Write the task the way you would brief a capable colleague who cannot ask " \
-      "you a follow-up question: state the goal, the constraints, and how they will know it worked. Defaults to " \
-      "the calling run's own workspace, or the oldest registered workspace if called from outside a run; pass " \
-      "workspace to target a different one."
+    # Shared by /mcp/run and /mcp/admin, so the text must not assume which
+    # kind of caller is reading it.
+    description "Queue a separate job. It gets its own worktree, `workflow/<name>` branch and agent session, " \
+      "starts when a concurrency slot frees, and shares none of your context -- write the task as a complete " \
+      "brief: goal, constraints, relevant files, and how to tell it worked. From inside a run, use it only for " \
+      "follow-up work the operator asked for, never to hand off your own task. Defaults to the calling run's " \
+      "workspace, or the oldest registered workspace if called from outside a run; pass workspace to target " \
+      "a different one."
     input_schema(
       properties: {
         task: { type: "string" },
         workspace: { type: "string", description: "Workspace name to queue the run in." },
-        driver: { type: "string", enum: Run::LAUNCHER_VARIANTS, description: "Which agent to run it with." }
+        driver: { type: "string", enum: Run::LAUNCHER_VARIANTS, description: "Which agent runs it (default claude)." }
       },
       required: %w[task]
     )

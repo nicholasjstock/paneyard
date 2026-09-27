@@ -21,24 +21,21 @@ module McpTools
   # are the normal shape here, not a race to guard against.
   class ReportIdleTool < MCP::Tool
     tool_name "report_idle"
-    description "Report that you have stopped working and say where the run stands. Call it every time you " \
-      "go idle: when you have finished the task (outcome `done`), need the operator and cannot continue " \
-      "(`blocked`), or have concluded the task cannot be done as specified (`failed`). Before reporting " \
-      "`done`, commit and push your branch. This does NOT end the run -- the operator reads your reports " \
-      "and decides what happens next, and may well send you more work; when you go idle after that, report " \
-      "again. Each report is a checkpoint covering only the interval since your previous one, and they are " \
-      "kept as the run's history, so do not restate earlier reports. " \
-      "Not calling it is the one real failure: until you do, Rails cannot tell you are idle rather than " \
-      "still working."
+    description "Tell the operator you have stopped and where things stand. Call it every time you go idle: " \
+      "`done` (task finished), `blocked` (you need the operator; put the question in the summary) or `failed` " \
+      "(cannot be done as specified; say why). It does not end the run, close your terminal, commit or push " \
+      "anything. The operator reads these reports instead of your terminal and may send more work; report " \
+      "again when you next stop."
     input_schema(
       properties: {
-        runId: { type: "string" },
+        runId: { type: "string", description: "This run's id, from your startup prompt." },
         outcome: { type: "string", enum: RunSession::OUTCOMES },
         summary: {
           type: "string",
-          description: "A full Markdown report of this slice of work -- the operator reads these instead of " \
-            "the pane. What you changed and why, how you verified it (commands and results), what failed or " \
-            "was left out, the state of the worktree and branch, and what should happen next."
+          description: "Markdown report of the work since your previous report only -- earlier ones are " \
+            "kept, so do not repeat them. What you changed and why, how you verified it (commands and " \
+            "results), what failed or was skipped, what is uncommitted in the worktree and how the operator " \
+            "can try it, and what should happen next. For `blocked`, lead with the question."
         }
       },
       required: %w[runId outcome summary]

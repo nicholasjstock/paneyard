@@ -1,8 +1,8 @@
 # Workflow Orchestrator
 
-Queue a job against a workspace. When a slot frees, it gets its own git worktree and one live `claude`/`codex`/`opencode` session you can watch and talk to, which does the work end to end and pushes its branch. Runs, sessions, events, artifacts, and operator chat all stay scoped to their workspace.
+Queue a job against a workspace. When a slot frees, it gets its own git worktree and one live `claude`/`codex`/`opencode` session you can watch and talk to, which does the work end to end and leaves its changes for you to try, committing, pushing or merging only when you ask. Runs, sessions, events, artifacts, and operator chat all stay scoped to their workspace.
 
-Rails schedules; it does not orchestrate. It decides when a run starts, gives it a worktree, and reclaims that worktree afterwards. Everything in between belongs to the session. There is no planner, no step queue, and no pull-request publishing: the session pushes its branch, and opening and merging a PR is up to you.
+Rails schedules; it does not orchestrate. It decides when a run starts, gives it a worktree, and reclaims that worktree afterwards. Everything in between belongs to the session. There is no planner, no step queue, and no pull-request publishing: when you ask, the session commits and pushes its branch or merges it into `main`, and opening and merging a PR is up to you.
 
 This README is for **operators** (running the orchestrator and pointing it at repositories). If you are changing the orchestrator's own code, read [AGENTS.md](./AGENTS.md). It is the source of truth for structure, conventions, and testing.
 
@@ -65,7 +65,7 @@ Before creating a worktree, `GitWorktree.validate_source!` checks all of these, 
 
 - `<root_path>/main` exists and is a git work tree.
 - Its directory is named `main`, **and it has the `main` branch checked out**. A repo whose default branch is `master` or anything else needs a local `main` branch. The simplest fix is to rename the default branch.
-- It has an `origin` remote. The session is told to push with `git push -u origin workflow/<name>` (`Orchestrator::RunPrompt`), so `origin` must be a remote this machine can push to.
+- It has an `origin` remote. When asked to push, the session is told to use `git push -u origin workflow/<name>` (`Orchestrator::RunPrompt`), so `origin` must be a remote this machine can push to.
 
 Each run branches from the source checkout's **current local `HEAD`**. Rails never fetches or pulls, so keep `<root_path>/main` up to date yourself (`git -C ~/Source/my-app/main pull`). Uncommitted changes in `main` are not carried into a run's worktree.
 
@@ -84,7 +84,7 @@ The sweep covers **every** worktree of the source repository, not only the ones 
 A worktree is a fresh checkout of committed files only. Anything untracked or gitignored in `main` (`.env`, `config/master.key`, `node_modules`, a local database) is **not** there. Rails runs no setup commands and never infers a language, package manager, or ports. The session works those out itself each run. That puts the burden on the repository:
 
 - **`AGENTS.md` / `CLAUDE.md` in the target repo** are how you tell a session how to set up, build, and test. Sessions start in the worktree and read the repo's own instruction files the way they would if you ran the CLI there yourself. `claude` is deliberately launched without `--setting-sources` so it loads the repo's `CLAUDE.md` and `.claude/` settings. It does get `--strict-mcp-config`, so any `.mcp.json` in the repo is ignored in favour of the workflow MCP server (`SessionArgs.claude_args`). `codex` and `opencode` read `AGENTS.md`.
-- **Tests.** The run prompt (`Orchestrator::RunPrompt`) does not tell the session to run tests. It asks for commit, push, and a `report_idle` summary that includes "how it was verified". If a repo needs particular verification, put the commands in its `AGENTS.md`/`CLAUDE.md`, or in the task text.
+- **Tests.** The run prompt (`Orchestrator::RunPrompt`) does not tell the session to run tests. It tells the session to leave its changes uncommitted until asked, and asks for a `report_idle` summary that includes "how it was verified". If a repo needs particular verification, put the commands in its `AGENTS.md`/`CLAUDE.md`, or in the task text.
 - **Environment variables.** A session can call the `record_workspace_env_var` MCP tool to save a workaround (for example a bundler path). The value is stored as a `WorkspaceEnvVar` on the workspace and set in every later session's pane environment (`Orchestrator::WorkspaceEnvVars`, merged first in `SessionEnv.for_session`, so it can't override anything the orchestrator sets). Values are literal and must not contain `$` or a backtick, because they are never shell-expanded. They are stored in plaintext in the orchestrator's database, so don't use them for secrets. There is no UI for them. To inspect them or seed them yourself, use the console:
 
   ```sh
@@ -94,7 +94,7 @@ A worktree is a fresh checkout of committed files only. Anything untracked or gi
 
   (With `bin/service`, prefix those commands with `RAILS_ENV=production`.)
 - **Environment Rails removes.** `SessionEnv` unsets the orchestrator's own Bundler activation (`BUNDLE_GEMFILE`, `RUBYOPT`, …), `RAILS_ENV`, and nested-Claude-Code markers, so the target repo resolves its own `Gemfile.lock` and picks its own Rails env.
-- Every session runs with full access to its worktree (`--permission-mode bypassPermissions`, `-s danger-full-access`, `--auto`). The review gate is your review of the pushed branch.
+- Every session runs with full access to its worktree (`--permission-mode bypassPermissions`, `-s danger-full-access`, `--auto`). The review gate is you trying the session's changes before you ask it to commit.
 
 ### 4. GitHub access
 
@@ -126,15 +126,15 @@ What that means in practice:
 
 From the workspace's runs page, choose a new run, give it a task, and pick a driver (and optionally a model). Or queue it over MCP (below). Within a few seconds `RunDispatchJob` claims it, and a herdr workspace named after the worktree opens with the agent on the left and `nvim` on the right. If it fails, the run screen shows the launch error. The common ones map back to the steps above: "Source checkout must be on main", "has no origin remote", "Worktree path already exists", herdr unreachable, or a CLI that never became ready.
 
-It worked when the session calls `report_idle` and the run screen shows its checkpoint, and `git -C ~/Source/my-app/main ls-remote origin 'workflow/*'` lists the pushed branch.
+It worked when the session calls `report_idle` and the run screen shows its checkpoint. Ask it to commit and push, and `git -C ~/Source/my-app/main ls-remote origin 'workflow/*'` then lists the branch.
 
 ## How a run works
 
 1. **Queue it.** Creating a run starts nothing. It waits for a slot. The cap is global across every workspace: `WORKFLOW_MAX_CONCURRENT_RUNS`, default 4.
 2. **Dispatch.** `RunDispatchJob` claims the oldest queued run. `StartRunSessionJob` provisions its worktree and opens one interactive session in a herdr pane rooted there, with the task as its first prompt.
-3. **Work.** The session owns the job. It explores, edits, runs the repo's own commands, commits, and pushes. Watch it in your herdr client, or send it a message from the run screen.
+3. **Work.** The session owns the job. It explores, edits, and runs the repo's own commands, then leaves its changes uncommitted for you to try. Ask it to commit, push, or merge into `main` when you're happy. Watch it in your herdr client, or send it a message from the run screen.
 4. **Report.** The session calls the `report_idle` MCP tool (`done`, `blocked`, or `failed`) each time it stops working. This does not end the run: the pane stays open and the slot stays held. Each report is a checkpoint covering the interval since the last one, written as a full Markdown report, and the run screen lists them in order.
-5. **Decide.** Read the reports, then either send more work or **Close session**, which quits the CLI, closes the herdr workspace, and frees the slot. An unreviewed run keeps holding its slot, so it blocks the queue. PRs are yours to open from the pushed branch.
+5. **Decide.** Read the reports, then either send more work or **Close session**, which quits the CLI, closes the herdr workspace, and frees the slot. An unreviewed run keeps holding its slot, so it blocks the queue. PRs are yours to open from a pushed branch.
 6. **Clean up.** `WorktreeJanitor` removes the worktree on Close session if its work is saved (see [Git requirements](#2-git-requirements)), and otherwise keeps it and flags it until you push, merge, or remove it.
 
 If a session dies without reporting (pane closed, CLI crashed), `RunSessionReconcileJob` notices within about 30 seconds and frees the slot.

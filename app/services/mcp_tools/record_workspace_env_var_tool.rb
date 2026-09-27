@@ -1,19 +1,17 @@
 module McpTools
   class RecordWorkspaceEnvVarTool < MCP::Tool
     tool_name "record_workspace_env_var"
-    description "Persist an environment variable this workspace's commands need (e.g. a bundle install workaround) " \
-      "so every future worker and start_run_command in this workspace gets it automatically, instead of every " \
-      "future worker rediscovering the same workaround. Recording the same name again overwrites its value. " \
-      "value is set directly as a literal process environment variable -- it is never passed through a shell, so " \
-      "it must already be a fully resolved value (e.g. an absolute path like /tmp/bundler_gems), not shell syntax " \
-      "like $TMPDIR/bundler_gems or `command`, which would reach the next process as that exact unexpanded literal " \
-      "string. Do not use this for secrets you would not want visible in this workspace's stored configuration."
+    description "Save an environment variable that commands in this workspace need (e.g. a bundler workaround) " \
+      "so every future job in this workspace starts with it. It does not change your current session -- export " \
+      "it yourself as well. Recording a name again overwrites it. The value is set literally, never through a " \
+      "shell: pass a resolved value such as /tmp/bundler_gems, not $TMPDIR/bundler_gems or `cmd`. It is stored " \
+      "in plain text and injected into every future session, so never record a secret."
     input_schema(
       properties: {
-        runId: { type: "string" },
+        runId: { type: "string", description: "This run's id, from your startup prompt." },
         name: { type: "string" },
         value: { type: "string" },
-        evidenceRef: { type: "string" }
+        evidenceRef: { type: "string", description: "One line on why it is needed, e.g. the failing command and its error." }
       },
       required: %w[runId name value evidenceRef]
     )

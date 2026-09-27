@@ -16,7 +16,6 @@ module Orchestrator
     module_function
 
     TOOLS = [
-      ::McpTools::PingTool,
       ::McpTools::ReportIdleTool,
       ::McpTools::WriteWorkflowArtifactTool,
       ::McpTools::ReadWorkflowArtifactTool,
@@ -27,11 +26,20 @@ module Orchestrator
       ::McpTools::ListWorkspacesTool
     ].freeze
 
+    # Belt and braces: clients that surface server instructions (Claude Code
+    # does) get a one-paragraph map. The lifecycle itself lives in RunPrompt,
+    # because not every driver is known to show these.
+    INSTRUCTIONS = "Orchestrator tools for an agent session. Call report_idle every time you stop working; the " \
+      "others are optional, e.g. queue_run / list_runs / get_run / list_workspaces for other jobs, and " \
+      "record_workspace_env_var to save an env fix for future jobs in this workspace. Files, shell and git are " \
+      "yours to do directly; there are no tools for them.".freeze
+
     def build(server_context:)
       MCP::Server.new(
         name: "workflow",
         title: "Workflow Run",
         version: "0.1.0",
+        instructions: INSTRUCTIONS,
         server_context:,
         tools: TOOLS
       )

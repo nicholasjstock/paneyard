@@ -1,4 +1,0 @@
-interface:
-  display_name: "Infrastructure Operations"
-  short_description: "Debug workers, services, queues, and streams"
-  default_prompt: "Use $infrastructure to diagnose and fix this runtime reliability issue."
