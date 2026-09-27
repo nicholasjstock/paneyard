@@ -1,6 +1,6 @@
 # Workflow Orchestrator
 
-Queue a job against a workspace. When a slot frees, it gets its own git worktree and one live `claude`/`codex`/`opencode` session you can watch and talk to, which does the work end to end and leaves its changes for you to try, committing, pushing or merging only when you ask. Runs, sessions, events, artifacts, and operator chat all stay scoped to their workspace.
+Queue a job against a workspace. When a slot frees, it gets its own git worktree and one live `claude`/`codex`/`opencode` session you can watch and talk to, which does the work end to end and leaves its changes for you to try, committing, pushing or merging only when you ask. Runs, sessions, checkpoints, and artifacts all stay scoped to their workspace.
 
 Rails schedules; it does not orchestrate. It decides when a run starts, gives it a worktree, and reclaims that worktree afterwards. Everything in between belongs to the session. There is no planner, no step queue, and no pull-request publishing: when you ask, the session commits and pushes its branch or merges it into `main`, and opening and merging a PR is up to you.
 
@@ -14,7 +14,7 @@ This README is for **operators** (running the orchestrator and pointing it at re
 | `git` | every run | Worktrees are made with `git worktree add` (`Orchestrator::GitWorktree`). |
 | [herdr](https://herdr.dev), running | every run | Owns every pane and process. Rails talks to its socket at `~/.config/herdr/herdr.sock` (override with `HERDR_SOCKET_PATH`) through `Orchestrator::Herdr`. If herdr isn't up, the run fails at launch. |
 | `claude`, `codex`, and/or `opencode` | whichever driver a run uses | Must be on the `PATH` of the **shell a herdr pane opens** (your login shell), and already signed in, because the session starts non-interactively and can't complete a login flow. Rails doesn't check for them before launching: a missing CLI shows up as a run that fails with "never became ready". Default models are in `Orchestrator::SessionArgs` (`opus`, `gpt-5.6-terra`, `9router/oc/deepseek-v4-flash-free`); override with `WORKFLOW_CLAUDE_MODEL` / `WORKFLOW_CODEX_MODEL` / `WORKFLOW_OPENCODE_MODEL` or per run in the UI. The opencode default assumes a provider you may not have configured. |
-| `nvim` | optional | Each run's herdr workspace opens with `nvim` in a split to the right of the agent (`RunSessionRunner#open_editor_pane`). If `nvim` isn't on the Rails process's `PATH`, the run launches with only the agent pane. |
+| `nvim` | optional | By default each run's herdr workspace opens with `nvim` in a split to the right of the agent. If `nvim` isn't on the Rails process's `PATH`, the default layout opens only the agent pane. A workspace can set its own layout instead (see "Workspace layouts" below). |
 | `gh`, signed in | pushing, unless you use SSH or a GitHub App | `Orchestrator::SessionEnv` uses `gh auth token` for the session's credentials and installs `gh auth git-credential` as git's credential helper. See [GitHub access](#4-github-access). |
 | `curl` | GitHub App only | `Orchestrator::GitHubAppAuth` calls the GitHub API with it. |
 
@@ -124,7 +124,30 @@ What that means in practice:
 
 ### 6. First run
 
-From the workspace's runs page, choose a new run, give it a task, and pick a driver (and optionally a model). Or queue it over MCP (below). Within a few seconds `RunDispatchJob` claims it, and a herdr workspace named after the worktree opens with the agent on the left and `nvim` on the right. If it fails, the run screen shows the launch error. The common ones map back to the steps above: "Source checkout must be on main", "has no origin remote", "Worktree path already exists", herdr unreachable, or a CLI that never became ready.
+From the workspace's runs page, choose a new run, give it a task, and pick a driver (and optionally a model). Or queue it over MCP (below). Within a few seconds `RunDispatchJob` claims it, and a herdr workspace named after the worktree opens with the agent on the left and `nvim` on the right, or with whatever tabs and panes that workspace's layout defines. If it fails, the run screen shows the launch error. The common ones map back to the steps above: "Source checkout must be on main", "has no origin remote", "Worktree path already exists", herdr unreachable, or a CLI that never became ready.
+
+### Workspace layouts
+
+Each workspace's new and edit forms have a **Layout** editor: the herdr tabs and panes its runs open with. Name each tab. Add panes, give each a command, and pick which earlier pane it splits off, to the right or below, and how much of the space that pane keeps. A live sketch of each tab shows the result. Until you change anything, the workspace uses the default layout (the agent with `nvim .` split beside it), and **Reset to default** goes back to it. The layout is stored as YAML (`workspaces.layout`), in this shape:
+
+```yaml
+tabs:
+  - name: main
+    panes:
+      - agent                       # required: the first pane of the first tab
+      - name: editor
+        command: nvim .
+        split: { of: agent, direction: right, ratio: 0.5 }
+  - name: logs
+    panes:
+      - name: dev-log
+        command: tail -f log/development.log
+      - name: test-log
+        command: tail -f log/test.log
+        split: { of: dev-log, direction: down }
+```
+
+Have as many tabs as you like, each with as many splits as you like. The agent pane is the only one that is required, and it is always the first pane of the first tab, which is the tab a run opens on. Every other pane is split off an earlier pane in its own tab, `right` or `down`; `ratio` is the share the pane being split keeps. A `command` is typed into the pane's own shell in the run's worktree, and every pane gets the same environment as the agent (`GH_TOKEN`, `WORKFLOW_RUN_ID`, the workspace's recorded env vars). A pane with no command is a plain shell. The panes are only set up when the session starts. Rails never watches or restarts them, and Close session, or the agent pane going away, closes all of them. See `docs/workspace-layouts.md` for the design.
 
 It worked when the session calls `report_idle` and the run screen shows its checkpoint. Ask it to commit and push, and `git -C ~/Source/my-app/main ls-remote origin 'workflow/*'` then lists the branch.
 
@@ -150,9 +173,9 @@ If a session dies without reporting (pane closed, CLI crashed), `RunSessionRecon
 
 See AGENTS.md's "MCP Boundary" for the design rules behind both.
 
-## Telegram admin chat
+## Telegram remote control
 
-The optional Telegram bot fronts the existing workspace admin chats. It only accepts messages from the Telegram user IDs configured below.
+The optional Telegram bot lets you check on and steer your live run sessions from your phone. It answers only the Telegram user IDs configured below, and only in your private chat with the bot, never in a group.
 
 Add these values to Rails credentials (or set equivalent environment variables):
 
@@ -169,7 +192,22 @@ The app polls Telegram every five seconds, so it only needs outbound internet ac
 bin/rails runner 'Telegram::Client.new.delete_webhook'
 ```
 
-In Telegram, send `/workspaces`, select a workspace, and then chat normally. `/stop` cancels that workspace's current admin-chat turn.
+Commands:
+
+| Command | What it does |
+| --- | --- |
+| `/panes` | Every live session: its run, workspace, what herdr says it is doing, and its last report. |
+| `/idle` | Only the live sessions that aren't working: idle, finished, blocked at a prompt, or reported idle. |
+| `/pane <run>` | Where that session stands. If it has reported (`report_idle`) and hasn't gone back to work since, you get that recap. Otherwise you get its live pane, and the message updates itself every few seconds for 3 minutes. If the session reports during that time, the message says so and the recap follows. |
+| `/screen <run> [lines]` | The raw newest lines of the pane, once (default 40, up to 200). |
+| `/report <run>` | That run's newest recap, rendered as Markdown. This also works after the session is closed. |
+| `/send <run> <text>` | Types `<text>` into the session as live input, exactly like the run screen's message box. |
+
+`<run>` is the run id's last four characters (the lists print `/pane_33bd` and `/screen_33bd`, which you can tap), a prefix of the worktree name, or the full run id. Every message the bot sends about a run starts with `run <id> ·`, and **replying to one of those messages sends your reply to that run**.
+
+Session status comes from herdr and is refreshed every 30 seconds, so it can lag by up to that much.
+
+Be aware of what this exposes. Anyone on the allow-list can type into sessions that have full access to their worktrees, which amounts to a shell on this machine. Pane text and checkpoints also pass through Telegram's servers, and bot chats aren't end-to-end encrypted, so anything a session prints can end up there.
 
 ## Verification
 

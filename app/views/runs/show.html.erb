@@ -83,6 +83,12 @@
       <% if @session.started_at %> &middot; started <%= time_ago_in_words(@session.started_at) %> ago<% end %>
     </p>
 
+    <%# A session that never got as far as running made no checkpoint; its result is the launch error and the
+        agent pane's last screen, which is all that is left once its workspace is closed. %>
+    <% if @session.ended? && @session.started_at.nil? && @session.result.present? %>
+      <pre class="log"><%= @session.result %></pre>
+    <% end %>
+
     <% if @session.live? %>
       <%= form_with url: send_message_workspace_run_path(current_workspace, @run), method: :post, local: true do |form| %>
         <div class="field">

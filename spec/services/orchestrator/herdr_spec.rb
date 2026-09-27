@@ -63,6 +63,41 @@ RSpec.describe Orchestrator::Herdr do
 
       expect(pane.fetch("pane_id")).to eq("w1:p2")
     end
+
+    # A split inherits nothing from the workspace's root pane (confirmed live),
+    # so a layout pane's env has to travel on the split itself.
+    it "passes a ratio and a compacted env when given" do
+      expect(described_class).to receive(:request!).with(
+        "pane.split", target_pane_id: "w1:p1", direction: "down", cwd: "/tmp/run-1", focus: false,
+        ratio: 0.3, env: { "FOO" => "1" }
+      ).and_return("pane" => { "pane_id" => "w1:p2" })
+
+      described_class.pane_split(
+        target_pane_id: "w1:p1", direction: "down", cwd: "/tmp/run-1", ratio: 0.3, env: { "FOO" => 1, "GONE" => nil }
+      )
+    end
+  end
+
+  describe ".tab_create" do
+    it "opens an unfocused tab with its own env and returns the tab and its root pane" do
+      expect(described_class).to receive(:request!).with(
+        "tab.create", workspace_id: "w1", label: "logs", cwd: "/tmp/run-1", env: { "FOO" => "bar" }, focus: false
+      ).and_return("tab" => { "tab_id" => "w1:t2" }, "root_pane" => { "pane_id" => "w1:p3" })
+
+      result = described_class.tab_create(workspace_id: "w1", label: "logs", cwd: "/tmp/run-1", env: { "FOO" => "bar" })
+
+      expect(result.dig("root_pane", "pane_id")).to eq("w1:p3")
+    end
+  end
+
+  describe ".pane_rename / .tab_rename" do
+    it "sends the label for the pane or tab" do
+      expect(described_class).to receive(:request!).with("pane.rename", pane_id: "w1:p2", label: "editor")
+      expect(described_class).to receive(:request!).with("tab.rename", tab_id: "w1:t1", label: "main")
+
+      described_class.pane_rename("w1:p2", "editor")
+      described_class.tab_rename("w1:t1", "main")
+    end
   end
 
   describe ".pane_read" do

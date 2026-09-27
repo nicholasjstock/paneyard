@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_26_180000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_27_120000) do
   create_table "run_checkpoints", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "outcome", null: false
@@ -73,66 +73,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_180000) do
     t.index ["worktree_name"], name: "index_runs_on_worktree_name"
   end
 
-  create_table "telegram_conversations", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "telegram_chat_id", null: false
-    t.string "telegram_user_id", null: false
-    t.datetime "updated_at", null: false
-    t.integer "workspace_id"
-    t.index ["telegram_chat_id"], name: "index_telegram_conversations_on_telegram_chat_id", unique: true
-    t.index ["workspace_id"], name: "index_telegram_conversations_on_workspace_id"
-  end
-
   create_table "telegram_update_cursors", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "last_update_id", default: -1, null: false
     t.string "name", null: false
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_telegram_update_cursors_on_name", unique: true
-  end
-
-  create_table "workspace_admin_chat_messages", force: :cascade do |t|
-    t.text "content", default: "", null: false
-    t.datetime "created_at", null: false
-    t.text "error_message"
-    t.json "events", default: [], null: false
-    t.integer "pid"
-    t.integer "process_group_id"
-    t.string "provider"
-    t.string "role", null: false
-    t.string "status", default: "queued", null: false
-    t.integer "telegram_conversation_id"
-    t.datetime "telegram_delivered_at"
-    t.integer "telegram_draft_id"
-    t.integer "telegram_message_id"
-    t.integer "telegram_persisted_characters", default: 0, null: false
-    t.text "telegram_synced_content"
-    t.string "turn_id"
-    t.datetime "updated_at", null: false
-    t.json "usage", default: {}, null: false
-    t.integer "workspace_admin_chat_id", null: false
-    t.index ["telegram_conversation_id"], name: "idx_on_telegram_conversation_id_d672f9d019"
-    t.index ["turn_id"], name: "index_workspace_admin_chat_messages_on_turn_id"
-    t.index ["workspace_admin_chat_id"], name: "index_workspace_admin_chat_messages_on_workspace_admin_chat_id"
-  end
-
-  create_table "workspace_admin_chats", force: :cascade do |t|
-    t.string "active_provider", default: "claude", null: false
-    t.string "active_turn_id"
-    t.string "capability_token_digest"
-    t.string "claude_model"
-    t.string "claude_session_id"
-    t.string "codex_model"
-    t.string "codex_session_id"
-    t.datetime "created_at", null: false
-    t.text "last_error"
-    t.string "opencode_model"
-    t.string "opencode_session_id"
-    t.string "status", default: "idle", null: false
-    t.datetime "updated_at", null: false
-    t.integer "workspace_id", null: false
-    t.index ["capability_token_digest"], name: "index_workspace_admin_chats_on_capability_token_digest", unique: true
-    t.index ["workspace_id"], name: "index_workspace_admin_chats_on_workspace_id", unique: true
   end
 
   create_table "workspace_env_vars", force: :cascade do |t|
@@ -149,6 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_180000) do
 
   create_table "workspaces", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.text "layout"
     t.string "name", null: false
     t.string "root_path", null: false
     t.datetime "updated_at", null: false
@@ -160,9 +107,5 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_180000) do
   add_foreign_key "run_checkpoints", "runs"
   add_foreign_key "run_sessions", "runs"
   add_foreign_key "runs", "workspaces"
-  add_foreign_key "telegram_conversations", "workspaces"
-  add_foreign_key "workspace_admin_chat_messages", "telegram_conversations"
-  add_foreign_key "workspace_admin_chat_messages", "workspace_admin_chats"
-  add_foreign_key "workspace_admin_chats", "workspaces"
   add_foreign_key "workspace_env_vars", "workspaces"
 end

@@ -35,12 +35,21 @@ module Orchestrator
     # be one of those gaps rather than the end of startup.
     SHELL_STABLE_SAMPLES = 3
     AGENT_START_ATTEMPTS = 5
+    # A healthy launch is detected about 250 ms after agent.start (herdr logs
+    # "agent changed ... agent=Some(Claude)"), so 10 s is ample and still well
+    # inside herdr's own 30 s startup timeout -- see wait_for_agent_detected!.
+    AGENT_DETECT_POLL_ATTEMPTS = 40
+    AGENT_DETECT_POLL_INTERVAL_SECONDS = 0.25
+    # How much of the agent pane a failed launch keeps for the run screen. The
+    # tail is what matters (the shell's last error, the CLI's exit message).
+    LAUNCH_SCREEN_LINES = 80
+    LAUNCH_SCREEN_MAX_CHARS = 8_000
+    # start! owns a "starting" session: see refresh!. Well beyond the longest
+    # start! can take (shell settling, launch retries, readiness, pid poll), so
+    # past this the worker that was starting it must have died.
+    STARTING_GRACE = 10.minutes
     PROMPT_SUBMIT_POLL_ATTEMPTS = 8
     PROMPT_SUBMIT_POLL_INTERVAL_SECONDS = 0.5
-    EDITOR_COMMAND = "nvim"
-    # `.` opens the worktree itself (LazyVim's explorer on the project root)
-    # rather than an empty buffer on the dashboard.
-    EDITOR_COMMAND_LINE = "#{EDITOR_COMMAND} .".freeze
 
     def start!(run, resume_session_id: nil, prompt: nil)
       raise Error, "run #{run.run_id} has no provisioned worktree" if run.target_root.blank? || run.branch_name.blank?
@@ -66,9 +75,13 @@ module Orchestrator
         prompt_path = File.join(runtime_dir, "prompt.txt")
         File.write(prompt_path, text)
 
-        root_pane = Herdr.workspace_create(
-          label: run.worktree_name.presence || run.run_id, cwd: run.target_root, env:, focus: false
-        ).fetch("root_pane")
+        # The workspace's layout: the agent pane plus whatever tabs and splits
+        # the workspace is configured with (nvim beside it, by default). Only
+        # the agent pane is recorded -- see SessionLayout.
+        root_pane = SessionLayout.open!(
+          label: run.worktree_name.presence || run.run_id, cwd: run.target_root, env:,
+          tabs: WorkspaceLayout.for(run.workspace)
+        )
         session.update!(
           herdr_workspace_id: root_pane.fetch("workspace_id"),
           herdr_tab_id: root_pane.fetch("tab_id"),
@@ -77,10 +90,10 @@ module Orchestrator
         )
 
         pane_id = session.herdr_pane_id
-        open_editor_pane(pane_id, cwd: run.target_root)
         start_agent!(name: run.run_id, kind:, pane_id:, args:)
+        wait_for_agent_detected!(pane_id, kind:)
         dismiss_codex_trust_prompt!(pane_id) if run.launcher_variant == "codex"
-        wait_until_ready!(pane_id)
+        wait_until_ready!(pane_id, kind:)
         Herdr.agent_prompt(pane_id, text)
         submit_prompt_if_unsent!(pane_id)
 
@@ -90,10 +103,35 @@ module Orchestrator
         session.update!(status: "running", pid:, started_at: Time.current, last_seen_at: Time.current)
         session
       rescue StandardError => error
+        # Closing the workspace destroys the only evidence of why the agent
+        # did not start (a shell error, the CLI's own exit message), so read
+        # the pane first.
+        screen = launch_failure_screen(session)
         close_herdr_workspace(session)
-        session.update!(status: "failed", outcome: "failed", result: error.message, ended_at: Time.current)
+        session.update!(
+          status: "failed", outcome: "failed", result: launch_failure_result(error, session, screen),
+          ended_at: Time.current
+        )
         raise
       end
+    end
+
+    # Best effort by design: nothing here may mask the launch error itself.
+    def launch_failure_screen(session)
+      text = snapshot(session, lines: LAUNCH_SCREEN_LINES, source: "recent_unwrapped")
+      return nil if text.blank?
+
+      text = text.rstrip
+      text.length > LAUNCH_SCREEN_MAX_CHARS ? "[...]\n#{text[-LAUNCH_SCREEN_MAX_CHARS..]}" : text
+    rescue StandardError => error
+      Rails.logger.warn("[RunSessionRunner] could not read #{session.herdr_pane_id} after a failed launch: #{error.message}")
+      nil
+    end
+
+    def launch_failure_result(error, session, screen)
+      return error.message if screen.nil?
+
+      "#{error.message}\n\n--- Last screen of agent pane #{session.herdr_pane_id} ---\n#{screen}"
     end
 
     # Submits text as the agent's own live input. This is the operator's
@@ -115,8 +153,17 @@ module Orchestrator
     # idle/working/blocked/done enum, which the run screen renders) and the
     # CLI's own session id, which is the only way to get a --resume id for an
     # interactive session -- there is no structured log to parse one out of.
+    #
+    # A session start! is still launching is left alone. Before agent.start
+    # herdr has no agent in the pane, so agent.get answers "not found" -- which
+    # used to mark the session lost, complete the run, and let
+    # RunSessionReconcileJob remove its still-clean worktree, all while start!
+    # was about to launch the CLI into that now-deleted directory (it exits
+    # at once; herdr never sees it start). start!'s own rescue already fails
+    # a launch that goes wrong.
     def refresh!(session)
       return session if session.ended?
+      return session if session.status == "starting" && session.created_at > STARTING_GRACE.ago
       return mark_pane_lost!(session) if session.pane_gone?
 
       begin
@@ -144,10 +191,10 @@ module Orchestrator
       session
     end
 
-    def snapshot(session, lines: 60)
+    def snapshot(session, lines: 60, source: "recent")
       return nil if session.pane_gone?
 
-      Herdr.pane_read(session.herdr_pane_id, source: "recent", lines:)
+      Herdr.pane_read(session.herdr_pane_id, source:, lines:)
     rescue Herdr::Error
       nil
     end
@@ -196,6 +243,10 @@ module Orchestrator
       nil
     end
 
+    # The agent pane is gone, but the rest of its herdr workspace may not be:
+    # the operator can close just the agent's pane or tab, leaving a layout's
+    # log tail or dev server running -- inside a worktree WorktreeJanitor is
+    # about to reclaim. The session is over either way, so close the lot.
     def mark_pane_lost!(session)
       outcome = last_reported_outcome(session)
       session.update!(
@@ -203,6 +254,7 @@ module Orchestrator
         result: session.result.presence || "The herdr pane for this session no longer exists."
       )
       kill_process(session)
+      close_herdr_workspace(session)
       session
     end
 
@@ -247,35 +299,6 @@ module Orchestrator
     def dismiss_codex_trust_prompt!(pane_id)
       sleep CODEX_TRUST_PROMPT_GRACE_SECONDS
       Herdr.agent_send_keys(pane_id, [ "Enter" ])
-    end
-
-    # The operator's side of the split: nvim in the worktree, next to the
-    # agent, for reading the diff or editing alongside the session. Rails never
-    # records or talks to this pane -- herdr_pane_id stays the agent's, so
-    # prompt!/refresh!/reconcile cannot reach it -- and workspace.close on
-    # Close session takes it down with the rest of the workspace. Purely a
-    # convenience, so any failure leaves the run launching with just the agent
-    # pane. The PATH check is Rails' own PATH rather than the pane shell's;
-    # the operator's shell normally sees at least as much.
-    def open_editor_pane(agent_pane_id, cwd:)
-      unless executable_on_path?(EDITOR_COMMAND)
-        Rails.logger.info("[RunSessionRunner] #{EDITOR_COMMAND} not on PATH; launching #{agent_pane_id} without an editor pane")
-        return nil
-      end
-
-      editor_pane = Herdr.pane_split(target_pane_id: agent_pane_id, direction: "right", cwd:, focus: false)
-      Herdr.pane_send_input(editor_pane.fetch("pane_id"), text: EDITOR_COMMAND_LINE, keys: [ "Enter" ])
-      editor_pane
-    rescue Herdr::Error, KeyError => error
-      Rails.logger.warn("[RunSessionRunner] could not open an editor pane beside #{agent_pane_id}: #{error.message}")
-      nil
-    end
-
-    def executable_on_path?(command)
-      ENV["PATH"].to_s.split(File::PATH_SEPARATOR).any? do |dir|
-        path = File.join(dir, command)
-        File.file?(path) && File.executable?(path)
-      end
     end
 
     # workspace.create returns a pane whose shell exists immediately, but that
@@ -352,13 +375,56 @@ module Orchestrator
       false
     end
 
-    def wait_until_ready!(pane_id)
+    # agent.start only types the command line into the pane's shell; it
+    # returns before anything has run. herdr then detects the CLI by its
+    # foreground process, and agent.get's `agent` goes from null to the CLI's
+    # name ("claude") -- the moment herdr logs "agent changed ...
+    # previous_agent=None agent=Some(Claude) process=claude". Until then
+    # agent.get still answers, with no `agent`, and if detection never comes
+    # herdr silently drops the launch after agent.start's timeout_ms (30 s by
+    # default) and agent.get turns into an opaque "agent target ... not
+    # found". Checking for detection directly fails in seconds, with a message
+    # that says what actually went wrong.
+    #
+    # No second agent.start on failure. By now nothing says whether the
+    # command line was swallowed by the shell or the CLI ran and exited, or is
+    # still coming up under load: in that last case a retry types a second
+    # shell command into the live CLI's input box. And the one cause found so
+    # far (the CLI launched into a worktree that had been removed -- see
+    # refresh!) would fail identically a second time.
+    def wait_for_agent_detected!(pane_id, kind:)
+      AGENT_DETECT_POLL_ATTEMPTS.times do
+        return true if agent_info!(pane_id, kind:, waiting_for: "start")["agent"].present?
+
+        sleep AGENT_DETECT_POLL_INTERVAL_SECONDS
+      end
+      seconds = (AGENT_DETECT_POLL_ATTEMPTS * AGENT_DETECT_POLL_INTERVAL_SECONDS).round
+      raise Error, "herdr never detected #{kind} starting in pane #{pane_id} after #{seconds}s: " \
+                   "the command line was typed into the pane's shell, but no #{kind} process appeared"
+    end
+
+    def wait_until_ready!(pane_id, kind:)
       READY_POLL_ATTEMPTS.times do
-        return true if Herdr.agent_get(pane_id)["interactive_ready"]
+        return true if agent_info!(pane_id, kind:, waiting_for: "become ready")["interactive_ready"]
 
         sleep READY_POLL_INTERVAL_SECONDS
       end
       raise Error, "herdr agent in pane #{pane_id} never became ready"
+    end
+
+    # agent.get during a launch, with herdr's "agent target ... not found"
+    # (herdr has given up on the launch) turned into a plain explanation.
+    # Anything else, including herdr being unreachable, propagates as is.
+    def agent_info!(pane_id, kind:, waiting_for:)
+      Herdr.agent_get(pane_id)
+    rescue Herdr::Unreachable
+      raise
+    rescue Herdr::Error => error
+      raise unless error.message.match?(/agent target .* not found/)
+
+      raise Error, "herdr stopped tracking the #{kind} launch in pane #{pane_id} while waiting for it to " \
+                   "#{waiting_for} (herdr: #{error.message}); herdr drops an agent.start it has not " \
+                   "seen become ready within its startup timeout, so #{kind} most likely never started or exited"
     end
 
     # A pane's foreground_process_group_id equals its shell_pid while it sits

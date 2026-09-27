@@ -6,7 +6,6 @@ class ApplicationController < ActionController::Base
   stale_when_importmap_changes
 
   helper_method :current_workspace
-  helper_method :current_workspace_admin_chat
   helper_method :current_runs
   helper_method :background_job_warning
 
@@ -21,15 +20,6 @@ class ApplicationController < ActionController::Base
 
   def current_workspace
     @current_workspace
-  end
-
-  # Every workspace has exactly one admin-chat slot, available from any
-  # workspace-scoped page via the layout's launcher.
-  def current_workspace_admin_chat
-    return unless current_workspace
-
-    @current_workspace_admin_chat ||= current_workspace.workspace_admin_chat ||
-      current_workspace.create_workspace_admin_chat!
   end
 
   def current_runs

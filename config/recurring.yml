@@ -29,9 +29,6 @@ production: &recurring_jobs
   poll_telegram_updates:
     class: PollTelegramUpdatesJob
     schedule: every 5 seconds
-  refresh_telegram_admin_chat_progress:
-    class: RefreshTelegramAdminChatProgressJob
-    schedule: every 4 seconds
 
 development:
   <<: *recurring_jobs

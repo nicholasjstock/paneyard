@@ -141,4 +141,39 @@ RSpec.describe RunSessionReconcileJob do
     expect(second.reload.status).to eq("completed")
     expect(Orchestrator::WorktreeJanitor).to have_received(:release!).twice
   end
+
+  # A layout's extra panes (log tails, a dev server) are never looked at: only
+  # the agent pane decides whether the session is alive, and when it is gone
+  # the whole workspace goes with it -- before the worktree those extra panes
+  # run in is released.
+  context "with a layout's extra panes in the run's workspace" do
+    before do
+      allow(Orchestrator::Herdr).to receive(:workspace_close)
+      allow(Orchestrator::RunSessionRunner).to receive(:kill_process)
+    end
+
+    it "keys off the agent pane alone, however the other panes are doing" do
+      _run, session = create_run_and_session(prefix: "reconcile-layout-live")
+      allow(Orchestrator::Herdr).to receive(:agent_get).with("w1:p1").and_return("agent_status" => "idle")
+      allow(Orchestrator::RunSessionRunner).to receive(:process_alive?).and_return(true)
+
+      described_class.perform_now
+
+      expect(session.reload).to be_live
+      expect(Orchestrator::Herdr).not_to have_received(:workspace_close)
+      expect(Orchestrator::WorktreeJanitor).not_to have_received(:release!)
+    end
+
+    it "closes the whole workspace before releasing the worktree when only the agent pane is gone" do
+      run, session = create_run_and_session(prefix: "reconcile-layout-agent-gone")
+      allow(Orchestrator::Herdr).to receive(:agent_get).with("w1:p1")
+        .and_raise(Orchestrator::Herdr::Error, "pane_not_found")
+
+      described_class.perform_now
+
+      expect(session.reload).to be_ended
+      expect(Orchestrator::Herdr).to have_received(:workspace_close).with("w1").ordered
+      expect(Orchestrator::WorktreeJanitor).to have_received(:release!).with(run).ordered
+    end
+  end
 end

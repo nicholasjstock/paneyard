@@ -17,14 +17,21 @@ RSpec.describe Orchestrator::RunSessionRunner do
     # Every failure path closes the pane's workspace; stubbed here so no
     # example can reach the real socket through it.
     allow(Orchestrator::Herdr).to receive(:workspace_close)
-    # The operator's nvim pane beside the agent. PATH is stubbed so examples
-    # do not depend on whether this machine has nvim installed.
-    allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(true)
+    # ...and first reads the agent pane's last screen for the failure record.
+    allow(Orchestrator::Herdr).to receive(:pane_read).and_return("")
+    # The default layout's nvim pane beside the agent. PATH is stubbed so
+    # examples do not depend on whether this machine has nvim installed.
+    allow(Orchestrator::WorkspaceLayout).to receive(:executable_on_path?).with("nvim").and_return(true)
     allow(Orchestrator::Herdr).to receive(:pane_split)
       .and_return("pane_id" => "w9:p2", "tab_id" => "w9:t1", "workspace_id" => "w9")
     allow(Orchestrator::Herdr).to receive(:pane_send_input)
+    allow(Orchestrator::Herdr).to receive(:pane_rename)
+    allow(Orchestrator::Herdr).to receive(:tab_rename)
+    allow(Orchestrator::Herdr).to receive(:tab_create)
+      .and_return("tab" => { "tab_id" => "w9:t2" }, "root_pane" => { "pane_id" => "w9:p3" })
     stub_const("#{described_class}::SHELL_POLL_INTERVAL_SECONDS", 0)
     stub_const("#{described_class}::PROMPT_SUBMIT_POLL_INTERVAL_SECONDS", 0)
+    stub_const("#{described_class}::AGENT_DETECT_POLL_INTERVAL_SECONDS", 0)
   end
 
   # An idle pane: the shell itself is the only thing in the foreground.
@@ -58,7 +65,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
       { "root_pane" => { "pane_id" => pane_id, "tab_id" => "w9:t1", "workspace_id" => "w9" } }
     end
     allow(Orchestrator::Herdr).to receive(:agent_get)
-      .and_return("interactive_ready" => true, "agent_status" => agent_status)
+      .and_return("agent" => "claude", "interactive_ready" => true, "agent_status" => agent_status)
     allow(Orchestrator::Herdr).to receive(:agent_prompt)
     allow(Orchestrator::Herdr).to receive(:agent_start) { launched = true; nil }
     allow(Orchestrator::Herdr).to receive(:pane_process_info) { launched ? running_agent_info : idle_shell_info }
@@ -81,13 +88,15 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(File.read(session.prompt_path)).to include(run.task)
     end
 
-    it "splits nvim opened on the worktree beside the agent, and keeps tracking only the agent pane" do
+    it "splits nvim opened on the worktree beside the agent by default, and keeps tracking only the agent pane" do
       stub_successful_launch
 
       session = described_class.start!(run)
 
-      expect(Orchestrator::Herdr).to have_received(:pane_split)
-        .with(target_pane_id: "w9:p1", direction: "right", cwd: run.target_root, focus: false)
+      expect(Orchestrator::Herdr).to have_received(:pane_split).with(
+        target_pane_id: "w9:p1", direction: "right", ratio: nil, cwd: run.target_root, env: { "FOO" => "bar" },
+        focus: false
+      )
       expect(Orchestrator::Herdr).to have_received(:pane_send_input).with("w9:p2", text: "nvim .", keys: [ "Enter" ])
       expect(Orchestrator::Herdr).to have_received(:agent_start).with(hash_including(pane_id: "w9:p1"))
       expect(Orchestrator::Herdr).not_to have_received(:agent_prompt).with("w9:p2", anything)
@@ -96,7 +105,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
     it "launches with just the agent pane when nvim is not on PATH" do
       stub_successful_launch
-      allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(false)
+      allow(Orchestrator::WorkspaceLayout).to receive(:executable_on_path?).with("nvim").and_return(false)
 
       session = described_class.start!(run)
 
@@ -114,6 +123,50 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(Orchestrator::Herdr).not_to have_received(:pane_send_input)
       expect(Orchestrator::Herdr).not_to have_received(:workspace_close)
       expect(session).to have_attributes(status: "running", pid: 555, herdr_pane_id: "w9:p1")
+    end
+
+    it "opens the workspace's own layout: extra tabs and splits, all with the session env, the agent still tracked" do
+      stub_successful_launch
+      run.workspace.update!(layout: <<~YAML)
+        tabs:
+          - name: main
+            panes:
+              - agent
+          - name: logs
+            panes:
+              - name: dev-log
+                command: tail -f log/development.log
+              - name: test-log
+                command: tail -f log/test.log
+                split: { of: dev-log, direction: down }
+      YAML
+      allow(Orchestrator::Herdr).to receive(:pane_split)
+        .and_return("pane_id" => "w9:p4", "tab_id" => "w9:t2", "workspace_id" => "w9")
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).to have_received(:tab_rename).with("w9:t1", "main")
+      expect(Orchestrator::Herdr).to have_received(:tab_create)
+        .with(workspace_id: "w9", label: "logs", cwd: run.target_root, env: { "FOO" => "bar" }, focus: false)
+      expect(Orchestrator::Herdr).to have_received(:pane_send_input)
+        .with("w9:p3", text: "tail -f log/development.log", keys: [ "Enter" ])
+      expect(Orchestrator::Herdr).to have_received(:pane_split).with(
+        hash_including(target_pane_id: "w9:p3", direction: "down", env: { "FOO" => "bar" }, focus: false)
+      )
+      expect(Orchestrator::Herdr).to have_received(:pane_send_input)
+        .with("w9:p4", text: "tail -f log/test.log", keys: [ "Enter" ])
+      expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1", herdr_tab_id: "w9:t1")
+    end
+
+    it "launches the agent even when a layout tab cannot be opened" do
+      stub_successful_launch
+      run.workspace.update!(layout: "tabs:\n  - panes: [agent]\n  - panes: [{ name: logs, command: tail -f x }]\n")
+      allow(Orchestrator::Herdr).to receive(:tab_create).and_raise(Orchestrator::Herdr::Error, "boom")
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).not_to have_received(:workspace_close)
+      expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1")
     end
 
     it "still launches the agent when nvim cannot be typed into the split pane" do
@@ -247,7 +300,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
       stub_const("#{described_class}::READY_POLL_ATTEMPTS", 2)
       stub_const("#{described_class}::READY_POLL_INTERVAL_SECONDS", 0)
       stub_successful_launch
-      allow(Orchestrator::Herdr).to receive(:agent_get).and_return("interactive_ready" => false)
+      allow(Orchestrator::Herdr).to receive(:agent_get).and_return("agent" => "claude", "interactive_ready" => false)
       allow(Orchestrator::Herdr).to receive(:workspace_close)
 
       expect { described_class.start!(run) }.to raise_error(described_class::Error, /never became ready/)
@@ -255,6 +308,105 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(Orchestrator::Herdr).to have_received(:workspace_close).with("w9")
       expect(run.run_sessions.sole).to have_attributes(status: "failed", outcome: "failed")
       expect(run.live_session).to be_nil
+    end
+
+    # The workspace is closed on failure, which destroys the pane -- so what
+    # the pane showed (a shell error, the CLI's exit message) is read first.
+    it "keeps the agent pane's last screen in the session result when the launch fails" do
+      stub_const("#{described_class}::READY_POLL_ATTEMPTS", 1)
+      stub_const("#{described_class}::READY_POLL_INTERVAL_SECONDS", 0)
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:agent_get).and_return("agent" => "claude", "interactive_ready" => false)
+      allow(Orchestrator::Herdr).to receive(:pane_read).and_return("~/worktree $ claude --model x\nError: cwd was deleted\n")
+
+      expect { described_class.start!(run) }.to raise_error(described_class::Error, /never became ready/)
+
+      expect(Orchestrator::Herdr).to have_received(:pane_read)
+        .with("w9:p1", source: "recent_unwrapped", lines: described_class::LAUNCH_SCREEN_LINES).ordered
+      expect(Orchestrator::Herdr).to have_received(:workspace_close).with("w9").ordered
+      expect(run.run_sessions.sole.result).to eq(
+        "herdr agent in pane w9:p1 never became ready\n\n" \
+        "--- Last screen of agent pane w9:p1 ---\n~/worktree $ claude --model x\nError: cwd was deleted"
+      )
+    end
+
+    it "keeps only the tail of a long pane screen" do
+      stub_const("#{described_class}::LAUNCH_SCREEN_MAX_CHARS", 10)
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:agent_start).and_raise(Orchestrator::Herdr::Error, "unknown agent kind")
+      allow(Orchestrator::Herdr).to receive(:pane_read).and_return("#{'x' * 50}0123456789")
+
+      expect { described_class.start!(run) }.to raise_error(Orchestrator::Herdr::Error)
+
+      expect(run.run_sessions.sole.result).to end_with("---\n[...]\n0123456789")
+    end
+
+    it "never lets a failed pane read mask the launch error" do
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:agent_start).and_raise(Orchestrator::Herdr::Error, "unknown agent kind")
+      allow(Orchestrator::Herdr).to receive(:pane_read).and_raise(Orchestrator::Herdr::Unreachable, "timed out")
+
+      expect { described_class.start!(run) }.to raise_error(Orchestrator::Herdr::Error, "unknown agent kind")
+
+      expect(Orchestrator::Herdr).to have_received(:workspace_close).with("w9")
+      expect(run.run_sessions.sole).to have_attributes(status: "failed", result: "unknown agent kind")
+
+      allow(Orchestrator::Herdr).to receive(:pane_read).and_raise(KeyError, "read")
+      expect { described_class.start!(run) }.to raise_error(Orchestrator::Herdr::Error, "unknown agent kind")
+    end
+
+    # Observed live: agent.start returned ok, herdr never saw claude start, and
+    # 30 s later agent.get only said "agent target ... not found".
+    it "fails fast with a plain message when herdr never detects the agent starting" do
+      stub_const("#{described_class}::AGENT_DETECT_POLL_ATTEMPTS", 3)
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:agent_get)
+        .and_return("agent" => nil, "launch_pending" => true, "interactive_ready" => false, "agent_status" => "unknown")
+
+      expect { described_class.start!(run) }.to raise_error(
+        described_class::Error, /\Aherdr never detected claude starting in pane w9:p1 after \d+s: /
+      )
+
+      expect(Orchestrator::Herdr).to have_received(:agent_get).exactly(3).times
+      # Never a second launch: it could type a command line into a live CLI.
+      expect(Orchestrator::Herdr).to have_received(:agent_start).once
+      expect(Orchestrator::Herdr).not_to have_received(:agent_prompt)
+      expect(run.run_sessions.sole).to have_attributes(status: "failed", outcome: "failed")
+      expect(run.run_sessions.sole.result).to start_with("herdr never detected claude starting")
+    end
+
+    it "explains herdr's 'agent target not found' while waiting for the agent to start" do
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:agent_get)
+        .and_raise(Orchestrator::Herdr::Error, "agent target w9:p1 not found")
+
+      expect { described_class.start!(run) }.to raise_error(
+        described_class::Error, /herdr stopped tracking the claude launch in pane w9:p1 while waiting for it to start/
+      )
+    end
+
+    it "explains herdr's 'agent target not found' while waiting for the agent to become ready" do
+      stub_successful_launch
+      calls = 0
+      allow(Orchestrator::Herdr).to receive(:agent_get) do
+        calls += 1
+        raise Orchestrator::Herdr::Error, "agent target w9:p1 not found" if calls > 2
+
+        { "agent" => "claude", "interactive_ready" => false }
+      end
+
+      expect { described_class.start!(run) }.to raise_error(
+        described_class::Error,
+        /stopped tracking the claude launch in pane w9:p1 while waiting for it to become ready \(herdr: agent target/
+      )
+      expect(run.run_sessions.sole.result).to include("never started or exited")
+    end
+
+    it "does not reword a herdr error that is not a lost agent target" do
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:agent_get).and_raise(Orchestrator::Herdr::Unreachable, "herdr timed out")
+
+      expect { described_class.start!(run) }.to raise_error(Orchestrator::Herdr::Unreachable, "herdr timed out")
     end
 
     it "sends codex its directory-trust Enter, and no other driver one" do
@@ -324,6 +476,9 @@ RSpec.describe Orchestrator::RunSessionRunner do
       described_class.refresh!(session)
 
       expect(session.reload).to have_attributes(status: "failed", outcome: "failed", herdr_pane_id: nil)
+      # The rest of the workspace (a layout's log tail or dev server) must not
+      # outlive the agent pane.
+      expect(Orchestrator::Herdr).to have_received(:workspace_close).with("w1")
     end
 
     # Regression: a session that already reported "done" -- work committed,
@@ -386,6 +541,32 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
       expect(session.reload).to have_attributes(status: "done", outcome: "done")
       expect(session.result).to eq("Merged into main.")
+    end
+
+    # Regression (run-20260927-075528-47b3): before agent.start herdr has no
+    # agent in the pane and agent.get says "not found". The reconcile tick
+    # that landed in that window marked the session lost, completed the run
+    # and removed its clean worktree, and start! then launched claude into a
+    # deleted directory.
+    it "leaves a session that start! is still launching to start!" do
+      _run, session = create_run_and_session(run:, prefix: "session-runner", status: "starting", started_at: nil)
+
+      expect(Orchestrator::Herdr).not_to receive(:agent_get)
+      described_class.refresh!(session)
+
+      expect(session.reload).to have_attributes(status: "starting", ended_at: nil, herdr_pane_id: "w1:p1")
+    end
+
+    # ...but a worker that died mid-launch must not hold a slot forever.
+    it "reconciles a session stuck starting long past any real launch" do
+      _run, session = create_run_and_session(run:, prefix: "session-runner", status: "starting", started_at: nil)
+      session.update!(created_at: (described_class::STARTING_GRACE + 1.minute).ago)
+      allow(Orchestrator::Herdr).to receive(:agent_get)
+        .and_raise(Orchestrator::Herdr::Error, "agent target w1:p1 not found")
+
+      described_class.refresh!(session)
+
+      expect(session.reload).to have_attributes(status: "failed", outcome: "failed", herdr_pane_id: nil)
     end
 
     it "leaves an already-ended session alone" do

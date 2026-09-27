@@ -49,10 +49,10 @@ class WorkspacesController < ApplicationController
   private
 
   def workspace_params
-    params.require(:workspace).permit(:name, :root_path)
+    params.require(:workspace).permit(:name, :root_path, :layout)
   end
 
   def workspace_edit_params
-    params.require(:workspace).permit(:root_path)
+    params.require(:workspace).permit(:root_path, :layout)
   end
 end

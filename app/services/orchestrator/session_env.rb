@@ -70,7 +70,7 @@ module Orchestrator
       env
     end
 
-    # Every session now commits and pushes its own branch -- there is no
+    # Any session may be asked to commit and push its own branch -- there is no
     # separate git-role worker to hand credentials to any more -- so this is
     # unconditional rather than role-scoped.
     #
