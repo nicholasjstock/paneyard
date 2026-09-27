@@ -4,6 +4,9 @@ RSpec.describe RunSessionReconcileJob do
   # RunIdleReport notifies the operator's real herdr; a spec must never open
   # that socket.
   before { allow(Orchestrator::Herdr).to receive(:notify) }
+  # A spec must not remove real worktrees either; the janitor's own specs cover
+  # what release! keeps and removes.
+  before { allow(Orchestrator::WorktreeJanitor).to receive(:release!).and_return(false) }
   # This job is the safety net for sessions that die unnoticed. Its whole job is
   # to spot sessions that stopped existing, so their runs stop holding a slot.
   it "completes the run when a session turns out to have died" do
@@ -92,5 +95,50 @@ RSpec.describe RunSessionReconcileJob do
 
     expect(session.reload).to have_attributes(status: "done", outcome: "done", ended_at: nil)
     expect(run.reload).to have_attributes(status: "awaiting_review", stopped_at: nil)
+  end
+
+  # Closing a run's herdr workspace by hand is the operator finishing with it
+  # without the run screen, so it must release the worktree just as Close
+  # session does, not leave it for the next ten-minute sweep.
+  it "releases the worktree of a session whose pane is gone" do
+    run, = create_run_and_session(prefix: "reconcile-release")
+    allow(Orchestrator::RunSessionRunner).to receive(:refresh!) do |s|
+      s.update!(status: "failed", outcome: "failed", result: "pane gone", ended_at: Time.current)
+    end
+
+    described_class.perform_now
+
+    expect(Orchestrator::WorktreeJanitor).to have_received(:release!).with(run).once
+  end
+
+  it "does not release the worktree of a live or idle session" do
+    live_run, = create_run_and_session(prefix: "reconcile-keep-live")
+    idle_run, idle_session = create_run_and_session(prefix: "reconcile-keep-idle")
+    Orchestrator::RunIdleReport.call(run: idle_run, session: idle_session, outcome: "done", summary: "Over to you.")
+    allow(Orchestrator::RunSessionRunner).to receive(:refresh!) do |s|
+      s.update!(agent_status: s.run == live_run ? "working" : "idle", last_seen_at: Time.current)
+    end
+
+    described_class.perform_now
+
+    expect(Orchestrator::WorktreeJanitor).not_to have_received(:release!)
+  end
+
+  # The run is already completed and the sweep retries later, so one failed
+  # removal must not abort the loop over the remaining sessions.
+  it "keeps completing runs when releasing their worktrees fails" do
+    first, = create_run_and_session(prefix: "reconcile-release-fail-a")
+    second, = create_run_and_session(prefix: "reconcile-release-fail-b")
+    allow(Orchestrator::RunSessionRunner).to receive(:refresh!) do |s|
+      s.update!(status: "done", outcome: "done", ended_at: Time.current)
+    end
+    allow(Orchestrator::WorktreeJanitor).to receive(:release!)
+      .and_raise(Orchestrator::WorktreeJanitor::Error, "git worktree remove failed")
+
+    expect { described_class.perform_now }.not_to raise_error
+
+    expect(first.reload.status).to eq("completed")
+    expect(second.reload.status).to eq("completed")
+    expect(Orchestrator::WorktreeJanitor).to have_received(:release!).twice
   end
 end
