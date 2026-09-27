@@ -28,9 +28,11 @@ APP_ROOT = File.expand_path("..", __dir__)
 ROOT = File.join(APP_ROOT, "tmp", "preflight")
 STORAGE = File.join(ROOT, "storage")
 PROD_COPY = ARGV.include?("--prod-copy")
-# Only the primary database has migrations (db/migrate); queue, cache and
-# cable are loaded from their schema files when created, so the instance gets
-# fresh ones -- which also means none of production's pending jobs come along.
+# Only the primary database is copied. Queue, cache and cable are loaded from
+# their schema files when created, so the instance gets fresh ones -- which
+# also means none of production's pending jobs come along, and that a
+# db/queue_migrate or db/cable_migrate migration is not exercised against
+# production's data here.
 DATABASES = %w[production].freeze
 
 $stdout.sync = true

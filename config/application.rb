@@ -38,5 +38,10 @@ module WorkflowOrchestrator
 
     # Don't generate system test files.
     config.generators.system_tests = nil
+
+    # Nothing here attaches images, so no variant processor is needed.
+    # image_processing 2 no longer pulls in ruby-vips, and Active Storage
+    # would otherwise warn about its absence on every boot.
+    config.active_storage.variant_processor = :disabled
   end
 end
