@@ -49,9 +49,9 @@ was created or closed.
 workspace's env.** The env passed to `workspace.create` applies to the root
 pane only. This run's agent pane has `WORKFLOW_RUN_ID`, `WORKFLOW_RUN_TOKEN`
 and `GH_TOKEN`. Its `nvim .` split (`ps eww` on the nvim pid) has only the
-herdr-injected `HERDR_*` values. Every extra pane therefore gets exactly the
-env we pass it and nothing else. That is useful: the capability token and the
-GitHub token stay in the agent pane unless we choose to hand them out.
+herdr-injected `HERDR_*` values. Every pane therefore gets exactly the env we
+pass on the call that creates it, and nothing else. Since every pane is to get
+the full session env (§3), each creating call must pass it explicitly.
 
 Still unverified. Checking these needs mutating calls, so they must be run
 live against a throwaway workspace during implementation, not in a spec:
@@ -61,9 +61,9 @@ live against a throwaway workspace during implementation, not in a spec:
 - What `layout.apply`'s `command` argv does: exec it directly or run it
   through the shell, and whether the pane closes, freezes or drops to a shell
   when the command exits.
-- Whether `pane.split {env}` really sets the new pane's shell env. That is
-  the only way to place the agent somewhere other than the first tab's root
-  (§3), and it would carry the capability token.
+- Whether `pane.split {env}` and `tab.create {env}` really set the new pane's
+  shell env, as `workspace.create {env}` is known to. Every non-root pane
+  depends on this for its env, so it is the most important live check.
 - Whether `tab.create {focus: false}` in an unfocused workspace leaves the
   active tab alone.
 - Whether processes that ignore SIGHUP or daemonise survive `workspace.close`.
@@ -102,12 +102,11 @@ Both, with precedence (repo file overrides column, or the reverse): rejected.
 Two sources with a merge rule is exactly the kind of cleverness this app has
 been removing. It also keeps the problems of the repo file.
 
-What the repo file would buy is versioning and sharing, and a project-specific
-fact such as "the dev server is `bin/dev -p $PORT`" does sit naturally in the
-repo. If that is missed later, the additive form is an **explicit, per-workspace
-opt-in**, `layout_source: repo`, never auto-discovery. It would read the file
-from the **source checkout (`main`)**, not the run's worktree, so a run cannot
-change its own layout. Left as an open question.
+**Decided (operator, 2026-09-27): no repo file.** The layout lives only in
+the workspace's settings in Rails. If a repo file is ever wanted, the shape to
+use is an **explicit, per-workspace opt-in**, never auto-discovery, reading from
+the **source checkout (`main`)** rather than the run's worktree, so a run cannot
+change its own layout.
 
 ## 3. Schema
 
@@ -133,17 +132,17 @@ tabs:
         split: { of: agent, direction: right, ratio: 0.5 }
       - name: shell               # no command: a plain shell in the worktree
         split: { of: editor, direction: down, ratio: 0.7 }
-  - name: server
+  - name: logs
     panes:
-      - name: server
-        command: bin/dev -p {{port}}
-      - name: log
+      - name: dev-log
         command: tail -f log/development.log
-        split: { of: server, direction: down }
+      - name: test-log
+        command: tail -f log/test.log
+        split: { of: dev-log, direction: down }
         focus: true
       - name: sidekiq-log
         command: tail -f log/sidekiq.log
-        split: { of: log, direction: right }
+        split: { of: test-log, direction: right }
   - name: specs
     panes:
       - name: specs
@@ -156,9 +155,9 @@ That produces:
 tab "main":   [ agent | editor ]
               [       | ------ ]
               [       | shell  ]
-tab "server": [ server               ]
-              [ -------------------- ]
-              [ log (focused) | sidekiq-log ]
+tab "logs":   [ dev-log                          ]
+              [ -------------------------------- ]
+              [ test-log (focused) | sidekiq-log ]
 tab "specs":  [ specs ]
 ```
 
@@ -179,14 +178,8 @@ Rules:
   first tab, so the tab you land on is the agent's. It may be the tab's root
   or a split of another pane (`{agent: {split: {of: editor, direction: right}}}`)
   if you want something to its left or above it. The agent pane is always the
-  one stored as `herdr_pane_id`. It gets the full session env, and it is
-  created without best-effort handling: if it fails, the run fails.
-  - Detail: when the agent is the first tab's root, it is `workspace.create`'s
-    root pane with the session env, which is today's verified path. When it is
-    a split, its env comes from `pane.split {env}` instead. That is in herdr's
-    schema, but it carries the capability token, so verify it live before
-    relying on it (§1). If it doesn't hold, fall back to requiring the agent
-    to be the first tab's root.
+  one stored as `herdr_pane_id`, and it is created without best-effort
+  handling: if it fails, the run fails.
 - `name`: required on every other pane, unique across the whole layout,
   `[a-z0-9_-]{1,32}`. `agent` is reserved. It becomes the herdr pane label
   (`pane.rename`). Tab `name` is optional and becomes the tab label.
@@ -206,33 +199,25 @@ Rules:
   run never takes over the operator's screen.
 - `command` at most 1 KB.
 
-**Interpolation.** `{{worktree}}`, `{{branch}}`, `{{run_id}}`,
-`{{workspace}}` and `{{port}}` are substituted into `command`. Each value is
-`Shellwords.escape`d because the command is shell text. An unknown `{{…}}` is
-a validation error. The same values go into every extra pane's env as
-`WORKFLOW_WORKTREE`, `WORKFLOW_BRANCH`, `WORKFLOW_RUN_ID`, `WORKFLOW_PORT` and
-`PORT`, so a command can use `$PORT` instead, which is what `bin/dev` and
-Procfiles already read.
+**Env: every pane gets all of it (operator decision).** Every pane, including
+the editor, log tails and plain shells, gets the same env hash the agent gets:
+`SessionEnv.for_session(run:, capability_token:, extra:)`. That is the
+workspace's recorded env vars, the sanitised process env, `WORKFLOW_RUN_ID`,
+the run's MCP capability token, `GH_TOKEN` with the git credential helper,
+and the driver's extras. So `git push` from the nvim pane or a spare shell
+works exactly as it does for the agent, and a command in any pane can
+reference `$WORKFLOW_RUN_ID` and the rest. `SessionLayout` passes that one hash
+to every `workspace.create`, `tab.create` and `pane.split` it makes. This is a
+change from today, where the nvim split has none of it (§1). The token dies
+with the session anyway: `RunSession.authenticate_capability` only accepts
+live sessions.
 
-**Ports.** A port is allocated only when the layout references `{{port}}`.
-`Orchestrator::PortAllocator` picks the lowest port in `3100..3999` that meets
-both conditions:
-
-- it is not recorded on another **live** `RunSession` (new column
-  `run_sessions.port`; it frees itself when `ended_at` is set)
-- a bind probe on `127.0.0.1` succeeds
-
-Four concurrent runs then never collide on 3000 or with each other. The agent
-pane also gets `PORT`/`WORKFLOW_PORT` so the session can curl or restart its own
-server, and the run screen shows `http://localhost:<port>`. One port per run in
-v1. Named ports (`{{port.web}}`, `{{port.vite}}`) are an open question.
-
-**Env for extra panes.** `WorkspaceEnvVars` (the recorded per-workspace
-workarounds), plus `SessionEnv.sanitized_process_env`, plus the interpolation
-variables above. Deliberately **not** the capability token (`WORKFLOW_RUN_TOKEN`),
-the MCP config or `GH_TOKEN`: a log tail or dev server needs none of them.
-Today's nvim pane already runs without them, as found above. That becomes a new
-`SessionEnv.for_layout_pane(run:, vars:)`.
+**No interpolation and no ports (operator decision).** There are no
+`{{…}}` placeholders and no port allocation. Each pane's cwd is the worktree,
+and the env above covers anything run-specific, so a command is plain shell
+text. If two concurrent runs start servers on the same port, that is the
+project's own command to adjust (for example `bin/dev -p $SOME_VAR` with a
+workspace env var), not something the orchestrator allocates.
 
 ## 4. Lifecycle
 
@@ -248,7 +233,7 @@ panes individually.
   Today it only kills the agent pid, because until now "pane gone" meant the
   whole workspace was gone. With a `server` tab, an operator who closes just the
   agent pane (or its tab) leaves a live workspace with `bin/dev` still bound to
-  the port and cwd'd inside a worktree that `WorktreeJanitor.release!` is about
+  its port and cwd'd inside a worktree that `WorktreeJanitor.release!` is about
   to remove. `mark_pane_lost!` must call `close_herdr_workspace(session)` too.
   That is harmless when the workspace is already gone, since
   `workspace.close` is `request` rather than `request!` and its error is
@@ -281,8 +266,7 @@ panes individually.
   shell is settling. Opening them after the agent pane has settled
   (`wait_for_available_shell!`) would slow start-up for no gain.
 - **Resume** (`start!(resume_session_id:)`): a resumed session opens a new
-  workspace, so it gets the layout fresh. It reuses the session's port if that
-  port is still free, and otherwise allocates a new one.
+  workspace, so it gets the layout fresh, with the new session's env.
 
 ## 5. Default and migration
 
@@ -306,18 +290,15 @@ means "agent pane only".
 
 Migration steps, each shippable on its own:
 
-1. Migration: `add_column :workspaces, :layout, :text` and
-   `add_column :run_sessions, :port, :integer`. No backfill.
-2. `WorkspaceLayout` (parse, validate, default, interpolate) and the new herdr
+1. Migration: `add_column :workspaces, :layout, :text`. No backfill.
+2. `WorkspaceLayout` (parse, validate, default) and the new herdr
    client calls, with specs. Move `open_editor_pane` behind the layout, which
-   produces the default. The pane then gets its `editor` label and the
-   `WORKFLOW_*` env, and is otherwise unchanged.
+   produces the default. The editor pane then gets its `editor` label and the
+   full session env, and is otherwise unchanged.
 3. `mark_pane_lost!` closes the workspace. Worth doing even before layouts
    land, because it is correct today too.
 4. Workspace edit form: a `layout` textarea (prefilled with the default as a
    comment/example), with validation errors shown inline.
-5. Ports: `PortAllocator`, `run_sessions.port`, and the port link on the run
-   screen.
 
 Sessions already running when this ships are not affected. Only new starts
 read the layout. Rollback is `remove_column`: the code falls back to the
@@ -344,20 +325,20 @@ default.
 | `layout.apply` for the whole thing | It creates a *new* tab, and with `tab_id` it replaces the tab and kills its PTYs. The agent pane comes from `workspace.create` and must survive, so the agent's tab can't be built this way. Its `command` argv exit semantics are also unverified, and it bypasses the operator's shell, which `bin/dev`-style commands need for PATH/rbenv. It could build *non-agent* tabs in one call later, once verified live. |
 | Rails supervising extra panes (restart on crash, health checks, wait-for-ready before prompting the agent) | That is orchestration. A crashed server is visible in its pane, and the agent or operator restarts it. |
 | Tracking extra pane ids on `RunSession` | Nothing needs them: `workspace.close` covers teardown, and reconcile must *not* look at them. |
-| Giving extra panes the full session env | They would hold the MCP capability and `GH_TOKEN` for no reason. Found above that today's nvim split already runs without them. |
+| Giving extra panes a reduced env (no token, no `GH_TOKEN`) | Operator decision: every pane gets every env var, so a spare shell or nvim can push and talk to the run exactly like the agent. |
+| `{{…}}` interpolation and per-run port allocation | Operator decision: panes don't need allocated ports, and env vars already cover run-specific values. |
 | Auto-detecting from `Procfile.dev`/`bin/dev` | Too magic, and one `bin/dev` pane (foreman multiplexes) already covers it explicitly. |
 | JSON column with a structured form builder | The form would cost more than the feature. YAML text with validation is enough for one operator. |
 
 ## Files that would change
 
-- `db/migrate/*_add_layout_to_workspaces.rb`, `*_add_port_to_run_sessions.rb`,
-  and `db/schema.rb`
+- `db/migrate/*_add_layout_to_workspaces.rb` and `db/schema.rb`
 - `app/models/workspace.rb`: `validate :layout_is_valid`, and `#layout_config`
   returning the parsed layout or the default
 - **new** `app/services/orchestrator/workspace_layout.rb`: parse, validate,
-  `DEFAULT`, `interpolate(vars)` → plain `Pane` structs
+  `DEFAULT` → plain `Tab`/`Pane` structs
 - **new** `app/services/orchestrator/session_layout.rb`: `open!(run:, layout:,
-  vars:, agent_env:, pane_env:)` builds the whole workspace and returns the
+  env:)` builds the whole workspace and returns the
   agent pane (`workspace_id`, `tab_id`, `pane_id`) for `RunSessionRunner` to
   record. It walks tabs, then panes, in order: `workspace_create`/`tab_create`
   for a tab's root, `pane_split` for the rest, then `pane_rename` and
@@ -365,18 +346,14 @@ default.
   depends on (its tab root when the agent is a split), and best effort for
   everything else. It replaces `RunSessionRunner.open_editor_pane` and the
   inline `workspace_create` in `start!`.
-- **new** `app/services/orchestrator/port_allocator.rb`
 - `app/services/orchestrator/herdr.rb`: `pane_split(…, ratio:, env:)`,
   `tab_create`, `tab_rename`, `pane_rename`, plus documented header entries
-- `app/services/orchestrator/run_session_runner.rb`: call `SessionLayout`,
-  allocate the port, remove the `EDITOR_*` constants, and make `mark_pane_lost!`
+- `app/services/orchestrator/run_session_runner.rb`: call `SessionLayout` with
+  the session env, remove the `EDITOR_*` constants, and make `mark_pane_lost!`
   close the workspace
-- `app/services/orchestrator/session_env.rb`: `for_layout_pane`, and
-  `PORT`/`WORKFLOW_PORT` in `for_session`
 - `app/controllers/workspaces_controller.rb`: permit `:layout` (both
   `workspace_params` and `workspace_edit_params`)
 - `app/views/workspaces/{new,edit}.html.erb`: layout textarea and errors
-- `app/views/runs/show.html.erb`: port link when `session.port`
 - `AGENTS.md` / `CLAUDE.md`: a short "Layouts" note (agent pane is primary;
   reconcile ignores the rest; layout is start-time setup only), and a README
   mention
@@ -391,21 +368,19 @@ All with `Orchestrator::Herdr` stubbed. No live socket.
   - rejects: `agent` missing, repeated or outside the first tab; a tab root
     with `split`, or a later pane without one; duplicate/reserved names; `of`
     naming a later pane, an unknown pane, or a pane in another tab; two
-    `focus` in one tab; unknown `{{var}}`, bad
-    ratio, more than the sanity cap, invalid YAML
-  - interpolation shell-escapes values (a worktree path with a space and a `'`)
+    `focus` in one tab; bad ratio; more than the sanity cap; invalid YAML
+  - the command text is kept verbatim (quotes, `$VAR`, `&&`)
 - `spec/services/orchestrator/session_layout_spec.rb`
   - issues `pane_split`/`tab_create`/`pane_rename`/`pane_send_input` in order
     with the right targets. A split `of: server` targets the pane id returned
     for `server`.
-  - env passed to extra panes has `PORT`/`WORKFLOW_*` and **no**
-    `WORKFLOW_RUN_TOKEN` or `GH_TOKEN`
+  - every `workspace_create`, `tab_create` and `pane_split` gets the same full
+    session env, including `WORKFLOW_RUN_TOKEN` and `GH_TOKEN`
   - a `Herdr::Error` on one pane logs, skips it and its dependants (panes whose
     `of` chain leads back to it; a whole tab if its root fails), and continues
     with the rest
-  - agent as the first tab's root: env goes on `workspace_create`. Agent as a
-    split: `workspace_create` gets the pane env and the agent's `pane_split`
-    gets the session env. Either way the returned pane is the agent's.
+  - agent as the first tab's root or as a split: either way the returned pane
+    is the agent's
   - a layout with several tabs, each with several splits, issues one
     `tab_create` per extra tab and one `pane_split` per non-root pane, all
     targeting the right ids
@@ -418,12 +393,6 @@ All with `Orchestrator::Herdr` stubbed. No live socket.
   - an extra-pane failure does not fail `start!`
   - `mark_pane_lost!` (via `refresh!` with `agent_get` raising `Herdr::Error`)
     now calls `workspace_close`
-  - `start!` records `port` only when the layout uses `{{port}}`, and the agent
-    env carries `PORT`
-- `spec/services/orchestrator/port_allocator_spec.rb`: skips ports held by
-  live sessions, reuses ports of ended sessions, and skips a port bound by a
-  real `TCPServer` in the spec. That is a real socket on 127.0.0.1, not
-  herdr's.
 - `spec/jobs/run_session_reconcile_job_spec.rb`
   - agent pane alive while a (stubbed) extra pane is gone: session stays live
   - agent pane gone while the workspace still exists: session ends, run
@@ -434,24 +403,23 @@ All with `Orchestrator::Herdr` stubbed. No live socket.
   and shows the validation error.
 
 Manual live verification (operator's herdr, throwaway workspace), before
-merging: the four unverified herdr behaviours in §1, and one real run with a
-`bin/dev -p {{port}}` tab closed via Close session, then `lsof -i :<port>`
-empty.
+merging: the unverified herdr behaviours in §1 (above all, that a split or
+tab pane gets its env: `ps eww` on a process in it). Then one real run with a
+`logs` tab running `tail -f`, closed via Close session, then check that no
+`tail` process is left.
 
-## Decided
+## Decided (operator, 2026-09-27)
 
 - A workspace's layout may have any number of tabs, each with any number of
-  splits. The agent pane is the only obligatory pane (operator, 2026-09-27).
+  splits. The agent pane is the only obligatory pane. The layout is saved in
+  the workspace's (project's) settings.
+- Default: one tab with the agent and nvim beside it. A project might instead
+  have, say, the agent in tab 1 and a `logs` tab tailing its dev logs.
+- No repo layout file.
+- No port allocation and no `{{…}}` interpolation.
+- Every pane gets all the session's env vars.
 
 ## Open questions for the operator
 
-1. Repo file: agree to leave it out of v1? If it's wanted later, is
-   "explicit opt-in, read from `main` only" the right shape?
-2. Should a layout be able to make a non-agent tab active when you first
-   switch to the run's workspace? (v1: no, the agent's first tab is always
-   active.)
-3. One port per run enough, or named ports (`web`, `vite`) from the start?
-4. Should the editor pane also get `GH_TOKEN` so `git push` from nvim/shell
-   works like the agent's? (Proposed: no, least privilege. Today it has
-   neither.)
-5. Port range `3100..3999`: any local services that collide on this machine?
+1. Should a run ever *land* on a tab other than the agent's? This design always
+   opens with the agent's (first) tab active.
