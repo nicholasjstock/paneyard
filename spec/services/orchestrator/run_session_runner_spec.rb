@@ -17,12 +17,16 @@ RSpec.describe Orchestrator::RunSessionRunner do
     # Every failure path closes the pane's workspace; stubbed here so no
     # example can reach the real socket through it.
     allow(Orchestrator::Herdr).to receive(:workspace_close)
-    # The operator's nvim pane beside the agent. PATH is stubbed so examples
-    # do not depend on whether this machine has nvim installed.
-    allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(true)
+    # The default layout's nvim pane beside the agent. PATH is stubbed so
+    # examples do not depend on whether this machine has nvim installed.
+    allow(Orchestrator::WorkspaceLayout).to receive(:executable_on_path?).with("nvim").and_return(true)
     allow(Orchestrator::Herdr).to receive(:pane_split)
       .and_return("pane_id" => "w9:p2", "tab_id" => "w9:t1", "workspace_id" => "w9")
     allow(Orchestrator::Herdr).to receive(:pane_send_input)
+    allow(Orchestrator::Herdr).to receive(:pane_rename)
+    allow(Orchestrator::Herdr).to receive(:tab_rename)
+    allow(Orchestrator::Herdr).to receive(:tab_create)
+      .and_return("tab" => { "tab_id" => "w9:t2" }, "root_pane" => { "pane_id" => "w9:p3" })
     stub_const("#{described_class}::SHELL_POLL_INTERVAL_SECONDS", 0)
     stub_const("#{described_class}::PROMPT_SUBMIT_POLL_INTERVAL_SECONDS", 0)
   end
@@ -81,13 +85,15 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(File.read(session.prompt_path)).to include(run.task)
     end
 
-    it "splits nvim opened on the worktree beside the agent, and keeps tracking only the agent pane" do
+    it "splits nvim opened on the worktree beside the agent by default, and keeps tracking only the agent pane" do
       stub_successful_launch
 
       session = described_class.start!(run)
 
-      expect(Orchestrator::Herdr).to have_received(:pane_split)
-        .with(target_pane_id: "w9:p1", direction: "right", cwd: run.target_root, focus: false)
+      expect(Orchestrator::Herdr).to have_received(:pane_split).with(
+        target_pane_id: "w9:p1", direction: "right", ratio: nil, cwd: run.target_root, env: { "FOO" => "bar" },
+        focus: false
+      )
       expect(Orchestrator::Herdr).to have_received(:pane_send_input).with("w9:p2", text: "nvim .", keys: [ "Enter" ])
       expect(Orchestrator::Herdr).to have_received(:agent_start).with(hash_including(pane_id: "w9:p1"))
       expect(Orchestrator::Herdr).not_to have_received(:agent_prompt).with("w9:p2", anything)
@@ -96,7 +102,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
     it "launches with just the agent pane when nvim is not on PATH" do
       stub_successful_launch
-      allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(false)
+      allow(Orchestrator::WorkspaceLayout).to receive(:executable_on_path?).with("nvim").and_return(false)
 
       session = described_class.start!(run)
 
@@ -114,6 +120,50 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(Orchestrator::Herdr).not_to have_received(:pane_send_input)
       expect(Orchestrator::Herdr).not_to have_received(:workspace_close)
       expect(session).to have_attributes(status: "running", pid: 555, herdr_pane_id: "w9:p1")
+    end
+
+    it "opens the workspace's own layout: extra tabs and splits, all with the session env, the agent still tracked" do
+      stub_successful_launch
+      run.workspace.update!(layout: <<~YAML)
+        tabs:
+          - name: main
+            panes:
+              - agent
+          - name: logs
+            panes:
+              - name: dev-log
+                command: tail -f log/development.log
+              - name: test-log
+                command: tail -f log/test.log
+                split: { of: dev-log, direction: down }
+      YAML
+      allow(Orchestrator::Herdr).to receive(:pane_split)
+        .and_return("pane_id" => "w9:p4", "tab_id" => "w9:t2", "workspace_id" => "w9")
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).to have_received(:tab_rename).with("w9:t1", "main")
+      expect(Orchestrator::Herdr).to have_received(:tab_create)
+        .with(workspace_id: "w9", label: "logs", cwd: run.target_root, env: { "FOO" => "bar" }, focus: false)
+      expect(Orchestrator::Herdr).to have_received(:pane_send_input)
+        .with("w9:p3", text: "tail -f log/development.log", keys: [ "Enter" ])
+      expect(Orchestrator::Herdr).to have_received(:pane_split).with(
+        hash_including(target_pane_id: "w9:p3", direction: "down", env: { "FOO" => "bar" }, focus: false)
+      )
+      expect(Orchestrator::Herdr).to have_received(:pane_send_input)
+        .with("w9:p4", text: "tail -f log/test.log", keys: [ "Enter" ])
+      expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1", herdr_tab_id: "w9:t1")
+    end
+
+    it "launches the agent even when a layout tab cannot be opened" do
+      stub_successful_launch
+      run.workspace.update!(layout: "tabs:\n  - panes: [agent]\n  - panes: [{ name: logs, command: tail -f x }]\n")
+      allow(Orchestrator::Herdr).to receive(:tab_create).and_raise(Orchestrator::Herdr::Error, "boom")
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Herdr).not_to have_received(:workspace_close)
+      expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1")
     end
 
     it "still launches the agent when nvim cannot be typed into the split pane" do
@@ -324,6 +374,9 @@ RSpec.describe Orchestrator::RunSessionRunner do
       described_class.refresh!(session)
 
       expect(session.reload).to have_attributes(status: "failed", outcome: "failed", herdr_pane_id: nil)
+      # The rest of the workspace (a layout's log tail or dev server) must not
+      # outlive the agent pane.
+      expect(Orchestrator::Herdr).to have_received(:workspace_close).with("w1")
     end
 
     # Regression: a session that already reported "done" -- work committed,

@@ -12,6 +12,11 @@ class Workspace < ApplicationRecord
   validates :name, presence: true, uniqueness: true
   validates :root_path, presence: true, uniqueness: true
   validate :source_checkout_is_not_changed_while_runs_are_active
+  validate :layout_is_valid
+
+  # A blank layout is stored as NULL, which means the default. A browser
+  # textarea submits CRLF line endings.
+  normalizes :layout, with: ->(text) { text.gsub("\r\n", "\n").strip.presence }
 
   def self.default
     order(:created_at).first
@@ -25,6 +30,12 @@ class Workspace < ApplicationRecord
   end
 
   private
+
+  def layout_is_valid
+    return if layout.blank?
+
+    Orchestrator::WorkspaceLayout.errors_for(layout).each { |message| errors.add(:layout, message) }
+  end
 
   def source_checkout_is_not_changed_while_runs_are_active
     return unless will_save_change_to_root_path?

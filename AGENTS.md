@@ -59,6 +59,8 @@ Key implementation files: `app/services/orchestrator/{herdr,run_session_runner,s
 
 The per-driver flags in `Orchestrator::SessionArgs` were established by running these CLIs for real inside a pane, and several contradict what `--help` implies (codex's `--dangerously-bypass-approvals-and-sandbox` breaks the interactive command; opencode silently never receives input without `--mini`). Do not "simplify" a flag out of that file without re-verifying it live.
 
+A run's herdr workspace is built from its `Workspace`'s **layout** (`workspaces.layout`, YAML; `Orchestrator::WorkspaceLayout` parses it, `Orchestrator::SessionLayout` builds it; nil means the default: agent plus an `nvim .` split). The agent pane is obligatory and always the first tab's root. It is the only pane Rails records (`herdr_pane_id`), so `RunSessionReconcileJob` keys off it alone, and a crashed log tail can't look like a dead session. Every other pane is set up once at session start and then forgotten, with no supervision. `workspace.close` takes all of them down, and `mark_pane_lost!` closes the workspace so none outlive the agent. Every pane gets the agent's full env, passed on each creating call because herdr panes inherit nothing. Never pass `focus: true` to a herdr pane or tab for a run: it was confirmed live to pull the whole workspace into the operator's view.
+
 Accepted trade-off: a real interactive TUI produces human-rendered output, not structured JSON, so there is **no cost/usage/token accounting for a session**. That was only ever recoverable from `--print --output-format stream-json`, which is exactly the mode this design abandons. Missing cost data is not a bug.
 
 ### Worktrees are the durable artifact

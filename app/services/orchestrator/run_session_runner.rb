@@ -37,10 +37,6 @@ module Orchestrator
     AGENT_START_ATTEMPTS = 5
     PROMPT_SUBMIT_POLL_ATTEMPTS = 8
     PROMPT_SUBMIT_POLL_INTERVAL_SECONDS = 0.5
-    EDITOR_COMMAND = "nvim"
-    # `.` opens the worktree itself (LazyVim's explorer on the project root)
-    # rather than an empty buffer on the dashboard.
-    EDITOR_COMMAND_LINE = "#{EDITOR_COMMAND} .".freeze
 
     def start!(run, resume_session_id: nil, prompt: nil)
       raise Error, "run #{run.run_id} has no provisioned worktree" if run.target_root.blank? || run.branch_name.blank?
@@ -66,9 +62,13 @@ module Orchestrator
         prompt_path = File.join(runtime_dir, "prompt.txt")
         File.write(prompt_path, text)
 
-        root_pane = Herdr.workspace_create(
-          label: run.worktree_name.presence || run.run_id, cwd: run.target_root, env:, focus: false
-        ).fetch("root_pane")
+        # The workspace's layout: the agent pane plus whatever tabs and splits
+        # the workspace is configured with (nvim beside it, by default). Only
+        # the agent pane is recorded -- see SessionLayout.
+        root_pane = SessionLayout.open!(
+          label: run.worktree_name.presence || run.run_id, cwd: run.target_root, env:,
+          tabs: WorkspaceLayout.for(run.workspace)
+        )
         session.update!(
           herdr_workspace_id: root_pane.fetch("workspace_id"),
           herdr_tab_id: root_pane.fetch("tab_id"),
@@ -77,7 +77,6 @@ module Orchestrator
         )
 
         pane_id = session.herdr_pane_id
-        open_editor_pane(pane_id, cwd: run.target_root)
         start_agent!(name: run.run_id, kind:, pane_id:, args:)
         dismiss_codex_trust_prompt!(pane_id) if run.launcher_variant == "codex"
         wait_until_ready!(pane_id)
@@ -196,6 +195,10 @@ module Orchestrator
       nil
     end
 
+    # The agent pane is gone, but the rest of its herdr workspace may not be:
+    # the operator can close just the agent's pane or tab, leaving a layout's
+    # log tail or dev server running -- inside a worktree WorktreeJanitor is
+    # about to reclaim. The session is over either way, so close the lot.
     def mark_pane_lost!(session)
       outcome = last_reported_outcome(session)
       session.update!(
@@ -203,6 +206,7 @@ module Orchestrator
         result: session.result.presence || "The herdr pane for this session no longer exists."
       )
       kill_process(session)
+      close_herdr_workspace(session)
       session
     end
 
@@ -247,35 +251,6 @@ module Orchestrator
     def dismiss_codex_trust_prompt!(pane_id)
       sleep CODEX_TRUST_PROMPT_GRACE_SECONDS
       Herdr.agent_send_keys(pane_id, [ "Enter" ])
-    end
-
-    # The operator's side of the split: nvim in the worktree, next to the
-    # agent, for reading the diff or editing alongside the session. Rails never
-    # records or talks to this pane -- herdr_pane_id stays the agent's, so
-    # prompt!/refresh!/reconcile cannot reach it -- and workspace.close on
-    # Close session takes it down with the rest of the workspace. Purely a
-    # convenience, so any failure leaves the run launching with just the agent
-    # pane. The PATH check is Rails' own PATH rather than the pane shell's;
-    # the operator's shell normally sees at least as much.
-    def open_editor_pane(agent_pane_id, cwd:)
-      unless executable_on_path?(EDITOR_COMMAND)
-        Rails.logger.info("[RunSessionRunner] #{EDITOR_COMMAND} not on PATH; launching #{agent_pane_id} without an editor pane")
-        return nil
-      end
-
-      editor_pane = Herdr.pane_split(target_pane_id: agent_pane_id, direction: "right", cwd:, focus: false)
-      Herdr.pane_send_input(editor_pane.fetch("pane_id"), text: EDITOR_COMMAND_LINE, keys: [ "Enter" ])
-      editor_pane
-    rescue Herdr::Error, KeyError => error
-      Rails.logger.warn("[RunSessionRunner] could not open an editor pane beside #{agent_pane_id}: #{error.message}")
-      nil
-    end
-
-    def executable_on_path?(command)
-      ENV["PATH"].to_s.split(File::PATH_SEPARATOR).any? do |dir|
-        path = File.join(dir, command)
-        File.file?(path) && File.executable?(path)
-      end
     end
 
     # workspace.create returns a pane whose shell exists immediately, but that

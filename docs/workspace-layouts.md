@@ -1,6 +1,8 @@
 # Per-workspace layouts (design, not yet implemented)
 
-Status: proposal. Nothing here exists in code yet.
+Status: implemented (branch `workflow/plan-do-not-implement-yet-per-workspace-layouts--792c`).
+This started as a proposal and has been updated to match what was built, and
+what was verified live against herdr during implementation (§1).
 
 ## Problem
 
@@ -34,8 +36,8 @@ was created or closed.
 
 | Capability | herdr surface | Notes |
 |---|---|---|
-| Split a pane | `pane.split {target_pane_id, direction: right\|down, ratio?, cwd?, env?, focus?}` -> `{pane}` | Already used. **`ratio` and `env` exist in the schema, but our client passes neither.** |
-| New tab in a workspace | `tab.create {workspace_id, label?, cwd?, env?, focus?}` | Not in our client yet. Starts with one shell pane. |
+| Split a pane | `pane.split {target_pane_id, direction: right\|down, ratio?, cwd?, env?, focus?}` -> `{pane}` | Used for every pane after a tab's root, now with `ratio` and `env`. |
+| New tab in a workspace | `tab.create {workspace_id, label?, cwd?, env?, focus?}` | Used for every tab after the first. Starts with one shell pane. |
 | Declarative tree | `layout.apply {workspace_id \| tab_id, root: LayoutNode, tab_label?, focus?}` | `LayoutNode` is either `pane {label, cwd, env, command: argv[]}` or `split {direction, ratio, first, second}`. Per the docs it **creates a fresh tab**. When given `tab_id`, it replaces that tab and "does not preserve live PTYs … or running processes". |
 | Read a layout | `layout.export {tab_id \| pane_id}` | Live result for this run: `split right 0.5 { pane w1F:p1, pane w1F:p2 }` with cwd only. It reports no command and no label, because we set neither. |
 | Pane names | `pane.rename {pane_id, label}`, `tab.rename {tab_id, label}`, `label` on `workspace.create`/`tab.create`/layout nodes | Today panes have no label and the tab label is `"1"`. |
@@ -53,22 +55,33 @@ herdr-injected `HERDR_*` values. Every pane therefore gets exactly the env we
 pass on the call that creates it, and nothing else. Since every pane is to get
 the full session env (§3), each creating call must pass it explicitly.
 
-Still unverified. Checking these needs mutating calls, so they must be run
-live against a throwaway workspace during implementation, not in a spec:
+**Verified live during implementation.** The operator approved these mutating
+checks. They ran in a throwaway, unfocused `layout-probe` workspace running
+only `sleep`/`env`, which was closed afterwards.
 
-- Whether a `tab.create`d tab is also closed by `workspace.close`. This is
-  almost certain, but it is load-bearing for lifecycle, so verify it.
-- What `layout.apply`'s `command` argv does: exec it directly or run it
-  through the shell, and whether the pane closes, freezes or drops to a shell
-  when the command exits.
-- Whether `pane.split {env}` and `tab.create {env}` really set the new pane's
-  shell env, as `workspace.create {env}` is known to. Every non-root pane
-  depends on this for its env, so it is the most important live check.
-- Whether `tab.create {focus: false}` in an unfocused workspace leaves the
-  active tab alone.
-- Whether processes that ignore SIGHUP or daemonise survive `workspace.close`.
-  `bin/dev` (foreman/overmind) should die with its pty; a double-forking
-  server would not. That is the project's problem, but document it.
+- **Env on a split or a new tab works.** `pane.split {env}` and
+  `tab.create {env}` each set exactly their own pane's env. `env` run in each
+  pane showed its own `PROBE_*` var and none of the others'.
+- **`workspace.close` kills processes in every tab.** Both `sleep` pids in a
+  second tab were gone after the close.
+- **`tab.create {focus: false}` leaves things alone.** The workspace stayed
+  unfocused and its active tab stayed the first one. An unfocused split
+  leaves its tab's active pane on the tab's root.
+- **`focus: true` on `pane.split` takes over the operator's screen.** It
+  focused the whole herdr workspace and switched to that tab. The operator's
+  focus was put back straight away. This is why the implemented schema has no
+  per-pane `focus` (§3). Every tab's active pane is its first pane, and the
+  agent is the first tab's first pane.
+- **`ratio` is the share the split (target) pane keeps.** With 0.3 the
+  target kept 23 of 78 columns.
+- `pane.rename` sets a label that `layout.export` reports back. The first
+  tab's label is `"1"` unless renamed (`tab.rename`).
+
+Still unverified, and not needed by this design: what `layout.apply`'s `command`
+argv does when it exits, and whether a process that ignores SIGHUP or
+daemonises survives `workspace.close`. `tail -f` and foreman-style `bin/dev`
+die with their pty; a double-forking server would not. That is the project's
+own concern.
 
 ## 2. Where the layout lives
 
@@ -139,7 +152,6 @@ tabs:
       - name: test-log
         command: tail -f log/test.log
         split: { of: dev-log, direction: down }
-        focus: true
       - name: sidekiq-log
         command: tail -f log/sidekiq.log
         split: { of: test-log, direction: right }
@@ -157,7 +169,7 @@ tab "main":   [ agent | editor ]
               [       | shell  ]
 tab "logs":   [ dev-log                          ]
               [ -------------------------------- ]
-              [ test-log (focused) | sidekiq-log ]
+              [ test-log           | sidekiq-log ]
 tab "specs":  [ specs ]
 ```
 
@@ -174,12 +186,14 @@ Rules:
   pane of a tab is its root and takes no `split`. Every later pane needs one.
   There is no limit on tabs or panes, beyond a sanity cap (e.g. 32 panes in
   total) so a typo can't open hundreds of shells.
-- **`agent`**: a reserved bare entry. It must appear exactly once, and in the
-  first tab, so the tab you land on is the agent's. It may be the tab's root
-  or a split of another pane (`{agent: {split: {of: editor, direction: right}}}`)
-  if you want something to its left or above it. The agent pane is always the
-  one stored as `herdr_pane_id`, and it is created without best-effort
-  handling: if it fails, the run fails.
+- **`agent`**: a reserved bare entry. It must be the **first pane of the first
+  tab**, and appear nowhere else. That makes it `workspace.create`'s root pane,
+  and the active pane of the tab a run always opens on. (An earlier draft let
+  the agent be a split, so something could sit to its left. That would have
+  needed `focus: true` to keep the agent active, and that flag takes over the
+  operator's screen; see §1.) The agent pane is always the one stored as
+  `herdr_pane_id`, and it is created without best-effort handling: if it
+  fails, the run fails.
 - `name`: required on every other pane, unique across the whole layout,
   `[a-z0-9_-]{1,32}`. `agent` is reserved. It becomes the herdr pane label
   (`pane.rename`). Tab `name` is optional and becomes the tab label.
@@ -193,11 +207,11 @@ Rules:
   first tab). `direction` is `right` or `down`, default `right`. `ratio` is
   0.1–0.9 and gives the share `of` keeps. It is optional and herdr's default
   applies when it is left out.
-- `focus`: at most one per tab. It sets that tab's active pane; the default is
-  the tab's root, or the agent in the first tab. The first tab is always the
-  workspace's active tab, and the workspace is always created unfocused, so a
-  run never takes over the operator's screen.
-- `command` at most 1 KB.
+- **No `focus`.** Each tab's active pane is its first pane. The first (agent)
+  tab is always the workspace's active tab, and the workspace is always
+  created unfocused, so a run never takes over the operator's screen
+  (operator decision: always land on the agent tab).
+- `command` at most 1 KB. Unknown keys are rejected rather than ignored.
 
 **Env: every pane gets all of it (operator decision).** Every pane, including
 the editor, log tails and plain shells, gets the same env hash the agent gets:
@@ -257,9 +271,11 @@ panes individually.
   `open_editor_pane` today. A herdr error while creating, renaming or typing
   into one pane is logged and that pane is skipped, along with the panes split
   from it. A failed `tab.create` skips its whole tab. The rest continue, and
-  none of this fails the run. A failure creating the agent pane (or the tab
-  root it is split from) still fails the run and closes the workspace (the
-  existing `rescue`).
+  none of this fails the run. A failure creating the agent pane
+  (`workspace.create` itself) still fails the run.
+- **Invalid stored layout**: a layout is validated on save. If one stored
+  earlier no longer validates at session start, the run falls back to the
+  default layout with a log warning, rather than failing to start.
 - **Ordering**: the whole layout, every tab and split, is built before
   `start_agent!`, where the editor split is today. That keeps the
   operator's first view complete, and their shells start up while the agent's
@@ -330,83 +346,67 @@ default.
 | Auto-detecting from `Procfile.dev`/`bin/dev` | Too magic, and one `bin/dev` pane (foreman multiplexes) already covers it explicitly. |
 | JSON column with a structured form builder | The form would cost more than the feature. YAML text with validation is enough for one operator. |
 
-## Files that would change
+## What changed
 
-- `db/migrate/*_add_layout_to_workspaces.rb` and `db/schema.rb`
-- `app/models/workspace.rb`: `validate :layout_is_valid`, and `#layout_config`
-  returning the parsed layout or the default
-- **new** `app/services/orchestrator/workspace_layout.rb`: parse, validate,
-  `DEFAULT` → plain `Tab`/`Pane` structs
-- **new** `app/services/orchestrator/session_layout.rb`: `open!(run:, layout:,
-  env:)` builds the whole workspace and returns the
-  agent pane (`workspace_id`, `tab_id`, `pane_id`) for `RunSessionRunner` to
-  record. It walks tabs, then panes, in order: `workspace_create`/`tab_create`
-  for a tab's root, `pane_split` for the rest, then `pane_rename` and
-  `pane_send_input`. It is strict for the agent pane and anything the agent
-  depends on (its tab root when the agent is a split), and best effort for
-  everything else. It replaces `RunSessionRunner.open_editor_pane` and the
-  inline `workspace_create` in `start!`.
-- `app/services/orchestrator/herdr.rb`: `pane_split(…, ratio:, env:)`,
-  `tab_create`, `tab_rename`, `pane_rename`, plus documented header entries
-- `app/services/orchestrator/run_session_runner.rb`: call `SessionLayout` with
-  the session env, remove the `EDITOR_*` constants, and make `mark_pane_lost!`
-  close the workspace
-- `app/controllers/workspaces_controller.rb`: permit `:layout` (both
-  `workspace_params` and `workspace_edit_params`)
-- `app/views/workspaces/{new,edit}.html.erb`: layout textarea and errors
-- `AGENTS.md` / `CLAUDE.md`: a short "Layouts" note (agent pane is primary;
-  reconcile ignores the rest; layout is start-time setup only), and a README
-  mention
+- `db/migrate/20260927090000_add_layout_to_workspaces.rb`, `db/schema.rb`:
+  `workspaces.layout` (text, nullable).
+- `app/models/workspace.rb`: validates the layout (`WorkspaceLayout.errors_for`),
+  and normalises CRLF/blank input, with blank stored as `NULL` (the default).
+- **new** `app/services/orchestrator/workspace_layout.rb`: `parse` and
+  validate into `Tab`/`Pane` data objects. Also `DEFAULT_YAML`, and
+  `for(workspace)`: the workspace's layout, else the default, which drops
+  the editor pane when nvim is missing; an invalid stored layout also falls
+  back to the default.
+- **new** `app/services/orchestrator/session_layout.rb`: `open!(label:, cwd:,
+  env:, tabs:)` builds the workspace and returns the agent (root) pane.
+  - Uses `workspace_create`, then `tab_rename` for a named first tab, then
+    `pane_split` for each pane after a tab's root, then `tab_create` for each
+    further tab. It labels each pane and types its command.
+  - Everything goes in list order, with the same env on every call and
+    `focus: false` throughout.
+  - Best effort for everything but the agent.
+- `app/services/orchestrator/herdr.rb`: `pane_split(ratio:, env:)`,
+  `tab_create`, `tab_rename`, `pane_rename`, and the live findings above in
+  the header comment.
+- `app/services/orchestrator/run_session_runner.rb`:
+  - `start!` builds through `SessionLayout`; the `open_editor_pane` and
+    `EDITOR_*` constants moved into the layout default.
+  - `mark_pane_lost!` now closes the whole workspace.
+- `app/controllers/workspaces_controller.rb`, `app/views/workspaces/*`: a
+  Layout textarea (with the default as its placeholder) on the new and edit
+  forms, plus validation errors.
+- `README.md` ("Workspace layouts"), `AGENTS.md`, `CLAUDE.md`.
 
-## Spec coverage the implementation needs
+## Spec coverage
 
 All with `Orchestrator::Herdr` stubbed. No live socket.
 
 - `spec/services/orchestrator/workspace_layout_spec.rb`
-  - `nil` → default equals today's editor split; `tabs: [{panes: [agent]}]` →
-    no extra panes; many tabs with deep split trees parse and keep their order
-  - rejects: `agent` missing, repeated or outside the first tab; a tab root
-    with `split`, or a later pane without one; duplicate/reserved names; `of`
-    naming a later pane, an unknown pane, or a pane in another tab; two
-    `focus` in one tab; bad ratio; more than the sanity cap; invalid YAML
-  - the command text is kept verbatim (quotes, `$VAR`, `&&`)
+  - parsing a multi-tab, multi-split layout, commands kept verbatim
+  - agent-only layouts
+  - each validation error
+  - the pane cap
+  - `.for`: default, no nvim, own layout, and falling back when invalid
 - `spec/services/orchestrator/session_layout_spec.rb`
-  - issues `pane_split`/`tab_create`/`pane_rename`/`pane_send_input` in order
-    with the right targets. A split `of: server` targets the pane id returned
-    for `server`.
-  - every `workspace_create`, `tab_create` and `pane_split` gets the same full
-    session env, including `WORKFLOW_RUN_TOKEN` and `GH_TOKEN`
-  - a `Herdr::Error` on one pane logs, skips it and its dependants (panes whose
-    `of` chain leads back to it; a whole tab if its root fails), and continues
-    with the rest
-  - agent as the first tab's root or as a split: either way the returned pane
-    is the agent's
-  - a layout with several tabs, each with several splits, issues one
-    `tab_create` per extra tab and one `pane_split` per non-root pane, all
-    targeting the right ids
-  - never calls `workspace_focus`, and creates tabs with `focus: false`
-  - default layout without nvim on PATH opens nothing (ported from the existing
-    runner spec)
+  - the order and targets of every herdr call
+  - the full env and `focus: false` on every call
+  - plain-shell panes
+  - skipping a failed pane with its dependants, and a failed tab
+  - a failed label keeps the pane
+  - a failed `workspace_create` raises
 - `spec/services/orchestrator/run_session_runner_spec.rb`
-  - `start!` applies the workspace's layout before `agent_start`, and
-    `herdr_pane_id` is still the root pane
-  - an extra-pane failure does not fail `start!`
-  - `mark_pane_lost!` (via `refresh!` with `agent_get` raising `Herdr::Error`)
-    now calls `workspace_close`
+  - the default nvim split now carries the session env
+  - a workspace's own tabs and splits
+  - a failed layout tab doesn't fail the launch
+  - `mark_pane_lost!` closes the workspace
 - `spec/jobs/run_session_reconcile_job_spec.rb`
-  - agent pane alive while a (stubbed) extra pane is gone: session stays live
-  - agent pane gone while the workspace still exists: session ends, run
-    completes, `workspace_close` is called before `WorktreeJanitor.release!`
-- `spec/models/workspace_spec.rb`: invalid layout blocks save with a readable
-  error
-- request/system spec: editing a workspace's layout round-trips the YAML text,
-  and shows the validation error.
-
-Manual live verification (operator's herdr, throwaway workspace), before
-merging: the unverified herdr behaviours in §1 (above all, that a split or
-tab pane gets its env: `ps eww` on a process in it). Then one real run with a
-`logs` tab running `tail -f`, closed via Close session, then check that no
-`tail` process is left.
+  - only the agent pane is consulted
+  - when only the agent pane is gone, the workspace is closed before the
+    worktree is released
+- `spec/services/orchestrator/herdr_spec.rb`: the new client calls.
+- `spec/models/workspace_spec.rb`, `spec/system/workspaces_spec.rb`:
+  validation, blank → default, and the edit form round-trip with its error
+  display.
 
 ## Decided (operator, 2026-09-27)
 
@@ -418,8 +418,6 @@ tab pane gets its env: `ps eww` on a process in it). Then one real run with a
 - No repo layout file.
 - No port allocation and no `{{…}}` interpolation.
 - Every pane gets all the session's env vars.
+- A run always lands on the agent's tab.
 
-## Open questions for the operator
-
-1. Should a run ever *land* on a tab other than the agent's? This design always
-   opens with the agent's (first) tab active.
+No open questions.

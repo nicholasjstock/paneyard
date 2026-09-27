@@ -1,0 +1,10 @@
+<div class="field">
+  <%= form.label :layout, "Layout" %>
+  <p class="muted">
+    The herdr tabs and panes each run's workspace opens with, as YAML. The agent is always the
+    first pane of the first tab, and that is the tab a run opens on; every other tab and split is
+    optional. Each pane's <span class="mono">command</span> is typed into its own shell in the run's
+    worktree, with the same environment as the agent. Leave blank for the default shown here.
+  </p>
+  <%= form.text_area :layout, rows: 14, class: "mono", placeholder: Orchestrator::WorkspaceLayout::DEFAULT_YAML %>
+</div>

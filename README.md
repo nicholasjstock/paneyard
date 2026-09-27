@@ -14,7 +14,7 @@ This README is for **operators** (running the orchestrator and pointing it at re
 | `git` | every run | Worktrees are made with `git worktree add` (`Orchestrator::GitWorktree`). |
 | [herdr](https://herdr.dev), running | every run | Owns every pane and process. Rails talks to its socket at `~/.config/herdr/herdr.sock` (override with `HERDR_SOCKET_PATH`) through `Orchestrator::Herdr`. If herdr isn't up, the run fails at launch. |
 | `claude`, `codex`, and/or `opencode` | whichever driver a run uses | Must be on the `PATH` of the **shell a herdr pane opens** (your login shell), and already signed in, because the session starts non-interactively and can't complete a login flow. Rails doesn't check for them before launching: a missing CLI shows up as a run that fails with "never became ready". Default models are in `Orchestrator::SessionArgs` (`opus`, `gpt-5.6-terra`, `9router/oc/deepseek-v4-flash-free`); override with `WORKFLOW_CLAUDE_MODEL` / `WORKFLOW_CODEX_MODEL` / `WORKFLOW_OPENCODE_MODEL` or per run in the UI. The opencode default assumes a provider you may not have configured. |
-| `nvim` | optional | Each run's herdr workspace opens with `nvim` in a split to the right of the agent (`RunSessionRunner#open_editor_pane`). If `nvim` isn't on the Rails process's `PATH`, the run launches with only the agent pane. |
+| `nvim` | optional | By default each run's herdr workspace opens with `nvim` in a split to the right of the agent. If `nvim` isn't on the Rails process's `PATH`, the default layout opens only the agent pane. A workspace can set its own layout instead (see "Workspace layouts" below). |
 | `gh`, signed in | pushing, unless you use SSH or a GitHub App | `Orchestrator::SessionEnv` uses `gh auth token` for the session's credentials and installs `gh auth git-credential` as git's credential helper. See [GitHub access](#4-github-access). |
 | `curl` | GitHub App only | `Orchestrator::GitHubAppAuth` calls the GitHub API with it. |
 
@@ -124,7 +124,30 @@ What that means in practice:
 
 ### 6. First run
 
-From the workspace's runs page, choose a new run, give it a task, and pick a driver (and optionally a model). Or queue it over MCP (below). Within a few seconds `RunDispatchJob` claims it, and a herdr workspace named after the worktree opens with the agent on the left and `nvim` on the right. If it fails, the run screen shows the launch error. The common ones map back to the steps above: "Source checkout must be on main", "has no origin remote", "Worktree path already exists", herdr unreachable, or a CLI that never became ready.
+From the workspace's runs page, choose a new run, give it a task, and pick a driver (and optionally a model). Or queue it over MCP (below). Within a few seconds `RunDispatchJob` claims it, and a herdr workspace named after the worktree opens with the agent on the left and `nvim` on the right, or with whatever tabs and panes that workspace's layout defines. If it fails, the run screen shows the launch error. The common ones map back to the steps above: "Source checkout must be on main", "has no origin remote", "Worktree path already exists", herdr unreachable, or a CLI that never became ready.
+
+### Workspace layouts
+
+Each workspace's edit form has a **Layout** field: the herdr tabs and panes its runs open with, as YAML. Leave it blank for the default (the agent with `nvim .` split beside it).
+
+```yaml
+tabs:
+  - name: main
+    panes:
+      - agent                       # required: the first pane of the first tab
+      - name: editor
+        command: nvim .
+        split: { of: agent, direction: right, ratio: 0.5 }
+  - name: logs
+    panes:
+      - name: dev-log
+        command: tail -f log/development.log
+      - name: test-log
+        command: tail -f log/test.log
+        split: { of: dev-log, direction: down }
+```
+
+Have as many tabs as you like, each with as many splits as you like. The agent pane is the only one that is required, and it is always the first pane of the first tab, which is the tab a run opens on. Every other pane is split off an earlier pane in its own tab, `right` or `down`; `ratio` is the share the pane being split keeps. A `command` is typed into the pane's own shell in the run's worktree, and every pane gets the same environment as the agent (`GH_TOKEN`, `WORKFLOW_RUN_ID`, the workspace's recorded env vars). A pane with no command is a plain shell. The panes are only set up when the session starts. Rails never watches or restarts them, and Close session, or the agent pane going away, closes all of them. See `docs/workspace-layouts.md` for the design.
 
 It worked when the session calls `report_idle` and the run screen shows its checkpoint, and `git -C ~/Source/my-app/main ls-remote origin 'workflow/*'` lists the pushed branch.
 

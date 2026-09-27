@@ -107,4 +107,23 @@ RSpec.describe "workspaces", type: :system do
       launcher_variant: "claude", status: "running", launched_by: "operator", started_at: Time.current
     )
   end
+
+  it "saves a workspace's layout from the edit form and shows why an invalid one is refused" do
+    workspace = Workspace.create!(name: "layout-#{SecureRandom.hex(4)}", root_path: "/tmp/layout-#{SecureRandom.hex(4)}")
+    layout = "tabs:\n  - panes: [agent]\n  - name: logs\n    panes: [{ name: dev-log, command: tail -f log/development.log }]"
+
+    visit edit_workspace_path(workspace)
+    fill_in "Layout", with: layout
+    click_button "Save"
+
+    expect(page).to have_text("Updated workspace #{workspace.name}.")
+    expect(workspace.reload.layout).to eq(layout)
+
+    visit edit_workspace_path(workspace)
+    fill_in "Layout", with: "tabs:\n  - panes: [{ name: logs }]"
+    click_button "Save"
+
+    expect(page).to have_text("`agent` must be the first pane of the first tab")
+    expect(workspace.reload.layout).to eq(layout)
+  end
 end
