@@ -14,6 +14,13 @@
 # It also refreshes what herdr knows about each live session -- the agent
 # status the run screen renders, and the CLI's own session id, which is the
 # only way to obtain a --resume id for an interactive session.
+#
+# Closing a run's herdr workspace by hand (agent pane and editor pane together)
+# is also how the operator says they are done with its worktree, without ever
+# opening the run screen. So a session this job finds ended gets the same
+# WorktreeJanitor.release! that Close session gives it: the worktree goes only
+# when its work is committed and pushed or merged, and is otherwise kept,
+# exactly as Close session would keep it.
 class RunSessionReconcileJob < ApplicationJob
   queue_as :default
 
@@ -30,6 +37,7 @@ class RunSessionReconcileJob < ApplicationJob
       Orchestrator::RunCompletion.call(
         run: session.run, outcome: session.outcome || "failed", summary: session.result
       )
+      release_worktree(session.run)
     rescue Orchestrator::Herdr::Error => error
       # herdr itself is unreachable (not running, socket replaced). That says
       # nothing about this session in particular, so leave every row alone and
@@ -37,5 +45,16 @@ class RunSessionReconcileJob < ApplicationJob
       Rails.logger.warn("RunSessionReconcileJob: #{error.message}")
       break
     end
+  end
+
+  private
+
+  # The run is already completed, and the janitor's sweep retries a worktree
+  # it could not remove, so one failed removal must not stop the sessions
+  # still left in this loop.
+  def release_worktree(run)
+    Orchestrator::WorktreeJanitor.release!(run)
+  rescue Orchestrator::WorktreeJanitor::Error => error
+    Rails.logger.warn("RunSessionReconcileJob: could not release #{run.worktree_name}: #{error.message}")
   end
 end

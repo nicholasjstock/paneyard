@@ -20,7 +20,7 @@ A session produces no structured JSON output, so there is no cost or token accou
 
 ## Worktrees
 
-Every run gets a sibling worktree of the workspace's `main` checkout on a `workflow/<name>` branch. Two things reclaim them: `Orchestrator::WorktreeJanitor` — on **Close session** and on its sweep — and the run screen's **Remove worktree** button. The janitor never touches `main` and never removes a worktree whose work is not both committed and pushed or merged; those are kept indefinitely and flagged in the UI as kept worktrees.
+Every run gets a sibling worktree of the workspace's `main` checkout on a `workflow/<name>` branch. Two things reclaim them: `Orchestrator::WorktreeJanitor` — on **Close session**, when `RunSessionReconcileJob` finds a run's herdr workspace was closed by hand, and on its sweep — and the run screen's **Remove worktree** button. The janitor never touches `main` and never removes a worktree whose work is not both committed and pushed or merged; those are kept indefinitely and flagged in the UI as kept worktrees.
 
 ## MCP boundary
 
