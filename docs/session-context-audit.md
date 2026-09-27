@@ -609,12 +609,14 @@ Then, per the operator's follow-up decisions:
 - **F6, done.** `ARCHITECTURE.md`, `PLAN.md`, `TODO.md`, `COST_ANALYSIS.md` and `TEST_COVERAGE_MATRIX.md` are
   deleted. Git history keeps them.
 
+- **D4, done, on the operator's machine.** Removed `model_reasoning_effort = "low"` from `~/.config/codex/config.toml`,
+  so codex now uses its default effort for runs and for the operator's own sessions. Also deleted
+  `~/.config/codex/skills/bus-handoff/`. Neither change is in the repo.
+
 Still not done:
-- D4: codex reasoning effort.
 - F12: making `runId` optional.
 - F17: `WORKFLOW_RUN_TOKEN` in non-codex panes.
 - The CLAUDE.md `@AGENTS.md` import.
-- The codex `bus-handoff` skill in `~/.config/codex`, which is outside the repo.
 
 ## 5. Decisions for the operator
 
