@@ -234,7 +234,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
       File.write(File.join(path, "scratch.rb"), "unsaved\n")
 
       expect { described_class.remove_for_run!(run) }
-        .to raise_error(described_class::Error, /uncommitted changes/)
+        .to raise_error(Orchestrator::Runner::Error, /uncommitted changes/)
       expect(File.exist?(path)).to be(true)
 
       described_class.remove_for_run!(run, force: true)
@@ -245,7 +245,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
       run = terminal_run("source-pointing", source_root, stopped_at: 1.minute.ago)
 
       expect { described_class.remove_for_run!(run) }
-        .to raise_error(described_class::Error, /Refusing to remove the source checkout/)
+        .to raise_error(Orchestrator::Runner::Error, /Refusing to remove the source checkout/)
       expect(File.exist?(source_root)).to be(true)
     end
   end

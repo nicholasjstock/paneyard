@@ -163,7 +163,7 @@ module Telegram
       Orchestrator::RunSessionRunner.prompt!(run.live_session, text)
       Rails.logger.info("[telegram] sent #{text.length} characters to #{run.run_id}")
       reply("#{header(run)}\nSent.")
-    rescue Orchestrator::RunSessionRunner::Error, Orchestrator::Herdr::Error => error
+    rescue Orchestrator::RunSessionRunner::Error, Orchestrator::Runner::Error => error
       reply("#{header(run)}\nNot sent: #{error.message}")
     end
 

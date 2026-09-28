@@ -12,10 +12,10 @@ This README is for **operators** (running the orchestrator and pointing it at re
 | --- | --- | --- |
 | Ruby + Bundler, SQLite | Rails itself | `bin/setup` installs gems and prepares the database. |
 | `git` | every run | Worktrees are made with `git worktree add` (`Orchestrator::GitWorktree`). |
-| [herdr](https://herdr.dev), running | every run | Owns every pane and process. Rails talks to its socket at `~/.config/herdr/herdr.sock` (override with `HERDR_SOCKET_PATH`) through `Orchestrator::Herdr`. If herdr isn't up, the run fails at launch. |
-| `claude`, `codex`, and/or `opencode` | whichever driver a run uses | Must be on the `PATH` of the **shell a herdr pane opens** (your login shell), and already signed in, because the session starts non-interactively and can't complete a login flow. Rails doesn't check for them before launching: a missing CLI shows up as a run that fails with "never became ready". Default models are in `Orchestrator::SessionArgs` (`opus`, `gpt-5.6-terra`, `9router/oc/deepseek-v4-flash-free`); override with `WORKFLOW_CLAUDE_MODEL` / `WORKFLOW_CODEX_MODEL` / `WORKFLOW_OPENCODE_MODEL` or per run in the UI. The opencode default assumes a provider you may not have configured. |
+| [herdr](https://herdr.dev), running | every run | Owns every pane and process. Rails talks to its socket at `~/.config/herdr/herdr.sock` (override with `HERDR_SOCKET_PATH`) through `Orchestrator::Runner::Herdr`. If herdr isn't up, the run fails at launch. |
+| `claude`, `codex`, and/or `opencode` | whichever driver a run uses | Must be on the `PATH` of the **shell a herdr pane opens** (your login shell), and already signed in, because the session starts non-interactively and can't complete a login flow. Rails doesn't check for them before launching: a missing CLI shows up as a run that fails with "never became ready". Default models are in `Orchestrator::DefaultModels` (`opus`, `gpt-5.6-terra`, `9router/oc/deepseek-v4-flash-free`); override with `WORKFLOW_CLAUDE_MODEL` / `WORKFLOW_CODEX_MODEL` / `WORKFLOW_OPENCODE_MODEL` or per run in the UI. The opencode default assumes a provider you may not have configured. |
 | `nvim` | optional | By default each run's herdr workspace opens with `nvim` in a split to the right of the agent. If `nvim` isn't on the Rails process's `PATH`, the default layout opens only the agent pane. A workspace can set its own layout instead (see "Workspace layouts" below). |
-| `gh`, signed in | pushing, unless you use SSH or a GitHub App | `Orchestrator::SessionEnv` uses `gh auth token` for the session's credentials and installs `gh auth git-credential` as git's credential helper. See [GitHub access](#4-github-access). |
+| `gh`, signed in | pushing, unless you use SSH or a GitHub App | `Orchestrator::Runner::ProcessEnv` uses `gh auth token` for the session's credentials and installs `gh auth git-credential` as git's credential helper. See [GitHub access](#4-github-access). |
 | `curl` | GitHub App only | `Orchestrator::GitHubAppAuth` calls the GitHub API with it. |
 
 ## Running the orchestrator
@@ -85,7 +85,7 @@ A worktree is a fresh checkout of committed files only. Anything untracked or gi
 
 - **`AGENTS.md` / `CLAUDE.md` in the target repo** are how you tell a session how to set up, build, and test. Sessions start in the worktree and read the repo's own instruction files the way they would if you ran the CLI there yourself. `claude` is deliberately launched without `--setting-sources` so it loads the repo's `CLAUDE.md` and `.claude/` settings. It does get `--strict-mcp-config`, so any `.mcp.json` in the repo is ignored in favour of the workflow MCP server (`SessionArgs.claude_args`). `codex` and `opencode` read `AGENTS.md`.
 - **Tests.** The run prompt (`Orchestrator::RunPrompt`) does not tell the session to run tests. It tells the session to leave its changes uncommitted until asked, and asks for a `report_idle` summary that includes "how it was verified". If a repo needs particular verification, put the commands in its `AGENTS.md`/`CLAUDE.md`, or in the task text.
-- **Environment variables.** A session can call the `record_workspace_env_var` MCP tool to save a workaround (for example a bundler path). The value is stored as a `WorkspaceEnvVar` on the workspace and set in every later session's pane environment (`Orchestrator::WorkspaceEnvVars`, merged first in `SessionEnv.for_session`, so it can't override anything the orchestrator sets). Values are literal and must not contain `$` or a backtick, because they are never shell-expanded. They are stored in plaintext in the orchestrator's database, so don't use them for secrets. There is no UI for them. To inspect them or seed them yourself, use the console:
+- **Environment variables.** A session can call the `record_workspace_env_var` MCP tool to save a workaround (for example a bundler path). The value is stored as a `WorkspaceEnvVar` on the workspace and set in every later session's pane environment (`Orchestrator::WorkspaceEnvVars`, merged first in `Runner::ProcessEnv.for_session`, so it can't override anything the orchestrator sets). Values are literal and must not contain `$` or a backtick, because they are never shell-expanded. They are stored in plaintext in the orchestrator's database, so don't use them for secrets. There is no UI for them. To inspect them or seed them yourself, use the console:
 
   ```sh
   bin/rails runner 'w = Workspace.find_by!(name: "my-app"); pp w.workspace_env_vars.pluck(:name, :value)'
@@ -93,15 +93,15 @@ A worktree is a fresh checkout of committed files only. Anything untracked or gi
   ```
 
   (With `bin/service`, prefix those commands with `RAILS_ENV=production`.)
-- **Environment Rails removes.** `SessionEnv` unsets the orchestrator's own Bundler activation (`BUNDLE_GEMFILE`, `RUBYOPT`, …), `RAILS_ENV`, and nested-Claude-Code markers, so the target repo resolves its own `Gemfile.lock` and picks its own Rails env.
+- **Environment Rails removes.** `Runner::ProcessEnv` unsets the orchestrator's own Bundler activation (`BUNDLE_GEMFILE`, `RUBYOPT`, …), `RAILS_ENV`, and nested-Claude-Code markers, so the target repo resolves its own `Gemfile.lock` and picks its own Rails env.
 - Every session runs with full access to its worktree (`--permission-mode bypassPermissions`, `-s danger-full-access`, `--auto`). The review gate is you trying the session's changes before you ask it to commit.
 
 ### 4. GitHub access
 
-Rails itself opens no pull requests and makes no GitHub API calls about your repo. The only GitHub call it makes is to mint an App token, below. What needs credentials is the session's `git push`. `SessionEnv.git_env` picks the session's credentials in this order:
+Rails itself opens no pull requests and makes no GitHub API calls about your repo. The only GitHub call it makes is to mint an App token, below. What needs credentials is the session's `git push`. The session's credentials are picked (`RunSessionRunner.session_spec`, then `Runner::ProcessEnv`) in this order:
 
-1. **GitHub App configured** (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`, or `github_app:` in credentials; see [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md)): Rails reads `remote.origin.url` in the worktree, finds the App installation whose account matches the repo's **owner**, and mints an installation token. The session gets it as `GH_TOKEN`, with `gh auth git-credential` as a git credential helper.
-2. **No App, or minting fails** (App not installed on that owner, a non-GitHub `origin`, an API error): it falls back to `gh auth token`, which is your own `gh` login.
+1. **GitHub App configured** (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`, or `github_app:` in credentials; see [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md)): Rails asks the runner for the worktree's `remote.origin.url`, finds the App installation whose account matches the repo's **owner**, and mints an installation token. The session gets it as `GH_TOKEN`, with `gh auth git-credential` as a git credential helper.
+2. **No App, or minting fails** (App not installed on that owner, a non-GitHub `origin`, an API error): it falls back to `gh auth token` on the runner's machine, which is your own `gh` login.
 3. **Neither is available**: the session gets no injected credentials and pushes with whatever your login shell already has.
 
 What that means in practice:

@@ -19,10 +19,10 @@ RSpec.describe StartRunSessionJob do
   it "fails the run and frees its slot when provisioning blows up" do
     run = create_run(prefix: "start-session-broken", status: "launching")
     allow(Orchestrator::GitWorktree).to receive(:provision!)
-      .and_raise(Orchestrator::GitWorktree::Error, "Source checkout must be on main")
+      .and_raise(Orchestrator::Runner::Error, "Source checkout must be on main")
 
     expect { described_class.perform_now(run.id) }
-      .to raise_error(Orchestrator::GitWorktree::Error)
+      .to raise_error(Orchestrator::Runner::Error)
       .and have_enqueued_job(RunDispatchJob)
 
     expect(run.reload).to have_attributes(status: "failed")

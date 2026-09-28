@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe McpTools::ReportIdleTool do
-  before { allow(Orchestrator::Herdr).to receive(:notify) }
+  before { allow(Orchestrator::Runner::Herdr).to receive(:notify) }
 
   # The whole point of the rewrite: reporting idle leaves the session running so
   # the operator can read the report and decide what happens next.
@@ -38,11 +38,11 @@ RSpec.describe McpTools::ReportIdleTool do
 
   it "does not close the herdr pane or kill the process" do
     run, session = create_run_and_session(prefix: "report-idle-pane")
-    allow(Orchestrator::Herdr).to receive(:workspace_close)
+    allow(Orchestrator::Runner::Herdr).to receive(:workspace_close)
 
     described_class.call(runId: run.run_id, outcome: "done", summary: "Done.", server_context: { run_session_id: session.id })
 
-    expect(Orchestrator::Herdr).not_to have_received(:workspace_close)
+    expect(Orchestrator::Runner::Herdr).not_to have_received(:workspace_close)
     expect(session.reload.herdr_pane_id).to be_present
   end
 

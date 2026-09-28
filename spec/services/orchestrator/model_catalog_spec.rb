@@ -1,91 +1,27 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::ModelCatalog do
-  describe ".options_for claude" do
-    around do |example|
-      original = ENV["CLAUDE_CONFIG_DIR"]
-      Dir.mktmpdir("claude-config") do |dir|
-        ENV["CLAUDE_CONFIG_DIR"] = dir
-        example.run
-      end
-    ensure
-      ENV["CLAUDE_CONFIG_DIR"] = original
-    end
+  let(:workspace) { Workspace.new(name: "catalog") }
 
-    def write_catalog(name, models, mtime: Time.current)
-      dir = File.join(ENV["CLAUDE_CONFIG_DIR"], "cache", "model-catalog")
-      FileUtils.mkdir_p(dir)
-      path = File.join(dir, name)
-      File.write(path, JSON.generate({ "catalog" => { "config" => { "models" => models } } }))
-      File.utime(mtime.to_time, mtime.to_time, path)
-    end
+  it "offers what the workspace's runner says its CLIs can run" do
+    allow(Orchestrator::Runner.local).to receive(:available_models)
+    allow(Orchestrator::Runner.local).to receive(:available_models).with("claude")
+      .and_return([ { "id" => "claude-sonnet-5", "label" => "Sonnet 5 — claude-sonnet-5" } ])
 
-    it "reads the catalog claude cached for its own model picker, newest file first" do
-      write_catalog("old-cc.json", [ { "id" => "claude-old", "name" => "Old" } ], mtime: 1.day.ago)
-      write_catalog("new-cc.json", [
-        { "id" => "claude-opus-5-5", "name" => "Opus 5.5" },
-        { "id" => "claude-sonnet-5", "name" => "Sonnet 5" }
-      ])
-
-      expect(described_class.options_for("claude")).to eq([
-        { "id" => "claude-opus-5-5", "label" => "Opus 5.5 — claude-opus-5-5" },
-        { "id" => "claude-sonnet-5", "label" => "Sonnet 5 — claude-sonnet-5" }
-      ])
-    end
-
-    it "is empty when claude has never cached a catalog" do
-      allow(Dir).to receive(:glob).and_return([])
-
-      expect(described_class.options_for("claude")).to eq([])
-    end
+    expect(described_class.all(workspace)).to eq(
+      "claude" => [ { "id" => "claude-sonnet-5", "label" => "Sonnet 5 — claude-sonnet-5" } ],
+      "codex" => [], "opencode" => []
+    )
   end
 
-  describe ".options_for codex" do
-    it "lists codex's own catalog in its priority order, leaving out hidden models" do
-      allow(described_class).to receive(:capture).with("codex", "debug", "models").and_return(JSON.generate({
-        "models" => [
-          { "slug" => "gpt-5.5", "display_name" => "GPT-5.5", "visibility" => "list", "priority" => 12 },
-          { "slug" => "codex-auto-review", "display_name" => "Codex Auto Review", "visibility" => "hide", "priority" => 43 },
-          { "slug" => "gpt-6-astra", "display_name" => "GPT-6-Astra", "visibility" => "list", "priority" => 1 }
-        ]
-      }))
+  it "caches a runner's answer, per runner, so the form does not run every CLI on each render" do
+    allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
+    allow(Orchestrator::Runner.local).to receive(:available_models).with("codex")
+      .and_return([ { "id" => "gpt-5.5", "label" => "gpt-5.5" } ])
 
-      expect(described_class.options_for("codex")).to eq([
-        { "id" => "gpt-6-astra", "label" => "gpt-6-astra" },
-        { "id" => "gpt-5.5", "label" => "gpt-5.5" }
-      ])
-    end
+    2.times { expect(described_class.options_for("codex", workspace).pluck("id")).to eq([ "gpt-5.5" ]) }
 
-    it "is empty rather than an error when codex output is unusable" do
-      allow(described_class).to receive(:capture).and_return("not json")
-
-      expect(described_class.options_for("codex")).to eq([])
-    end
-  end
-
-  describe ".options_for opencode" do
-    it "takes one provider/model per line and ignores anything else it prints" do
-      allow(described_class).to receive(:capture).with("opencode", "models")
-        .and_return("Loading models...\nopencode/big-pickle\n9router/oc/deepseek-v4-flash-free\n\n")
-
-      expect(described_class.ids_for("opencode")).to eq(%w[opencode/big-pickle 9router/oc/deepseek-v4-flash-free])
-    end
-  end
-
-  describe ".capture" do
-    it "returns nil for a CLI that is not installed" do
-      expect(described_class.capture("definitely-not-a-real-cli-#{SecureRandom.hex(4)}")).to be_nil
-    end
-
-    it "returns nil for a failing command and stdout for a successful one" do
-      expect(described_class.capture("false")).to be_nil
-      expect(described_class.capture("echo", "hi")).to eq("hi\n")
-    end
-
-    it "gives up on a CLI that hangs" do
-      stub_const("#{described_class}::COMMAND_TIMEOUT_SECONDS", 0.2)
-
-      expect(described_class.capture("sleep", "5")).to be_nil
-    end
+    expect(Orchestrator::Runner.local).to have_received(:available_models).once
+    expect(Rails.cache.exist?("orchestrator/model_catalog/local/codex")).to be(true)
   end
 end

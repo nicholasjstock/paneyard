@@ -1,5 +1,5 @@
 module Orchestrator
-  # The single document handed to a run's session via Herdr.agent_prompt, as
+  # The single document handed to a run's session as live input, as
   # its first user message. There is no system prompt and no MCP-server
   # instructions carrying the lifecycle, so this is the one place every driver
   # is guaranteed to read it.
@@ -61,14 +61,13 @@ module Orchestrator
       section
     end
 
-    # Launch uploads are copied (RunsController#uploaded_artifacts) while the
-    # run's target_root is still the workspace's main checkout, so they live
-    # there, not in the worktree provisioned later.
+    # Launch uploads are stored (RunsController#uploaded_artifacts) before the
+    # run has a worktree, so they live under the workspace's main checkout.
     def attachments_section(run)
       names = Array(run.launch_artifacts).filter_map { |artifact| artifact["name"] || artifact[:name] }
       return if names.empty?
 
-      dir = File.join(ArtifactStore.output_dir(run.workspace.source_root), ArtifactStore.sanitize_run_id(run.run_id))
+      dir = Runner.for(run.workspace).attachments_dir(source_root: run.workspace.source_root, run_id: run.run_id)
       "Attached files: #{names.join(', ')}, in `#{dir}`.\n"
     end
 

@@ -1,5 +1,3 @@
-require "fileutils"
-
 class RunsController < ApplicationController
   before_action :require_workspace
   before_action :set_run, only: %i[show stop send_message remove_worktree close_session]
@@ -60,14 +58,14 @@ class RunsController < ApplicationController
 
     Orchestrator::RunSessionRunner.prompt!(session, params.require(:message))
     redirect_to workspace_run_path(current_workspace, @run), notice: "Sent to the session."
-  rescue ActionController::ParameterMissing, Orchestrator::RunSessionRunner::Error, Orchestrator::Herdr::Error => error
+  rescue ActionController::ParameterMissing, Orchestrator::RunSessionRunner::Error, Orchestrator::Runner::Error => error
     redirect_to workspace_run_path(current_workspace, @run), alert: error.message
   end
 
   def remove_worktree
     Orchestrator::WorktreeJanitor.remove_for_run!(@run, force: params[:force].present?)
     redirect_to workspace_run_path(current_workspace, @run), notice: "Removed #{@run.worktree_name}."
-  rescue Orchestrator::WorktreeJanitor::Error => error
+  rescue Orchestrator::WorktreeJanitor::Error, Orchestrator::Runner::Error => error
     redirect_to workspace_run_path(current_workspace, @run), alert: error.message
   end
 
@@ -97,12 +95,12 @@ class RunsController < ApplicationController
     else
       "Closed the session. Kept #{@run.worktree_name}: it has uncommitted or unpushed work."
     end
-  rescue Orchestrator::WorktreeJanitor::Error => error
+  rescue Orchestrator::Runner::Error => error
     "Closed the session, but could not remove its worktree: #{error.message}"
   end
 
   def model_catalog
-    @model_catalog ||= Orchestrator::ModelCatalog.all
+    @model_catalog ||= Orchestrator::ModelCatalog.all(current_workspace)
   end
   helper_method :model_catalog
 
@@ -129,17 +127,15 @@ class RunsController < ApplicationController
     params.fetch(:run, {}).permit(launch_files: [])[:launch_files]
   end
 
-  # Files the operator attached at launch. Stored under the workspace's main
-  # checkout (target_root is not the worktree yet); RunPrompt gives the
-  # session their absolute path and the run screen lists them.
+  # Files the operator attached at launch. The runner stores them under the
+  # workspace's main checkout (there is no worktree yet); RunPrompt gives the
+  # session their path and the run screen lists them.
   def uploaded_artifacts(files)
     Array(files).filter_map do |uploaded|
       next unless uploaded.respond_to?(:original_filename) && uploaded.original_filename.present?
 
       name = File.basename(uploaded.original_filename)
-      path = Orchestrator::ArtifactStore.resolve_path(@run.target_root, @run.run_id, name)
-      FileUtils.mkdir_p(File.dirname(path))
-      FileUtils.cp(uploaded.tempfile.path, path)
+      runner.store_attachment(source_root: current_workspace.source_root, run_id: @run.run_id, name:, content: uploaded.read)
       { "name" => name, "source_path" => uploaded.original_filename }
     end
   end
@@ -149,13 +145,13 @@ class RunsController < ApplicationController
   end
 
   # Launch files live under the main checkout, not the run's worktree (see
-  # #uploaded_artifacts), so read them from there once target_root has moved.
+  # #uploaded_artifacts).
   def collect_artifacts
-    root = current_workspace.source_root
-    Orchestrator::ArtifactStore.names(root, @run.run_id).map do |name|
-      { name:, content: Orchestrator::ArtifactStore.read(root, @run.run_id, name) }
-    end
-  rescue Errno::ENOENT
-    []
+    runner.attachments(source_root: current_workspace.source_root, run_id: @run.run_id)
+      .map { |attachment| { name: attachment["name"], content: attachment["content"] } }
+  end
+
+  def runner
+    Orchestrator::Runner.for(current_workspace)
   end
 end

@@ -1,7 +1,7 @@
 require "tmpdir"
 
 # Runs a FakeHerdr::Server on a throwaway socket for the duration of an
-# example and points Orchestrator::Herdr at it -- the real client, the real
+# example and points Orchestrator::Runner::Herdr at it -- the real client, the real
 # wire protocol, and real agent processes, but never the operator's herdr.
 #
 #   it "...", :fake_herdr do

@@ -11,7 +11,7 @@
       data: {
         controller: "run-model",
         run_model_catalog_value: model_catalog.to_json,
-        run_model_defaults_value: Run::LAUNCHER_VARIANTS.index_with { |v| Orchestrator::SessionArgs.default_model(v) }.to_json
+        run_model_defaults_value: Run::LAUNCHER_VARIANTS.index_with { |v| Orchestrator::DefaultModels.for(v) }.to_json
       } do |form| %>
   <% if @run.errors.any? %>
     <div class="flash alert">
@@ -34,7 +34,7 @@
 
   <div class="field">
     <%= form.label :model, "Model" %>
-    <% default_model = Orchestrator::SessionArgs.default_model(@run.launcher_variant) %>
+    <% default_model = Orchestrator::DefaultModels.for(@run.launcher_variant) %>
     <%= form.select :model,
           [ [ "Default (#{default_model})", "" ] ] +
             model_catalog.fetch(@run.launcher_variant, []).map { |option| option.values_at("label", "id") },

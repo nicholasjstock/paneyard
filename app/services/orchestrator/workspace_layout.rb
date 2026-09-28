@@ -3,7 +3,8 @@ require "yaml"
 module Orchestrator
   # The herdr panes a run's workspace opens with, configured per Workspace
   # (workspaces.layout, YAML text edited on the workspace form). Parsing and
-  # validation only -- Orchestrator::SessionLayout is what builds it.
+  # validation only -- the runner's Runner::SessionLayout is what builds it,
+  # from the plain data #for hands it.
   #
   # A layout is a list of tabs; each tab is a list of panes, built as a split
   # tree in list order. The agent pane is the one obligatory pane and is always
@@ -64,28 +65,45 @@ module Orchestrator
               split: { of: agent, direction: right }
     YAML
 
-    # The layout a run of this workspace opens with. The built-in default
-    # quietly drops its editor pane when nvim is not installed; a layout the
-    # operator wrote gets no such check -- a missing command just shows up as
-    # "command not found" in its own pane.
+    # The layout a run of this workspace opens with, as the plain data the
+    # runner takes:
+    #
+    #   [{ "name", "panes" => [{ "name", "command", "split_of", "direction",
+    #                            "ratio", "requires" }] }]
+    #
+    # The built-in default's editor pane `requires` nvim, so the runner quietly
+    # drops it on a machine without nvim; a layout the operator wrote gets no
+    # such check -- a missing command just shows up as "command not found" in
+    # its own pane.
     #
     # A stored layout is validated when it is saved, so an invalid one here
     # means the rules changed underneath it. That must not stop runs from
     # starting, so it falls back to the default.
     def for(workspace)
-      text = workspace&.layout
-      if text.present?
-        begin
-          return parse(text)
-        rescue Invalid => error
-          Rails.logger.warn("[WorkspaceLayout] #{workspace.name}: invalid layout, using the default: #{error.message}")
+      tabs = custom(workspace)
+      default = tabs.nil?
+      tabs ||= parse(DEFAULT_YAML)
+
+      tabs.map do |tab|
+        panes = tab.panes.map do |pane|
+          {
+            "name" => pane.name, "command" => pane.command, "split_of" => pane.split_of,
+            "direction" => pane.direction, "ratio" => pane.ratio,
+            "requires" => (EDITOR_COMMAND if default && pane.command == EDITOR_COMMAND_LINE)
+          }
         end
+        { "name" => tab.name, "panes" => panes }
       end
+    end
 
-      tabs = parse(DEFAULT_YAML)
-      return tabs if executable_on_path?(EDITOR_COMMAND)
+    def custom(workspace)
+      text = workspace&.layout
+      return if text.blank?
 
-      [ Tab.new(name: nil, panes: tabs.first.panes.select(&:agent?)) ]
+      parse(text)
+    rescue Invalid => error
+      Rails.logger.warn("[WorkspaceLayout] #{workspace.name}: invalid layout, using the default: #{error.message}")
+      nil
     end
 
     # Returns an array of Tab, or raises Invalid with every problem found.
@@ -254,13 +272,6 @@ module Orchestrator
         ratio = nil
       end
       [ of, direction, ratio&.to_f ]
-    end
-
-    def executable_on_path?(command)
-      ENV["PATH"].to_s.split(File::PATH_SEPARATOR).any? do |dir|
-        path = File.join(dir, command)
-        File.file?(path) && File.executable?(path)
-      end
     end
   end
 end

@@ -4,9 +4,9 @@ require "fileutils"
 
 module FakeHerdr
   # A stand-in for the operator's herdr server, speaking the same
-  # newline-delimited JSON-RPC over a Unix socket that Orchestrator::Herdr
+  # newline-delimited JSON-RPC over a Unix socket that Orchestrator::Runner::Herdr
   # does (one request line in, one response line out, per connection). The
-  # response shapes are the ones Orchestrator::Herdr's header documents as
+  # response shapes are the ones Orchestrator::Runner::Herdr's header documents as
   # confirmed live -- root_pane on workspace.create, the "read" nesting on
   # pane.read, "process_info", "agent target ... not found" -- so the real
   # client and RunSessionRunner run unmodified against it.

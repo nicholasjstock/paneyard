@@ -12,7 +12,7 @@ RSpec.describe Telegram::UpdateProcessor do
       { "message_id" => 77 }
     end
     # What herdr says the agent is doing right now; nil unless a spec says.
-    allow(Orchestrator::Herdr).to receive(:agent_get).and_return({})
+    allow(Orchestrator::Runner::Herdr).to receive(:agent_get).and_return({})
     allow(Telegram::Configuration).to receive(:authorized_user?).and_return(false)
     allow(Telegram::Configuration).to receive(:authorized_user?).with("42").and_return(true)
   end
@@ -95,7 +95,7 @@ RSpec.describe Telegram::UpdateProcessor do
     it "shows the latest recap when the session has reported and is not working again" do
       run, session = live_run("aaaa", worktree: "layouts-aaaa", agent_status: "idle")
       run.checkpoints.create!(run_session: session, outcome: "done", summary: "## Shipped\n\nAll green.")
-      allow(Orchestrator::Herdr).to receive(:agent_get).with("w1:p1").and_return("agent_status" => "idle")
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_get).with("w1:p1").and_return("agent_status" => "idle")
       allow(Orchestrator::RunSessionRunner).to receive(:snapshot)
 
       described_class.call(message("/pane_aaaa"))
@@ -124,7 +124,7 @@ RSpec.describe Telegram::UpdateProcessor do
     it "shows the live pane rather than a stale recap when herdr says it is working again" do
       run, session = live_run("aaaa", worktree: "layouts-aaaa", agent_status: "idle")
       checkpoint = run.checkpoints.create!(run_session: session, outcome: "done", summary: "Old news.")
-      allow(Orchestrator::Herdr).to receive(:agent_get).with("w1:p1").and_return("agent_status" => "working")
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_get).with("w1:p1").and_return("agent_status" => "working")
       allow(Orchestrator::RunSessionRunner).to receive(:snapshot).and_return("editing...")
 
       described_class.call(message("/pane aaaa"))
@@ -256,7 +256,7 @@ RSpec.describe Telegram::UpdateProcessor do
 
     it "reports why a send failed instead of raising" do
       live_run("aaaa", worktree: "layouts-aaaa")
-      allow(Orchestrator::RunSessionRunner).to receive(:prompt!).and_raise(Orchestrator::Herdr::Error, "no such pane")
+      allow(Orchestrator::RunSessionRunner).to receive(:prompt!).and_raise(Orchestrator::Runner::Error, "no such pane")
 
       described_class.call(message("/send aaaa hi"))
 

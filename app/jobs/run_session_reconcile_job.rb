@@ -38,7 +38,7 @@ class RunSessionReconcileJob < ApplicationJob
         run: session.run, outcome: session.outcome || "failed", summary: session.result
       )
       release_worktree(session.run)
-    rescue Orchestrator::Herdr::Error => error
+    rescue Orchestrator::Runner::Error => error
       # herdr itself is unreachable (not running, socket replaced). That says
       # nothing about this session in particular, so leave every row alone and
       # try again next minute rather than failing every run at once.
@@ -54,7 +54,7 @@ class RunSessionReconcileJob < ApplicationJob
   # still left in this loop.
   def release_worktree(run)
     Orchestrator::WorktreeJanitor.release!(run)
-  rescue Orchestrator::WorktreeJanitor::Error => error
+  rescue Orchestrator::Runner::Error => error
     Rails.logger.warn("RunSessionReconcileJob: could not release #{run.worktree_name}: #{error.message}")
   end
 end

@@ -1,11 +1,11 @@
 require "rails_helper"
 
-# The contract between Orchestrator::Herdr (the real client) and the fake.
+# The contract between Orchestrator::Runner::Herdr (the real client) and the fake.
 # Every lifecycle spec and the sandbox instance trust the fake to answer the
 # way herdr does, so the shapes the client parses are pinned here, over the
 # real socket.
 RSpec.describe FakeHerdr::Server, :fake_herdr do
-  let(:herdr) { Orchestrator::Herdr }
+  let(:herdr) { Orchestrator::Runner::Herdr }
 
   def wait_for(timeout: 5)
     deadline = Time.current + timeout
@@ -35,8 +35,8 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
     expect(split.fetch("pane_id")).to eq("w1:p2")
     expect(tab.fetch("root_pane").fetch("tab_id")).to eq("w1:t2")
     expect(herdr.pane_read(split.fetch("pane_id"))).to include("$ nvim .")
-    expect(herdr.workspace_alive?("w1")).to be(true)
-    expect(herdr.pane_alive?("w1:p2")).to be(true)
+    expect { herdr.request!("workspace.get", workspace_id: "w1") }.not_to raise_error
+    expect { herdr.request!("pane.get", pane_id: "w1:p2") }.not_to raise_error
   end
 
   it "reports an idle shell until an agent starts, then the agent's own process group" do
@@ -53,7 +53,7 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
     expect(agent.dig("agent_session", "value")).to start_with("fake-")
     expect(Process.getpgid(pid)).to eq(pid)
     expect { herdr.agent_start(name: "again", kind: "claude", pane_id:, args: []) }
-      .to raise_error(Orchestrator::Herdr::Error, /not an available shell/)
+      .to raise_error(Orchestrator::Runner::Herdr::Error, /not an available shell/)
   end
 
   it "delivers a prompt to the agent and shows its output in pane.read" do
@@ -70,7 +70,7 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
   it "answers agent.get for a pane with no agent the way herdr does" do
     pane_id = herdr.workspace_create(label: "run-1", cwd: Dir.pwd).dig("root_pane", "pane_id")
 
-    expect { herdr.agent_get(pane_id) }.to raise_error(Orchestrator::Herdr::Error, /agent target .* not found/)
+    expect { herdr.agent_get(pane_id) }.to raise_error(Orchestrator::Runner::Herdr::Error, /agent target .* not found/)
   end
 
   it "kills every agent in a workspace when it is closed, after which the panes are gone" do
@@ -82,9 +82,9 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
     herdr.workspace_close("w1")
 
     wait_for { !(Process.kill(0, pid) rescue false) }
-    expect(herdr.workspace_alive?("w1")).to be(false)
-    expect(herdr.pane_alive?(pane_id)).to be(false)
-    expect { herdr.agent_get(pane_id) }.to raise_error(Orchestrator::Herdr::Error, /not found/)
+    expect { herdr.request!("workspace.get", workspace_id: "w1") }.to raise_error(Orchestrator::Runner::Herdr::Error)
+    expect { herdr.request!("pane.get", pane_id:) }.to raise_error(Orchestrator::Runner::Herdr::Error)
+    expect { herdr.agent_get(pane_id) }.to raise_error(Orchestrator::Runner::Herdr::Error, /not found/)
   end
 
   it "records every request so specs can assert on what Rails asked for" do
@@ -96,6 +96,6 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
   end
 
   it "rejects methods herdr does not have" do
-    expect { herdr.request!("pane.explode", pane_id: "w1:p1") }.to raise_error(Orchestrator::Herdr::Error, /unknown method/)
+    expect { herdr.request!("pane.explode", pane_id: "w1:p1") }.to raise_error(Orchestrator::Runner::Herdr::Error, /unknown method/)
   end
 end

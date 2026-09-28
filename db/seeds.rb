@@ -62,10 +62,11 @@ if Rails.env.development?
       "source_path" => "sample-data.json" }
   ]
   launch_artifact_run.update!(launch_artifacts: launch_artifacts)
-  Orchestrator::ArtifactStore.write(launch_artifact_run.target_root, launch_artifact_run.run_id,
-                                    "requirements.txt", "Uploaded at launch\n- artifact manifest\n")
-  Orchestrator::ArtifactStore.write(launch_artifact_run.target_root, launch_artifact_run.run_id,
-                                    "sample-data.json", '{"source":"synthetic demo fixture","records":2}' + "\n")
+  seed_runner = Orchestrator::Runner.for(launch_artifact_run.workspace)
+  seed_runner.store_attachment(source_root: launch_artifact_run.workspace.source_root, run_id: launch_artifact_run.run_id,
+                               name: "requirements.txt", content: "Uploaded at launch\n- artifact manifest\n")
+  seed_runner.store_attachment(source_root: launch_artifact_run.workspace.source_root, run_id: launch_artifact_run.run_id,
+                               name: "sample-data.json", content: '{"source":"synthetic demo fixture","records":2}' + "\n")
 
   # Synthetic blockers keep the global notifications drawer visible across
   # workspaces without depending on a live planner or worker.

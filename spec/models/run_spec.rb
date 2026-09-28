@@ -4,7 +4,7 @@ require "open3"
 RSpec.describe Run, type: :model do
   # Real git, because #kept_worktree? now asks git whether target_root is an
   # actual worktree rather than trusting File.directory? -- see
-  # Orchestrator::WorktreeJanitor.registered_worktree?.
+  # the runner's #worktree_registered? (Orchestrator::Runner::Worktrees).
   describe "#kept_worktree?" do
     let(:root) { Dir.mktmpdir("run-kept-worktree") }
     let(:source_root) { File.join(root, "main") }

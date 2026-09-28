@@ -103,33 +103,34 @@ RSpec.describe Orchestrator::WorkspaceLayout do
   describe ".for" do
     let(:workspace) { Workspace.new(name: "layout-for", root_path: "/tmp/layout-for") }
 
-    it "gives a workspace with no layout the agent with nvim split beside it" do
-      allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(true)
+    def pane_names(tabs)
+      tabs.map { |tab| tab["panes"].map { |pane| pane["name"] } }
+    end
+
+    it "gives a workspace with no layout the agent with nvim split beside it, the editor only where nvim is" do
+      tabs = described_class.for(workspace)
+
+      expect(pane_names(tabs)).to eq([ %w[agent editor] ])
+      expect(tabs.first["panes"].last).to include(
+        "command" => "nvim .", "split_of" => "agent", "direction" => "right", "requires" => "nvim"
+      )
+      expect(tabs.first["panes"].first["requires"]).to be_nil
+    end
+
+    it "uses the workspace's own layout when it has one, requiring nothing of the runner's machine" do
+      workspace.layout = "tabs:\n  - panes: [agent, { name: ed, command: nvim ., split: { of: agent } }]\n" \
+                         "  - panes: [{ name: logs, command: tail -f x }]\n"
 
       tabs = described_class.for(workspace)
 
-      expect(tabs.size).to eq(1)
-      expect(tabs.first.panes.map(&:name)).to eq(%w[agent editor])
-      expect(tabs.first.panes.last).to have_attributes(command: "nvim .", split_of: "agent", direction: "right")
-    end
-
-    it "drops the default's editor pane when nvim is not installed" do
-      allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(false)
-
-      expect(described_class.for(workspace).first.panes.map(&:name)).to eq(%w[agent])
-    end
-
-    it "uses the workspace's own layout when it has one" do
-      workspace.layout = "tabs:\n  - panes: [agent]\n  - panes: [{ name: logs, command: tail -f x }]\n"
-
-      expect(described_class.for(workspace).map { |tab| tab.panes.map(&:name) }).to eq([ %w[agent], %w[logs] ])
+      expect(pane_names(tabs)).to eq([ %w[agent ed], %w[logs] ])
+      expect(tabs.flat_map { |tab| tab["panes"] }.pluck("requires")).to all(be_nil)
     end
 
     it "falls back to the default rather than stopping runs when a stored layout no longer validates" do
-      allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(true)
       workspace.layout = "tabs:\n  - panes: [{ name: logs }]\n"
 
-      expect(described_class.for(workspace).first.panes.map(&:name)).to eq(%w[agent editor])
+      expect(pane_names(described_class.for(workspace))).to eq([ %w[agent editor] ])
     end
   end
 
