@@ -1,8 +1,8 @@
 # Workflow Orchestrator
 
-Queue a job against a workspace. When a slot frees, it gets its own git worktree and one live `claude`/`codex`/`opencode` session you can watch and talk to, which does the work end to end and leaves its changes for you to try, committing, pushing or merging only when you ask. Runs, sessions, checkpoints, and artifacts all stay scoped to their workspace.
+Queue a job against a workspace. When a slot frees, it gets its own git worktree and one live `claude`/`codex`/`opencode` session you can watch and talk to, which does the work end to end and leaves its changes for you to try, committing, pushing or merging only when you ask for that particular step. Runs, sessions, checkpoints, and artifacts all stay scoped to their workspace.
 
-Rails schedules; it does not orchestrate. It decides when a run starts, gives it a worktree, and reclaims that worktree afterwards. Everything in between belongs to the session. There is no planner, no step queue, and no pull-request publishing: when you ask, the session commits and pushes its branch or merges it into `main`, and opening and merging a PR is up to you.
+Rails schedules; it does not orchestrate. It decides when a run starts, gives it a worktree, and reclaims that worktree afterwards. Everything in between belongs to the session. There is no planner, no step queue, and no pull-request publishing: the session commits, pushes its branch, or merges it into `main` only when you ask for that step (a commit is not a push), and opening and merging a PR is up to you.
 
 This README is for **operators** (running the orchestrator and pointing it at repositories). If you are changing the orchestrator's own code, read [AGENTS.md](./AGENTS.md). It is the source of truth for structure, conventions, and testing.
 
@@ -21,11 +21,11 @@ This README is for **operators** (running the orchestrator and pointing it at re
 ## Running the orchestrator
 
 ```sh
-bin/setup --skip-server
+bin/setup
 PORT=3000 bin/dev
 ```
 
-`bin/dev` starts Puma and Solid Queue together. Before starting either one, it checks the bundle and pending migrations and exits with a recovery command if something is missing. **Always pass `PORT` explicitly when you want runs to work.** Without it, `bin/dev` gives Puma a random free port, but the Solid Queue process still thinks the app is on 3000. Solid Queue is what launches sessions, so it would point each session's MCP server at the wrong URL, and the session could never call `report_idle`. (`SessionArgs.rails_mcp_url` uses `WORKFLOW_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`.) If you set `WORKFLOW_RAILS_URL`, keep it in step with `PORT`:
+`bin/dev` starts Puma and Solid Queue together. Before starting either one, it checks the bundle and pending migrations and exits with a recovery command if something is missing. Without `PORT` it picks a random free port, and gives both processes the same one: Solid Queue is what launches sessions, and it points each session's MCP server at `SessionArgs.rails_mcp_url` (`WORKFLOW_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`). If you set `WORKFLOW_RAILS_URL`, keep it in step with `PORT`:
 
 ```sh
 PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev
@@ -65,7 +65,7 @@ Before creating a worktree, `GitWorktree.validate_source!` checks all of these, 
 
 - `<root_path>/main` exists and is a git work tree.
 - Its directory is named `main`, **and it has the `main` branch checked out**. A repo whose default branch is `master` or anything else needs a local `main` branch. The simplest fix is to rename the default branch.
-- It has an `origin` remote. When asked to push, the session is told to use `git push -u origin workflow/<name>` (`Orchestrator::RunPrompt`), so `origin` must be a remote this machine can push to.
+- It has an `origin` remote. If you ask a session to push, it pushes `workflow/<name>` to `origin`, so `origin` must be a remote this machine can push to. It pushes only when asked to push, not when asked to commit (`Orchestrator::RunPrompt`).
 
 Each run branches from the source checkout's **current local `HEAD`**. Rails never fetches or pulls, so keep `<root_path>/main` up to date yourself (`git -C ~/Source/my-app/main pull`). Uncommitted changes in `main` are not carried into a run's worktree.
 
@@ -155,7 +155,7 @@ It worked when the session calls `report_idle` and the run screen shows its chec
 
 1. **Queue it.** Creating a run starts nothing. It waits for a slot. The cap is global across every workspace: `WORKFLOW_MAX_CONCURRENT_RUNS`, default 4.
 2. **Dispatch.** `RunDispatchJob` claims the oldest queued run. `StartRunSessionJob` provisions its worktree and opens one interactive session in a herdr pane rooted there, with the task as its first prompt.
-3. **Work.** The session owns the job. It explores, edits, and runs the repo's own commands, then leaves its changes uncommitted for you to try. Ask it to commit, push, or merge into `main` when you're happy. Watch it in your herdr client, or send it a message from the run screen.
+3. **Work.** The session owns the job. It explores, edits, and runs the repo's own commands, then leaves its changes uncommitted for you to try. Ask it to commit, push, or merge into `main` when you're happy; each is a separate request, and it does only the one you ask for. Watch it in your herdr client, or send it a message from the run screen.
 4. **Report.** The session calls the `report_idle` MCP tool (`done`, `blocked`, or `failed`) each time it stops working. This does not end the run: the pane stays open and the slot stays held. Each report is a checkpoint covering the interval since the last one, written as a full Markdown report, and the run screen lists them in order.
 5. **Decide.** Read the reports, then either send more work or **Close session**, which quits the CLI, closes the herdr workspace, and frees the slot. An unreviewed run keeps holding its slot, so it blocks the queue. PRs are yours to open from a pushed branch.
 6. **Clean up.** `WorktreeJanitor` removes the worktree on Close session if its work is saved (see [Git requirements](#2-git-requirements)), and otherwise keeps it and flags it until you push, merge, or remove it.
@@ -217,4 +217,4 @@ bin/rubocop
 git diff --check
 ```
 
-`bin/ci` also runs dependency, importmap, and Brakeman audits.
+`bin/verify` runs all of those plus `bin/preflight`, `bin/sandbox verify`, and the bundler-audit, importmap and Brakeman audits (see AGENTS.md, "Testing Guidelines").

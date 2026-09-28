@@ -106,8 +106,8 @@ module Orchestrator
       "#{base}/mcp"
     end
 
-    # Any session may be asked to commit and push its own branch, so it gets
-    # credentials unconditionally. A GitHub App installation token -- scoped
+    # Any session may be asked to push its own branch (only ever on an explicit
+    # request -- see RunPrompt), so it gets credentials unconditionally. A GitHub App installation token -- scoped
     # to this one repository/installation rather than the operator's whole
     # identity -- is preferred; without one, the runner falls back to its own
     # machine's `gh auth token`.

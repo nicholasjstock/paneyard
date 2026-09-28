@@ -98,27 +98,7 @@ Then set the master key:
 rails credentials:edit
 ```
 
-### Option 3: Deployment Configuration
-
-For production deployments using Kamal or other orchestration, add secrets to your deployment config:
-
-```yaml
-# config/deploy.yml
-env:
-  secret:
-    - RAILS_MASTER_KEY
-    - GITHUB_APP_ID
-    - GITHUB_APP_PRIVATE_KEY
-    - GITHUB_APP_INSTALLATION_ID
-```
-
-Then set the secrets:
-
-```bash
-kamal secrets set GITHUB_APP_ID=12345 GITHUB_APP_PRIVATE_KEY="..." GITHUB_APP_INSTALLATION_ID=98765
-```
-
-### Option 4: GitHub Actions CI/CD Secrets
+### Option 3: GitHub Actions CI/CD Secrets
 
 To use GitHub App authentication in GitHub Actions workflows (e.g., for running tests or deploying):
 

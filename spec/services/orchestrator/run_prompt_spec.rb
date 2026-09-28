@@ -20,12 +20,21 @@ RSpec.describe Orchestrator::RunPrompt do
   end
 
   # The operator tries a session's changes before anything is kept, so the
-  # session must not commit on its own -- and must know how when asked.
-  it "tells the session to leave changes uncommitted and commit, push or merge only when asked" do
+  # session must not commit on its own -- and must know where to merge when asked.
+  it "tells the session to leave changes uncommitted and commit, push or merge each only when asked" do
     expect(prompt).to include("Leave your changes uncommitted")
-    expect(prompt).to include("unless asked")
-    expect(prompt).to include("git push -u origin workflow/run-prompt-a1b2")
-    expect(prompt).to include("git -C #{run.workspace.source_root} merge workflow/run-prompt-a1b2")
+    expect(prompt).to include("do only the one you are asked for")
+    expect(prompt).to include('"Commit" means a local commit on this branch, nothing more')
+    expect(prompt).to include("Push only when told to push")
+    expect(prompt).to include("Merge only when told to merge, from the main checkout `#{run.workspace.source_root}`")
+    expect(prompt).to include("needs no push first")
+  end
+
+  # A ready-made push command read as one step of a commit/push/merge recipe,
+  # so sessions asked only to commit pushed their branch too.
+  it "hands over no git push command" do
+    expect(prompt).not_to match(/git push/)
+    expect(prompt).not_to include("origin #{run.branch_name}")
   end
 
   # Everything downstream depends on report_idle arriving: Rails cannot tell
