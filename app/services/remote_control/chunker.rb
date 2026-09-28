@@ -1,5 +1,5 @@
-module Telegram
-  # Splits long text into pieces that each fit one Telegram message, on line
+module RemoteControl
+  # Splits long text into pieces that each fit one chat message, on line
   # boundaries rather than mid-word. A fenced code block cut in two is closed
   # at the end of one piece and reopened (same info string) at the start of
   # the next, so each piece still renders on its own.
@@ -8,7 +8,7 @@ module Telegram
 
     FENCE = /\A\s*(```|~~~)(.*)\z/
 
-    def split(text, limit: Client::MAX_MESSAGE_LENGTH - 96)
+    def split(text, limit:)
       chunks = []
       current = +""
       open_fence = nil

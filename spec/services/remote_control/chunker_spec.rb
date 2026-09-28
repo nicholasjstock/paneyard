@@ -1,9 +1,9 @@
 require "rails_helper"
 
-RSpec.describe Telegram::Chunker do
+RSpec.describe RemoteControl::Chunker do
   describe ".split" do
     it "leaves short text alone" do
-      expect(described_class.split("hello\nworld")).to eq([ "hello\nworld" ])
+      expect(described_class.split("hello\nworld", limit: 4000)).to eq([ "hello\nworld" ])
     end
 
     it "splits on line boundaries under the limit" do

@@ -11,7 +11,8 @@ module Orchestrator
   #   - herdr: only the sandbox's fake herdr socket, never the operator's;
   #   - git worktrees: provisioning and removal only under the sandbox root;
   #   - processes: a session pid is only signalled if it is a fake agent;
-  #   - Telegram: no bot token, so no polling or sending;
+  #   - remote control (Telegram, and any other RemoteControl adapter): no
+  #     credentials, so no polling or sending;
   #   - GitHub: no installation or `gh` token handed to a session.
   #
   # Two of those can be opted back in, for an operator who wants to see the
@@ -22,7 +23,9 @@ module Orchestrator
   #     real model usage) in the operator's own herdr, labelled [sandbox];
   #     signals are then allowed to pids this sandbox's own sessions recorded.
   #   - WORKFLOW_SANDBOX_TELEGRAM=1: the TELEGRAM_* env it was started with
-  #     (bin/sandbox insists on a bot of its own) is used for real.
+  #     (bin/sandbox insists on a bot of its own) is used for real. Any other
+  #     remote-control adapter opts in the same way, by its own name
+  #     (allows_remote_control?).
   module Sandbox
     module_function
 
@@ -38,8 +41,14 @@ module Orchestrator
       enabled? && ENV["WORKFLOW_SANDBOX_REAL_HERDR"] == "1"
     end
 
-    def real_telegram?
-      enabled? && ENV["WORKFLOW_SANDBOX_TELEGRAM"] == "1"
+    # Whether a remote-control adapter (RemoteControl::Adapter) may reach its
+    # platform. Outside a sandbox, always. Inside one, only an adapter
+    # bin/sandbox opted in by name (WORKFLOW_SANDBOX_<NAME>=1, e.g. --telegram):
+    # an adapter that polls would otherwise take the operator's messages from
+    # production, and any adapter would answer from a sandbox as if it were
+    # the real thing. A new adapter is therefore off in a sandbox by default.
+    def allows_remote_control?(adapter_name)
+      !enabled? || ENV["WORKFLOW_SANDBOX_#{adapter_name.to_s.upcase}"] == "1"
     end
 
     # What a sandbox shows in the operator's herdr (workspace names,

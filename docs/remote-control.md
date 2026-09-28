@@ -3,6 +3,16 @@
 Status: **partly implemented.** Written 2026-09-27 on
 `workflow/plan-do-not-implement-replacing-the-workspace-ad-33bd`.
 
+## Update, 2026-09-28: Telegram is now an adapter
+
+The `Telegram::*` classes named below have moved. The chat-independent logic is now
+`RemoteControl::Processor`, `RemoteControl::Views`, `RemoteControl::Commands`
+and `RemoteControl::Chunker`. Telegram is now `RemoteControl::Adapters::Telegram::{Adapter,
+Client, Configuration, Poller}`, behind the `RemoteControl::Adapter` contract.
+`StreamTelegramPaneJob` is now `StreamPaneJob` (with an `adapter:` argument), and
+`PollTelegramUpdatesJob` only calls the poller. See README's "Adding another
+chat platform".
+
 ## Update, 2026-09-27: what shipped
 
 The operator decided to **remove the admin chat outright (D2), keep the

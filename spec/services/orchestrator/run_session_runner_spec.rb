@@ -330,6 +330,18 @@ RSpec.describe Orchestrator::RunSessionRunner do
       )
     end
 
+    it "names claude's folder-trust prompt when that is where the launch stopped" do
+      stub_const("#{described_class}::READY_POLL_ATTEMPTS", 1)
+      stub_const("#{described_class}::READY_POLL_INTERVAL_SECONDS", 0)
+      stub_successful_launch
+      allow(Orchestrator::Herdr).to receive(:agent_get).and_return("agent" => "claude", "interactive_ready" => false)
+      allow(Orchestrator::Herdr).to receive(:pane_read).and_return("❯ No, exit\n  Yes, I trust this folder\n")
+
+      expect { described_class.start!(run) }.to raise_error(described_class::Error)
+
+      expect(run.run_sessions.sole.result).to include("claude stopped at its folder-trust prompt: open claude once in #{run.workspace.source_root}")
+    end
+
     it "keeps only the tail of a long pane screen" do
       stub_const("#{described_class}::LAUNCH_SCREEN_MAX_CHARS", 10)
       stub_successful_launch

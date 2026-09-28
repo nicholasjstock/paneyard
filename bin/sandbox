@@ -19,7 +19,7 @@
 #                        run lifecycle through it end to end (see
 #                        WorkflowSandbox::Verify); exits non-zero on failure
 #
-# Queue a run with a `[fake-agent: done|blocked|failed|dirty|crash|manual]`
+# Queue a run with a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]`
 # directive in its task to choose what the fake agent does (default: done).
 #
 # To try the real thing, opt integrations back in, one at a time:
@@ -58,8 +58,11 @@ def sandbox_setting(key)
   return nil unless File.exist?(SANDBOX_ENV_FILE)
 
   File.readlines(SANDBOX_ENV_FILE, chomp: true).each do |line|
-    name, value = line.strip.split("=", 2)
-    return value.strip.delete_prefix('"').delete_suffix('"') if name == key && value
+    name, value = line.strip.delete_prefix("export ").split("=", 2)
+    next unless name&.strip == key && value
+
+    value = value.strip.delete_prefix('"').delete_suffix('"')
+    return value unless value.empty? || value == "REPLACE_ME"
   end
   nil
 end
@@ -92,6 +95,42 @@ rescue SocketError, SystemCallError, JSON::ParserError => error
   abort "bin/sandbox: could not reach Telegram to check the sandbox bot: #{error.message}"
 end
 
+# A sandbox database remembers herdr pane and workspace ids ("w1:p1") and
+# session pids. Those only mean something to the herdr that issued them: booted
+# against the other kind, the reconciler would look up -- and, finding them
+# "lost", close -- whatever the operator's own herdr has under the fake's ids,
+# and signal pids that fake agents once had. So a database stays with the
+# herdr it started with, and switching needs a reset.
+def guard_herdr_kind!(sandbox, kind)
+  marker = File.join(sandbox.root, "herdr-kind")
+  used = File.exist?(File.join(sandbox.storage_dir, "production.sqlite3"))
+  previous = File.exist?(marker) ? File.read(marker).strip : ("fake" if used)
+  if previous && previous != kind
+    abort "bin/sandbox: #{sandbox.root} was used with #{previous} herdr; its sessions' herdr ids and pids would " \
+          "point at the wrong processes under #{kind} herdr. Run bin/sandbox reset first."
+  end
+
+  FileUtils.mkdir_p(sandbox.root)
+  File.write(marker, kind)
+end
+
+# A real claude opened in a folder it has never been told to trust stops at
+# "Is this a project you trust?", whose default answer exits -- so the run
+# fails to launch. Trust is per repository (a run's worktree counts as its
+# main checkout), and the scratch repo's path survives bin/sandbox reset, so
+# the operator only has to accept it once. Read-only: this never edits
+# Claude's config.
+def warn_untrusted!(repo)
+  config = File.join(ENV["CLAUDE_CONFIG_DIR"].to_s.strip.empty? ? Dir.home : ENV["CLAUDE_CONFIG_DIR"], ".claude.json")
+  trusted = JSON.parse(File.read(config)).dig("projects", repo, "hasTrustDialogAccepted") if File.exist?(config)
+  return if trusted
+
+  puts "  WARNING    claude has not been told to trust #{repo}, so a real claude run will stop at its trust"
+  puts "             prompt and fail to launch. Accept it once: cd #{repo} && claude  (answer Yes, then /exit)"
+rescue JSON::ParserError
+  nil
+end
+
 def seed!(instance)
   output, ok = instance.run("bin/rails", "sandbox:seed")
   abort "bin/sandbox: seeding failed:\n#{output}" unless ok
@@ -107,10 +146,11 @@ def boot(instance, modes: [])
   puts "bin/sandbox: up at #{instance.url} in #{(Time.now - started).round(1)}s"
   puts "  herdr      #{modes.include?('real-herdr') ? 'YOUR herdr: runs launch real CLIs, labelled [sandbox]' : 'fake (scripted agents, no model)'}"
   puts "  telegram   #{modes.include?('telegram') ? "live, as #{@telegram_bot}" : 'off'}"
-  puts "  workspace  #{name} -> #{instance.url}/workspaces/#{id} (scratch repo #{root})"
+  puts "  workspace  #{name} -> #{instance.url}/workspaces/#{id} (scratch repo #{File.join(root, "main")})"
   puts "  mcp admin  #{instance.url}/mcp/admin"
   puts "  database   #{instance.storage_dir}"
   puts "  log        #{instance.log_path}"
+  warn_untrusted!(File.join(root, "main")) if modes.include?("real-herdr")
   [ name, id ]
 rescue WorkflowSandbox::Instance::Error => error
   abort "bin/sandbox: #{error.message}"
@@ -127,6 +167,7 @@ when "start"
     env = {}
     env.merge!(real_herdr_env) && modes << "real-herdr" if ARGV.include?("--real-herdr")
     env.merge!(telegram_env) && modes << "telegram" if ARGV.include?("--telegram")
+    guard_herdr_kind!(sandbox, modes.include?("real-herdr") ? "real" : "fake")
     boot(instance("sandbox", env:, fake_herdr: !modes.include?("real-herdr")), modes:)
     puts "Stop it with bin/sandbox stop."
   end

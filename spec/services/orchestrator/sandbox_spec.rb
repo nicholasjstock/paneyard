@@ -84,7 +84,8 @@ RSpec.describe Orchestrator::Sandbox do
     sandbox_on!
     allow(Orchestrator::SessionEnv).to receive(:gh_auth_token).and_return("gho_real")
 
-    expect(Telegram::Configuration.polling_configured?).to be(false)
+    expect(RemoteControl::Adapters::Telegram::Configuration.configured?).to be(false)
+    expect(RemoteControl::Adapters.enabled).to be_empty
     expect(Orchestrator::SessionEnv.git_env(run)).to eq({})
     expect(Orchestrator::SessionEnv).not_to have_received(:gh_auth_token)
   ensure
@@ -141,8 +142,26 @@ RSpec.describe Orchestrator::Sandbox do
       ENV["TELEGRAM_BOT_TOKEN"] = "999:sandbox-bot"
       ENV["TELEGRAM_ALLOWED_USER_IDS"] = "42"
 
-      expect(Telegram::Configuration.bot_token).to eq("999:sandbox-bot")
-      expect(Telegram::Configuration.polling_configured?).to be(true)
+      expect(RemoteControl::Adapters::Telegram::Configuration.bot_token).to eq("999:sandbox-bot")
+      expect(RemoteControl::Adapters::Telegram::Configuration.configured?).to be(true)
+    end
+
+    it "opts in only the adapter it was started with, so a new one is off by default" do
+      sandbox_on!
+      ENV["WORKFLOW_SANDBOX_TELEGRAM"] = "1"
+
+      expect(described_class.allows_remote_control?("telegram")).to be(true)
+      expect(described_class.allows_remote_control?("discord")).to be(false)
+      expect(Class.new(FakeRemoteControlAdapter) { def name = "discord" }.new.enabled?).to be(false)
+    end
+
+    it "never falls back to production's bot in credentials" do
+      sandbox_on!
+      ENV["WORKFLOW_SANDBOX_TELEGRAM"] = "1"
+      allow(Rails.application.credentials).to receive(:dig).with(:telegram, anything).and_return("123:production-bot")
+
+      expect(RemoteControl::Adapters::Telegram::Configuration.bot_token).to be_nil
+      expect(RemoteControl::Adapters::Telegram::Configuration.allowed_user_ids).to eq([])
     end
 
     it "keeps worktrees and GitHub tokens confined either way" do

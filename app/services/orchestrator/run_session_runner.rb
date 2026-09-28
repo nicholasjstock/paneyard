@@ -131,7 +131,11 @@ module Orchestrator
     def launch_failure_result(error, session, screen)
       return error.message if screen.nil?
 
-      "#{error.message}\n\n--- Last screen of agent pane #{session.herdr_pane_id} ---\n#{screen}"
+      # claude's folder-trust gate defaults to "No, exit", so an untrusted
+      # repo looks like a CLI that quit on its own. Say what it was.
+      hint = "\n\nclaude stopped at its folder-trust prompt: open claude once in #{session.run.workspace.source_root} " \
+             "and trust it." if screen.match?(/trust this folder/i)
+      "#{error.message}#{hint}\n\n--- Last screen of agent pane #{session.herdr_pane_id} ---\n#{screen}"
     end
 
     # Submits text as the agent's own live input. This is the operator's

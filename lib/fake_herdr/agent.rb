@@ -16,12 +16,13 @@ module FakeHerdr
   #   dirty                    leave an uncommitted file in the worktree, then report done
   #   crash                    exit without reporting (RunSessionReconcileJob's case)
   #   manual                   go idle without reporting; the caller reports itself
+  #   working                  stay "working" without reporting, as a CLI mid-task
   #
   # Its stdout is the fake herdr's control channel: `{"fake_herdr": {...}}`
   # lines update what agent.get says, anything else lands in the pane text.
   class Agent
     DIRECTIVE = /\[fake-agent:\s*([a-z]+)\]/
-    MODES = %w[done blocked failed dirty crash manual].freeze
+    MODES = %w[done blocked failed dirty crash manual working].freeze
 
     def initialize(argv: ARGV, env: ENV, input: $stdin, output: $stdout)
       @argv = argv
@@ -63,6 +64,7 @@ module FakeHerdr
         say("fake agent crashing without reporting")
         exit 3
       when "manual" then nil
+      when "working" then return
       else say("unknown fake-agent mode #{mode.inspect}; expected one of #{MODES.join(', ')}")
       end
       control(status: "idle")

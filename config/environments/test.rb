@@ -20,7 +20,10 @@ Rails.application.configure do
 
   # Show full error reports.
   config.consider_all_requests_local = true
-  config.cache_store = :null_store
+  # A real store, emptied before every example (spec/rails_helper.rb), so what
+  # the app keeps in the cache -- e.g. a remote-control chat's focused run --
+  # behaves as it does in production instead of silently forgetting.
+  config.cache_store = :memory_store
 
   # Render exception templates for rescuable exceptions and raise for other exceptions.
   config.action_dispatch.show_exceptions = :rescuable
