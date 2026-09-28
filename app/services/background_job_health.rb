@@ -18,7 +18,7 @@ class BackgroundJobHealth
     summary = job_counts.map { |class_name, count| "#{count} #{class_name}" }.join(", ")
 
     "Background jobs are queued but no Solid Queue worker heartbeat is active. " \
-      "Pending work: #{summary}. Start `bin/jobs` or `bin/dev`."
+      "Pending work: #{summary}. Start `bin/service` (or `bin/dev` in development)."
   rescue ActiveRecord::StatementInvalid
     nil
   end

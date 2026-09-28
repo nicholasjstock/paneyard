@@ -21,11 +21,11 @@ This README is for **operators** (running the orchestrator and pointing it at re
 ## Running the orchestrator
 
 ```sh
-bin/setup --skip-server
+bin/setup
 PORT=3000 bin/dev
 ```
 
-`bin/dev` starts Puma and Solid Queue together. Before starting either one, it checks the bundle and pending migrations and exits with a recovery command if something is missing. **Always pass `PORT` explicitly when you want runs to work.** Without it, `bin/dev` gives Puma a random free port, but the Solid Queue process still thinks the app is on 3000. Solid Queue is what launches sessions, so it would point each session's MCP server at the wrong URL, and the session could never call `report_idle`. (`SessionArgs.rails_mcp_url` uses `WORKFLOW_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`.) If you set `WORKFLOW_RAILS_URL`, keep it in step with `PORT`:
+`bin/dev` starts Puma and Solid Queue together. Before starting either one, it checks the bundle and pending migrations and exits with a recovery command if something is missing. Without `PORT` it picks a random free port, and gives both processes the same one: Solid Queue is what launches sessions, and it points each session's MCP server at `SessionArgs.rails_mcp_url` (`WORKFLOW_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`). If you set `WORKFLOW_RAILS_URL`, keep it in step with `PORT`:
 
 ```sh
 PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev
@@ -217,4 +217,4 @@ bin/rubocop
 git diff --check
 ```
 
-`bin/ci` also runs dependency, importmap, and Brakeman audits.
+`bin/verify` runs all of those plus `bin/preflight`, `bin/sandbox verify`, and the bundler-audit, importmap and Brakeman audits (see AGENTS.md, "Testing Guidelines").

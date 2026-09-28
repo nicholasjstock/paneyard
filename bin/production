@@ -2,7 +2,7 @@
 # Runs the Rails server and the Solid Queue jobs process together against
 # the production database, the same way bin/dev does for development. This
 # is the one long-running instance that holds this machine's real state --
-# see bin/dev for the disposable, seeded counterpart.
+# see bin/dev for the disposable counterpart.
 
 ENV["RAILS_ENV"] = "production"
 

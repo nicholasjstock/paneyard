@@ -16,7 +16,7 @@ If you are a session spawned by this very system -- a run working in a worktree 
 This repository is a Rails 8 application organized around `Workspace` as the top-level boundary. New work should start from a specific workspace, and related runs, sessions, events, and artifacts should stay nested under that workspace in code and UI flow. Core server code lives in `app/`: controllers in `app/controllers`, persistence models in `app/models`, background jobs in `app/jobs`, and orchestration logic in `app/services/orchestrator` and `app/services/mcp_tools`. Frontend code uses importmap + Stimulus under `app/javascript`, with views in `app/views` and static assets in `public/`. Database schema and migrations live in `db/`.
 
 ## Build, Test, and Development Commands
-Run `bin/setup` to install gems, prepare the database, and clear stale logs/tmp files. Use `bin/dev` for local development; it starts both the Rails server and the Solid Queue worker process so recurring jobs fire. `bin/dev` is **not** isolated -- it runs the full recurring schedule (Telegram polling, the worktree janitor) against whatever herdr socket the shell has -- so a run session must use `bin/sandbox` instead (see "Testing Guidelines"). Use `bin/rails db:prepare` after schema changes, and `bin/rails console` for local inspection. `bin/ci` executes setup, RuboCop, `bundler-audit`, `bin/importmap audit`, and Brakeman.
+Run `bin/setup` to install gems, prepare the database, and clear stale logs/tmp files; it does not start a server. Use `bin/dev` for local development; it starts both the Rails server and the Solid Queue worker process so recurring jobs fire. `bin/dev` is **not** isolated -- it runs the full recurring schedule (Telegram polling, the worktree janitor) against whatever herdr socket the shell has -- so a run session must use `bin/sandbox` instead (see "Testing Guidelines"). Use `bin/rails db:prepare` after schema changes, and `bin/rails console` for local inspection. `bin/verify` (see "Testing Guidelines") is the one check-everything command, including the `bin/bundler-audit`, `bin/importmap audit` and `bin/brakeman` security audits. Nothing here builds a container or deploys: there is no Docker, Kamal or Thruster setup.
 
 ### Restarting the long-running production instance
 
@@ -89,7 +89,7 @@ Use real git where git behavior is the thing under test (`spec/services/orchestr
 The production instance only runs `main`, so it cannot tell you whether a worktree's change works. Verify it where it was made, at the level of fidelity it needs, with one command:
 
 ```bash
-bin/verify               # rspec, rubocop, git diff --check, bin/preflight, bin/sandbox verify (~1 min)
+bin/verify               # rspec, rubocop, git diff --check, bin/preflight, bin/sandbox verify, security audits (~1 min)
 bin/verify --prod-copy   # same, with bin/preflight migrating a copy of the production database
 ```
 
