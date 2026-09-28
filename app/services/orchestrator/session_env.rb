@@ -70,9 +70,10 @@ module Orchestrator
       env
     end
 
-    # Any session may be asked to commit and push its own branch -- there is no
-    # separate git-role worker to hand credentials to any more -- so this is
-    # unconditional rather than role-scoped.
+    # Any session may be asked to push its own branch (only ever on an explicit
+    # request -- see RunPrompt) and there is no separate git-role worker to
+    # hand credentials to any more, so this is unconditional rather than
+    # role-scoped.
     #
     # `gh` and plain `git push` normally authenticate via the OS keychain,
     # which a non-interactive child cannot reach. GH_TOKEN lets gh skip the
