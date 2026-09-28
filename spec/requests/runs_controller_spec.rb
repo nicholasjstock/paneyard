@@ -36,7 +36,7 @@ RSpec.describe "runs", type: :request do
       get new_workspace_run_path(workspace)
 
       expect(response).to have_http_status(:ok)
-      expect(response.body).to include("Default (#{Orchestrator::SessionArgs.claude_model})")
+      expect(response.body).to include("Default (#{Orchestrator::DefaultModels.for("claude")})")
       expect(response.body).to include(%(<option value="claude-sonnet-5">Sonnet 5 — claude-sonnet-5</option>))
       expect(response.body).not_to include(%(<option value="gpt-5.5">))
       expect(response.body).to include("gpt-5.5") # in the Stimulus catalog value
@@ -94,10 +94,10 @@ RSpec.describe "runs", type: :request do
       { "name" => "first.db", "source_path" => "first.db" },
       { "name" => "second.log", "source_path" => "second.log" }
     )
-    expect(File.read(Orchestrator::ArtifactStore.resolve_path(run.target_root, run.run_id, "first.db"))).to eq("first artifact")
-    expect(File.read(Orchestrator::ArtifactStore.resolve_path(run.target_root, run.run_id, "second.log"))).to eq("second artifact")
+    expect(File.read(Orchestrator::Runner::Attachments.path(run.target_root, run.run_id, "first.db"))).to eq("first artifact")
+    expect(File.read(Orchestrator::Runner::Attachments.path(run.target_root, run.run_id, "second.log"))).to eq("second artifact")
     expect(Orchestrator::RunPrompt.compose(run:, session_driver: "claude"))
-      .to include(File.dirname(Orchestrator::ArtifactStore.resolve_path(workspace.source_root, run.run_id, "first.db")))
+      .to include(File.dirname(Orchestrator::Runner::Attachments.path(workspace.source_root, run.run_id, "first.db")))
 
     # Once the worktree is provisioned target_root moves, but the run screen
     # still lists the files from where they were stored.

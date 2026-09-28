@@ -15,7 +15,7 @@
 # See https://rubydoc.info/gems/rspec-core/RSpec/Core/Configuration
 
 # A run session's shell carries HERDR_SOCKET_PATH pointing at the operator's
-# real herdr, and specs stub Orchestrator::Herdr call by call. Point the
+# real herdr, and specs stub Orchestrator::Runner::Herdr call by call. Point the
 # client at a socket that cannot exist, so a call a spec forgot to stub fails
 # with Herdr::Unreachable instead of opening a workspace on the operator's
 # screen. Specs that want a herdr start FakeHerdr::Server and set their own.

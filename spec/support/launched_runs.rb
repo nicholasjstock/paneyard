@@ -7,11 +7,11 @@ RSpec.shared_context "launched runs" do
     # Where every real client reaches it; the MCP transport's DNS-rebinding
     # check turns away the request-spec default of www.example.com.
     host! "127.0.0.1"
-    stub_const("Orchestrator::RunSessionRunner::SHELL_POLL_INTERVAL_SECONDS", 0.01)
-    stub_const("Orchestrator::RunSessionRunner::AGENT_DETECT_POLL_INTERVAL_SECONDS", 0.05)
-    stub_const("Orchestrator::RunSessionRunner::READY_POLL_INTERVAL_SECONDS", 0.05)
-    stub_const("Orchestrator::RunSessionRunner::PID_POLL_INTERVAL_SECONDS", 0.05)
-    stub_const("Orchestrator::RunSessionRunner::PROMPT_SUBMIT_POLL_INTERVAL_SECONDS", 0.05)
+    stub_const("Orchestrator::Runner::SessionLauncher::SHELL_POLL_INTERVAL_SECONDS", 0.01)
+    stub_const("Orchestrator::Runner::SessionLauncher::AGENT_DETECT_POLL_INTERVAL_SECONDS", 0.05)
+    stub_const("Orchestrator::Runner::SessionLauncher::READY_POLL_INTERVAL_SECONDS", 0.05)
+    stub_const("Orchestrator::Runner::SessionLauncher::PID_POLL_INTERVAL_SECONDS", 0.05)
+    stub_const("Orchestrator::Runner::SessionLauncher::PROMPT_SUBMIT_POLL_INTERVAL_SECONDS", 0.05)
   end
 
   let(:workspace) { create_workspace(root_path: create_source_checkout) }

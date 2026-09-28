@@ -30,8 +30,9 @@ module RemoteControl
     def live_agent_status(session)
       return session.agent_status if session.pane_gone?
 
-      Orchestrator::Herdr.agent_get(session.herdr_pane_id)["agent_status"].presence || session.agent_status
-    rescue Orchestrator::Herdr::Error
+      state = Orchestrator::Runner.for(session.run.workspace).agent_state(session.herdr_pane_id)
+      state&.dig("agent_status").presence || session.agent_status
+    rescue Orchestrator::Runner::Error
       session.agent_status
     end
 

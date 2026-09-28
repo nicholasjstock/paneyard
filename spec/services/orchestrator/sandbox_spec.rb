@@ -25,9 +25,9 @@ RSpec.describe Orchestrator::Sandbox do
     ENV["HERDR_SOCKET_PATH"] = File.expand_path("~/.config/herdr/herdr.sock")
     sandbox_on!
 
-    expect(Orchestrator::Herdr.socket_path).to eq(WorkflowSandbox.herdr_socket_path(sandbox_root))
-    expect(Orchestrator::Herdr.socket_path).to start_with(Dir.tmpdir)
-    expect(Orchestrator::Herdr.socket_path.bytesize).to be < 104
+    expect(Orchestrator::Runner::Herdr.socket_path).to eq(WorkflowSandbox.herdr_socket_path(sandbox_root))
+    expect(Orchestrator::Runner::Herdr.socket_path).to start_with(Dir.tmpdir)
+    expect(Orchestrator::Runner::Herdr.socket_path.bytesize).to be < 104
   ensure
     ENV["HERDR_SOCKET_PATH"] = original
   end
@@ -47,7 +47,7 @@ RSpec.describe Orchestrator::Sandbox do
     run = create_run(workspace:, status: "launching")
     sandbox_on!
 
-    expect { Orchestrator::GitWorktree.provision!(run) }.to raise_error(described_class::Violation, /outside/)
+    expect { Orchestrator::GitWorktree.provision!(run) }.to raise_error(Orchestrator::Runner::Error, /sandbox refuses .* outside/)
     expect(Dir.children(workspace.root_path)).to eq([ "main" ])
   end
 
@@ -60,7 +60,7 @@ RSpec.describe Orchestrator::Sandbox do
 
     expect(Orchestrator::WorktreeJanitor.sweep_all).to eq(0)
     expect { Orchestrator::WorktreeJanitor.release!(run) }
-      .to raise_error(Orchestrator::WorktreeJanitor::Error, /sandbox refuses/)
+      .to raise_error(Orchestrator::Runner::Error, /sandbox refuses/)
     expect(File.directory?(run.target_root)).to be(true)
   end
 
@@ -77,17 +77,28 @@ RSpec.describe Orchestrator::Sandbox do
     Process.wait(pid) rescue nil
   end
 
+  # The git credentials a session of this run would get: what the
+  # orchestrator hands the runner, and what the runner makes of it.
+  def git_credentials_for(run)
+    session = run.run_sessions.new(driver: "claude", model: "opus")
+    spec = Orchestrator::RunSessionRunner.session_spec(run:, session:, capability_token: "tok", prompt: "task")
+    expect(spec).to include(github_token: nil, ambient_github_auth: false)
+
+    Orchestrator::Runner::ProcessEnv.for_session(**spec.slice(:workspace_env, :env, :capability_token, :github_token, :ambient_github_auth))
+      .slice("GH_TOKEN", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_TERMINAL_PROMPT")
+  end
+
   it "has no Telegram bot and hands sessions no GitHub token" do
     ENV["TELEGRAM_BOT_TOKEN"] = "123:real"
     ENV["TELEGRAM_ALLOWED_USER_IDS"] = "42"
     run = create_run
     sandbox_on!
-    allow(Orchestrator::SessionEnv).to receive(:gh_auth_token).and_return("gho_real")
+    allow(Orchestrator::Runner::ProcessEnv).to receive(:gh_auth_token).and_return("gho_real")
 
     expect(RemoteControl::Adapters::Telegram::Configuration.configured?).to be(false)
     expect(RemoteControl::Adapters.enabled).to be_empty
-    expect(Orchestrator::SessionEnv.git_env(run)).to eq({})
-    expect(Orchestrator::SessionEnv).not_to have_received(:gh_auth_token)
+    expect(git_credentials_for(run)).to eq({})
+    expect(Orchestrator::Runner::ProcessEnv).not_to have_received(:gh_auth_token)
   ensure
     ENV.delete("TELEGRAM_BOT_TOKEN")
     ENV.delete("TELEGRAM_ALLOWED_USER_IDS")
@@ -106,16 +117,16 @@ RSpec.describe Orchestrator::Sandbox do
       ENV["HERDR_SOCKET_PATH"] = "/tmp/operator-herdr.sock"
       sandbox_on!
       ENV["WORKFLOW_SANDBOX_REAL_HERDR"] = "1"
-      allow(Orchestrator::Herdr).to receive(:request!).and_return("root_pane" => {})
-      allow(Orchestrator::Herdr).to receive(:request).and_return({})
+      allow(Orchestrator::Runner::Herdr).to receive(:request!).and_return("root_pane" => {})
+      allow(Orchestrator::Runner::Herdr).to receive(:request).and_return({})
 
-      Orchestrator::Herdr.workspace_create(label: "fix-it-1234", cwd: sandbox_root)
-      Orchestrator::Herdr.notify(title: "Run r1 done")
+      Orchestrator::Runner::Herdr.workspace_create(label: "fix-it-1234", cwd: sandbox_root)
+      Orchestrator::Runner::Herdr.notify(title: "Run r1 done")
 
-      expect(Orchestrator::Herdr.socket_path).to eq("/tmp/operator-herdr.sock")
-      expect(Orchestrator::Herdr).to have_received(:request!)
+      expect(Orchestrator::Runner::Herdr.socket_path).to eq("/tmp/operator-herdr.sock")
+      expect(Orchestrator::Runner::Herdr).to have_received(:request!)
         .with("workspace.create", hash_including(label: "[sandbox] fix-it-1234"))
-      expect(Orchestrator::Herdr).to have_received(:request)
+      expect(Orchestrator::Runner::Herdr).to have_received(:request)
         .with("notification.show", hash_including(title: "[sandbox] Run r1 done"))
     ensure
       ENV["HERDR_SOCKET_PATH"] = original
@@ -170,22 +181,22 @@ RSpec.describe Orchestrator::Sandbox do
       ENV["WORKFLOW_SANDBOX_TELEGRAM"] = "1"
 
       expect(described_class.allows_path?(Dir.mktmpdir("real-project"))).to be(false)
-      expect(Orchestrator::SessionEnv.git_env(create_run(workspace: Workspace.create!(name: "s", root_path: File.join(sandbox_root, "repos", "s"))))).to eq({})
+      expect(git_credentials_for(create_run(workspace: Workspace.create!(name: "s", root_path: File.join(sandbox_root, "repos", "s"))))).to eq({})
     end
   end
 
   it "changes nothing when it is off" do
     expect(described_class.allows_path?("/anywhere")).to be(true)
     expect(described_class.allows_signal?(1)).to be(true)
-    expect(Orchestrator::Herdr.socket_path).to end_with("specs-have-no-herdr.sock")
+    expect(Orchestrator::Runner::Herdr.socket_path).to end_with("specs-have-no-herdr.sock")
   end
 end
 
 RSpec.describe "the spec suite's own herdr guard" do
-  it "points Orchestrator::Herdr at a socket that does not exist, so an unstubbed call cannot reach herdr" do
-    expect(Orchestrator::Herdr.socket_path).to end_with("workflow-specs-have-no-herdr.sock")
-    expect(File.exist?(Orchestrator::Herdr.socket_path)).to be(false)
-    expect { Orchestrator::Herdr.request!("workspace.get", workspace_id: "w1") }
-      .to raise_error(Orchestrator::Herdr::Unreachable)
+  it "points Orchestrator::Runner::Herdr at a socket that does not exist, so an unstubbed call cannot reach herdr" do
+    expect(Orchestrator::Runner::Herdr.socket_path).to end_with("workflow-specs-have-no-herdr.sock")
+    expect(File.exist?(Orchestrator::Runner::Herdr.socket_path)).to be(false)
+    expect { Orchestrator::Runner::Herdr.request!("workspace.get", workspace_id: "w1") }
+      .to raise_error(Orchestrator::Runner::Herdr::Unreachable)
   end
 end

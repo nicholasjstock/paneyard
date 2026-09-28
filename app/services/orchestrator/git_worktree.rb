@@ -1,43 +1,22 @@
-require "open3"
-
 module Orchestrator
+  # A run's worktree: which one it gets, and recording it once the runner has
+  # made it (Runner::Local#provision_worktree does the git).
   module GitWorktree
-    class Error < StandardError; end
     module_function
 
     def provision!(run)
-      source_root = Pathname(run.workspace.source_root)
-      Sandbox.guard_path!(source_root, "provision a worktree in")
       name = run.worktree_name.presence || name_for(run)
-      branch = "workflow/#{name}"
-      worktree = source_root.parent.join(name)
-      return run if provisioned?(run, worktree)
+      current = run.target_root if run.worktree_name.present? && run.branch_name.present? && run.source_root.present?
+      result = Runner.for(run.workspace).provision_worktree(
+        source_root: run.workspace.source_root, name:, current_target_root: current
+      )
+      return run if result.fetch("reused")
 
-      validate_source!(source_root)
-      raise Error, "Worktree path already exists: #{worktree}" if worktree.exist?
-
-      base_sha = git!(source_root, "rev-parse", "HEAD").strip
-      git!(source_root, "worktree", "add", "-b", branch, worktree.to_s, base_sha)
       run.update!(
-        worktree_name: name, source_root: source_root.to_s, branch_name: branch,
-        base_sha: base_sha, target_root: worktree.to_s
+        worktree_name: name, source_root: result.fetch("source_root"), branch_name: result.fetch("branch"),
+        base_sha: result.fetch("base_sha"), target_root: result.fetch("target_root")
       )
       run
-    end
-
-    def provisioned?(run, worktree)
-      return false unless run.worktree_name.present? && run.branch_name.present? && run.source_root.present?
-      return false unless Pathname(run.target_root).expand_path == worktree.expand_path
-
-      worktree.directory?
-    end
-
-    def validate_source!(source_root)
-      raise Error, "Source checkout does not exist: #{source_root}" unless source_root.directory?
-      raise Error, "Source checkout must be named main: #{source_root}" unless source_root.basename.to_s == "main"
-      raise Error, "Source checkout is not a Git repository: #{source_root}" unless git_success?(source_root, "rev-parse", "--is-inside-work-tree")
-      raise Error, "Source checkout must be on main" unless git!(source_root, "branch", "--show-current").strip == "main"
-      raise Error, "Source checkout has no origin remote: #{source_root}" unless git_success?(source_root, "remote", "get-url", "origin")
     end
 
     def name_for(run)
@@ -46,17 +25,6 @@ module Orchestrator
       suffix = run.run_id.to_s.split("-").last.to_s.gsub(/[^a-z0-9]/i, "").last(8)
       suffix = SecureRandom.hex(3) if suffix.blank?
       "#{slug}-#{suffix}"
-    end
-
-    def git!(root, *args)
-      output, error, status = Open3.capture3("git", "-C", root.to_s, *args)
-      return output if status.success?
-      raise Error, "git #{args.join(' ')} failed: #{error.presence || output}"
-    end
-
-    def git_success?(root, *args)
-      _output, _error, status = Open3.capture3("git", "-C", root.to_s, *args)
-      status.success?
     end
   end
 end

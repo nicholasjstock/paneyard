@@ -1,6 +1,6 @@
 # GitHub App Authentication Setup
 
-Rails itself makes no GitHub calls: it does not open, update, or watch pull requests. What needs GitHub credentials is each run's session, which pushes its own `workflow/<name>` branch when you ask it to (and may run `gh` if you ask it to). When a GitHub App is configured, `Orchestrator::SessionEnv` gives every session an installation token for the app instead of letting it act as you with your own `gh auth` identity. The token reaches exactly the repositories that installation was granted, which is why "Only select repositories" below is recommended.
+Rails itself makes no GitHub calls: it does not open, update, or watch pull requests. What needs GitHub credentials is each run's session, which pushes its own `workflow/<name>` branch when you ask it to (and may run `gh` if you ask it to). When a GitHub App is configured, every session gets an installation token for the app instead of letting it act as you with your own `gh auth` identity. The token reaches exactly the repositories that installation was granted, which is why "Only select repositories" below is recommended.
 
 ## Prerequisites
 
@@ -98,27 +98,7 @@ Then set the master key:
 rails credentials:edit
 ```
 
-### Option 3: Deployment Configuration
-
-For production deployments using Kamal or other orchestration, add secrets to your deployment config:
-
-```yaml
-# config/deploy.yml
-env:
-  secret:
-    - RAILS_MASTER_KEY
-    - GITHUB_APP_ID
-    - GITHUB_APP_PRIVATE_KEY
-    - GITHUB_APP_INSTALLATION_ID
-```
-
-Then set the secrets:
-
-```bash
-kamal secrets set GITHUB_APP_ID=12345 GITHUB_APP_PRIVATE_KEY="..." GITHUB_APP_INSTALLATION_ID=98765
-```
-
-### Option 4: GitHub Actions CI/CD Secrets
+### Option 3: GitHub Actions CI/CD Secrets
 
 To use GitHub App authentication in GitHub Actions workflows (e.g., for running tests or deploying):
 
@@ -179,14 +159,14 @@ rails runner '
 
 ## How It Works
 
-1. When a run's session starts, `Orchestrator::SessionEnv.git_env`:
+1. When a run's session starts, `Orchestrator::RunSessionRunner.session_spec` (via `Orchestrator::GitHubAppAuth`):
    - Checks if GitHub App credentials are configured
    - Generates a JWT signed with the app's private key
-   - Exchanges it for an access token for the installation that covers the run's repository (looked up from `remote.origin.url`)
+   - Exchanges it for an access token for the installation that covers the run's repository (looked up from `remote.origin.url`, which it asks the run's runner for, unless `GITHUB_APP_INSTALLATION_ID` is set)
    - Caches the token for 55 minutes (tokens are valid for 1 hour), so a session may start with one that is already up to 55 minutes old
-   - Puts it in the session's environment as `GH_TOKEN`, and appends `gh auth git-credential` as a git credential helper, so both `gh` and plain `git push` authenticate with it
+   - Hands it to the runner, whose `Orchestrator::Runner::ProcessEnv` puts it in the session's environment as `GH_TOKEN`, and appends `gh auth git-credential` as a git credential helper, so both `gh` and plain `git push` authenticate with it
 
-2. If the GitHub App is not configured, or minting a token fails, the session gets whatever `gh auth token` returns for the local user instead.
+2. If the GitHub App is not configured, or minting a token fails, the session gets whatever `gh auth token` returns for the user on the runner's machine instead.
 
 The token is fixed when the session starts. A session left open for long enough will find it expired and its next push failing; close the session and start a new run, or push that branch yourself.
 

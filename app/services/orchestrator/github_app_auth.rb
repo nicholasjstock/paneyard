@@ -18,25 +18,21 @@ module Orchestrator
       # Get or generate a GitHub App installation token for the repository.
       # This token can be used with `gh` CLI via GH_TOKEN env var or other authenticated calls.
       #
-      # @param workspace_root [String] Path to the target workspace/repository
+      # The block returns the repository's origin URL. The checkout lives on
+      # the runner's machine, not here, so it is only asked for when the
+      # installation has to be looked up by owner (no cached token and no
+      # GITHUB_APP_INSTALLATION_ID).
+      #
+      # @yieldreturn [String] the repository's `origin` remote URL
       # @return [String] GitHub App installation token
       # @raise [Error] if app credentials are not configured or token generation fails
-      def installation_token_for(workspace_root:)
+      def installation_token_for(&remote_url)
         cached_token = get_cached_token
         return cached_token if cached_token.present?
 
-        token = generate_installation_token(workspace_root: workspace_root)
+        token = generate_installation_token(remote_url)
         cache_token(token)
         token
-      end
-
-      # Get an installation token with caching disabled. Used for cases where
-      # a fresh token is always needed.
-      #
-      # @param workspace_root [String] Path to the target workspace/repository
-      # @return [String] GitHub App installation token
-      def fresh_installation_token_for(workspace_root:)
-        generate_installation_token(workspace_root: workspace_root)
       end
 
       private
@@ -48,10 +44,10 @@ module Orchestrator
       # 2. Use JWT to get a list of installations
       # 3. Get the installation ID for this workspace
       # 4. Exchange JWT for an installation access token
-      def generate_installation_token(workspace_root:)
+      def generate_installation_token(remote_url)
         app_id = load_app_id
         private_key = load_private_key
-        installation_id = find_installation_id(workspace_root: workspace_root)
+        installation_id = find_installation_id(remote_url)
 
         jwt_token = create_jwt(app_id, private_key)
         get_installation_access_token(jwt_token, installation_id)
@@ -91,7 +87,7 @@ module Orchestrator
         raise Error, "GitHub App private key is not a valid PEM-formatted RSA key: #{e.message}"
       end
 
-      def find_installation_id(workspace_root:)
+      def find_installation_id(remote_url)
         # A pre-configured installation ID means we never need the repository's
         # own remote URL at all -- looking it up unconditionally here broke
         # every caller that already knows the installation (including a repo
@@ -99,7 +95,7 @@ module Orchestrator
         installation_id = ENV["GITHUB_APP_INSTALLATION_ID"]
         return installation_id if installation_id.present?
 
-        repository = get_repository_info(workspace_root)
+        repository = get_repository_info(remote_url&.call)
         app_id = load_app_id
         private_key = load_private_key
 
@@ -107,14 +103,10 @@ module Orchestrator
         find_installation_for_repository(jwt_token, repository)
       end
 
-      def get_repository_info(workspace_root)
-        # Extract owner/repo from the git remote
-        output, error, status = Open3.capture3("git", "-C", workspace_root, "config", "--get", "remote.origin.url")
-        unless status.success?
-          raise Error, "Failed to get repository info: #{error}"
-        end
+      def get_repository_info(url)
+        raise Error, "Failed to get repository info: no origin remote URL" if url.blank?
 
-        url = output.strip
+        url = url.strip
         # Handle both HTTPS and SSH URLs
         # HTTPS: https://github.com/owner/repo.git or https://github.com/owner/repo
         # SSH: git@github.com:owner/repo.git

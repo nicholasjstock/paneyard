@@ -8,6 +8,9 @@
 #   git diff --check
 #   bin/preflight            this code booted as production on a scratch DB
 #   bin/sandbox verify       a run lifecycle through a live isolated instance
+#   bin/bundler-audit        known-vulnerable gems
+#   bin/importmap audit      known-vulnerable JavaScript pins
+#   bin/brakeman             Rails static security analysis
 #
 # Usage: bin/verify [--prod-copy]   (--prod-copy is passed to bin/preflight)
 
@@ -19,7 +22,10 @@ steps = [
   [ "rubocop", %w[bin/rubocop] ],
   [ "git diff --check", %w[git diff --check] ],
   [ "preflight", preflight ],
-  [ "sandbox verify", %w[bin/sandbox verify] ]
+  [ "sandbox verify", %w[bin/sandbox verify] ],
+  [ "bundler-audit", %w[bin/bundler-audit] ],
+  [ "importmap audit", %w[bin/importmap audit] ],
+  [ "brakeman", %w[bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error] ]
 ]
 
 $stdout.sync = true

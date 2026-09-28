@@ -98,14 +98,14 @@ RSpec.describe "a run's lifecycle", type: :request do
 
   it "fails the launch, keeps the pane's last screen, and frees the slot when the CLI never starts",
     :fake_herdr, fake_agent_command: [ "sh", "-c", "echo 'claude: command not found'; exit 127" ] do
-    stub_const("Orchestrator::RunSessionRunner::AGENT_DETECT_POLL_ATTEMPTS", 4)
+    stub_const("Orchestrator::Runner::SessionLauncher::AGENT_DETECT_POLL_ATTEMPTS", 4)
 
     run_id = nil
     perform_enqueued_jobs(only: RunDispatchJob) do
       run_id = mcp_call("/mcp/admin", "queue_run", task: "Never starts", workspace: workspace.name).fetch("runId")
     end
     run = Run.find_by!(run_id:)
-    expect { StartRunSessionJob.perform_now(run.id) }.to raise_error(Orchestrator::RunSessionRunner::Error, /never detected/)
+    expect { StartRunSessionJob.perform_now(run.id) }.to raise_error(Orchestrator::Runner::LaunchError, /never detected/)
 
     expect(run.reload).to have_attributes(status: "failed", launch_error: include("never detected claude"))
     expect(run.latest_session.result).to include("claude: command not found")

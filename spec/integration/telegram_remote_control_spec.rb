@@ -22,7 +22,7 @@ RSpec.describe "Telegram remote control", :fake_herdr, :fake_telegram, type: :re
   # What herdr says the agent is doing -- the fake agent is "working" on its
   # task prompt for a moment after launch.
   def wait_until_agent(run, status)
-    wait_for { Orchestrator::Herdr.agent_get(run.live_session.herdr_pane_id)["agent_status"] == status }
+    wait_for { Orchestrator::Runner.for(run.workspace).agent_state(run.live_session.herdr_pane_id)&.dig("agent_status") == status }
   end
 
   # One tick of the live /pane message's StreamPaneJob, as the queue would run

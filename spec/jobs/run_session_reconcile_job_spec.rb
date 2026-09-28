@@ -3,7 +3,7 @@ require "rails_helper"
 RSpec.describe RunSessionReconcileJob do
   # RunIdleReport notifies the operator's real herdr; a spec must never open
   # that socket.
-  before { allow(Orchestrator::Herdr).to receive(:notify) }
+  before { allow(Orchestrator::Runner::Herdr).to receive(:notify) }
   # A spec must not remove real worktrees either; the janitor's own specs cover
   # what release! keeps and removes.
   before { allow(Orchestrator::WorktreeJanitor).to receive(:release!).and_return(false) }
@@ -71,7 +71,7 @@ RSpec.describe RunSessionReconcileJob do
     first, = create_run_and_session(prefix: "reconcile-herdr-a")
     second, = create_run_and_session(prefix: "reconcile-herdr-b")
     allow(Orchestrator::RunSessionRunner).to receive(:refresh!)
-      .and_raise(Orchestrator::Herdr::Error, "herdr is not running")
+      .and_raise(Orchestrator::Runner::Unreachable, "herdr is not running")
 
     expect { described_class.perform_now }.not_to raise_error
 
@@ -88,8 +88,8 @@ RSpec.describe RunSessionReconcileJob do
   it "leaves an idle, already-done session untouched when herdr is briefly unreachable" do
     run, session = create_run_and_session(prefix: "reconcile-blip")
     Orchestrator::RunIdleReport.call(run:, session:, outcome: "done", summary: "Finished; over to you.")
-    allow(Orchestrator::Herdr).to receive(:agent_get)
-      .and_raise(Orchestrator::Herdr::Unreachable, "herdr agent.get timed out after 5s")
+    allow(Orchestrator::Runner::Herdr).to receive(:agent_get)
+      .and_raise(Orchestrator::Runner::Herdr::Unreachable, "herdr agent.get timed out after 5s")
 
     expect { described_class.perform_now }.not_to raise_error
 
@@ -133,7 +133,7 @@ RSpec.describe RunSessionReconcileJob do
       s.update!(status: "done", outcome: "done", ended_at: Time.current)
     end
     allow(Orchestrator::WorktreeJanitor).to receive(:release!)
-      .and_raise(Orchestrator::WorktreeJanitor::Error, "git worktree remove failed")
+      .and_raise(Orchestrator::Runner::Error, "git worktree remove failed")
 
     expect { described_class.perform_now }.not_to raise_error
 
@@ -148,31 +148,31 @@ RSpec.describe RunSessionReconcileJob do
   # run in is released.
   context "with a layout's extra panes in the run's workspace" do
     before do
-      allow(Orchestrator::Herdr).to receive(:workspace_close)
+      allow(Orchestrator::Runner::Herdr).to receive(:workspace_close)
       allow(Orchestrator::RunSessionRunner).to receive(:kill_process)
     end
 
     it "keys off the agent pane alone, however the other panes are doing" do
       _run, session = create_run_and_session(prefix: "reconcile-layout-live")
-      allow(Orchestrator::Herdr).to receive(:agent_get).with("w1:p1").and_return("agent_status" => "idle")
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_get).with("w1:p1").and_return("agent_status" => "idle")
       allow(Orchestrator::RunSessionRunner).to receive(:process_alive?).and_return(true)
 
       described_class.perform_now
 
       expect(session.reload).to be_live
-      expect(Orchestrator::Herdr).not_to have_received(:workspace_close)
+      expect(Orchestrator::Runner::Herdr).not_to have_received(:workspace_close)
       expect(Orchestrator::WorktreeJanitor).not_to have_received(:release!)
     end
 
     it "closes the whole workspace before releasing the worktree when only the agent pane is gone" do
       run, session = create_run_and_session(prefix: "reconcile-layout-agent-gone")
-      allow(Orchestrator::Herdr).to receive(:agent_get).with("w1:p1")
-        .and_raise(Orchestrator::Herdr::Error, "pane_not_found")
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_get).with("w1:p1")
+        .and_raise(Orchestrator::Runner::Herdr::Error, "pane_not_found")
 
       described_class.perform_now
 
       expect(session.reload).to be_ended
-      expect(Orchestrator::Herdr).to have_received(:workspace_close).with("w1").ordered
+      expect(Orchestrator::Runner::Herdr).to have_received(:workspace_close).with("w1").ordered
       expect(Orchestrator::WorktreeJanitor).to have_received(:release!).with(run).ordered
     end
   end

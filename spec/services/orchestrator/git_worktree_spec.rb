@@ -10,12 +10,16 @@ RSpec.describe Orchestrator::GitWorktree do
   it "does not mistake the source checkout for a provisioned worktree" do
     root = Pathname(Dir.mktmpdir).join("main")
     FileUtils.mkdir_p(root)
+    workspace = Workspace.new(name: "not-provisioned", root_path: root.parent.to_s)
     run = Run.new(
-      target_root: root.to_s, worktree_name: "add-todo-a1b2", branch_name: "workflow/add-todo-a1b2",
+      workspace:, target_root: root.to_s, worktree_name: "add-todo-a1b2", branch_name: "workflow/add-todo-a1b2",
       source_root: root.to_s
     )
 
-    expect(described_class.provisioned?(run, root.parent.join("add-todo-a1b2"))).to be(false)
+    # Not reused as the run's worktree: provisioning goes on to check the
+    # source checkout, and finds it is not a repository.
+    expect { described_class.provision!(run) }
+      .to raise_error(Orchestrator::Runner::Error, /not a Git repository/)
   ensure
     FileUtils.remove_entry(root.parent) if root&.parent&.exist?
   end

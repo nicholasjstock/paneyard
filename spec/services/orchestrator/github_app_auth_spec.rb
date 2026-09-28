@@ -66,7 +66,7 @@ RSpec.describe Orchestrator::GitHubAppAuth do
   end
 
   describe ".installation_token_for" do
-    let(:workspace_root) { "/path/to/repo" }
+    let(:remote_url) { "https://github.com/owner/repo.git" }
     let(:app_id) { "12345" }
     let(:private_key) { TEST_RSA_PRIVATE_KEY }
     let(:installation_id) { "67890" }
@@ -96,7 +96,7 @@ RSpec.describe Orchestrator::GitHubAppAuth do
 
       it "raises an error" do
         expect {
-          described_class.installation_token_for(workspace_root: workspace_root)
+          described_class.installation_token_for { remote_url }
         }.to raise_error(Orchestrator::GitHubAppAuth::Error, /not configured/)
       end
     end
@@ -114,11 +114,11 @@ RSpec.describe Orchestrator::GitHubAppAuth do
           [ { token: "different_token" }.to_json, "", double(success?: true) ]
         )
 
-        token1 = described_class.installation_token_for(workspace_root: workspace_root)
+        token1 = described_class.installation_token_for { remote_url }
         expect(token1).to eq(mock_token)
 
         # Second call should return cached token
-        token2 = described_class.installation_token_for(workspace_root: workspace_root)
+        token2 = described_class.installation_token_for { remote_url }
         expect(token2).to eq(mock_token)
       end
     end
@@ -132,49 +132,9 @@ RSpec.describe Orchestrator::GitHubAppAuth do
 
       it "raises an error with GitHub API response" do
         expect {
-          described_class.installation_token_for(workspace_root: workspace_root)
+          described_class.installation_token_for { remote_url }
         }.to raise_error(Orchestrator::GitHubAppAuth::Error)
       end
-    end
-  end
-
-  describe ".fresh_installation_token_for" do
-    let(:workspace_root) { "/path/to/repo" }
-    let(:app_id) { "12345" }
-    let(:private_key) { TEST_RSA_PRIVATE_KEY }
-    let(:installation_id) { "67890" }
-    let(:mock_token) { "ghu_test_token_xyz789" }
-
-    before do
-      ENV["GITHUB_APP_ID"] = app_id
-      ENV["GITHUB_APP_PRIVATE_KEY"] = private_key
-      ENV["GITHUB_APP_INSTALLATION_ID"] = installation_id
-    end
-
-    after do
-      ENV.delete("GITHUB_APP_ID")
-      ENV.delete("GITHUB_APP_PRIVATE_KEY")
-      ENV.delete("GITHUB_APP_INSTALLATION_ID")
-      Rails.cache.clear
-    end
-
-    it "always generates a fresh token without using cache" do
-      allow(Open3).to receive(:capture3).and_call_original
-      allow(Open3).to receive(:capture3).with(
-        "curl", "-s", "-X", "POST",
-        "-H", "Accept: application/vnd.github.v3+json",
-        "-H", /Authorization: Bearer/,
-        "https://api.github.com/app/installations/#{installation_id}/access_tokens"
-      ).and_return(
-        [ { token: "token_one" }.to_json, "", double(success?: true) ],
-        [ { token: "token_two" }.to_json, "", double(success?: true) ]
-      )
-
-      token1 = described_class.fresh_installation_token_for(workspace_root: workspace_root)
-      expect(token1).to eq("token_one")
-
-      token2 = described_class.fresh_installation_token_for(workspace_root: workspace_root)
-      expect(token2).to eq("token_two")
     end
   end
 end

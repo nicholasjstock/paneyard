@@ -23,6 +23,8 @@ class Run < ApplicationRecord
   # awaiting_review -- session reported idle; the operator decides what next
   STATUSES = %w[queued launching running awaiting_review stopped completed failed].freeze
   NON_TERMINAL_STATUSES = %w[queued launching running awaiting_review].freeze
+  # Something is, or is about to be, working in the run's worktree.
+  SESSION_ACTIVE_STATUSES = %w[queued launching running].freeze
 
   belongs_to :workspace
 
@@ -38,7 +40,7 @@ class Run < ApplicationRecord
   validates :task, presence: true
   validates :target_root, presence: true
   validates :launcher_variant, inclusion: { in: LAUNCHER_VARIANTS }
-  # Blank means the driver's default (Orchestrator::SessionArgs). A model id
+  # Blank means the driver's default (Orchestrator::DefaultModels). A model id
   # becomes one argv element of the session's command line, so it may never
   # look like a flag.
   validates :model, format: { with: %r{\A[A-Za-z0-9][\w.:/\[\]@-]*\z} }, allow_blank: true
@@ -103,7 +105,7 @@ class Run < ApplicationRecord
   # Nothing is working in the worktree any more: the run has finished, or is
   # awaiting review with its session closed.
   def session_over?
-    !status.in?(%w[queued launching running]) && live_session.nil?
+    !status.in?(SESSION_ACTIVE_STATUSES) && live_session.nil?
   end
 
   # Still on disk after its session ended. WorktreeJanitor removes every such
@@ -114,11 +116,12 @@ class Run < ApplicationRecord
   # workspace's source checkout until GitWorktree.provision! succeeds, so a
   # run that died before provisioning still has a target_root that resolves
   # (to `main`, never a worktree of it), and a worktree already removed by
-  # the janitor can leave an inert leftover directory behind. Asking git
-  # whether target_root is actually a registered worktree rules out both.
+  # the janitor can leave an inert leftover directory behind. The runner asks
+  # git whether target_root is actually a registered worktree, ruling out
+  # both.
   def kept_worktree?
-    managed_worktree? && target_root.present? && File.directory?(target_root) && session_over? &&
-      Orchestrator::WorktreeJanitor.registered_worktree?(workspace, target_root)
+    managed_worktree? && target_root.present? && session_over? &&
+      Orchestrator::Runner.for(workspace).worktree_registered?(source_root: workspace.source_root, path: target_root)
   end
 
   def to_param

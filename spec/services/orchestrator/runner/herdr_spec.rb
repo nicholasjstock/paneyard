@@ -1,6 +1,6 @@
 require "rails_helper"
 
-RSpec.describe Orchestrator::Herdr do
+RSpec.describe Orchestrator::Runner::Herdr do
   describe ".workspace_create" do
     it "passes label/cwd/focus through and stringifies the env, dropping nil-valued entries" do
       expect(described_class).to receive(:request!).with(
@@ -12,34 +12,6 @@ RSpec.describe Orchestrator::Herdr do
       )
 
       expect(result.fetch("root_pane").fetch("pane_id")).to eq("w9:p1")
-    end
-  end
-
-  describe ".workspace_alive?" do
-    it "is true while herdr still knows the workspace" do
-      allow(described_class).to receive(:request!).with("workspace.get", workspace_id: "w1").and_return({})
-
-      expect(described_class.workspace_alive?("w1")).to be true
-    end
-
-    it "is false once the operator has closed it by hand, and for a blank id" do
-      allow(described_class).to receive(:request!).with("workspace.get", workspace_id: "w1")
-        .and_raise(described_class::Error, "workspace not found")
-
-      expect(described_class.workspace_alive?("w1")).to be false
-      expect(described_class.workspace_alive?(nil)).to be false
-    end
-  end
-
-  describe ".pane_alive?" do
-    it "reports pane liveness and treats a blank id as dead" do
-      allow(described_class).to receive(:request!).with("pane.get", pane_id: "w1:p1").and_return({})
-      expect(described_class.pane_alive?("w1:p1")).to be true
-
-      allow(described_class).to receive(:request!).with("pane.get", pane_id: "w1:p2")
-        .and_raise(described_class::Error, "pane_not_found")
-      expect(described_class.pane_alive?("w1:p2")).to be false
-      expect(described_class.pane_alive?("")).to be false
     end
   end
 

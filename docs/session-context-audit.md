@@ -403,7 +403,7 @@ planner, steps or a GitHub question protocol except F3 (machine-global) and F6 (
 | Content | Home | Why |
 |---|---|---|
 | Run identity (runId, branch, worktree, base) | **Prompt** | Only Rails knows it. Every driver reliably sees a first user message. |
-| Run lifecycle (leave changes uncommitted, commit and push only when asked, report_idle when and how, questions go in `blocked`) | **Prompt**, short | It must work in every repo, for every driver, and before the model has looked at any tool. |
+| Run lifecycle (leave changes uncommitted, commit, push and merge each only when asked for, report_idle when and how, questions go in `blocked`) | **Prompt**, short | It must work in every repo, for every driver, and before the model has looked at any tool. |
 | How to call each tool and what its params mean | **MCP tool descriptions** | Read at the point of use. Shared tools must stay neutral about who is calling (run session or admin client). |
 | A one-paragraph map of the server | **MCP server `instructions`** | Belt and braces for clients that surface it (Claude Code does; codex and opencode support is unverified). It must not be the only place the lifecycle lives. |
 | How to build, test and commit *in this repo* | **Repo files** (AGENTS.md, CLAUDE.md) | Different per target repo, and the session reads them itself. Rails injects none of it. |
@@ -416,7 +416,8 @@ docs. Every one of those is meaningless in an arbitrary target repo.
 ### 4.2 Proposed task wrapper (full text)
 
 **Revised after operator feedback (see F0):** the prompt should be much shorter, and a session should leave its
-changes **uncommitted** so the operator can try them out. It commits and pushes only when told to.
+changes **uncommitted** so the operator can try them out. It commits, pushes or merges only when told to do that
+particular one.
 
 Placeholders are in `{}`. The `[claude]` line is emitted only for that driver. The attachments line is emitted
 only when there are attachments.
@@ -427,9 +428,10 @@ only when there are attachments.
 Worktree `{worktree}`, branch `{branch}` (from `main` at {base_sha_short}). It is yours alone. Follow the repo's
 own AGENTS.md / CLAUDE.md.
 
-Leave your changes uncommitted: the operator tries them out and decides what to keep. Do not commit, push or merge
-unless asked. When asked: commit on this branch, push with `git push -u origin {branch}`, and merge from the main
-checkout (`git -C {source_root} merge {branch}`), since `main` is checked out there.
+Leave your changes uncommitted: the operator tries them out and decides what to keep. Commit, push and merge
+are separate: do only the one you are asked for. "Commit" means a local commit on this branch, nothing more.
+Push only when told to push. Merge only when told to merge, from the main checkout `{source_root}` (`main` is
+checked out there); a merge needs no push first.
 
 Whenever you stop (finished, stuck, or giving up), call `report_idle` (MCP server `workflow`, runId `{run_id}`)
 with `done`, `blocked` or `failed`. The operator reads these reports, not this terminal, so a question goes in a
@@ -472,8 +474,8 @@ for future jobs in this workspace. Files, shell and git are yours to do directly
 ```text
 description: Tell the operator you have stopped and where things stand. Call it every time you go idle: `done`
   (task finished), `blocked` (you need the operator; put the question in the summary) or `failed` (cannot be
-  done as specified; say why). It does not end the run, close your terminal, commit or push anything. The operator
-  reads these reports instead of your terminal and may send more work; report again when you next stop.
+  done as specified; say why). It does not end the run or close your terminal, and it is not a cue to commit, push
+  or merge: do each of those only when the operator asks for that one. The operator reads these reports instead of your terminal and may send more work; report again when you next stop.
 runId: This run's id, from your startup prompt.
 summary: Markdown report of the work since your previous report only. Cover what you changed and why, how you
   verified it (commands and results), what failed or was skipped, what is uncommitted in the worktree, how the
@@ -621,7 +623,9 @@ Still not done:
 ## 5. Decisions for the operator
 
 - **D1: Commit, merge and cleanup policy. Decided.**
-  - A session leaves its changes uncommitted, and commits, pushes or merges only when the operator asks.
+  - A session leaves its changes uncommitted, and commits, pushes or merges only when the operator asks for that
+    step. The three are separate: an earlier wording ("When asked: commit…, push with `git push -u origin …`, and
+    merge…") read as one procedure, so a request to commit also pushed; the prompt now names no push command.
   - A session **may** merge straight into `main` when asked. AGENTS.md already says so, and it stays.
   - Worktree cleanup is unchanged. A worktree whose HEAD is pushed *or* merged is saved, and may be removed on
     Close session. With uncommitted work as the default, most worktrees are dirty at close, so they are kept

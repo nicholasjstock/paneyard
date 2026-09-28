@@ -23,8 +23,8 @@ module McpTools
     tool_name "report_idle"
     description "Tell the operator you have stopped and where things stand. Call it every time you go idle: " \
       "`done` (task finished), `blocked` (you need the operator; put the question in the summary) or `failed` " \
-      "(cannot be done as specified; say why). It does not end the run, close your terminal, commit or push " \
-      "anything. The operator reads these reports instead of your terminal and may send more work; report " \
+      "(cannot be done as specified; say why). It does not end the run or close your terminal, and it is not " \
+      "a cue to commit, push or merge: do each of those only when the operator asks for that one. The operator reads these reports instead of your terminal and may send more work; report " \
       "again when you next stop."
     input_schema(
       properties: {
@@ -34,8 +34,8 @@ module McpTools
           type: "string",
           description: "Markdown report of the work since your previous report only -- earlier ones are " \
             "kept, so do not repeat them. What you changed and why, how you verified it (commands and " \
-            "results), what failed or was skipped, what is uncommitted in the worktree and how the operator " \
-            "can try it, and what should happen next. For `blocked`, lead with the question."
+            "results), what failed or was skipped, what is uncommitted, committed or pushed, and how the " \
+            "operator can try it, and what should happen next. For `blocked`, lead with the question."
         }
       },
       required: %w[outcome summary]
