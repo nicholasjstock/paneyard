@@ -165,6 +165,20 @@ begin
       paths.join(" ")
     end
 
+    # DNS rebinding: a page re-pointing its own name at 127.0.0.1 still sends
+    # that name as Host (config.hosts, WorkflowAllowedHosts).
+    step("foreign Host rejected, loopback names answered") do
+      bad = [ "/", "/up", "/mcp/admin" ].filter_map do |path|
+        code = instance.get(path, headers: { "Host" => "rebound.example" }).code
+        "#{path} with a foreign Host -> #{code}" unless code == "403"
+      end
+      bad += [ "localhost:#{instance.port}", "[::1]:#{instance.port}" ].filter_map do |host|
+        code = instance.get("/up", headers: { "Host" => host }).code
+        "/up with Host #{host} -> #{code}" unless code == "200"
+      end
+      raise bad.join(", ") if bad.any?
+    end
+
     step("/mcp/admin answers") do
       client = WorkflowSandbox::McpClient.new("#{instance.url}/mcp/admin")
       tools = client.tool_names

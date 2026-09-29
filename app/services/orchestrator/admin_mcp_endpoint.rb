@@ -15,7 +15,9 @@ module Orchestrator
   # session/stream internally.
   class AdminMcpEndpoint
     def initialize
-      @transport = MCP::Server::Transports::StreamableHTTPTransport.new(AdminMcpServer.build)
+      @transport = MCP::Server::Transports::StreamableHTTPTransport.new(
+        AdminMcpServer.build, allowed_hosts: WorkflowAllowedHosts.extra
+      )
     end
 
     def call(env)
