@@ -18,6 +18,9 @@ require "action_cable/engine"
 # you've limited to :test, :development, or :production.
 Bundler.require(*Rails.groups)
 
+# Needed by config/environments/production.rb, before autoloading exists.
+require_relative "../lib/workflow_allowed_hosts"
+
 module WorkflowOrchestrator
   class Application < Rails::Application
     # Initialize configuration defaults for originally generated Rails version.
@@ -26,7 +29,7 @@ module WorkflowOrchestrator
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.
-    config.autoload_lib(ignore: %w[assets tasks])
+    config.autoload_lib(ignore: %w[assets tasks workflow_allowed_hosts.rb])
 
     # Configuration for the application, engines, and railties goes here.
     #

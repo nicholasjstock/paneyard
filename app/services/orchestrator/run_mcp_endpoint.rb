@@ -26,7 +26,8 @@ module Orchestrator
           @transports.delete_if { |id, _| !live_ids.include?(id) }
         end
         @transports[session.id] ||= MCP::Server::Transports::StreamableHTTPTransport.new(
-          RunMcpServer.build(server_context: { run_session_id: session.id })
+          RunMcpServer.build(server_context: { run_session_id: session.id }),
+          allowed_hosts: WorkflowAllowedHosts.extra
         )
       end
     end
