@@ -1,0 +1,35 @@
+name: Feature request
+description: "Suggest a change or new capability."
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Some directions were tried and removed on purpose (a planner or step queue, pull-request automation, an agent layer in front of sessions, multi-user auth). The "Design rules" in CONTRIBUTING.md explain why; if your idea touches one of them, say how it fits.
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Problem"
+      description: "What are you trying to do, and what gets in the way today?"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: "Proposed solution"
+      description: "What you'd like to happen. Where does it live (UI, MCP tool, runner, remote control, a bin/ script)?"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternatives considered"
+      description: "Other approaches, including doing it inside the agent session itself or in the target repository's AGENTS.md/CLAUDE.md."
+  - type: checkboxes
+    id: fit
+    attributes:
+      label: "Design fit"
+      options:
+        - label: "This keeps the agent session in charge of the work, with Rails only scheduling it (see \"Sessions, not orchestration\")."
+        - label: "This is scoped to a workspace, or is genuinely global."
+        - label: "I'd be willing to open a pull request for it."

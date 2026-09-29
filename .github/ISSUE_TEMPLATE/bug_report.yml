@@ -1,0 +1,70 @@
+name: Bug report
+description: "Something in the orchestrator doesn't work as documented."
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. **Security vulnerabilities should not be reported here**: follow SECURITY.md instead.
+
+        Before posting logs or pane output, remove anything private: tokens, file paths you'd rather not share, and task text or agent output from your own repositories.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: "What happened"
+      description: "What you did, what you expected, and what happened instead. Include exact error text (for example the launch error on the run screen)."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: "Steps to reproduce"
+      description: "The smallest set of steps that shows the problem. If it reproduces in `bin/sandbox` (fake herdr, fake agent), say so and include the `[fake-agent: ...]` directive you used."
+      placeholder: |
+        1. bin/sandbox start
+        2. Queue a task with "[fake-agent: crash]"
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: "How are you running it?"
+      options:
+        - bin/service (long-running production mode)
+        - bin/dev
+        - bin/sandbox
+        - Test suite / bin/verify
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: driver
+    attributes:
+      label: "Agent driver"
+      description: "Which CLI the affected run used, if any."
+      multiple: true
+      options:
+        - claude
+        - codex
+        - opencode
+        - Not run-specific
+  - type: textarea
+    id: environment
+    attributes:
+      label: "Environment"
+      description: "Versions help a lot, especially for launch problems, since CLI flags are version-sensitive."
+      value: |
+        - OS and version:
+        - Ruby (`ruby -v`):
+        - herdr version:
+        - Agent CLI version(s):
+        - Orchestrator commit (`git rev-parse --short HEAD`):
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Relevant logs"
+      description: "For example from `log/production_service.log` or `log/development.log`. Redact first."
+      render: shell

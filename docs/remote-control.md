@@ -1,5 +1,9 @@
 # Remote control for live run sessions
 
+> This is a design record, kept for its reasoning (see [the docs index](./README.md#design-records)).
+> For how to use remote control today, see [telegram.md](./telegram.md). The "admin chat" it
+> discusses has been removed, and "the operator" means whoever runs the orchestrator.
+
 Status: **partly implemented.** Written 2026-09-27 on
 `workflow/plan-do-not-implement-replacing-the-workspace-ad-33bd`.
 
@@ -10,8 +14,8 @@ The `Telegram::*` classes named below have moved. The chat-independent logic is 
 and `RemoteControl::Chunker`. Telegram is now `RemoteControl::Adapters::Telegram::{Adapter,
 Client, Configuration, Poller}`, behind the `RemoteControl::Adapter` contract.
 `StreamTelegramPaneJob` is now `StreamPaneJob` (with an `adapter:` argument), and
-`PollTelegramUpdatesJob` only calls the poller. See README's "Adding another
-chat platform".
+`PollTelegramUpdatesJob` only calls the poller. See [telegram.md](./telegram.md#adding-another-chat-platform),
+"Adding another chat platform".
 
 ## Update, 2026-09-27: what shipped
 

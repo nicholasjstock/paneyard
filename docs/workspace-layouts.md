@@ -1,8 +1,13 @@
-# Per-workspace layouts (design, not yet implemented)
+# Per-workspace layouts (design record)
 
-Status: implemented (branch `workflow/plan-do-not-implement-yet-per-workspace-layouts--792c`).
-This started as a proposal and has been updated to match what was built, and
-what was verified live against herdr during implementation (§1).
+> This is a design record, kept for its reasoning (see [the docs index](./README.md#design-records)).
+> For how to use layouts, see [operating.md](./operating.md#workspace-layouts). Some class names
+> below have since moved behind `Orchestrator::Runner` (for example `SessionEnv` is now
+> `Runner::ProcessEnv` and the pane building is `Runner::SessionLayout`).
+
+Status: implemented. This started as a proposal and has been updated to match
+what was built, and what was verified live against herdr during
+implementation (§1).
 
 ## Problem
 

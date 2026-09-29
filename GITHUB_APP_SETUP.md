@@ -1,5 +1,7 @@
 # GitHub App Authentication Setup
 
+**This is optional.** Without a GitHub App, sessions push with your own `gh auth token` or SSH key; see [GitHub access](./docs/operating.md#4-github-access) for how credentials are chosen. Use an App when you want sessions to act as a bot identity limited to specific repositories rather than as you.
+
 Rails itself makes no GitHub calls: it does not open, update, or watch pull requests. What needs GitHub credentials is each run's session, which pushes its own `workflow/<name>` branch when you ask it to (and may run `gh` if you ask it to). When a GitHub App is configured, every session gets an installation token for the app instead of letting it act as you with your own `gh auth` identity. The token reaches exactly the repositories that installation was granted, which is why "Only select repositories" below is recommended.
 
 ## Prerequisites
@@ -21,7 +23,7 @@ An app created under one can't be installed on repos owned by the other — if y
 2. Click "New GitHub App"
 3. Fill in the form:
    - **App name**: `Workflow Orchestrator` (or similar)
-   - **Homepage URL**: `https://your-orchestrator-url.com` (or any valid URL)
+   - **Homepage URL**: any valid URL, such as this project's repository page (it is not used)
    - **Webhook URL**: Leave blank (not needed for this usage)
    - **Webhook active**: Uncheck (not needed)
 
@@ -29,7 +31,7 @@ An app created under one can't be installed on repos owned by the other — if y
    - **Contents**: Read & write — required. This is what lets a session `git push` its branch.
    - **Pull requests**: Read & write — optional. Only needed if you want to tell a session to open or update a pull request itself with `gh pr create`; otherwise you open PRs yourself from the pushed branch.
 
-   Nothing else is needed. Earlier versions of this orchestrator also asked for **Issues** (a GitHub-issue approval gate) and used Contents for release uploads; both are gone, so an existing app can drop Issues.
+   Nothing else is needed.
 
 5. Under **Where can this GitHub App be installed?**:
    - Select "Only on this account" for a single-owner setup (recommended — this just restricts *who can install it*, it does not make the app public or listed anywhere; that only happens if you separately publish it to the GitHub Marketplace, a distinct opt-in step this guide doesn't cover). Select "Any account" only if you need to install the same app across multiple, unrelated owners.
@@ -57,9 +59,9 @@ To change repo access later (add/remove repos), go to `https://github.com/settin
 
 ## Configuring the Orchestrator
 
-### Option 1: Environment Variables (Recommended for CI/CD)
+### Option 1: Environment variables
 
-Set these environment variables before starting the orchestrator:
+Set these in the environment the orchestrator starts from (the shell you run `bin/dev` or `bin/service start`/`restart` in):
 
 ```bash
 export GITHUB_APP_ID=12345                    # Numeric app ID
@@ -71,12 +73,12 @@ export GITHUB_APP_INSTALLATION_ID=98765       # Optional -- see note below befor
 
 **Leave `GITHUB_APP_INSTALLATION_ID` unset if the orchestrator will operate against more than one repository or owner.** When unset, `Orchestrator::GitHubAppAuth` looks up the correct installation per repository automatically from `remote.origin.url`, so one app install covers every repo it's granted access to. Setting this variable pins every token request to that one specific installation, regardless of which repo a given run actually targets — correct only if the orchestrator will only ever run against a single, fixed repo.
 
-### Option 2: Rails Credentials (Recommended for Development)
+### Option 2: Rails credentials
 
-Store credentials in `config/credentials.yml.enc`:
+Store them in the encrypted credentials file, which needs your own `config/master.key` (see the README's [Quickstart](./README.md#3-start-the-orchestrator); `config/*.key` is gitignored, so never commit it):
 
 ```bash
-rails credentials:edit
+bin/rails credentials:edit
 ```
 
 Add:
@@ -91,71 +93,28 @@ github_app:
     -----END RSA PRIVATE KEY-----
 ```
 
-Then set the master key:
-
-```bash
-# Generate and save to config/master.key (add to .gitignore)
-rails credentials:edit
-```
-
-### Option 3: GitHub Actions CI/CD Secrets
-
-To use GitHub App authentication in GitHub Actions workflows (e.g., for running tests or deploying):
-
-1. Go to your repository: `https://github.com/{OWNER}/{REPO}/settings/secrets/actions`
-2. Click "New repository secret"
-3. Add the following secrets:
-
-   - Name: `GITHUB_APP_ID`
-     Value: Your app's ID (numeric value)
-
-   - Name: `GITHUB_APP_PRIVATE_KEY`
-     Value: Your private key (full PEM content, including BEGIN/END lines)
-
-   - Name: `GITHUB_APP_INSTALLATION_ID` (optional)
-     Value: Your installation ID (numeric value, for faster token generation)
-
-4. In your workflow (`.github/workflows/ci.yml`), reference these secrets:
-
-```yaml
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    env:
-      GITHUB_APP_ID: ${{ secrets.GITHUB_APP_ID }}
-      GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
-      GITHUB_APP_INSTALLATION_ID: ${{ secrets.GITHUB_APP_INSTALLATION_ID }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-      
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
-      
-      - name: Run tests
-        run: bundle exec rspec
-```
+Environment variables win over credentials when both are set (`config/initializers/github_app.rb`). Restart a running `bin/service` instance (`bin/service restart`) after changing either.
 
 ## Verifying the Setup
 
 Run this Rails command to verify the app is configured:
 
 ```bash
-rails runner 'puts Orchestrator::GitHubAppAuth.app_configured?'
+bin/rails runner 'puts Orchestrator::GitHubAppAuth.app_configured?'
 ```
 
-Should return `true`.
+Should print `true`. (Add `RAILS_ENV=production` to check the environment `bin/service` runs in.)
 
-To test token generation for a specific repository:
+To test token generation for a specific repository, pass its `origin` URL:
 
 ```bash
-rails runner '
-  token = Orchestrator::GitHubAppAuth.installation_token_for(workspace_root: "/path/to/repo")
-  puts "Token generated: #{token[0..20]}..."
+bin/rails runner '
+  token = Orchestrator::GitHubAppAuth.installation_token_for { "https://github.com/OWNER/REPO.git" }
+  puts "Token generated: #{token[0..8]}..."
 '
 ```
+
+With `RAILS_ENV=production`, the Rails cache is shared with the running instance, so a token minted in the last 55 minutes is returned without looking this repository up at all. In that case the check proves the App credentials work, not that this particular repository is covered.
 
 ## How It Works
 
@@ -177,7 +136,7 @@ The token is fixed when the session starts. A session left open for long enough 
 Check that one of these is true:
 - `GITHUB_APP_ID` environment variable is set
 - `config/credentials.yml.enc` contains `github_app.id`
-- Rails is in production environment and has the secret configured
+- If you use credentials, the process can decrypt them (`config/master.key` or `RAILS_MASTER_KEY` is present)
 
 ### "GitHub App not installed for repository"
 
@@ -202,7 +161,6 @@ Check:
 
 - **Never commit private keys** to version control
 - **Rotate private keys regularly** by regenerating them on GitHub
-- **Use environment variables** (not credentials files) in CI/CD pipelines
 - **Restrict app permissions** to only what's needed (Contents, plus Pull requests only if sessions open PRs)
 - **Monitor app usage** in GitHub audit logs for suspicious activity
 - **Limit installation scope** to only target repositories/organizations

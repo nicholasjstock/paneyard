@@ -1,5 +1,5 @@
 # A registered target project the orchestrator can be pointed at (e.g.
-# simple-retail-planner). Runs launched from the ops UI pick one of these
+# a web app in its own repo). Runs launched from the ops UI pick one of these
 # instead of the app being wired to a single hardcoded
 # WORKFLOW_TARGET_ROOT env var -- see Run#target_root, which still holds
 # the actual path a launched run's supervisor process gets, just sourced
