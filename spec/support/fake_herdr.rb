@@ -25,7 +25,7 @@ RSpec.configure do |config|
     dir = Dir.mktmpdir("fh")
     mode = example.metadata[:fake_agent_mode] || "manual"
     @fake_herdr = FakeHerdr::Server.new(
-      socket_path: File.join(dir, "herdr.sock"), agent_env: { "FAKE_AGENT_MODE" => mode },
+      socket_path: File.join(dir, "herdr.sock"), agent_env: { "FAKE_AGENT_MODE" => mode, "FAKE_AGENT_WORK_SECONDS" => "0.6" },
       agent_command: example.metadata[:fake_agent_command]
     ).start
     original = ENV["HERDR_SOCKET_PATH"]

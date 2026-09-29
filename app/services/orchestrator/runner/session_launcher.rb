@@ -36,12 +36,17 @@ module Orchestrator
       # inside herdr's own 30 s startup timeout -- see wait_for_agent_detected!.
       AGENT_DETECT_POLL_ATTEMPTS = 40
       AGENT_DETECT_POLL_INTERVAL_SECONDS = 0.25
-      # See submit_prompt_if_unsent!: the whole window is always sampled, and
+      # See submit_prompt_if_unsent!: each window is always sampled whole, and
       # the prompt counts as picked up only if the agent was non-idle on each
-      # of the last PROMPT_SUBMIT_STABLE_SAMPLES samples.
+      # of its last PROMPT_SUBMIT_STABLE_SAMPLES samples.
       PROMPT_SUBMIT_POLL_ATTEMPTS = 20
       PROMPT_SUBMIT_POLL_INTERVAL_SECONDS = 0.5
       PROMPT_SUBMIT_STABLE_SAMPLES = 4
+      # The window watched after each Enter, in samples (x 0.5 s = 3, 5, 7, 10,
+      # 15 and 20 s): so Enters go out about 10, 13, 18, 25, 35 and 50 s after
+      # agent.prompt, and a launch gives up about 70 s after it. Why those
+      # numbers is in submit_prompt_if_unsent!'s comment.
+      PROMPT_SUBMIT_RETRY_WINDOWS = [ 6, 10, 14, 20, 30, 40 ].freeze
 
       # Writes the files the CLI reads (its MCP config for claude, and the
       # prompt, kept for the record), builds the session env and opens the
@@ -175,36 +180,121 @@ module Orchestrator
       # window is sampled, and only an agent that was non-idle on each of the
       # last PROMPT_SUBMIT_STABLE_SAMPLES samples counts as working; a
       # herdr error is no evidence either way, so it breaks that streak too.
+      #
+      # One Enter was then not always enough. On run-20260929-194456-3ec1
+      # (claude, ~4.4KB prompt) the agent sat idle for the whole 10 s window,
+      # the Enter went out at +10 s and herdr accepted it -- and nothing was
+      # submitted. The operator's own Enter in the pane at about +84 s was, and
+      # on an earlier stuck run an Enter sent about 2 minutes after the prompt
+      # was too. The received text was the prompt exactly, so no Enter had
+      # landed mid-text. Unconfirmed hypothesis: Claude drops or absorbs an
+      # Enter that arrives too soon after a large typed or pasted input, or too
+      # soon after its own startup, and a later one works.
+      #
+      # So after each Enter the next window (PROMPT_SUBMIT_RETRY_WINDOWS) is
+      # sampled the same way, and while the agent is still not picked up
+      # another Enter goes out, up to six in all, at about +10, 13, 18, 25, 35
+      # and 50 s. The threshold, if there is one, lies somewhere between the
+      # 10 s that failed and the 84 s that worked: the early Enters are close
+      # together in case being a few seconds late is enough, and the spacing
+      # then widens to reach past a minute in few attempts. The last window
+      # ends about 70 s after agent.prompt, so a stuck launch holds
+      # StartRunSessionJob about a minute longer than a healthy one and never
+      # more: after that the launch goes ahead (the pid is read, the run is
+      # running) with a warning in the log and a herdr notification, and the
+      # operator can still press Enter in the pane -- failing the run would
+      # only throw away a session one keystroke from working.
+      #
       # An Enter on an already-submitted (empty) input box does nothing, so a
-      # spurious one -- e.g. after a task that finished inside the window -- is
-      # cheap, while a missed one strands the run: lean towards sending it.
+      # spurious one is cheap, while a missed one strands the run: lean towards
+      # sending it. One case is excluded from the retries, though: an agent
+      # that was non-idle for PROMPT_SUBMIT_STABLE_SAMPLES samples in a row at
+      # any point has evidently taken on work, far longer than the paste blip
+      # above, and is idle again only because it finished (a fast task, or the
+      # fake agent in specs and bin/sandbox). It still gets the first Enter, as
+      # before, but not a minute of retries holding its launch open.
       #
-      # The pane text itself is not used as a second signal: whether the prompt
-      # is still "in the input box" looks different in every driver (claude
-      # folds a long paste into a "[Pasted text ...]" placeholder, and all
-      # three wrap and truncate it to the pane width), so a match would be
-      # neither reliable nor portable.
+      # The pane text itself is not used as a second "still unsent" signal.
+      # Every driver echoes a submitted prompt into its transcript, so the
+      # prompt's last line stays visible in the pane after it was submitted
+      # just as before; claude folds a long paste into a "[Pasted text ...]"
+      # placeholder; and all three wrap and truncate it to the pane width. And
+      # since an idle agent gets its Enter anyway, the only verdict such a
+      # signal could change is "picked up", which is exactly where the echo
+      # would make it wrong.
       #
-      # The sample sequence is logged either way, so the next occurrence can
-      # be diagnosed from the log. Returns true if no Enter was needed.
+      # Every Enter is logged with the time since agent.prompt and the samples
+      # so far, so the next occurrence shows how late an Enter had to be to
+      # work. Returns true if no Enter was needed.
       def submit_prompt_if_unsent!(pane_id, run_id:)
-        samples = Array.new(PROMPT_SUBMIT_POLL_ATTEMPTS) do |index|
-          sleep PROMPT_SUBMIT_POLL_INTERVAL_SECONDS unless index.zero?
-          prompt_status_sample(pane_id)
-        end
-        tail = samples.last(PROMPT_SUBMIT_STABLE_SAMPLES)
-        picked_up = tail.size == PROMPT_SUBMIT_STABLE_SAMPLES && tail.none? { |status| status == "idle" || status.start_with?("error") }
-        seconds = (PROMPT_SUBMIT_POLL_ATTEMPTS * PROMPT_SUBMIT_POLL_INTERVAL_SECONDS).round(1)
-        sequence = summarize_samples(samples)
-        if picked_up
-          Rails.logger.info("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt picked up (agent_status over #{seconds}s: #{sequence})")
-          return true
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        elapsed = -> { (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(1) }
+        history = []
+        window = sample_prompt_status(pane_id, PROMPT_SUBMIT_POLL_ATTEMPTS, first_sleep: false)
+        history.concat(window)
+        enters = 0
+
+        loop do
+          if prompt_picked_up?(window)
+            Rails.logger.info("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt picked up #{elapsed.call}s after " \
+                              "agent.prompt, after #{enters} Enter(s) (agent_status: #{summarize_samples(history)})")
+            return enters.zero?
+          end
+          break if enters >= PROMPT_SUBMIT_RETRY_WINDOWS.size
+          if enters.positive? && sustained_work?(history)
+            Rails.logger.info("[SessionLauncher] run #{run_id} pane #{pane_id}: agent was seen working and is idle again " \
+                              "#{elapsed.call}s after agent.prompt; no more Enters (agent_status: #{summarize_samples(history)})")
+            return false
+          end
+
+          enters += 1
+          Rails.logger.warn("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt not seen picked up #{elapsed.call}s after " \
+                            "agent.prompt (agent_status: #{summarize_samples(history)}); sending Enter " \
+                            "#{enters}/#{PROMPT_SUBMIT_RETRY_WINDOWS.size} to submit it")
+          history << send_prompt_enter(pane_id, run_id:)
+          window = sample_prompt_status(pane_id, PROMPT_SUBMIT_RETRY_WINDOWS[enters - 1])
+          history.concat(window)
         end
 
-        Rails.logger.warn("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt not seen picked up within #{seconds}s " \
-                          "(agent_status: #{sequence}); sending Enter to submit it")
-        Herdr.agent_send_keys(pane_id, [ "Enter" ])
+        Rails.logger.warn("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt still not seen picked up #{elapsed.call}s " \
+                          "after agent.prompt and #{enters} Enters (agent_status: #{summarize_samples(history)}); " \
+                          "leaving the session running -- its task may be sitting unsent in the pane's input box")
+        Herdr.notify(title: "Run #{run_id}: prompt may be unsent",
+                     body: "#{enters} Enters did not submit it; press Enter in pane #{pane_id}", sound: "request")
         false
+      end
+
+      def sample_prompt_status(pane_id, count, first_sleep: true)
+        Array.new(count) do |index|
+          sleep PROMPT_SUBMIT_POLL_INTERVAL_SECONDS if first_sleep || !index.zero?
+          prompt_status_sample(pane_id)
+        end
+      end
+
+      def prompt_picked_up?(window)
+        tail = window.last(PROMPT_SUBMIT_STABLE_SAMPLES)
+        tail.size == PROMPT_SUBMIT_STABLE_SAMPLES && tail.all? { |status| agent_busy?(status) }
+      end
+
+      def sustained_work?(history)
+        history.chunk_while { |a, b| agent_busy?(a) && agent_busy?(b) }
+               .any? { |run| run.size >= PROMPT_SUBMIT_STABLE_SAMPLES && agent_busy?(run.first) }
+      end
+
+      # Enter markers in the history ("ENTER") are neither.
+      def agent_busy?(status)
+        !(status == "idle" || status.start_with?("ENTER", "error"))
+      end
+
+      # Returns the marker the history records for it. A failed Enter is logged
+      # and counted like any other: the retries are bounded either way, and the
+      # launch should not fail over a keystroke.
+      def send_prompt_enter(pane_id, run_id:)
+        Herdr.agent_send_keys(pane_id, [ "Enter" ])
+        "ENTER"
+      rescue Herdr::Error => error
+        Rails.logger.warn("[SessionLauncher] run #{run_id} pane #{pane_id}: sending Enter failed: #{error.message}")
+        "ENTER(failed)"
       end
 
       def prompt_status_sample(pane_id)

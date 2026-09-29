@@ -78,8 +78,11 @@ module FakeHerdr
       say("fake agent received a #{text.length}-character prompt; mode #{mode}")
       # A moment of "working", as a real CLI shows. Not the whole of
       # SessionLauncher.submit_prompt_if_unsent!'s window, so a launch usually
-      # ends with its (harmless) Enter on an empty input box.
-      sleep 0.6
+      # ends with its (harmless) Enter on an empty input box -- but long
+      # enough, at its real 0.5 s sampling, to count as sustained work, which
+      # is what spares the launch the retried Enters meant for a prompt that
+      # was never picked up. Specs, sampling far faster, shorten it.
+      sleep Float(@env.fetch("FAKE_AGENT_WORK_SECONDS", "2.5"))
 
       case mode
       when "done", "blocked", "failed" then report(mode)

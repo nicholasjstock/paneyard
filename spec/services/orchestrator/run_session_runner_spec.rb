@@ -268,14 +268,18 @@ RSpec.describe Orchestrator::RunSessionRunner do
     end
 
     # Observed live: agent.prompt delivered the prompt but left it unsubmitted
-    # in the input box, and the session sat idle holding its slot forever.
-    it "nudges the agent with an Enter when the prompt is left unsubmitted" do
+    # in the input box, and the session sat idle holding its slot forever;
+    # and on run-20260929-194456-3ec1 the first Enter was ignored too.
+    it "nudges the agent with bounded Enters when the prompt is left unsubmitted, and still starts the run" do
       stub_successful_launch(agent_status: "idle")
       allow(Orchestrator::Runner::Herdr).to receive(:agent_send_keys)
+      allow(Orchestrator::Runner::Herdr).to receive(:notify)
 
-      described_class.start!(run)
+      session = described_class.start!(run)
 
-      expect(Orchestrator::Runner::Herdr).to have_received(:agent_send_keys).with("w9:p1", [ "Enter" ]).once
+      expect(Orchestrator::Runner::Herdr).to have_received(:agent_send_keys).with("w9:p1", [ "Enter" ])
+        .exactly(Orchestrator::Runner::SessionLauncher::PROMPT_SUBMIT_RETRY_WINDOWS.size).times
+      expect(session.reload).to have_attributes(status: "running", pid: 555)
     end
 
     it "does not nudge a claude session that picked the prompt up on its own" do
