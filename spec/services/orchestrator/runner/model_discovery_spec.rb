@@ -66,9 +66,9 @@ RSpec.describe Orchestrator::Runner::ModelDiscovery do
   describe ".models_for opencode" do
     it "takes one provider/model per line and ignores anything else it prints" do
       allow(described_class).to receive(:capture).with("opencode", "models")
-        .and_return("Loading models...\nopencode/big-pickle\n9router/oc/deepseek-v4-flash-free\n\n")
+        .and_return("Loading models...\nopencode/big-pickle\nanthropic/claude-sonnet-4-5\n\n")
 
-      expect(described_class.models_for("opencode").pluck("id")).to eq(%w[opencode/big-pickle 9router/oc/deepseek-v4-flash-free])
+      expect(described_class.models_for("opencode").pluck("id")).to eq(%w[opencode/big-pickle anthropic/claude-sonnet-4-5])
     end
   end
 

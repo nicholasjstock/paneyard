@@ -6,14 +6,16 @@
 # workspace with `bin/rails sandbox:seed` and must never register a real one.
 return if Orchestrator::Sandbox.enabled?
 
-# The one workspace every run was implicitly pointed at before workspaces
-# existed as a real concept -- keeps pre-existing runs working the same
-# way, and backfills their workspace_id for display/traceability.
-default_root_path = ENV.fetch("WORKFLOW_TARGET_ROOT", "/Users/stockn/Source/simple-retail-planner/main")
-default_workspace = Workspace.find_or_create_by!(root_path: default_root_path) do |workspace|
-  workspace.name = "simple-retail-planner"
+# No workspace is registered by default: add one from the UI (or /mcp/admin).
+# WORKFLOW_TARGET_ROOT, if set, registers that project directory (the one
+# holding its `main` checkout) as a workspace named after it, and backfills
+# the workspace of any runs that were pointed at it before workspaces existed.
+if (default_root_path = ENV["WORKFLOW_TARGET_ROOT"].presence)
+  default_workspace = Workspace.find_or_create_by!(root_path: default_root_path) do |workspace|
+    workspace.name = File.basename(File.expand_path(default_root_path))
+  end
+  Run.where(target_root: default_workspace.root_path, workspace_id: nil).update_all(workspace_id: default_workspace.id)
 end
-Run.where(target_root: default_workspace.root_path, workspace_id: nil).update_all(workspace_id: default_workspace.id)
 
 # Demo fixtures for UI states that don't depend on any real model output --
 # e.g. the current-runs drawer panel and its count badge just need Run rows
@@ -21,8 +23,8 @@ Run.where(target_root: default_workspace.root_path, workspace_id: nil).update_al
 # title/worktree_name lengths to look at. Never seeded in production: that
 # database holds this machine's one real history.
 if Rails.env.development?
-  demo_workspace = Workspace.find_or_create_by!(root_path: "/tmp/workflow-demo/simple-retail-planner") do |workspace|
-    workspace.name = "demo: simple-retail-planner"
+  demo_workspace = Workspace.find_or_create_by!(root_path: "/tmp/workflow-demo/my-project") do |workspace|
+    workspace.name = "demo: my-project"
   end
 
   [
@@ -32,7 +34,7 @@ if Rails.env.development?
         "decline reason instead of a generic 'something went wrong' banner, matching what support " \
         "already sees in the gateway dashboard" },
     { suffix: "launching", status: "launching", worktree_name: "add-discount-codes", task: "Add discount codes" },
-    { suffix: "stopping", status: "stopping", worktree_name: "fix-tax-rounding", task: "Fix tax rounding" },
+    { suffix: "queued", status: "queued", worktree_name: "fix-tax-rounding", task: "Fix tax rounding" },
     { suffix: "no-worktree-name", status: "running", worktree_name: nil, task: "Runs before worktree naming existed" }
   ].each do |attrs|
     run_id = "demo-#{attrs[:suffix]}"
@@ -68,59 +70,15 @@ if Rails.env.development?
   seed_runner.store_attachment(source_root: launch_artifact_run.workspace.source_root, run_id: launch_artifact_run.run_id,
                                name: "sample-data.json", content: '{"source":"synthetic demo fixture","records":2}' + "\n")
 
-  # Synthetic blockers keep the global notifications drawer visible across
-  # workspaces without depending on a live planner or worker.
-  notification_run = Run.find_by!(run_id: "demo-long-title")
-  notification_question = UserQuestion.find_or_create_by!(question_id: "demo-blocking-question") do |question|
-    question.run = notification_run
-    question.asked_by = "planner"
-    question.scope = "plan"
-    question.text = "Which deployment target should this run use?"
-    question.priority = "blocking"
-    question.status = "open"
-    question.github_comment_url = "https://github.com/example/simple-retail-planner/issues/42#issuecomment-123456789"
-  end
-  notification_question.update!(github_comment_url: "https://github.com/example/simple-retail-planner/issues/42#issuecomment-123456789")
-
-  if notification_question.notification.nil?
-    Notification.create!(
-      workspace: demo_workspace,
-      user_question: notification_question,
-      kind: "blocking_question",
-      title: Notification.review_title_for(notification_run),
-      body: notification_question.text,
-      link_url: notification_question.github_comment_url
-    )
-  end
-
   second_demo_workspace = Workspace.find_or_create_by!(root_path: "/tmp/workflow-demo/inventory-service") do |workspace|
     workspace.name = "demo: inventory-service"
   end
-  second_notification_run = Run.find_or_create_by!(run_id: "demo-inventory-review") do |run|
+  Run.find_or_create_by!(run_id: "demo-inventory-review") do |run|
     run.workspace = second_demo_workspace
     run.task = "Review inventory synchronization"
     run.target_root = File.join(second_demo_workspace.root_path, "review-inventory-sync")
     run.launcher_variant = "claude"
     run.status = "running"
     run.worktree_name = "review-inventory-sync"
-  end
-  second_notification_question = UserQuestion.find_or_create_by!(question_id: "demo-inventory-question") do |question|
-    question.run = second_notification_run
-    question.asked_by = "planner"
-    question.scope = "plan"
-    question.text = "Should inventory sync retry after a timeout?"
-    question.priority = "blocking"
-    question.status = "open"
-  end
-
-  if second_notification_question.notification.nil?
-    Notification.create!(
-      workspace: second_demo_workspace,
-      user_question: second_notification_question,
-      kind: "blocking_question",
-      title: Notification.review_title_for(second_notification_run),
-      body: second_notification_question.text,
-      link_url: second_notification_run.conversation_url
-    )
   end
 end

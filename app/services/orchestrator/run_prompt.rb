@@ -13,7 +13,6 @@ module Orchestrator
   #
   # A session leaves its changes uncommitted so the operator can try them
   # first; committing, pushing and merging into main happen only when asked.
-  # See docs/session-context-audit.md for why each line is here.
   module RunPrompt
     module_function
 
