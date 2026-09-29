@@ -2,9 +2,9 @@ require "rails_helper"
 
 RSpec.describe Workspace do
   it "derives the source checkout from the workspace root" do
-    workspace = Workspace.new(root_path: "/Users/stockn/Source/example")
+    workspace = Workspace.new(root_path: "/home/me/src/example")
 
-    expect(workspace.source_root).to eq("/Users/stockn/Source/example/main")
+    expect(workspace.source_root).to eq("/home/me/src/example/main")
   end
 
   it "does not let an active run's source checkout move" do

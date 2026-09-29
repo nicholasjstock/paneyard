@@ -5,6 +5,10 @@
 # see bin/dev for the disposable counterpart.
 
 ENV["RAILS_ENV"] = "production"
+# Loopback only: there is no auth (see SECURITY.md). Outside development
+# `rails server` otherwise listens on 0.0.0.0 whenever PORT is set, whatever
+# config/puma.rb says. `-b` or BINDING widens it deliberately.
+ENV["BINDING"] ||= "127.0.0.1"
 
 require "socket"
 

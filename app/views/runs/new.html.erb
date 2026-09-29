@@ -36,7 +36,7 @@
     <%= form.label :model, "Model" %>
     <% default_model = Orchestrator::DefaultModels.for(@run.launcher_variant) %>
     <%= form.select :model,
-          [ [ "Default (#{default_model})", "" ] ] +
+          [ [ "Default (#{default_model || "CLI default"})", "" ] ] +
             model_catalog.fetch(@run.launcher_variant, []).map { |option| option.values_at("label", "id") },
           {}, data: { run_model_target: "model" } %>
   </div>

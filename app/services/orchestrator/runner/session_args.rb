@@ -13,7 +13,8 @@ module Orchestrator
     # multi-KB prompt never has to survive being typed as a shell argv element.
     #
     # Which model to run is the orchestrator's decision (the operator's pick,
-    # else Orchestrator::DefaultModels), so `model` always arrives resolved.
+    # else Orchestrator::DefaultModels), so `model` always arrives resolved --
+    # nil meaning no model flag, so the CLI uses its own configured model.
     # So does `mcp_url`: the orchestrator's /mcp endpoint as this machine
     # reaches it.
     module SessionArgs
@@ -61,7 +62,7 @@ module Orchestrator
       # whatever .mcp.json the target repo happens to ship.
       def claude_args(root_dir:, mcp_config_path:, model:, resume_session_id: nil)
         [
-          "--model", model,
+          *model_args("--model", model),
           "--permission-mode", "bypassPermissions",
           "--add-dir", root_dir,
           "--mcp-config", mcp_config_path,
@@ -94,9 +95,9 @@ module Orchestrator
         sandbox_args = [ "-s", "danger-full-access" ]
 
         if resume_session_id
-          [ "resume", resume_session_id, "--model", model, *sandbox_args, *config_args ]
+          [ "resume", resume_session_id, *model_args("--model", model), *sandbox_args, *config_args ]
         else
-          [ "--model", model, *sandbox_args, *config_args, "-C", root_dir ]
+          [ *model_args("--model", model), *sandbox_args, *config_args, "-C", root_dir ]
         end
       end
 
@@ -125,10 +126,15 @@ module Orchestrator
           }
         })
 
-        args = [ "-m", model, "--auto", "--mini" ]
+        args = [ *model_args("-m", model), "--auto", "--mini" ]
         args += [ "-s", resume_session_id ] if resume_session_id
         args << root_dir
         [ args, { "OPENCODE_CONFIG_CONTENT" => config } ]
+      end
+
+      # No model means the CLI's own configured default: leave the flag out.
+      def model_args(flag, model)
+        model.present? ? [ flag, model ] : []
       end
 
       def write_claude_mcp_config(path, capability_token, mcp_url:)

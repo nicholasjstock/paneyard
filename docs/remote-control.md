@@ -207,7 +207,7 @@ instance**:
 
 ```
 $ lsof -nP -iTCP -sTCP:LISTEN | grep 3001
-ruby  4805 stockn  6u  IPv4 …  TCP *:3001 (LISTEN)
+ruby  4805 operator  6u  IPv4 …  TCP *:3001 (LISTEN)
 ```
 
 `bin/production` runs `bin/rails server` without `-b`. Outside development,

@@ -9,7 +9,7 @@ Workflow Orchestrator is a local, single-operator queue and supervisor for inter
 It is a Rails 8 app that runs on your own machine. Rails decides *which* task runs, *where*, and what happens to the worktree afterwards; the agent session decides everything else. There is no planner, no step queue and no pull-request automation.
 
 > [!WARNING]
-> **Read the [security model](#security-model) before you run this.** It has no authentication, it hands AI agents unrestricted access to the repositories you register, and its long-running mode listens on every network interface unless you tell it not to.
+> **Read the [security model](#security-model) before you run this.** It has no authentication, and it hands AI agents unrestricted access to the repositories you register and to your user account.
 
 ## Contents
 
@@ -24,10 +24,10 @@ It is a Rails 8 app that runs on your own machine. Rails decides *which* task ru
 
 ## Security model
 
-This is a tool for one trusted person on their own machine. Treat anything that can reach it as having a shell on that machine. See [SECURITY.md](./SECURITY.md) for how to report a vulnerability.
+This is a tool for one trusted person on their own machine. Treat anything that can reach it as having a shell on that machine. [SECURITY.md](./SECURITY.md) has the full threat model and how to report a vulnerability.
 
 - **No authentication.** Every web page, every form, and the `/mcp/admin` MCP endpoint are open to whoever can connect. There are no user accounts; the operator is whoever is at the keyboard.
-- **Bind it to loopback.** `bin/dev` (development) listens on `localhost` only. `bin/service` / `bin/production` run Rails in production mode, which **listens on `0.0.0.0` (all interfaces) by default**, so anyone on your network could open the UI, type into sessions and queue runs. Start it with `BINDING=127.0.0.1 bin/service start` (Rails' `BINDING` variable), or keep the port firewalled. `bin/sandbox` always binds `127.0.0.1`.
+- **Loopback only.** `bin/service` / `bin/production` bind to `127.0.0.1` and `bin/dev` to `localhost`, so nothing else on your network can connect. In production the app also answers only loopback `Host` names (`localhost`, `127.0.0.1`, `[::1]`), which stops DNS-rebinding attacks from web pages you visit. `BINDING` and `WORKFLOW_ALLOWED_HOSTS` widen this; if you set either, whatever sits in front of the app must provide the authentication it lacks.
 - **Agents run with approvals bypassed.** Each session is launched with full access and no confirmation prompts: `claude --permission-mode bypassPermissions`, `codex -s danger-full-access`, `opencode --auto`. It works in its own worktree but is not sandboxed: it can read and write anything your user account can, run any command, and use your network. The only review gate is you, reading its report and trying its changes before asking it to commit.
 - **Registered repositories are fully exposed to their sessions**, including any secrets you keep in them, and a session's environment includes a GitHub token when one is available (below).
 - **It can edit itself.** If you register this repository as one of its own workspaces, a session can change the orchestrator's code, and the running instance hot-reloads application code (`WORKFLOW_HOT_RELOAD`). Nothing stops a session from merging into `main` when asked to.
@@ -41,7 +41,7 @@ This is a tool for one trusted person on their own machine. Treat anything that 
 - **Ruby** at the version in [`.ruby-version`](./.ruby-version) (currently 4.0.1), with Bundler, and **SQLite 3**.
 - **git**, with each target repository checked out as described in [Preparing a repository](./docs/operating.md#preparing-a-repository).
 - **[herdr](https://herdr.dev), running.** Required. herdr owns every terminal pane and agent process; Rails talks to its socket at `~/.config/herdr/herdr.sock` (override with `HERDR_SOCKET_PATH`). Without it a run fails at launch.
-- **At least one agent CLI, already signed in:** `claude`, `codex` and/or `opencode`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow. Each driver has a built-in default model (`Orchestrator::DefaultModels`), which may not suit your account or provider setup: override it with `WORKFLOW_CLAUDE_MODEL`, `WORKFLOW_CODEX_MODEL` or `WORKFLOW_OPENCODE_MODEL`, or pick a model per run in the UI.
+- **At least one agent CLI, already signed in:** `claude`, `codex` and/or `opencode`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow. Unless you choose otherwise, a session uses a sensible default for its driver (`Orchestrator::DefaultModels`; for some drivers that means the CLI's own configured model). Override it per driver with `WORKFLOW_CLAUDE_MODEL`, `WORKFLOW_CODEX_MODEL` or `WORKFLOW_OPENCODE_MODEL`, or pick a model per run in the UI.
 - **Optional:** `nvim` (the default pane layout opens it beside the agent), `gh` signed in (for pushing over HTTPS without a GitHub App), `curl` (only for a GitHub App).
 
 ## Quickstart
@@ -78,8 +78,8 @@ PORT=3000 bin/dev
 For the long-running instance you keep up all day, use `bin/service`, which runs the app in production mode, detached, on port 3001 by default, logging to `log/production_service.log`:
 
 ```sh
-bin/rails credentials:edit            # once: see the note below
-BINDING=127.0.0.1 bin/service start   # also: stop | restart | status
+bin/rails credentials:edit   # once: see the note below
+bin/service start            # also: stop | restart | status
 ```
 
 > [!NOTE]
@@ -120,10 +120,11 @@ Everything is optional except herdr and an agent CLI.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | random (`bin/dev`), `3001` (`bin/service`) | HTTP port. |
-| `BINDING` | `localhost` (dev), `0.0.0.0` (production) | Interface Rails listens on. Set `127.0.0.1` for `bin/service`. |
+| `BINDING` | `localhost` (dev), `127.0.0.1` (`bin/service`) | Interface Rails listens on. Widening it exposes an unauthenticated app; see [SECURITY.md](./SECURITY.md). |
+| `WORKFLOW_ALLOWED_HOSTS` | unset | Extra `Host` names production answers to (comma-separated), for example behind a reverse proxy. |
 | `WORKFLOW_RAILS_URL` | `http://127.0.0.1:$PORT` | URL sessions use to reach the orchestrator's MCP endpoint. Keep it in step with `PORT`. |
 | `WORKFLOW_MAX_CONCURRENT_RUNS` | `4` | Global cap on live sessions. |
-| `WORKFLOW_CLAUDE_MODEL`, `WORKFLOW_CODEX_MODEL`, `WORKFLOW_OPENCODE_MODEL` | built in | Default model per driver; a model picked per run wins. |
+| `WORKFLOW_CLAUDE_MODEL`, `WORKFLOW_CODEX_MODEL`, `WORKFLOW_OPENCODE_MODEL` | per driver | Default model per driver; a model picked per run wins. |
 | `HERDR_SOCKET_PATH` | `~/.config/herdr/herdr.sock` | herdr's socket. |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` | unset | GitHub App for session push credentials; see [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md). Also settable in credentials. |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` | unset | Telegram remote control; see [docs/telegram.md](./docs/telegram.md). Also settable in credentials. |

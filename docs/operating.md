@@ -40,10 +40,10 @@ PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev
 For the instance you keep running, use `bin/service start|stop|restart|status`. It daemonizes `bin/production` (Puma plus Solid Queue in production mode, against `storage/production.sqlite3`), defaults to port `3001`, tracks its pid in `tmp/pids/production.pid`, and logs to `log/production_service.log`. `start` waits for `/up` to answer and fails after two minutes, naming the log.
 
 ```sh
-BINDING=127.0.0.1 bin/service start
+bin/service start
 ```
 
-- **Bind to loopback.** Rails in production mode listens on `0.0.0.0` unless told otherwise, and the app has no authentication. `BINDING=127.0.0.1` restricts it to this machine. The variable must be set on every `start` and `restart`.
+- **Loopback only.** `bin/production` binds to `127.0.0.1` (`BINDING`), and production answers only loopback `Host` names (`lib/workflow_allowed_hosts.rb`). Read [SECURITY.md](../SECURITY.md) before widening either with `BINDING` or `WORKFLOW_ALLOWED_HOSTS`: the app has no authentication.
 - **Credentials.** Production needs a `secret_key_base` from Rails credentials (`config/credentials.yml.enc` plus your own `config/master.key`) or the `SECRET_KEY_BASE` environment variable. See the note in the README's [Quickstart](../README.md#3-start-the-orchestrator).
 - **Restarting.** Application code is hot-reloaded (`WORKFLOW_HOT_RELOAD=1`), but `config/queue.yml`, `config/recurring.yml`, credentials and initializers are read once at boot. After changing any of them, run `bin/service restart`. It first runs `bin/preflight --prod-copy` (the new code booted on a scratch port against a copy of the production database) and leaves the running instance alone if that fails. `bin/service restart --skip-preflight` skips the check.
 - **Console commands** against this instance need `RAILS_ENV=production`, for example `RAILS_ENV=production bin/rails runner '...'`.
@@ -193,7 +193,7 @@ There is no cost or token accounting for sessions: they are real interactive ter
 ## MCP endpoints
 
 - **`/mcp/run`** is what each session talks to, authenticated by a per-session bearer token that dies with the session. It has `report_idle`, `record_workspace_env_var`, and the shared tools below. The orchestrator wires it into each CLI automatically, so you don't configure anything.
-- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Only expose it on loopback (see the README's [security model](../README.md#security-model)). Its tools are `queue_run` (task, optional `workspace` name and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one is the default when `workspace` is omitted), and `ping_tool`. For example, to add it to Claude Code:
+- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, optional `workspace` name and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one is the default when `workspace` is omitted), and `ping_tool`. For example, to add it to Claude Code:
 
   ```sh
   claude mcp add --transport http workflow-admin http://127.0.0.1:3001/mcp/admin

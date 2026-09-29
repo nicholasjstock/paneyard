@@ -37,6 +37,10 @@ The first public version. It includes:
 - `/mcp/admin`, an unauthenticated loopback MCP endpoint for the operator's own MCP clients: `queue_run`, `list_runs`, `get_run`, `list_workspaces`.
 - Telegram remote control: list sessions, read panes and reports, and type into sessions from an allow-listed private chat, behind a platform-neutral adapter interface.
 
+### Security
+
+- Loopback-only by default: Puma binds `127.0.0.1`, and production answers only loopback `Host` names (DNS-rebinding protection, `WORKFLOW_ALLOWED_HOSTS` to extend). See `SECURITY.md`.
+
 ### Operations and development
 
 - `bin/dev` for development and `bin/service` for a daemonized long-running instance, whose `restart` refuses to replace a working instance with code that fails a production boot check (`bin/preflight`).

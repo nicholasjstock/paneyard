@@ -23,6 +23,20 @@ RSpec.describe Orchestrator::Runner::SessionArgs do
       end
     end
 
+    it "leaves the model flag out when there is no model, so the CLI uses its own configured one" do
+      %w[claude codex opencode].each do |driver|
+        [ nil, "codex-7" ].each do |resume_session_id|
+          _command, args, _env = described_class.build(
+            driver:, root_dir: "/repos/app-1", mcp_config_path: "/tmp/mcp.json", capability_token: "tok", mcp_url:,
+            model: nil, resume_session_id:
+          )
+
+          expect(args).not_to include("--model", "-m"), "#{driver} args: #{args.inspect}"
+          expect(args).not_to include(nil)
+        end
+      end
+    end
+
     it "keeps the picked model when codex resumes a session" do
       _command, args, _env = described_class.build(
         driver: "codex", root_dir: "/repos/app-1", mcp_config_path: "/tmp/mcp.json",
