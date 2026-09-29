@@ -18,10 +18,17 @@ module FakeHerdr
   #   manual                   go idle without reporting; the caller reports itself
   #   working                  stay "working" without reporting, as a CLI mid-task
   #
+  # `[fake-agent-prompt: unsubmitted]` reproduces a prompt agent.prompt typed
+  # but never submitted (run-20260929-191533-d44e): the agent flickers to
+  # "working" for a moment, drops back to idle with the text still "in its
+  # input box", and only acts on it once an Enter arrives through
+  # agent.send_keys.
+  #
   # Its stdout is the fake herdr's control channel: `{"fake_herdr": {...}}`
   # lines update what agent.get says, anything else lands in the pane text.
   class Agent
     DIRECTIVE = /\[fake-agent:\s*([a-z]+)\]/
+    UNSUBMITTED = /\[fake-agent-prompt:\s*unsubmitted\]/
     MODES = %w[done blocked failed dirty crash manual working].freeze
 
     def initialize(argv: ARGV, env: ENV, input: $stdin, output: $stdout)
@@ -39,20 +46,39 @@ module FakeHerdr
       @input.each_line do |line|
         message = JSON.parse(line)
         case message["type"]
-        when "prompt" then handle_prompt(message["text"].to_s)
-        when "keys" then say("(keys #{Array(message['keys']).join(' ')})")
+        when "prompt" then receive_prompt(message["text"].to_s)
+        when "keys" then handle_keys(Array(message["keys"]))
         end
       end
     end
 
     private
 
+    def receive_prompt(text)
+      return handle_prompt(text) unless text.match?(UNSUBMITTED)
+
+      control(status: "working")
+      sleep 0.05
+      control(status: "idle")
+      @unsubmitted = text
+      say("fake agent left a #{text.length}-character prompt unsubmitted")
+    end
+
+    def handle_keys(keys)
+      say("(keys #{keys.join(' ')})")
+      return unless keys.include?("Enter") && @unsubmitted
+
+      text, @unsubmitted = @unsubmitted, nil
+      handle_prompt(text)
+    end
+
     def handle_prompt(text)
       control(status: "working")
       mode = text[DIRECTIVE, 1] || @env.fetch("FAKE_AGENT_MODE", "done")
       say("fake agent received a #{text.length}-character prompt; mode #{mode}")
-      # Long enough for RunSessionRunner.submit_prompt_if_unsent! to see the
-      # prompt was picked up, as it would with a real CLI.
+      # A moment of "working", as a real CLI shows. Not the whole of
+      # SessionLauncher.submit_prompt_if_unsent!'s window, so a launch usually
+      # ends with its (harmless) Enter on an empty input box.
       sleep 0.6
 
       case mode

@@ -36,8 +36,12 @@ module Orchestrator
       # inside herdr's own 30 s startup timeout -- see wait_for_agent_detected!.
       AGENT_DETECT_POLL_ATTEMPTS = 40
       AGENT_DETECT_POLL_INTERVAL_SECONDS = 0.25
-      PROMPT_SUBMIT_POLL_ATTEMPTS = 8
+      # See submit_prompt_if_unsent!: the whole window is always sampled, and
+      # the prompt counts as picked up only if the agent was non-idle on each
+      # of the last PROMPT_SUBMIT_STABLE_SAMPLES samples.
+      PROMPT_SUBMIT_POLL_ATTEMPTS = 20
       PROMPT_SUBMIT_POLL_INTERVAL_SECONDS = 0.5
+      PROMPT_SUBMIT_STABLE_SAMPLES = 4
 
       # Writes the files the CLI reads (its MCP config for claude, and the
       # prompt, kept for the record), builds the session env and opens the
@@ -75,7 +79,7 @@ module Orchestrator
         dismiss_codex_trust_prompt!(pane_id) if spec.fetch(:driver) == "codex"
         wait_until_ready!(pane_id, kind:)
         Herdr.agent_prompt(pane_id, spec.fetch(:prompt))
-        submit_prompt_if_unsent!(pane_id)
+        submit_prompt_if_unsent!(pane_id, run_id: spec.fetch(:run_id))
 
         wait_for_pid(pane_id) || raise(LaunchError, "session for run #{spec.fetch(:run_id)} never started a foreground process")
       end
@@ -156,27 +160,62 @@ module Orchestrator
       end
 
       # agent.prompt normally submits on its own -- confirmed live, including
-      # with this app's real ~5KB composed prompt. But it was also observed once
-      # on a real run to deliver the text and leave it sitting unsubmitted in
+      # with this app's real ~5KB composed prompt. But it has also been seen on
+      # real runs to deliver the text and leave it sitting unsubmitted in
       # Claude's input box: the session stayed idle forever, holding its
       # concurrency slot, and a single Enter submitted it. That was not
-      # reproducible in isolation, so rather than always send an Enter, confirm
-      # the agent actually picked the prompt up and only nudge it if it did not.
-      # An Enter on an already-submitted (empty) input box does nothing.
-      def submit_prompt_if_unsent!(pane_id)
-        PROMPT_SUBMIT_POLL_ATTEMPTS.times do
-          return true unless agent_idle?(pane_id)
-
-          sleep PROMPT_SUBMIT_POLL_INTERVAL_SECONDS
+      # reproducible in isolation, so rather than always send an Enter, check
+      # whether the agent actually picked the prompt up and nudge it if not.
+      #
+      # This used to take the first non-idle agent_status as "submitted" and
+      # return at once. Run run-20260929-191533-d44e (claude, ~3KB prompt) was
+      # left unsubmitted all the same: most likely herdr briefly reported the
+      # agent non-idle while the text was being pasted and rendered, then
+      # dropped back to idle, and the one sample settled it. So now the whole
+      # window is sampled, and only an agent that was non-idle on each of the
+      # last PROMPT_SUBMIT_STABLE_SAMPLES samples counts as working; a
+      # herdr error is no evidence either way, so it breaks that streak too.
+      # An Enter on an already-submitted (empty) input box does nothing, so a
+      # spurious one -- e.g. after a task that finished inside the window -- is
+      # cheap, while a missed one strands the run: lean towards sending it.
+      #
+      # The pane text itself is not used as a second signal: whether the prompt
+      # is still "in the input box" looks different in every driver (claude
+      # folds a long paste into a "[Pasted text ...]" placeholder, and all
+      # three wrap and truncate it to the pane width), so a match would be
+      # neither reliable nor portable.
+      #
+      # The sample sequence is logged either way, so the next occurrence can
+      # be diagnosed from the log. Returns true if no Enter was needed.
+      def submit_prompt_if_unsent!(pane_id, run_id:)
+        samples = Array.new(PROMPT_SUBMIT_POLL_ATTEMPTS) do |index|
+          sleep PROMPT_SUBMIT_POLL_INTERVAL_SECONDS unless index.zero?
+          prompt_status_sample(pane_id)
         end
+        tail = samples.last(PROMPT_SUBMIT_STABLE_SAMPLES)
+        picked_up = tail.size == PROMPT_SUBMIT_STABLE_SAMPLES && tail.none? { |status| status == "idle" || status.start_with?("error") }
+        seconds = (PROMPT_SUBMIT_POLL_ATTEMPTS * PROMPT_SUBMIT_POLL_INTERVAL_SECONDS).round(1)
+        sequence = summarize_samples(samples)
+        if picked_up
+          Rails.logger.info("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt picked up (agent_status over #{seconds}s: #{sequence})")
+          return true
+        end
+
+        Rails.logger.warn("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt not seen picked up within #{seconds}s " \
+                          "(agent_status: #{sequence}); sending Enter to submit it")
         Herdr.agent_send_keys(pane_id, [ "Enter" ])
         false
       end
 
-      def agent_idle?(pane_id)
-        Herdr.agent_get(pane_id)["agent_status"].to_s == "idle"
-      rescue Herdr::Error
-        false
+      def prompt_status_sample(pane_id)
+        Herdr.agent_get(pane_id)["agent_status"].to_s.presence || "unknown"
+      rescue Herdr::Error => error
+        "error(#{error.class.name.demodulize})"
+      end
+
+      # ["idle", "working", "working", "idle"] -> "idle, working x2, idle"
+      def summarize_samples(samples)
+        samples.chunk_while { |a, b| a == b }.map { |run| run.size > 1 ? "#{run.first} x#{run.size}" : run.first }.join(", ")
       end
 
       # agent.start only types the command line into the pane's shell; it

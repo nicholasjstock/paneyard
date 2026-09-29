@@ -59,6 +59,18 @@ RSpec.describe "a run's lifecycle", type: :request do
     expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
   end
 
+  # run-20260929-191533-d44e: the prompt was typed into claude's input box but
+  # never submitted, after herdr briefly reported the agent non-idle.
+  it "submits a prompt the agent left unsubmitted after a flicker of activity", :fake_herdr do
+    run = queue_and_launch("Stuck in the input box [fake-agent-prompt: unsubmitted]")
+
+    expect(run.reload.live_session).to have_attributes(status: "running")
+    expect(fake_herdr.requests_for("agent.send_keys").last).to include("target" => "w1:p1", "keys" => [ "Enter" ])
+    transcript = -> { fake_herdr.pane("w1:p1")[:transcript] }
+    expect(wait_for { transcript.call.include?("received a") }).to be(true)
+    expect(transcript.call.index("left a")).to be < transcript.call.index("received a")
+  end
+
   it "keeps a worktree with uncommitted work when the session is closed", :fake_herdr do
     run = queue_and_launch("Leave something behind")
     mcp_call("/mcp/run", "report_idle", token: session_token, outcome: "done", summary: "Left a file")
