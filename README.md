@@ -100,7 +100,15 @@ Open the orchestrator's URL, choose **Add workspace**, and enter a name and the 
 
 On the workspace's runs page, choose **Queue a task**, describe the task, pick a driver (`claude`, `codex` or `opencode`) and optionally a model, then **Queue**. Within a few seconds a herdr workspace named after the run's worktree opens with the agent in it. When the agent stops, it posts a report to the run screen. Read it, send it more instructions from the message box if needed, ask it to commit, push or merge when you are happy, and choose **Close session** to free the slot.
 
-You can also queue runs from another MCP client (for example your own Claude Code session) through `/mcp/admin`; see [MCP endpoints](./docs/operating.md#mcp-endpoints).
+### 6. Queue runs from your own agent (optional)
+
+Paneyard's `/mcp/admin` endpoint lets an MCP client, such as your everyday Claude Code session, queue and inspect runs without opening the web UI. Register it once, at user scope so it is available from every project:
+
+```sh
+claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:3001/mcp/admin
+```
+
+Use the port your instance listens on (3001 for `bin/service`; `bin/dev` prints its own). Then ask your agent to queue a task in a workspace, list runs, or check on one. The endpoint is unauthenticated, like the rest of the app, so keep it on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
 
 ## How a run works
 

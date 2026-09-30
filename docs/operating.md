@@ -193,10 +193,10 @@ There is no cost or token accounting for sessions: they are real interactive ter
 ## MCP endpoints
 
 - **`/mcp/run`** is what each session talks to, authenticated by a per-session bearer token that dies with the session. It has `report_idle`, `record_workspace_env_var`, and the shared tools below. The orchestrator wires it into each CLI automatically, so you don't configure anything.
-- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, optional `workspace` name and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one is the default when `workspace` is omitted), and `ping_tool`. For example, to add it to Claude Code:
+- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, optional `workspace` name and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one is the default when `workspace` is omitted), and `ping_tool`. For example, to add it to Claude Code for every project (`-s user`; without it, the server is registered only for the project you run the command in):
 
   ```sh
-  claude mcp add --transport http paneyard-admin http://127.0.0.1:3001/mcp/admin
+  claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:3001/mcp/admin
   ```
 
 See AGENTS.md's "MCP Boundary" for the design rules behind both.
