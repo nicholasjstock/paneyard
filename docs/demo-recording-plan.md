@@ -1,8 +1,7 @@
 # Recorded demo: plan
 
-Status: **partly built** (2026-09-30, run `run-20260930-074435-1371`). M0 and M1 are done. The director, rehearsal
-mode and the GIF cut (M3/M4) work end to end with the stand-in; the first real take is waiting on the operator's
-token. Claims marked *verified* were checked on this machine (§9); §0 is what exists now and how to run it.
+Status: **built** (2026-09-30). M0, M1, M3 and M4 are done: the README GIF is a real take with live Claude Code.
+Claims marked *verified* were checked on this machine (§9); §0 is what exists now and how to run it.
 
 The goal is a **silent GIF** for the open-source README showing Paneyard end to end: live Claude Code, two jobs
 queued over MCP, herdr, Hunk, merge, close. Everything else (a longer talk video, per-step clips, captions, a
@@ -36,7 +35,8 @@ demo/bin/record cut NAME   # re-cut rehearsal|take from its .mkv and NAME-timing
 **Results so far:**
 - `compat` is all green on herdr 0.9.3 (M0).
 - `smoke` gives 1920×1080 at 299–300 of 300 frames (M1).
-- A full `rehearse` passes every check in about 80 s of footage, and cuts to a 61 s, 2.3 MB GIF that is legible at 1200 px.
+- A full `rehearse` passes every check in about 80 s of footage.
+- The first real `take` (Sonnet) passed every check in 107 s of footage and cuts to a 45 s, 5.2 MB GIF, now in the README.
 - The todo repo's first commit is the same on every take (`234ed7b21e62`).
 
 **Changed from the plan while building:**

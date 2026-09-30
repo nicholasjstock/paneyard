@@ -13,8 +13,8 @@ require "open3"
 module Cut
   # Seconds each beat may take in the cut (docs/demo-recording-plan.md §5).
   BUDGETS = {
-    "idle" => 1.5, "ask" => 10, "spawn" => 5, "work" => 5, "hunk" => 12,
-    "merge" => 12, "close" => 7, "confirm" => 8, "end" => 2
+    "idle" => 1, "ask" => 8, "spawn" => 3, "work" => 3, "hunk" => 7,
+    "merge" => 9, "close" => 4, "confirm" => 7, "end" => 3
   }.freeze
   # Faster than this reads as a glitch rather than a time-lapse.
   MAX_SPEED = 40.0
