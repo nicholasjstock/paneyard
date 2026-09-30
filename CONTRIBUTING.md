@@ -11,12 +11,45 @@ For security vulnerabilities, follow [SECURITY.md](./SECURITY.md) instead of ope
 You need the [requirements in the README](./README.md#requirements), except that herdr and the agent CLIs are **not** needed to run the test suite: the suite uses a fake herdr and a fake agent. The JavaScript system specs (`js: true`) drive headless Chrome through Selenium, so they need Google Chrome installed.
 
 ```sh
-bin/setup                 # install gems, prepare the development database
+bin/setup                 # install gems, prepare the development database (--reset to recreate it)
 bundle exec rspec         # run the specs
 bin/sandbox start         # an isolated instance with a fake herdr and fake agent, to click through
 ```
 
+`bin/setup` does not start a server. Development and test use their own SQLite databases under `storage/`, separate from the `storage/production.sqlite3` that `bin/service` uses. Run `bin/rails db:prepare` after a schema change, and `bin/rails console` to poke at the development data.
+
 Use `bin/sandbox` rather than `bin/dev` to try a change by hand. `bin/dev` runs the real recurring schedule against your real herdr socket and any configured Telegram bot. The sandbox runs on its own port, database and scratch repository and refuses everything outside itself; see [operating.md](./docs/operating.md#the-sandbox).
+
+## Running it in development
+
+`bin/dev` runs the app in the foreground in development mode:
+
+```sh
+PORT=3000 bin/dev
+```
+
+It starts Puma and the Solid Queue worker together (the worker is what launches sessions), listening on `localhost` only. Before starting either, it checks the bundle and pending migrations and exits with a recovery command if something is missing. Without `PORT` it picks a free port and prints it. Sessions reach the app's MCP endpoint at `PANEYARD_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`; if you set it, keep it in step with `PORT`. An MCP client registered against `/mcp/admin` needs the port `bin/dev` printed, not `bin/service`'s 3001. More in [operating.md](./docs/operating.md#development-bindev).
+
+`bin/dev` is not isolated: it runs the full recurring schedule (dispatch, reconcile, Telegram polling if configured, the worktree janitor) against whatever herdr socket your shell has. A run session working on this repository must use `bin/sandbox` instead.
+
+## Code layout
+
+It is a Rails 8 app organised around `Workspace` as the top-level boundary: runs, sessions and their reports are nested under a workspace in code and in the UI. See AGENTS.md's ["Project Structure"](./AGENTS.md#project-structure--module-organization) for more.
+
+| Path | What lives there |
+| --- | --- |
+| `app/controllers`, `app/views` | The web UI. |
+| `app/models` | Persistence: `Workspace`, `Run`, `RunSession`, `RunCheckpoint`, … |
+| `app/jobs` | Solid Queue jobs: dispatch, starting a session, reconcile, worktree cleanup, Telegram polling. |
+| `app/services/orchestrator` | Orchestration logic: run and session state, prompts, concurrency, layouts, GitHub App tokens, and the two MCP endpoints (mounted in `config/routes.rb`). |
+| `app/services/orchestrator/runner` | Everything that touches the machine: herdr, agent CLIs, git worktrees, processes (see [the runner boundary](#design-rules)). |
+| `app/services/mcp_tools` | The MCP tools behind `/mcp/run` and `/mcp/admin`. |
+| `app/services/remote_control` | Telegram remote control and its adapter interface. |
+| `app/javascript` | importmap + Stimulus controllers. |
+| `db/` | Schema and migrations. |
+| `lib/fake_herdr`, `lib/fake_telegram`, `script/fake_agent` | Test doubles that speak the real protocols. |
+| `lib/paneyard_sandbox`, `bin/sandbox`, `bin/preflight` | The isolated sandbox instance and the production boot smoke test. |
+| `demo/` | The Docker-recorded demo behind the README GIF; see [docs/demo-recording-plan.md](./docs/demo-recording-plan.md). |
 
 ## Verifying a change
 
@@ -24,7 +57,7 @@ Use `bin/sandbox` rather than `bin/dev` to try a change by hand. `bin/dev` runs 
 bin/verify
 ```
 
-`bin/verify` is the one command that must pass before a change is merged (about a minute). It runs:
+`bin/verify` is the one command that must pass before a change is merged (about a minute). `bin/verify --prod-copy` does the same, but has `bin/preflight` migrate a read-only copy of the main checkout's `storage/production.sqlite3` rather than a scratch database. It runs:
 
 | Step | What it checks |
 | --- | --- |
@@ -43,8 +76,13 @@ The test layers, and where a change belongs (details in AGENTS.md, ["Testing Gui
 - **Fake herdr** (`lib/fake_herdr/`, tag an example `:fake_herdr`) and **fake Telegram** (`lib/fake_telegram/`, tag `:fake_telegram`): real sockets and processes, no model usage. If you teach `Orchestrator::Runner::Herdr` a new call, extend the fake and its spec together.
 - **Lifecycle** (`spec/integration/run_lifecycle_spec.rb`): a run end to end in process. Changes to run or session state belong here as well as in a unit spec.
 - **System specs** (`spec/system`): UI behaviour.
+- **Live agent specs** (tagged `live_agent`): drive the real CLIs with real model usage. They are excluded unless you set `LIVE_AGENT_SPECS=1`.
 
 Don't consume live model capacity to test dispatch or argument building.
+
+### CI
+
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs `bin/verify` on every push and on pull requests from forks, on both `ubuntu-latest` and `macos-latest` (the app has only been used on macOS; Linux keeps it honest). Nothing in CI reaches a real herdr, a model, Telegram or GitHub's API, and no secrets are passed in. It does not run `bin/verify --prod-copy`, `bin/preflight`'s credentials check (it needs `config/master.key`, so it is skipped and a throwaway `SECRET_KEY_BASE` used), or the live agent specs. On failure it uploads the logs as an artifact.
 
 ## Style
 

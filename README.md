@@ -15,7 +15,13 @@ It is a Rails 8 app that runs on your own machine. Rails decides *which* task ru
 
 - [Security model](#security-model)
 - [Requirements](#requirements)
-- [Quickstart](#quickstart)
+- [Getting started](#getting-started)
+  1. [Install](#1-install)
+  2. [Try it in the sandbox](#2-try-it-in-the-sandbox)
+  3. [Run it day to day](#3-run-it-day-to-day)
+  4. [Register a workspace](#4-register-a-workspace)
+  5. [Queue a run](#5-queue-a-run)
+  6. [Queue runs from your own agent](#6-queue-runs-from-your-own-agent)
 - [How a run works](#how-a-run-works)
 - [Configuration](#configuration)
 - [Documentation](#documentation)
@@ -44,7 +50,7 @@ This is a tool for one trusted person on their own machine. Treat anything that 
 - **At least one agent CLI, already signed in:** `claude`, `codex` and/or `opencode`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow. Unless you choose otherwise, a session uses a sensible default for its driver (`Orchestrator::DefaultModels`; for some drivers that means the CLI's own configured model). Override it per driver with `PANEYARD_CLAUDE_MODEL`, `PANEYARD_CODEX_MODEL` or `PANEYARD_OPENCODE_MODEL`, or pick a model per run in the UI.
 - **Optional:** `nvim` (the default pane layout opens it beside the agent), `gh` signed in (for pushing over HTTPS without a GitHub App), `curl` (only for a GitHub App).
 
-## Quickstart
+## Getting started
 
 ### 1. Install
 
@@ -54,36 +60,34 @@ cd paneyard
 bin/setup
 ```
 
-`bin/setup` installs gems and prepares the development database. It does not start anything.
+`bin/setup` installs gems and prepares a local database. It does not start anything.
 
-### 2. Try it risk-free with the sandbox
+### 2. Try it in the sandbox
+
+Before pointing Paneyard at a real repository, you can try the whole flow risk-free:
 
 ```sh
 bin/sandbox start     # prints the sandbox's URL
 bin/sandbox stop      # or: bin/sandbox reset, to delete it too
 ```
 
-The sandbox is a complete, isolated instance on a free loopback port, with its own database under `tmp/sandbox/`, a **fake herdr** and a **fake agent**: no real panes open, no model usage is spent, and nothing outside the sandbox is touched. It seeds a scratch repository as its only workspace. Open the URL, choose **Queue a task**, and include a directive such as `[fake-agent: done]` (or `blocked`, `failed`, `dirty`, `crash`, `manual`, `working`) in the task to choose what the fake agent does. You get the whole lifecycle — dispatch, a real worktree, a report, **Close session**, cleanup — without herdr or an agent CLI.
+The sandbox is a complete, isolated instance on a free loopback port, with its own database under `tmp/sandbox/`, a **fake herdr** and a **fake agent**: no real panes open, no model usage is spent, and nothing outside the sandbox is touched. It seeds a scratch repository as its only workspace. Open the URL, choose **Queue a task**, and include a directive such as `[fake-agent: done]` (or `blocked`, `failed`, `dirty`, `crash`, `manual`, `working`) in the task to choose what the fake agent does. You get the whole lifecycle — dispatch, a real worktree, a report, **Close session**, cleanup — without herdr or an agent CLI. [The sandbox](./docs/operating.md#the-sandbox) covers its other commands and its opt-ins for real herdr and Telegram.
 
-### 3. Start the orchestrator
+### 3. Run it day to day
 
-For development, or to try it in the foreground:
-
-```sh
-PORT=3000 bin/dev
-```
-
-`bin/dev` starts Puma and the Solid Queue worker together (the worker is what launches sessions), listening on `localhost` only. Without `PORT` it picks a free port and prints it.
-
-For the long-running instance you keep up all day, use `bin/service`, which runs the app in production mode, detached, on port 3001 by default, logging to `log/production_service.log`:
+Paneyard is meant to stay up all day. `bin/service` runs it in production mode, detached from your terminal, on port 3001 by default, logging to `log/production_service.log`. Its database is `storage/production.sqlite3`, created on first start.
 
 ```sh
 bin/rails credentials:edit   # once: see the note below
 bin/service start            # also: stop | restart | status
 ```
 
+Then open <http://127.0.0.1:3001>. `start` waits for the app to answer and fails after two minutes, naming the log. After changing credentials or other boot-time configuration, run `bin/service restart`; [Long-running: `bin/service`](./docs/operating.md#long-running-binservice) has the details.
+
 > [!NOTE]
 > Production mode needs a `secret_key_base`, which lives in Rails' encrypted credentials. A fresh clone has no `config/master.key`, so the committed `config/credentials.yml.enc` cannot be decrypted by you. Move it aside (`mv config/credentials.yml.enc config/credentials.yml.enc.orig`), then run `bin/rails credentials:edit`, which creates a new key and credentials file containing a `secret_key_base`. That file is also where optional Telegram and GitHub App settings go. Alternatively, export `SECRET_KEY_BASE` (for example from `bin/rails secret`) before `bin/service start`.
+
+There is also `bin/dev`, which runs the app in the foreground in development mode; it is for working on Paneyard itself, see [CONTRIBUTING.md](./CONTRIBUTING.md#running-it-in-development).
 
 ### 4. Register a workspace
 
@@ -94,21 +98,21 @@ mkdir -p ~/code/my-app
 git clone git@github.com:you/my-app.git ~/code/my-app/main   # must be on branch main, with an origin remote
 ```
 
-Open the orchestrator's URL, choose **Add workspace**, and enter a name and the **workspace root** (`~/code/my-app` as an absolute path, not `.../main`). [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks.
+Open Paneyard's URL, choose **Add workspace**, and enter a name and the **workspace root** (`~/code/my-app` as an absolute path, not `.../main`). [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
 
-### 5. Queue your first run
+### 5. Queue a run
 
 On the workspace's runs page, choose **Queue a task**, describe the task, pick a driver (`claude`, `codex` or `opencode`) and optionally a model, then **Queue**. Within a few seconds a herdr workspace named after the run's worktree opens with the agent in it. When the agent stops, it posts a report to the run screen. Read it, send it more instructions from the message box if needed, ask it to commit, push or merge when you are happy, and choose **Close session** to free the slot.
 
-### 6. Queue runs from your own agent (optional)
+### 6. Queue runs from your own agent
 
-Paneyard's `/mcp/admin` endpoint lets an MCP client, such as your everyday Claude Code session, queue and inspect runs without opening the web UI. Register it once, at user scope so it is available from every project:
+Optionally, Paneyard's `/mcp/admin` endpoint lets an MCP client, such as your everyday Claude Code session, queue and inspect runs without opening the web UI. Register it once, at user scope so it is available from every project:
 
 ```sh
 claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:3001/mcp/admin
 ```
 
-Use the port your instance listens on (3001 for `bin/service`; `bin/dev` prints its own). Then ask your agent to queue a task in a workspace, list runs, or check on one. The endpoint is unauthenticated, like the rest of the app, so keep it on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
+Use the port your instance listens on (3001 for `bin/service`). Then ask your agent to queue a task in a workspace, list runs, or check on one. The endpoint is unauthenticated, like the rest of the app, so keep it on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
 
 ## How a run works
 
@@ -150,7 +154,7 @@ Per-workspace pane layouts and environment variables are set on the workspace it
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). In short: `bin/setup`, make your change, and run `bin/verify` (specs, RuboCop, a production boot smoke test, an end-to-end run through the sandbox, and security audits) before opening a pull request.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setting up to develop Paneyard, running it with `bin/dev`, the tests and CI, the code layout, and the design rules a change has to follow; [AGENTS.md](./AGENTS.md) is the detailed architecture guide behind it. In short: `bin/setup`, make your change, and run `bin/verify` (specs, RuboCop, a production boot smoke test, an end-to-end run through the sandbox, and security audits) before opening a pull request.
 
 ## License
 

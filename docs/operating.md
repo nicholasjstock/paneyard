@@ -44,7 +44,7 @@ bin/service start
 ```
 
 - **Loopback only.** `bin/production` binds to `127.0.0.1` (`BINDING`), and production answers only loopback `Host` names (`lib/paneyard_allowed_hosts.rb`). Read [SECURITY.md](../SECURITY.md) before widening either with `BINDING` or `PANEYARD_ALLOWED_HOSTS`: the app has no authentication.
-- **Credentials.** Production needs a `secret_key_base` from Rails credentials (`config/credentials.yml.enc` plus your own `config/master.key`) or the `SECRET_KEY_BASE` environment variable. See the note in the README's [Quickstart](../README.md#3-start-the-orchestrator).
+- **Credentials.** Production needs a `secret_key_base` from Rails credentials (`config/credentials.yml.enc` plus your own `config/master.key`) or the `SECRET_KEY_BASE` environment variable. See the note in the README's [Run it day to day](../README.md#3-run-it-day-to-day).
 - **Restarting.** Application code is hot-reloaded (`PANEYARD_HOT_RELOAD=1`), but `config/queue.yml`, `config/recurring.yml`, credentials and initializers are read once at boot. After changing any of them, run `bin/service restart`. It first runs `bin/preflight --prod-copy` (the new code booted on a scratch port against a copy of the production database) and leaves the running instance alone if that fails. `bin/service restart --skip-preflight` skips the check.
 - **Console commands** against this instance need `RAILS_ENV=production`, for example `RAILS_ENV=production bin/rails runner '...'`.
 
