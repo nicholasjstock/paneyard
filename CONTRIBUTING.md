@@ -47,7 +47,7 @@ Without `-s user` this registers it for the current project only. The sandbox pi
 PORT=3000 bin/dev
 ```
 
-It starts Puma and the Solid Queue worker together (the worker is what launches sessions), listening on `localhost` only. Before starting either, it checks the bundle and pending migrations and exits with a recovery command if something is missing. Without `PORT` it picks a free port and prints it. Sessions reach the app's MCP endpoint at `PANEYARD_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`; if you set it, keep it in step with `PORT`. An MCP client registered against `/mcp/admin` needs the port `bin/dev` printed, not `bin/service`'s 3001. More in [operating.md](./docs/operating.md#development-bindev).
+It starts Puma and the Solid Queue worker together (the worker is what launches sessions), listening on `localhost` only. Before starting either, it checks the bundle and pending migrations and exits with a recovery command if something is missing. Without `PORT` it picks a free port and prints it. Sessions reach the app's MCP endpoint at `PANEYARD_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`; if you set it, keep it in step with `PORT`. An MCP client registered against `/mcp/admin` needs the port `bin/dev` printed, not `bin/service`'s 7263. More in [operating.md](./docs/operating.md#development-bindev).
 
 `bin/dev` is not isolated: it runs the full recurring schedule (dispatch, reconcile, Telegram polling if configured, the worktree janitor) against whatever herdr socket your shell has. A run session working on this repository must use `bin/sandbox` instead.
 

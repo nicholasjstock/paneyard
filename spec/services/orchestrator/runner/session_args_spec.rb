@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::Runner::SessionArgs do
-  let(:mcp_url) { "http://127.0.0.1:3001/mcp" }
+  let(:mcp_url) { "http://127.0.0.1:7263/mcp" }
 
   describe ".build" do
     it "rejects an unknown driver" do
@@ -81,7 +81,7 @@ RSpec.describe Orchestrator::Runner::SessionArgs do
       described_class.write_claude_mcp_config(path, "tok", mcp_url:)
 
       config = JSON.parse(File.read(path))
-      expect(config.dig("mcpServers", "paneyard", "url")).to eq("http://127.0.0.1:3001/mcp/run")
+      expect(config.dig("mcpServers", "paneyard", "url")).to eq("http://127.0.0.1:7263/mcp/run")
       expect(config.dig("mcpServers", "paneyard", "headers", "Authorization")).to eq("Bearer tok")
       expect(File.stat(path).mode & 0o777).to eq(0o600)
     ensure
@@ -103,7 +103,7 @@ RSpec.describe Orchestrator::Runner::SessionArgs do
       expect(args).not_to include("-a")
       expect(args).to include("-C", "/repos/app-1")
       expect(args).to include(%(mcp_servers.paneyard.bearer_token_env_var="PANEYARD_RUN_TOKEN"))
-      expect(args).to include(%(mcp_servers.paneyard.url="http://127.0.0.1:3001/mcp/run"))
+      expect(args).to include(%(mcp_servers.paneyard.url="http://127.0.0.1:7263/mcp/run"))
     end
 
     it "drops -C when resuming, which codex rejects on a resumed session" do
@@ -145,7 +145,7 @@ RSpec.describe Orchestrator::Runner::SessionArgs do
       expect(args).not_to include("--dir", "--variant", "run")
 
       config = JSON.parse(env.fetch("OPENCODE_CONFIG_CONTENT"))
-      expect(config.dig("mcp", "paneyard", "url")).to eq("http://127.0.0.1:3001/mcp/run")
+      expect(config.dig("mcp", "paneyard", "url")).to eq("http://127.0.0.1:7263/mcp/run")
       expect(config.dig("mcp", "paneyard", "headers", "Authorization")).to eq("Bearer tok")
     end
 

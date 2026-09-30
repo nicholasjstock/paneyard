@@ -37,12 +37,13 @@ PORT=3300 PANEYARD_RAILS_URL=http://127.0.0.1:3300 bin/dev
 
 ### Long-running: `bin/service`
 
-For the instance you keep running, use `bin/service start|stop|restart|status`. It daemonizes `bin/production` (Puma plus Solid Queue in production mode, against `storage/production.sqlite3`), defaults to port `3001`, tracks its pid in `tmp/pids/production.pid`, and logs to `log/production_service.log`. `start` waits for `/up` to answer and fails after two minutes, naming the log.
+For the instance you keep running, use `bin/service start|stop|restart|status`. It daemonizes `bin/production` (Puma plus Solid Queue in production mode, against `storage/production.sqlite3`), defaults to port `7263`, tracks its pid in `tmp/pids/production.pid`, and logs to `log/production_service.log`. `start` waits for `/up` to answer and fails after two minutes, naming the log.
 
 ```sh
 bin/service start
 ```
 
+- **Upgrading from port 3001.** The default used to be `3001`. To keep it, start the service with `PORT=3001 bin/service start` (and `restart`). Otherwise, re-register your MCP client against the new port (`claude mcp remove paneyard-admin -s user`, then the `claude mcp add` in [MCP endpoints](#mcp-endpoints)), and point any `tailscale serve` config at `7263`.
 - **Loopback only.** `bin/production` binds to `127.0.0.1` (`BINDING`), and production answers only loopback `Host` names (`lib/paneyard_allowed_hosts.rb`). Read [SECURITY.md](../SECURITY.md) before widening either with `BINDING` or `PANEYARD_ALLOWED_HOSTS`: the app has no authentication.
 - **Credentials.** Production needs a `secret_key_base` from Rails credentials (`config/credentials.yml.enc` plus your own `config/master.key`) or the `SECRET_KEY_BASE` environment variable. See the note in the README's [Run it day to day](../README.md#2-run-it-day-to-day).
 - **Restarting.** Application code is hot-reloaded (`PANEYARD_HOT_RELOAD=1`), but `config/queue.yml`, `config/recurring.yml`, credentials and initializers are read once at boot. After changing any of them, run `bin/service restart`. It first runs `bin/preflight --prod-copy` (the new code booted on a scratch port against a copy of the production database) and leaves the running instance alone if that fails. `bin/service restart --skip-preflight` skips the check.
@@ -196,7 +197,7 @@ There is no cost or token accounting for sessions: they are real interactive ter
 - **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, optional `workspace` name and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one is the default when `workspace` is omitted), and `ping_tool`. For example, to add it to Claude Code for every project (`-s user`; without it, the server is registered only for the project you run the command in):
 
   ```sh
-  claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:3001/mcp/admin
+  claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:7263/mcp/admin
   ```
 
 See AGENTS.md's "MCP Boundary" for the design rules behind both.

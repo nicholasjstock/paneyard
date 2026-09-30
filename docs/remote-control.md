@@ -206,8 +206,8 @@ with "Puma binds `127.0.0.1` only". That is **not true of the running
 instance**:
 
 ```
-$ lsof -nP -iTCP -sTCP:LISTEN | grep 3001
-ruby  4805 operator  6u  IPv4 …  TCP *:3001 (LISTEN)
+$ lsof -nP -iTCP -sTCP:LISTEN | grep 7263
+ruby  4805 operator  6u  IPv4 …  TCP *:7263 (LISTEN)
 ```
 
 `bin/production` runs `bin/rails server` without `-b`. Outside development,
@@ -440,13 +440,13 @@ recent runs (active first), and an ambiguous ref gets buttons.
 ## 4. Web
 
 **Can a phone reach it?** At the moment, yes: the instance listens on
-`*:3001` (§1.5). The same fact is also the security hole. The design should
+`*:7263` (§1.5). The same fact is also the security hole. The design should
 not depend on the LAN exposure staying. The right shape:
 
 1. **Bind to loopback** (`bin/production` passes `-b 127.0.0.1`, or sets
    `BINDING`), which makes AGENTS.md's claim true.
 2. For the phone, put the UI behind **Tailscale Serve** (`tailscale serve
-   --bg 3001`). The phone reaches it over the tailnet, and the traffic lands on
+   --bg 7263`). The phone reaches it over the tailnet, and the traffic lands on
    loopback. Optionally, Rails can check the `Tailscale-User-Login` header
    Serve adds and refuse anything without it. The alternative is an SSH
    tunnel, which is workable but clumsy on a phone. **Never** use a public
@@ -782,7 +782,7 @@ Pass `-b 127.0.0.1` (or `BINDING`) in `bin/production`. Correct AGENTS.md and
 `AdminMcpEndpoint`'s comment if they still disagree. Optionally set
 `config.hosts` in production. Add a `spec/bin/production_spec.rb` assertion on
 the argv. `bin/service restart`. If D1 picks Tailscale, document
-`tailscale serve --bg 3001` in README.
+`tailscale serve --bg 7263` in README.
 
 **Phase 1: extract `Orchestrator::RunActions`.**
 Add `run_actions.rb` with `Result`, `enqueue!`, `say!`, `pane`,
