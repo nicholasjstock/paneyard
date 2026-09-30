@@ -1,0 +1,6 @@
+# herdr's config inside the demo container (demo/Dockerfile).
+# Without this, a first-run onboarding modal covers the screen.
+onboarding = false
+
+[theme]
+name = "catppuccin"

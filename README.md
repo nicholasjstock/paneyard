@@ -2,9 +2,9 @@
 
 Paneyard is a local, single-operator queue and supervisor for interactive AI coding-agent sessions ([Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) and [opencode](https://opencode.ai)). You queue a task against one of your repositories; when a slot frees, the task gets its own git worktree and one live agent session in a [herdr](https://herdr.dev) pane, which you can watch and type into. The session does the work and leaves it uncommitted. Nothing is committed, pushed or merged until you ask for that particular step.
 
-<!-- TODO: add a screenshot or short GIF of the run screen at docs/images/run-screen.png and reference it here:
-![A run's screen: its checkpoints, message box and worktree status](docs/images/run-screen.png)
--->
+![Claude Code queues two jobs over Paneyard's MCP endpoint; each opens in its own herdr workspace, its diff grows in Hunk, and each is told to merge to main and closed](docs/images/demo.gif)
+
+*A scripted rehearsal of the flow (the agents are a stand-in that uses no model): recorded in Docker with `demo/bin/record`, see [docs/demo-recording-plan.md](./docs/demo-recording-plan.md).*
 
 It is a Rails 8 app that runs on your own machine. Rails decides *which* task runs, *where*, and what happens to the worktree afterwards; the agent session decides everything else. There is no planner, no step queue and no pull-request automation.
 

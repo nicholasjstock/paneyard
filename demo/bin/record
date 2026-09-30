@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# The recorded demo's host entry point (see docs/demo-recording-plan.md).
+#
+#   demo/bin/record build     build the paneyard-demo image
+#   demo/bin/record compat    check Paneyard against the image's herdr, with a
+#                             stand-in claude (no model usage)
+#   demo/bin/record smoke     record 10 s of the herdr UI at the demo's canvas size
+#   demo/bin/record rehearse  film the whole story with the stand-in (no model usage)
+#   demo/bin/record take      film the whole story with the real Claude Code
+#   demo/bin/record cut NAME  re-cut a recorded rehearsal or take into NAME.mp4/.gif
+#   demo/bin/record shell     a shell in the container
+#
+# Outputs land in tmp/demo-output/. A take needs a Claude subscription token:
+# run `claude setup-token` once and put the token it prints in
+# ~/.config/paneyard/demo.env as CLAUDE_CODE_OAUTH_TOKEN=...; it is passed to
+# the container when a take starts and never stored in the image.
+#
+# The image is built from a staged context (Gemfile, Gemfile.lock,
+# .ruby-version, demo/) rather than the whole repo. At run time the repo is
+# mounted read-only and copied inside the container, so code changes need no
+# rebuild and nothing in the container can write to this checkout except
+# tmp/demo-output. Colima shares only $HOME with its VM, so the repo must live
+# under $HOME. DEMO_MODEL (default sonnet), DEMO_CANVAS (1920x1080) and
+# DEMO_FONT_SIZE (15) are passed through.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+HERDR_VERSION="${HERDR_VERSION:-0.9.3}"
+IMAGE="paneyard-demo:herdr-${HERDR_VERSION}"
+DEMO_ENV_FILE="${DEMO_ENV_FILE:-$HOME/.config/paneyard/demo.env}"
+
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; }
+
+build() {
+  local context="$ROOT/tmp/demo-build"
+  rm -rf "$context"
+  mkdir -p "$context/demo"
+  cp "$ROOT/Gemfile" "$ROOT/Gemfile.lock" "$ROOT/.ruby-version" "$context/"
+  cp -R "$ROOT/demo/." "$context/demo/"
+  docker build \
+    --build-arg "HERDR_VERSION=$HERDR_VERSION" \
+    --build-arg "DEMO_UID=$(id -u)" \
+    -t "$IMAGE" -f "$context/demo/Dockerfile" "$context"
+}
+
+in_container() {
+  docker image inspect "$IMAGE" >/dev/null 2>&1 || build
+  mkdir -p "$ROOT/tmp/demo-output"
+  local env_args=()
+  local name
+  for name in DEMO_MODEL DEMO_CANVAS DEMO_FONT_SIZE CLAUDE_CODE_OAUTH_TOKEN; do
+    if [[ -n "${!name:-}" ]]; then env_args+=(-e "$name"); fi
+  done
+  docker run --rm --init ${DOCKER_TTY[@]+"${DOCKER_TTY[@]}"} ${env_args[@]+"${env_args[@]}"} \
+    -v "$ROOT:/work/src:ro" \
+    -v "$ROOT/tmp/demo-output:/work/output" \
+    -e DEMO_OUTPUT=/work/output \
+    --tmpfs /work/paneyard:exec,mode=1777 \
+    "$IMAGE" "$@"
+}
+
+DOCKER_TTY=()
+if [[ -t 0 && -t 1 ]]; then DOCKER_TTY=(-it); fi
+
+case "${1:-}" in
+  build) build ;;
+  compat|smoke|rehearse) in_container ruby /work/src/demo/bin/in-container "$1" ;;
+  take)
+    if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -f "$DEMO_ENV_FILE" ]]; then
+      CLAUDE_CODE_OAUTH_TOKEN="$(sed -n 's/^\(export \)\{0,1\}CLAUDE_CODE_OAUTH_TOKEN=//p' "$DEMO_ENV_FILE" | tr -d "\"'" | tail -1)"
+      export CLAUDE_CODE_OAUTH_TOKEN
+    fi
+    if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+      echo "demo/bin/record take: no CLAUDE_CODE_OAUTH_TOKEN. Run \`claude setup-token\` and put" >&2
+      echo "CLAUDE_CODE_OAUTH_TOKEN=<token> in $DEMO_ENV_FILE." >&2
+      exit 1
+    fi
+    in_container ruby /work/src/demo/bin/in-container take
+    ;;
+  cut) in_container ruby /work/src/demo/bin/in-container cut "${2:-take}" ;;
+  shell) in_container bash ;;
+  -h|--help|"") usage ;;
+  *) echo "Unknown command: $1" >&2; usage >&2; exit 1 ;;
+esac
