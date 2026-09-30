@@ -1,85 +1,88 @@
 name: CI
 
+# Runs bin/verify, the same one command a change is checked with locally:
+# rspec (unit, service, job, request, system, and the :fake_herdr /
+# :fake_telegram integration specs), rubocop, git diff --check, bin/preflight,
+# bin/sandbox verify, bundler-audit, importmap audit and brakeman.
+#
+# Nothing here reaches a real herdr, a model, Telegram or GitHub's API:
+# spec_helper points HERDR_SOCKET_PATH at a socket that does not exist, the
+# integration specs bring their own fake herdr and fake Telegram, and
+# bin/preflight / bin/sandbox verify boot with WORKFLOW_SANDBOX=1. No secrets
+# are passed in, so the GitHub App reads as unconfigured, as the specs expect.
+#
+# Not run here: `bin/verify --prod-copy` (needs the operator's production
+# database), bin/preflight's credentials check (needs config/master.key, which
+# is gitignored; preflight reports it as skipped and boots on a throwaway
+# SECRET_KEY_BASE), and the LIVE_AGENT_SPECS=1 specs (real CLIs, real model
+# usage; excluded by default everywhere).
+
 on:
-  pull_request:
   push:
-    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  scan_ruby:
-    runs-on: ubuntu-latest
+  verify:
+    # A pull request from a branch of this repository is already covered by
+    # the push that updated it.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    name: bin/verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # The app has only ever been used on macOS; ubuntu keeps it honest on
+        # Linux. Both have Chrome for the js: true system specs (Selenium
+        # Manager fetches the matching chromedriver).
+        os: [ ubuntu-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # The diff base below must be in the clone for git diff --check.
+          fetch-depth: 0
 
-      - name: Set up Ruby
+      - name: Set up Ruby (from .ruby-version)
         uses: ruby/setup-ruby@v1
         with:
+          ruby-version: .ruby-version
           bundler-cache: true
 
-      - name: Scan for common Rails security vulnerabilities using static analysis
-        run: bin/brakeman --no-pager
-      
-      - name: Scan for known security vulnerabilities in gems used
-        run: bin/bundler-audit
-      
-  scan_js:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
-
-      - name: Scan for security vulnerabilities in JavaScript dependencies
-        run: bin/importmap audit
-
-  test:
-    runs-on: ubuntu-latest
-    env:
-      GITHUB_APP_ID: ${{ secrets.GITHUB_APP_ID }}
-      GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
-      GITHUB_APP_INSTALLATION_ID: ${{ secrets.GITHUB_APP_INSTALLATION_ID }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
-
-      - name: Run tests
-        run: bundle exec rspec
-
-  lint:
-    runs-on: ubuntu-latest
-    env:
-      RUBOCOP_CACHE_ROOT: tmp/rubocop
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
-
-      - name: Prepare RuboCop cache
-        uses: actions/cache@v6
+      - name: Pick the diff base for git diff --check
+        id: base
         env:
-          DEPENDENCIES_HASH: ${{ hashFiles('.ruby-version', '**/.rubocop.yml', '**/.rubocop_todo.yml', 'Gemfile.lock') }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # A new branch's push has no "before" (all zeros), and a force push's
+          # may be gone; fall back to the parent commit, or check the whole
+          # change against nothing when there is none.
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            BASE=$(git rev-parse --verify --quiet HEAD~1 || git hash-object -t tree /dev/null)
+          fi
+          echo "sha=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: bin/verify
+        run: bin/verify --diff-base ${{ steps.base.outputs.sha }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
         with:
-          path: ${{ env.RUBOCOP_CACHE_ROOT }}
-          key: rubocop-${{ runner.os }}-${{ env.DEPENDENCIES_HASH }}-${{ github.ref_name == github.event.repository.default_branch && github.run_id || 'default' }}
-          restore-keys: |
-            rubocop-${{ runner.os }}-${{ env.DEPENDENCIES_HASH }}-
-
-      - name: Lint code for consistent style
-        run: bin/rubocop -f github
-
+          name: logs-${{ matrix.os }}
+          path: |
+            log/*.log
+            tmp/preflight/*.log
+            tmp/sandbox-verify/*.log
+            tmp/capybara/
+          if-no-files-found: ignore
+          retention-days: 7

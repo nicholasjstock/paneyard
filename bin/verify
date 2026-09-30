@@ -12,15 +12,29 @@
 #   bin/importmap audit      known-vulnerable JavaScript pins
 #   bin/brakeman             Rails static security analysis
 #
-# Usage: bin/verify [--prod-copy]   (--prod-copy is passed to bin/preflight)
+# Usage: bin/verify [--prod-copy] [--diff-base REF]
+#
+#   --prod-copy       passed to bin/preflight
+#   --diff-base REF   git diff --check everything since REF (committed or not),
+#                     not just uncommitted changes. CI passes the push's or
+#                     pull request's base, since its checkout has no
+#                     uncommitted changes to check.
+#
+# Under GitHub Actions each step's output is a collapsible log group.
 
 APP_ROOT = File.expand_path("..", __dir__)
 preflight = [ "bin/preflight", *(ARGV.include?("--prod-copy") ? [ "--prod-copy" ] : []) ]
+diff_base = ARGV.include?("--diff-base") ? ARGV[ARGV.index("--diff-base") + 1] : nil
+abort "bin/verify: --diff-base needs a commit or tree" if ARGV.include?("--diff-base") && diff_base.to_s.empty?
+if diff_base && !system("git", "rev-parse", "--verify", "--quiet", "#{diff_base}^{tree}", chdir: APP_ROOT, out: File::NULL)
+  abort "bin/verify: --diff-base #{diff_base} is not a commit or tree in this checkout (a shallow clone?)"
+end
+github_actions = ENV["GITHUB_ACTIONS"] == "true"
 
 steps = [
   [ "rspec", %w[bundle exec rspec] ],
   [ "rubocop", %w[bin/rubocop] ],
-  [ "git diff --check", %w[git diff --check] ],
+  [ "git diff --check", [ "git", "diff", "--check", *diff_base ] ],
   [ "preflight", preflight ],
   [ "sandbox verify", %w[bin/sandbox verify] ],
   [ "bundler-audit", %w[bin/bundler-audit] ],
@@ -30,9 +44,11 @@ steps = [
 
 $stdout.sync = true
 results = steps.map do |name, command|
-  puts "\n== #{name}: #{command.join(' ')}"
+  puts(github_actions ? "::group::#{name}: #{command.join(' ')}" : "\n== #{name}: #{command.join(' ')}")
   started = Time.now
   ok = system(*command, chdir: APP_ROOT)
+  puts "::endgroup::" if github_actions
+  puts "::error title=bin/verify::#{name} failed" if github_actions && !ok
   [ name, ok, Time.now - started ]
 end
 
