@@ -129,14 +129,27 @@ What that means in practice:
 
 ### 5. Register the workspace
 
-- **Web UI**: open the orchestrator, choose **Add workspace**, and enter a **Name** (unique; it's what `queue_run` and the other MCP tools take as `workspace`) and the **Workspace root**. The root is `root_path`, the parent directory (`~/code/my-app` as an absolute path), **not** `.../main`. Registration doesn't validate the checkout; that happens when the first run launches. You can edit the root later, except while the workspace has an active run. The name can't be changed.
-- **Console**, the only other way:
+Every way in takes a **name** (unique; it's what `queue_run` and the other MCP tools take as `workspace`) and a **root**: `root_path`, the parent directory (`~/code/my-app`). The web UI and the MCP tool also accept the `main` checkout itself, a directory inside it, or a run's worktree, and register the root above it. The name can't be changed later. You can change the root, except while the workspace has an active run.
+
+The web UI and the MCP tool check the layout before saving, with the same rules a launch enforces in [step 2](#2-git-requirements) (`Orchestrator::WorkspaceRegistration`, which asks the runner's `check_workspace_root`): the root is an absolute path (`~` is expanded) to an existing directory, `<root>/main` is a git checkout of its own with `main` checked out and an `origin` remote, and no other workspace has the name or the root. If anything is wrong, nothing is saved and every problem is listed with how to fix it, including the usual mistakes: giving a plain clone with no `main/` child (the `mkdir` and `git clone` commands for the right layout), and a checkout on `master` (how to switch to or rename it to `main`). The check only looks; it never clones, moves or renames anything. The saved root is the expanded path.
+
+- **Web UI**: open the orchestrator, choose **Add workspace**, and enter a **Name** and the **Workspace root**. Editing a workspace's root runs the same check; editing only its layout does not.
+- **MCP**, from your own agent over [`/mcp/admin`](#mcp-endpoints): the `register_workspace` tool, with `name` and `rootPath`. For example, in a Claude Code session with `paneyard-admin` registered, ask:
+
+  > Register ~/code/my-app as a Paneyard workspace called my-app.
+
+  which calls
+
+  ```json
+  { "name": "register_workspace", "arguments": { "name": "my-app", "rootPath": "~/code/my-app" } }
+  ```
+
+  On success it returns the workspace as `list_workspaces` shows it, plus `rootPath` and `originUrl`. Otherwise it returns an error result whose `problems` list every problem (`code` and `message`), and your agent can run the fixes it suggests and call it again. The tool is on `/mcp/admin` only; a run session can't register workspaces.
+- **Console**, which skips the check:
 
   ```sh
   bin/rails runner 'Workspace.create!(name: "my-app", root_path: File.expand_path("~/code/my-app"))'
   ```
-
-  There is no MCP tool for creating workspaces. `list_workspaces` only reads them.
 
 ### 6. First run
 
@@ -193,11 +206,13 @@ There is no cost or token accounting for sessions: they are real interactive ter
 ## MCP endpoints
 
 - **`/mcp/run`** is what each session talks to, authenticated by a per-session bearer token that dies with the session. It has `report_idle`, `record_workspace_env_var`, and the shared tools below. The orchestrator wires it into each CLI automatically, so you don't configure anything.
-- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, optional `workspace` name and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one is the default when `workspace` is omitted), and `ping_tool`. For example, to add it to Claude Code for every project (`-s user`; without it, the server is registered only for the project you run the command in):
+- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, `workspace` name, optional `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one `list_runs` and `get_run` default to when `workspace` is omitted), `register_workspace` (`name`, `rootPath`; checks the layout first and creates nothing if it is wrong, see [step 5](#5-register-the-workspace)), and `ping_tool`. For example, to add it to Claude Code for every project (`-s user`; without it, the server is registered only for the project you run the command in):
 
   ```sh
   claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:3001/mcp/admin
   ```
+
+  From here `queue_run` always needs `workspace`: it never falls back to a default, so a job can't land in an unrelated workspace because the repository you are in isn't registered. The endpoint's server instructions, which Claude Code reads, spell out the flow: `list_workspaces`, match `sourceRoot` against the repository, `register_workspace` if nothing matches, then `queue_run`. So in a repository that isn't registered, "queue a job to …" registers it first, from the `main` checkout the agent was opened in. A plain clone (`.git` at the top) doesn't pass the layout check, and the fix `register_workspace` returns clones it into `<new root>/main`. Runs then work from that clone, not the directory you opened.
 
 See AGENTS.md's "MCP Boundary" for the design rules behind both.
 

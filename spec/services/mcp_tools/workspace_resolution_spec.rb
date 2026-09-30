@@ -35,6 +35,21 @@ RSpec.describe McpTools::WorkspaceResolution do
     end
   end
 
+  describe ".resolve! with explicit: true (queue_run)" do
+    it "refuses to fall back to the oldest workspace from outside a run" do
+      create_workspace(prefix: "resolve-explicit-only")
+
+      expect { described_class.resolve!(server_context: {}, explicit: true) }
+        .to raise_error(ArgumentError, /workspace is required .* register_workspace/)
+    end
+
+    it "still defaults to the calling run session's own workspace" do
+      run, session = create_run_and_session(prefix: "resolve-explicit-session")
+
+      expect(described_class.resolve!(server_context: { run_session_id: session.id }, explicit: true)).to eq(run.workspace)
+    end
+  end
+
   describe ".run!" do
     it "scopes the run lookup to the resolved workspace" do
       run, session = create_run_and_session(prefix: "resolve-run")

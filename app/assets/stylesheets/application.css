@@ -176,6 +176,8 @@ h2 {
 .flash.notice { background: rgba(53, 201, 143, 0.15); color: var(--success); }
 .flash.alert { background: rgba(255, 91, 106, 0.15); color: var(--danger); }
 .flash.warning { background: rgba(245, 166, 35, 0.15); color: var(--warn); }
+.flash .preserve-lines { white-space: pre-line; }
+.flash .preserve-lines + .preserve-lines { margin-top: 0.5rem; }
 
 .toolbar {
   display: flex;

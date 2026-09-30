@@ -22,8 +22,9 @@ module McpTools
     end
 
 
-    def error(message, code: "validation_error")
-      payload = { error: code, message: message.to_s }
+    # `details` adds fields beside the message, e.g. every problem found.
+    def error(message, code: "validation_error", **details)
+      payload = { error: code, message: message.to_s, **details }
       MCP::Tool::Response.new(
         [ { type: "text", text: JSON.generate(payload) } ],
         error: true,
