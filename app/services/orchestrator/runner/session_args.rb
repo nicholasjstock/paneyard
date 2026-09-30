@@ -84,13 +84,27 @@ module Orchestrator
       # no approval prompts.
       #
       # `codex resume <id>` mirrors `codex exec resume <id>`, which rejects -C
-      # (a resumed session keeps the cwd it started with). Not itself
-      # live-verified -- verify before relying on it.
+      # (a resumed session keeps the cwd it started with). Confirmed live on
+      # 0.159.2 that `resume <id>` with the args below, and no -C, reopens the
+      # conversation in its original cwd.
+      #
+      # check_for_update_on_startup=false is required. With an update pending,
+      # the TUI opens on an "Update available" picker whose default choice is
+      # "Update now (runs `brew upgrade --cask codex`)", so the prompt Paneyard
+      # types plus its Enter picks it: codex upgraded itself, printed "Please
+      # restart Codex." and exited before ever seeing the task. Confirmed live
+      # on 0.159.2, fresh and resume, with a CODEX_HOME whose version.json
+      # claimed 99.0.0: without the override the picker appears, with it the
+      # session starts normally and takes a prompt. codex does flag an unknown
+      # -c key ("`...` is ignored"), and does not flag this one. It is a
+      # top-level ConfigToml key, and codex-rs/tui/src/updates.rs
+      # (get_upgrade_version) returns early when it is false.
       def codex_args(root_dir:, mcp_url:, model:, resume_session_id: nil)
         config_args = [
           %(mcp_servers.paneyard.url=#{"#{mcp_url}/run".to_json}),
           %(mcp_servers.paneyard.bearer_token_env_var="#{TOKEN_ENV_VAR}"),
-          %(mcp_servers.paneyard.default_tools_approval_mode="approve")
+          %(mcp_servers.paneyard.default_tools_approval_mode="approve"),
+          "check_for_update_on_startup=false"
         ].flat_map { |override| [ "-c", override ] }
         sandbox_args = [ "-s", "danger-full-access" ]
 
