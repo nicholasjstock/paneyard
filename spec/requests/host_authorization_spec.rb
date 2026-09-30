@@ -9,7 +9,7 @@ require "rails_helper"
 # real production boot rejects a foreign Host.
 RSpec.describe "host authorization (DNS rebinding)", type: :request do
   def app_for(env)
-    ActionDispatch::HostAuthorization.new(->(_) { [ 200, {}, [ "ok" ] ] }, WorkflowAllowedHosts.hosts(env))
+    ActionDispatch::HostAuthorization.new(->(_) { [ 200, {}, [ "ok" ] ] }, PaneyardAllowedHosts.hosts(env))
   end
 
   def get_with_host(host, path: "/up", env: {})
@@ -28,8 +28,8 @@ RSpec.describe "host authorization (DNS rebinding)", type: :request do
     end
   end
 
-  it "answers the hosts named in WORKFLOW_ALLOWED_HOSTS, and no others" do
-    env = { "WORKFLOW_ALLOWED_HOSTS" => " orchestrator.tailnet.ts.net, .proxy.internal ,[fd7a::1]" }
+  it "answers the hosts named in PANEYARD_ALLOWED_HOSTS, and no others" do
+    env = { "PANEYARD_ALLOWED_HOSTS" => " orchestrator.tailnet.ts.net, .proxy.internal ,[fd7a::1]" }
 
     expect(get_with_host("orchestrator.tailnet.ts.net", env:).status).to eq(200)
     expect(get_with_host("orchestrator.tailnet.ts.net:8443", env:).status).to eq(200)
@@ -38,10 +38,10 @@ RSpec.describe "host authorization (DNS rebinding)", type: :request do
     expect(get_with_host("rebound.example", env:).status).to eq(403)
   end
 
-  it "answers the host sessions are told to reach /mcp on (WORKFLOW_RAILS_URL)" do
-    env = { "WORKFLOW_RAILS_URL" => "http://runner-host.lan:3000" }
+  it "answers the host sessions are told to reach /mcp on (PANEYARD_RAILS_URL)" do
+    env = { "PANEYARD_RAILS_URL" => "http://runner-host.lan:3000" }
 
-    expect(WorkflowAllowedHosts.extra(env)).to eq([ "runner-host.lan" ])
+    expect(PaneyardAllowedHosts.extra(env)).to eq([ "runner-host.lan" ])
     expect(get_with_host("runner-host.lan:3000", env:).status).to eq(200)
   end
 
@@ -84,8 +84,8 @@ RSpec.describe "host authorization (DNS rebinding)", type: :request do
       expect(post_mcp(endpoint, "example.com", token:).status).to eq(403)
     end
 
-    it "admits WORKFLOW_ALLOWED_HOSTS there too, so a proxied UI and its MCP agree" do
-      endpoint = with_env("WORKFLOW_ALLOWED_HOSTS" => "orchestrator.tailnet.ts.net") { Orchestrator::AdminMcpEndpoint.new }
+    it "admits PANEYARD_ALLOWED_HOSTS there too, so a proxied UI and its MCP agree" do
+      endpoint = with_env("PANEYARD_ALLOWED_HOSTS" => "orchestrator.tailnet.ts.net") { Orchestrator::AdminMcpEndpoint.new }
 
       expect(post_mcp(endpoint, "orchestrator.tailnet.ts.net").status).to eq(200)
       expect(post_mcp(endpoint, "example.com").status).to eq(403)

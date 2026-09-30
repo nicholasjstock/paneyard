@@ -14,7 +14,7 @@ module Orchestrator
     DEFAULT_LIMIT = 4
 
     def limit
-      raw = ENV["WORKFLOW_MAX_CONCURRENT_RUNS"]
+      raw = ENV["PANEYARD_MAX_CONCURRENT_RUNS"]
       return DEFAULT_LIMIT if raw.blank?
 
       parsed = Integer(raw, exception: false)

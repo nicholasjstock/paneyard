@@ -90,7 +90,7 @@ module Orchestrator
         prompt: prompt || RunPrompt.compose(run:, session_driver: run.launcher_variant),
         mcp_url:,
         workspace_env: WorkspaceEnvVars.for_workspace(run.workspace),
-        env: { "WORKFLOW_RUN_ID" => run.run_id },
+        env: { "PANEYARD_RUN_ID" => run.run_id },
         # A sandbox instance (Orchestrator::Sandbox) hands its sessions no
         # GitHub credentials at all: they are fake agents in scratch repos
         # with a local origin.
@@ -102,7 +102,7 @@ module Orchestrator
 
     # This orchestrator's /mcp endpoint, as a session reaches it.
     def mcp_url
-      base = ENV.fetch("WORKFLOW_RAILS_URL", "http://127.0.0.1:#{ENV.fetch('PORT', 3000)}")
+      base = ENV.fetch("PANEYARD_RAILS_URL", "http://127.0.0.1:#{ENV.fetch('PORT', 3000)}")
       "#{base}/mcp"
     end
 

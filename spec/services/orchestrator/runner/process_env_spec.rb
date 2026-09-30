@@ -8,8 +8,8 @@ RSpec.describe Orchestrator::Runner::ProcessEnv do
 
   def env_for(**overrides)
     described_class.for_session(
-      workspace_env: { "SHARED" => "workspace", "WORKFLOW_RUN_ID" => "spoofed", "ONLY_WORKSPACE" => "1" },
-      env: { "WORKFLOW_RUN_ID" => "run-1" }, capability_token: "tok", github_token: nil,
+      workspace_env: { "SHARED" => "workspace", "PANEYARD_RUN_ID" => "spoofed", "ONLY_WORKSPACE" => "1" },
+      env: { "PANEYARD_RUN_ID" => "run-1" }, capability_token: "tok", github_token: nil,
       ambient_github_auth: true, extra: { "CLAUDE_CODE_DISABLE_AUTO_MEMORY" => "1" }, **overrides
     )
   end
@@ -19,7 +19,7 @@ RSpec.describe Orchestrator::Runner::ProcessEnv do
 
     expect(env).to include(
       "ONLY_WORKSPACE" => "1", "SHARED" => "process", "RAILS_ENV" => nil,
-      "WORKFLOW_RUN_ID" => "run-1", "WORKFLOW_RUN_TOKEN" => "tok",
+      "PANEYARD_RUN_ID" => "run-1", "PANEYARD_RUN_TOKEN" => "tok",
       "GH_TOKEN" => "gho_ambient", "GIT_TERMINAL_PROMPT" => "0",
       "CLAUDE_CODE_DISABLE_AUTO_MEMORY" => "1"
     )

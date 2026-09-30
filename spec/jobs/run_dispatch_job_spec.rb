@@ -2,13 +2,13 @@ require "rails_helper"
 
 RSpec.describe RunDispatchJob do
   around do |example|
-    original = ENV["WORKFLOW_MAX_CONCURRENT_RUNS"]
+    original = ENV["PANEYARD_MAX_CONCURRENT_RUNS"]
     example.run
-    ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = original
+    ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = original
   end
 
   it "starts queued runs oldest first, up to the global limit" do
-    ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = "2"
+    ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "2"
     first = create_run(prefix: "dispatch-first", status: "queued", created_at: 3.minutes.ago)
     second = create_run(prefix: "dispatch-second", status: "queued", created_at: 2.minutes.ago)
     third = create_run(prefix: "dispatch-third", status: "queued", created_at: 1.minute.ago)
@@ -21,7 +21,7 @@ RSpec.describe RunDispatchJob do
   end
 
   it "starts nothing when every slot is already occupied" do
-    ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = "1"
+    ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "1"
     create_run_and_session(prefix: "dispatch-busy")
     waiting = create_run(prefix: "dispatch-waiting", status: "queued")
 
@@ -33,7 +33,7 @@ RSpec.describe RunDispatchJob do
   # the same run cannot both win it. Simulating the loser: the row is no
   # longer "queued" by the time this dispatcher's update lands.
   it "does not start a run another dispatcher already claimed" do
-    ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = "2"
+    ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "2"
     contested = create_run(prefix: "dispatch-contested", status: "queued", created_at: 2.minutes.ago)
     free = create_run(prefix: "dispatch-free", status: "queued", created_at: 1.minute.ago)
 

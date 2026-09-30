@@ -20,8 +20,8 @@ module Orchestrator
 
     def build
       MCP::Server.new(
-        name: "workflow-admin",
-        title: "Workflow Admin",
+        name: "paneyard-admin",
+        title: "Paneyard Admin",
         version: "0.1.0",
         server_context: {},
         tools: TOOLS

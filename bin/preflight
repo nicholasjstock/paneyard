@@ -11,7 +11,7 @@
 #
 # --prod-copy takes an online, read-only sqlite backup of the main checkout's
 # storage/production.sqlite3 into tmp/preflight/ (never writes the original).
-# The booted copy runs with WORKFLOW_SANDBOX=1, so none of the real
+# The booted copy runs with PANEYARD_SANDBOX=1, so none of the real
 # workspaces, worktrees or session pids in it can be acted on, with a fresh
 # job queue and no recurring jobs, so nothing is dispatched from it.
 #
@@ -21,8 +21,8 @@
 require "bundler/setup"
 require "fileutils"
 require "sqlite3"
-require_relative "../lib/workflow_sandbox/instance"
-require_relative "../lib/workflow_sandbox/mcp_client"
+require_relative "../lib/paneyard_sandbox/instance"
+require_relative "../lib/paneyard_sandbox/mcp_client"
 
 APP_ROOT = File.expand_path("..", __dir__)
 ROOT = File.join(APP_ROOT, "tmp", "preflight")
@@ -52,7 +52,7 @@ end
 # The main checkout holds the production database. From a worktree that is
 # the checkout owning the shared .git; from main it is this checkout.
 def production_storage
-  return ENV["WORKFLOW_PREFLIGHT_SOURCE_STORAGE"] if ENV["WORKFLOW_PREFLIGHT_SOURCE_STORAGE"]
+  return ENV["PANEYARD_PREFLIGHT_SOURCE_STORAGE"] if ENV["PANEYARD_PREFLIGHT_SOURCE_STORAGE"]
 
   common_dir = IO.popen([ "git", "-C", APP_ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir" ], &:read).strip
   File.join(File.dirname(common_dir), "storage")
@@ -92,7 +92,7 @@ end
 puts "bin/preflight: #{PROD_COPY ? 'production copy' : 'empty database'}, scratch dir #{ROOT}"
 FileUtils.rm_rf(ROOT)
 FileUtils.mkdir_p(STORAGE)
-instance = WorkflowSandbox::Instance.new(
+instance = PaneyardSandbox::Instance.new(
   app_root: APP_ROOT, root: ROOT, storage_dir: STORAGE,
   # A production copy holds real queued runs and live sessions: no recurring
   # dispatch or reconcile against it (Orchestrator::Sandbox would refuse to
@@ -166,7 +166,7 @@ begin
     end
 
     # DNS rebinding: a page re-pointing its own name at 127.0.0.1 still sends
-    # that name as Host (config.hosts, WorkflowAllowedHosts).
+    # that name as Host (config.hosts, PaneyardAllowedHosts).
     step("foreign Host rejected, loopback names answered") do
       bad = [ "/", "/up", "/mcp/admin" ].filter_map do |path|
         code = instance.get(path, headers: { "Host" => "rebound.example" }).code
@@ -180,7 +180,7 @@ begin
     end
 
     step("/mcp/admin answers") do
-      client = WorkflowSandbox::McpClient.new("#{instance.url}/mcp/admin")
+      client = PaneyardSandbox::McpClient.new("#{instance.url}/mcp/admin")
       tools = client.tool_names
       workspaces = client.call_tool("list_workspaces").fetch("workspaces")
       "#{tools.size} tools, #{workspaces.size} workspaces"

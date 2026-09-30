@@ -12,7 +12,7 @@ rescue StandardError, ScriptError => error
   puts "  FAIL #{name}: #{error.class}: #{error.message}"
 end
 
-# WORKFLOW_HOT_RELOAD=1 (which bin/production sets) turns eager loading off,
+# PANEYARD_HOT_RELOAD=1 (which bin/production sets) turns eager loading off,
 # so a constant that only fails to load under eager loading is never seen in
 # production until something happens to touch it.
 check.call("eager-load every constant") do

@@ -7,10 +7,10 @@
 return if Orchestrator::Sandbox.enabled?
 
 # No workspace is registered by default: add one from the UI (or /mcp/admin).
-# WORKFLOW_TARGET_ROOT, if set, registers that project directory (the one
+# PANEYARD_TARGET_ROOT, if set, registers that project directory (the one
 # holding its `main` checkout) as a workspace named after it, and backfills
 # the workspace of any runs that were pointed at it before workspaces existed.
-if (default_root_path = ENV["WORKFLOW_TARGET_ROOT"].presence)
+if (default_root_path = ENV["PANEYARD_TARGET_ROOT"].presence)
   default_workspace = Workspace.find_or_create_by!(root_path: default_root_path) do |workspace|
     workspace.name = File.basename(File.expand_path(default_root_path))
   end
@@ -23,7 +23,7 @@ end
 # title/worktree_name lengths to look at. Never seeded in production: that
 # database holds this machine's one real history.
 if Rails.env.development?
-  demo_workspace = Workspace.find_or_create_by!(root_path: "/tmp/workflow-demo/my-project") do |workspace|
+  demo_workspace = Workspace.find_or_create_by!(root_path: "/tmp/paneyard-demo/my-project") do |workspace|
     workspace.name = "demo: my-project"
   end
 
@@ -70,7 +70,7 @@ if Rails.env.development?
   seed_runner.store_attachment(source_root: launch_artifact_run.workspace.source_root, run_id: launch_artifact_run.run_id,
                                name: "sample-data.json", content: '{"source":"synthetic demo fixture","records":2}' + "\n")
 
-  second_demo_workspace = Workspace.find_or_create_by!(root_path: "/tmp/workflow-demo/inventory-service") do |workspace|
+  second_demo_workspace = Workspace.find_or_create_by!(root_path: "/tmp/paneyard-demo/inventory-service") do |workspace|
     workspace.name = "demo: inventory-service"
   end
   Run.find_or_create_by!(run_id: "demo-inventory-review") do |run|

@@ -81,8 +81,8 @@ RSpec.describe Orchestrator::Runner::SessionArgs do
       described_class.write_claude_mcp_config(path, "tok", mcp_url:)
 
       config = JSON.parse(File.read(path))
-      expect(config.dig("mcpServers", "workflow", "url")).to eq("http://127.0.0.1:3001/mcp/run")
-      expect(config.dig("mcpServers", "workflow", "headers", "Authorization")).to eq("Bearer tok")
+      expect(config.dig("mcpServers", "paneyard", "url")).to eq("http://127.0.0.1:3001/mcp/run")
+      expect(config.dig("mcpServers", "paneyard", "headers", "Authorization")).to eq("Bearer tok")
       expect(File.stat(path).mode & 0o777).to eq(0o600)
     ensure
       File.delete(path) if path && File.exist?(path)
@@ -102,8 +102,8 @@ RSpec.describe Orchestrator::Runner::SessionArgs do
       expect(args).not_to include("--dangerously-bypass-approvals-and-sandbox")
       expect(args).not_to include("-a")
       expect(args).to include("-C", "/repos/app-1")
-      expect(args).to include(%(mcp_servers.workflow.bearer_token_env_var="WORKFLOW_RUN_TOKEN"))
-      expect(args).to include(%(mcp_servers.workflow.url="http://127.0.0.1:3001/mcp/run"))
+      expect(args).to include(%(mcp_servers.paneyard.bearer_token_env_var="PANEYARD_RUN_TOKEN"))
+      expect(args).to include(%(mcp_servers.paneyard.url="http://127.0.0.1:3001/mcp/run"))
     end
 
     it "drops -C when resuming, which codex rejects on a resumed session" do
@@ -132,8 +132,8 @@ RSpec.describe Orchestrator::Runner::SessionArgs do
       expect(args).not_to include("--dir", "--variant", "run")
 
       config = JSON.parse(env.fetch("OPENCODE_CONFIG_CONTENT"))
-      expect(config.dig("mcp", "workflow", "url")).to eq("http://127.0.0.1:3001/mcp/run")
-      expect(config.dig("mcp", "workflow", "headers", "Authorization")).to eq("Bearer tok")
+      expect(config.dig("mcp", "paneyard", "url")).to eq("http://127.0.0.1:3001/mcp/run")
+      expect(config.dig("mcp", "paneyard", "headers", "Authorization")).to eq("Bearer tok")
     end
 
     it "resumes with -s" do

@@ -30,14 +30,14 @@ RSpec.describe Run, type: :model do
     def terminal_run(name, path, status: "failed")
       workspace.runs.create!(
         run_id: name, task: "Exercise #{name}", target_root: path, source_root: source_root,
-        worktree_name: name, branch_name: "workflow/#{name}", launcher_variant: "claude",
+        worktree_name: name, branch_name: "paneyard/#{name}", launcher_variant: "claude",
         status:, stopped_at: 1.day.ago
       )
     end
 
     it "is true for a real worktree left behind with unpushed work" do
       path = File.join(root, "real-worktree")
-      git(source_root, "worktree", "add", "-b", "workflow/real-worktree", path, "HEAD")
+      git(source_root, "worktree", "add", "-b", "paneyard/real-worktree", path, "HEAD")
       File.write(File.join(path, "scratch.rb"), "unpushed\n")
       git(path, "add", "scratch.rb")
       git(path, "commit", "-m", "unpushed work")
@@ -61,7 +61,7 @@ RSpec.describe Run, type: :model do
     # `git worktree list`.
     it "is false for a husk directory git no longer knows about" do
       path = File.join(root, "husk")
-      FileUtils.mkdir_p(File.join(path, ".workflow-orchestrator"))
+      FileUtils.mkdir_p(File.join(path, ".paneyard"))
       run = terminal_run("husk", path)
 
       expect(run.kept_worktree?).to be(false)
@@ -69,7 +69,7 @@ RSpec.describe Run, type: :model do
 
     it "is false while the run's session is still live, even in a real worktree" do
       path = File.join(root, "still-live")
-      git(source_root, "worktree", "add", "-b", "workflow/still-live", path, "HEAD")
+      git(source_root, "worktree", "add", "-b", "paneyard/still-live", path, "HEAD")
       run = terminal_run("still-live", path, status: "running")
       create_run_and_session(run:, prefix: "still-live")
 

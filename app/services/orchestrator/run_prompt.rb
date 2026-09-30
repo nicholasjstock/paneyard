@@ -50,13 +50,13 @@ module Orchestrator
 
     def reporting_section(session_driver)
       section = <<~SECTION
-        Whenever you stop -- finished, stuck, or giving up -- call `report_idle` (MCP server `workflow`) with `done`,
+        Whenever you stop -- finished, stuck, or giving up -- call `report_idle` (MCP server `paneyard`) with `done`,
         `blocked` or `failed`. The operator reads these reports, not this terminal, so a question goes in a `blocked`
         summary. Reporting does not end the run; if more work comes, report again.
       SECTION
       # Only Claude Code defers MCP tools behind ToolSearch; codex and opencode
       # have no such tool and name MCP tools differently.
-      section += "If report_idle is not listed, load it with ToolSearch: `select:mcp__workflow__report_idle`.\n" if session_driver == "claude"
+      section += "If report_idle is not listed, load it with ToolSearch: `select:mcp__paneyard__report_idle`.\n" if session_driver == "claude"
       section
     end
 

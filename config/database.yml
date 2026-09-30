@@ -32,10 +32,10 @@ test:
 # The long-running instance (bin/service -> bin/production) keeps its real
 # state in storage/production*.sqlite3 in the main checkout.
 #
-# WORKFLOW_STORAGE_DIR moves all four files elsewhere: bin/sandbox and
+# PANEYARD_STORAGE_DIR moves all four files elsewhere: bin/sandbox and
 # bin/preflight boot production code against scratch copies this way. Unset,
 # the paths are exactly storage/production*.sqlite3.
-<% storage_dir = ENV.fetch("WORKFLOW_STORAGE_DIR", "storage") %>
+<% storage_dir = ENV.fetch("PANEYARD_STORAGE_DIR", "storage") %>
 production:
   primary:
     <<: *default

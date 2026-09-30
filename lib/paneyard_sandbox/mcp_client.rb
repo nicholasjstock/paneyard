@@ -2,7 +2,7 @@ require "json"
 require "net/http"
 require "uri"
 
-module WorkflowSandbox
+module PaneyardSandbox
   # Just enough of an MCP Streamable HTTP client to call this app's own
   # /mcp/run and /mcp/admin tools the way a real CLI does: the initialize
   # handshake, the Mcp-Session-Id it hands back, then tools/call. Responses
@@ -41,7 +41,7 @@ module WorkflowSandbox
       return if @session_id
 
       rpc("initialize", protocolVersion: PROTOCOL_VERSION, capabilities: {},
-        clientInfo: { name: "workflow-sandbox", version: "1" })
+        clientInfo: { name: "paneyard-sandbox", version: "1" })
       notify("notifications/initialized")
     end
 

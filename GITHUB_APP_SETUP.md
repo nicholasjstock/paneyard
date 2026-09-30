@@ -2,7 +2,7 @@
 
 **This is optional.** Without a GitHub App, sessions push with your own `gh auth token` or SSH key; see [GitHub access](./docs/operating.md#4-github-access) for how credentials are chosen. Use an App when you want sessions to act as a bot identity limited to specific repositories rather than as you.
 
-Rails itself makes no GitHub calls: it does not open, update, or watch pull requests. What needs GitHub credentials is each run's session, which pushes its own `workflow/<name>` branch when you ask it to (and may run `gh` if you ask it to). When a GitHub App is configured, every session gets an installation token for the app instead of letting it act as you with your own `gh auth` identity. The token reaches exactly the repositories that installation was granted, which is why "Only select repositories" below is recommended.
+Rails itself makes no GitHub calls: it does not open, update, or watch pull requests. What needs GitHub credentials is each run's session, which pushes its own `paneyard/<name>` branch when you ask it to (and may run `gh` if you ask it to). When a GitHub App is configured, every session gets an installation token for the app instead of letting it act as you with your own `gh auth` identity. The token reaches exactly the repositories that installation was granted, which is why "Only select repositories" below is recommended.
 
 ## Prerequisites
 
@@ -22,7 +22,7 @@ An app created under one can't be installed on repos owned by the other — if y
 1. Go to the URL above for your chosen owner.
 2. Click "New GitHub App"
 3. Fill in the form:
-   - **App name**: `Workflow Orchestrator` (or similar)
+   - **App name**: `Paneyard` (or similar)
    - **Homepage URL**: any valid URL, such as this project's repository page (it is not used)
    - **Webhook URL**: Leave blank (not needed for this usage)
    - **Webhook active**: Uncheck (not needed)

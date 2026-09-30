@@ -55,7 +55,7 @@ Telegram is one adapter behind a platform-neutral core, so Discord, Slack or Mat
 - `RemoteControl::Adapter` is the contract, documented in the class. An adapter receives messages, but only from one-to-one chats, never groups. It hands each one to `RemoteControl::Processor.call(adapter, message)` and says who is on its allow-list. It sends text and a monospace pane. Optionally it edits a pane (live `/pane`), renders Markdown (recaps), publishes a command menu and makes commands tappable. The defaults cover whatever it can't do.
 - `RemoteControl::Adapters::Telegram` is the reference: `Adapter` (event parsing and HTML rendering), `Client`, `Configuration`, and `Poller` (run by `PollTelegramUpdatesJob` from `config/recurring.yml`). `spec/support/fake_remote_control_adapter.rb` is the smallest adapter there is.
 - Register the new adapter in `RemoteControl::Adapters.registry`, and give it a way in: a recurring poll job, a webhook route, or a gateway connection.
-- A sandbox (`bin/sandbox`) refuses every adapter unless it is opted in by name (`WORKFLOW_SANDBOX_<NAME>=1`, see `Orchestrator::Sandbox.allows_remote_control?`), so add a `--<name>` flag to `bin/sandbox` that sets it with a sandbox-only bot or account.
+- A sandbox (`bin/sandbox`) refuses every adapter unless it is opted in by name (`PANEYARD_SANDBOX_<NAME>=1`, see `Orchestrator::Sandbox.allows_remote_control?`), so add a `--<name>` flag to `bin/sandbox` that sets it with a sandbox-only bot or account.
 - Test it the way the Telegram adapter is tested: a local fake of the platform's API (`lib/fake_telegram/`) and an end-to-end spec driving runs through the fake herdr (`spec/integration/telegram_remote_control_spec.rb`).
 
 The design history is in [remote-control.md](./remote-control.md).

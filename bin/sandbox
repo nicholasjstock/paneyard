@@ -3,7 +3,7 @@
 # Solid Queue with this checkout's queue.yml and recurring.yml) on a free
 # loopback port, against its own sqlite files under tmp/, beside a fake herdr
 # whose "agents" are scripted processes that never touch a model. Safe to run
-# from a run session's worktree: WORKFLOW_SANDBOX=1 (Orchestrator::Sandbox)
+# from a run session's worktree: PANEYARD_SANDBOX=1 (Orchestrator::Sandbox)
 # refuses the operator's herdr socket, Telegram, GitHub tokens, and any git
 # worktree or process outside the sandbox. It never touches
 # storage/production*.sqlite3, tmp/pids/production.pid or the production port.
@@ -17,7 +17,7 @@
 #   bin/sandbox verify [--keep]
 #                        boot a fresh instance under tmp/sandbox-verify and run a
 #                        run lifecycle through it end to end (see
-#                        WorkflowSandbox::Verify); exits non-zero on failure
+#                        PaneyardSandbox::Verify); exits non-zero on failure
 #
 # Queue a run with a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]`
 # directive in its task to choose what the fake agent does (default: done).
@@ -32,7 +32,7 @@
 #                 bot: getUpdates hands each message to one poller, so sharing
 #                 production's bot would take messages away from it. Create
 #                 one with @BotFather and put its token and your user id in
-#                 the environment or in ~/.config/workflow-orchestrator/sandbox.env:
+#                 the environment or in ~/.config/paneyard/sandbox.env:
 #                   SANDBOX_TELEGRAM_BOT_TOKEN=123456:ABC...
 #                   SANDBOX_TELEGRAM_ALLOWED_USER_IDS=11111111
 #
@@ -42,15 +42,15 @@
 require "fileutils"
 require "json"
 require "net/http"
-require_relative "../lib/workflow_sandbox/instance"
-require_relative "../lib/workflow_sandbox/verify"
+require_relative "../lib/paneyard_sandbox/instance"
+require_relative "../lib/paneyard_sandbox/verify"
 
 APP_ROOT = File.expand_path("..", __dir__)
 
-SANDBOX_ENV_FILE = File.expand_path("~/.config/workflow-orchestrator/sandbox.env")
+SANDBOX_ENV_FILE = File.expand_path("~/.config/paneyard/sandbox.env")
 
 def instance(name, env: {}, fake_herdr: true)
-  WorkflowSandbox::Instance.new(app_root: APP_ROOT, root: File.join(APP_ROOT, "tmp", name), env:, fake_herdr:)
+  PaneyardSandbox::Instance.new(app_root: APP_ROOT, root: File.join(APP_ROOT, "tmp", name), env:, fake_herdr:)
 end
 
 def sandbox_setting(key)
@@ -71,7 +71,7 @@ def real_herdr_env
   socket = ENV["HERDR_SOCKET_PATH"].to_s.strip.empty? ? File.expand_path("~/.config/herdr/herdr.sock") : ENV["HERDR_SOCKET_PATH"]
   abort "bin/sandbox: --real-herdr, but there is no herdr socket at #{socket}" unless File.socket?(socket)
 
-  { "WORKFLOW_SANDBOX_REAL_HERDR" => "1", "HERDR_SOCKET_PATH" => socket }
+  { "PANEYARD_SANDBOX_REAL_HERDR" => "1", "HERDR_SOCKET_PATH" => socket }
 end
 
 # Asks Telegram which bot the token belongs to (getMe reads nothing from the
@@ -90,7 +90,7 @@ def telegram_env
   abort "bin/sandbox: Telegram rejected SANDBOX_TELEGRAM_BOT_TOKEN: #{me['description']}" unless me["ok"]
 
   @telegram_bot = "@#{me.dig('result', 'username')}"
-  { "WORKFLOW_SANDBOX_TELEGRAM" => "1", "TELEGRAM_BOT_TOKEN" => token, "TELEGRAM_ALLOWED_USER_IDS" => users }
+  { "PANEYARD_SANDBOX_TELEGRAM" => "1", "TELEGRAM_BOT_TOKEN" => token, "TELEGRAM_ALLOWED_USER_IDS" => users }
 rescue SocketError, SystemCallError, JSON::ParserError => error
   abort "bin/sandbox: could not reach Telegram to check the sandbox bot: #{error.message}"
 end
@@ -152,7 +152,7 @@ def boot(instance, modes: [])
   puts "  log        #{instance.log_path}"
   warn_untrusted!(File.join(root, "main")) if modes.include?("real-herdr")
   [ name, id ]
-rescue WorkflowSandbox::Instance::Error => error
+rescue PaneyardSandbox::Instance::Error => error
   abort "bin/sandbox: #{error.message}"
 end
 
@@ -193,7 +193,7 @@ when "verify"
   passed = false
   begin
     name, id = boot(sandbox)
-    passed = WorkflowSandbox::Verify.new(sandbox, workspace: name, workspace_id: id).call
+    passed = PaneyardSandbox::Verify.new(sandbox, workspace: name, workspace_id: id).call
     puts "Last lines of #{sandbox.log_path}:\n#{sandbox.log_tail(80)}" unless passed
   ensure
     if ARGV.include?("--keep")

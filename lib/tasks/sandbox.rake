@@ -1,9 +1,9 @@
 require "open3"
 
 namespace :sandbox do
-  desc "Create the sandbox's scratch git repo and register it as a workspace (WORKFLOW_SANDBOX=1 only)"
+  desc "Create the sandbox's scratch git repo and register it as a workspace (PANEYARD_SANDBOX=1 only)"
   task seed: :environment do
-    abort "sandbox:seed only runs in a sandbox instance (WORKFLOW_SANDBOX=1); see bin/sandbox" unless Orchestrator::Sandbox.enabled?
+    abort "sandbox:seed only runs in a sandbox instance (PANEYARD_SANDBOX=1); see bin/sandbox" unless Orchestrator::Sandbox.enabled?
 
     name = ENV.fetch("SANDBOX_WORKSPACE", "sandbox-demo")
     project = Pathname(Orchestrator::Sandbox.root).join("repos", name)
@@ -20,8 +20,8 @@ namespace :sandbox do
       git.call("init", "--bare", "-b", "main", origin.to_s, dir: project)
       git.call("init", "-b", "main")
       git.call("config", "user.email", "sandbox@example.test")
-      git.call("config", "user.name", "Workflow Sandbox")
-      File.write(main.join("README.md"), "Scratch repository for a workflow-orchestrator sandbox.\n")
+      git.call("config", "user.name", "Paneyard Sandbox")
+      File.write(main.join("README.md"), "Scratch repository for a paneyard sandbox.\n")
       git.call("add", "README.md")
       git.call("commit", "-m", "Initial commit")
       git.call("remote", "add", "origin", origin.to_s)

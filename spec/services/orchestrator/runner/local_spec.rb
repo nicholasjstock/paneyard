@@ -71,10 +71,10 @@ RSpec.describe Orchestrator::Runner::Local do
     expect(opened).to include("pane_id" => "w1:p1", "tab_id" => "w1:t1", "workspace_id" => "w1")
     expect(opened["prompt_path"]).to eq(File.join(runner.runtime_root, "run_1", "prompt.txt"))
     expect(File.read(opened["prompt_path"])).to eq("Do it")
-    expect(JSON.parse(File.read(opened["mcp_config_path"])).dig("mcpServers", "workflow", "url"))
+    expect(JSON.parse(File.read(opened["mcp_config_path"])).dig("mcpServers", "paneyard", "url"))
       .to eq("http://127.0.0.1:3000/mcp/run")
     expect(herdr).to have_received(:workspace_create).with(hash_including(
-      cwd: "/tmp", focus: false, env: hash_including("GH_TOKEN" => "ghs", "WORKFLOW_RUN_TOKEN" => "tok")
+      cwd: "/tmp", focus: false, env: hash_including("GH_TOKEN" => "ghs", "PANEYARD_RUN_TOKEN" => "tok")
     ))
   end
 end

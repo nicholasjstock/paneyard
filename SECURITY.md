@@ -1,6 +1,6 @@
 # Security
 
-workflow-orchestrator is a single-operator tool that runs on your own machine and starts coding agents with full access to your repositories. Read this before you run it, and before you reach it from anywhere other than that machine.
+Paneyard is a single-operator tool that runs on your own machine and starts coding agents with full access to your repositories. Read this before you run it, and before you reach it from anywhere other than that machine.
 
 ## Threat model
 
@@ -11,13 +11,13 @@ workflow-orchestrator is a single-operator tool that runs on your own machine an
 **Loopback only.** What keeps other people out is where the app listens and which names it answers to:
 
 - `bin/production` (and so `bin/service`) binds Puma to `127.0.0.1`. `bin/dev` binds to `localhost`. Nothing else on your network can connect.
-- In production the app answers only requests whose `Host` is `localhost`, `127.0.0.1` or `[::1]` (any port). Any other name gets a `403`, and that includes `/up`. This is Rails' host authorization (`config.hosts`, built by `lib/workflow_allowed_hosts.rb`). It stops **DNS rebinding**, where a web page you visit points its own hostname at `127.0.0.1` so that it becomes same-origin with this UI and can read pages and submit forms. The MCP endpoints run the same check again through the `mcp` gem's `dns_rebinding_protection`, which also rejects a foreign `Origin`.
+- In production the app answers only requests whose `Host` is `localhost`, `127.0.0.1` or `[::1]` (any port). Any other name gets a `403`, and that includes `/up`. This is Rails' host authorization (`config.hosts`, built by `lib/paneyard_allowed_hosts.rb`). It stops **DNS rebinding**, where a web page you visit points its own hostname at `127.0.0.1` so that it becomes same-origin with this UI and can read pages and submit forms. The MCP endpoints run the same check again through the `mcp` gem's `dns_rebinding_protection`, which also rejects a foreign `Origin`.
 - Forms are protected by Rails' CSRF tokens, with an `Origin` check (on by default). Action Cable accepts same-origin connections only.
 
 Two settings widen this. Use them only if you really mean to reach the app from somewhere else:
 
 - `BINDING=0.0.0.0` (or `bin/production -b ...`) listens on other interfaces.
-- `WORKFLOW_ALLOWED_HOSTS=name1,name2` (comma-separated, `config.hosts` syntax, so a leading `.` also allows subdomains) accepts further `Host` names, for example a reverse proxy or a tailnet name. The host of `WORKFLOW_RAILS_URL`, the URL sessions use to reach `/mcp`, is accepted automatically.
+- `PANEYARD_ALLOWED_HOSTS=name1,name2` (comma-separated, `config.hosts` syntax, so a leading `.` also allows subdomains) accepts further `Host` names, for example a reverse proxy or a tailnet name. The host of `PANEYARD_RAILS_URL`, the URL sessions use to reach `/mcp`, is accepted automatically.
 
 If you do either, whatever sits in front of the app has to provide the authentication. The app has none. Anyone who can reach it can run code as you.
 
@@ -39,7 +39,7 @@ Reports are welcome for anything that lets someone **other than the operator** a
 - using a run session's `/mcp/run` capability after its session has ended, or to act as a different session;
 - a Telegram user who is not on the allow-list getting the bot to do anything;
 - an MCP tool that exposes more than it is documented to (arbitrary SQL, file reads, command execution);
-- a sandbox instance (`bin/sandbox`, `WORKFLOW_SANDBOX=1`) reaching outside itself: the operator's herdr, Telegram, GitHub tokens, or paths outside its root;
+- a sandbox instance (`bin/sandbox`, `PANEYARD_SANDBOX=1`) reaching outside itself: the operator's herdr, Telegram, GitHub tokens, or paths outside its root;
 - credentials or tokens leaking into logs, pages, prompts or anywhere else they don't belong.
 
 ## Out of scope
@@ -47,7 +47,7 @@ Reports are welcome for anything that lets someone **other than the operator** a
 These are how the tool is meant to work, not vulnerabilities:
 
 - An agent session doing something harmful with the access it is deliberately given, including after reading a malicious issue, web page or dependency. You choose which repositories to register and which tasks to run.
-- Anything done by someone who can already run code as your user on the machine, or who can reach the app because you set `BINDING` or `WORKFLOW_ALLOWED_HOSTS` without putting authentication in front of it.
+- Anything done by someone who can already run code as your user on the machine, or who can reach the app because you set `BINDING` or `PANEYARD_ALLOWED_HOSTS` without putting authentication in front of it.
 - The absence of authentication, multi-user support or per-user permissions.
 - Issues in the agent CLIs (`claude`, `codex`, `opencode`), herdr, Telegram or GitHub themselves. Please report those to their maintainers.
 - Denial of service against a local, single-user process.

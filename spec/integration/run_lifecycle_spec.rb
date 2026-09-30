@@ -24,13 +24,13 @@ RSpec.describe "a run's lifecycle", type: :request do
     run = queue_and_launch("Exercise the lifecycle")
     session = run.live_session
 
-    expect(run).to have_attributes(status: "running", branch_name: start_with("workflow/"))
+    expect(run).to have_attributes(status: "running", branch_name: start_with("paneyard/"))
     expect(File.directory?(run.target_root)).to be(true)
     expect(session).to have_attributes(status: "running", herdr_pane_id: "w1:p1")
     expect(process_alive?(session.pid)).to be(true)
     create = fake_herdr.requests_for("workspace.create").last
     expect(create).to include("cwd" => run.target_root, "focus" => false)
-    expect(create["env"]).to include("WORKFLOW_RUN_ID" => run.run_id)
+    expect(create["env"]).to include("PANEYARD_RUN_ID" => run.run_id)
     expect(fake_herdr.requests_for("agent.start").last).to include("kind" => "claude", "pane_id" => "w1:p1")
     expect(fake_herdr.requests_for("agent.prompt").last["text"]).to include("# Task", "Exercise the lifecycle")
 

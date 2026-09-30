@@ -3,13 +3,13 @@ require "json"
 require "net/http"
 require "securerandom"
 require "socket"
-require_relative "../workflow_sandbox"
+require_relative "../paneyard_sandbox"
 
-module WorkflowSandbox
+module PaneyardSandbox
   # One isolated instance of this checkout's code: bin/production (so Puma and
   # Solid Queue, with this checkout's queue.yml and recurring.yml, exactly as
   # bin/service runs them) on a free port, against sqlite files under its own
-  # storage dir, beside a fake herdr, with WORKFLOW_SANDBOX=1 so
+  # storage dir, beside a fake herdr, with PANEYARD_SANDBOX=1 so
   # Orchestrator::Sandbox keeps it from reaching anything real.
   #
   # Its pids and port live in <root>/instance.json, so a later `bin/sandbox
@@ -43,7 +43,7 @@ module WorkflowSandbox
     end
 
     def herdr_socket_path
-      WorkflowSandbox.herdr_socket_path(root)
+      PaneyardSandbox.herdr_socket_path(root)
     end
 
     # What the running instance was started with (bin/sandbox status).
@@ -111,18 +111,18 @@ module WorkflowSandbox
       {
         "RAILS_ENV" => "production",
         "PORT" => port&.to_s,
-        "WORKFLOW_SANDBOX" => "1",
-        "WORKFLOW_SANDBOX_ROOT" => root,
-        "WORKFLOW_STORAGE_DIR" => storage_dir,
-        "WORKFLOW_RAILS_URL" => port && "http://127.0.0.1:#{port}",
+        "PANEYARD_SANDBOX" => "1",
+        "PANEYARD_SANDBOX_ROOT" => root,
+        "PANEYARD_STORAGE_DIR" => storage_dir,
+        "PANEYARD_RAILS_URL" => port && "http://127.0.0.1:#{port}",
         # Belt and braces: Orchestrator::Sandbox already ignores these.
         "HERDR_SOCKET_PATH" => herdr_socket_path,
         "TELEGRAM_BOT_TOKEN" => nil,
         "TELEGRAM_ALLOWED_USER_IDS" => nil,
         "GITHUB_APP_ID" => nil,
         "GITHUB_APP_PRIVATE_KEY" => nil,
-        "WORKFLOW_RUN_TOKEN" => nil,
-        "WORKFLOW_RUN_ID" => nil,
+        "PANEYARD_RUN_TOKEN" => nil,
+        "PANEYARD_RUN_ID" => nil,
         "PIDFILE" => File.join(root, "puma.pid")
       }.merge(secret_env).merge(@extra_env)
     end

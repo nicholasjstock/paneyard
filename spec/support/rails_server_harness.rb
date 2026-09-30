@@ -6,7 +6,7 @@ require "timeout"
 module RailsServerHarness
   def with_test_rails_server
     port = pick_free_port
-    log_dir = Dir.mktmpdir("workflow-test-server")
+    log_dir = Dir.mktmpdir("paneyard-test-server")
     log_path = File.join(log_dir, "rails-server.log")
     pidfile = File.join(log_dir, "rails-server.pid")
     env = {

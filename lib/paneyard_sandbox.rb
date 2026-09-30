@@ -8,9 +8,9 @@ require "tmpdir"
 # Plain Ruby on purpose -- bin/sandbox, bin/preflight and script/fake_herdr use
 # it without booting Rails. Inside Rails, Orchestrator::Sandbox is the switch
 # the application code consults.
-module WorkflowSandbox
-  ENABLED_ENV_VAR = "WORKFLOW_SANDBOX".freeze
-  ROOT_ENV_VAR = "WORKFLOW_SANDBOX_ROOT".freeze
+module PaneyardSandbox
+  ENABLED_ENV_VAR = "PANEYARD_SANDBOX".freeze
+  ROOT_ENV_VAR = "PANEYARD_SANDBOX_ROOT".freeze
 
   module_function
 
@@ -26,7 +26,7 @@ module WorkflowSandbox
   # capped at 104 bytes on macOS, and a worktree's tmp/ is already close to
   # that. Deterministic so Rails and the scripts agree without passing it.
   def herdr_socket_path(root = self.root)
-    File.join(Dir.tmpdir, "workflow-sandbox-#{Digest::SHA256.hexdigest(root)[0, 12]}.sock")
+    File.join(Dir.tmpdir, "paneyard-sandbox-#{Digest::SHA256.hexdigest(root)[0, 12]}.sock")
   end
 
   def inside?(path, root = self.root)

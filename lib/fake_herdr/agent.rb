@@ -1,6 +1,6 @@
 require "json"
 require "securerandom"
-require_relative "../workflow_sandbox/mcp_client"
+require_relative "../paneyard_sandbox/mcp_client"
 
 module FakeHerdr
   # The process FakeHerdr::Server launches in place of claude/codex/opencode.
@@ -101,7 +101,7 @@ module FakeHerdr
 
     def report(outcome)
       url, token = mcp_endpoint
-      result = WorkflowSandbox::McpClient.new(url, token:).call_tool(
+      result = PaneyardSandbox::McpClient.new(url, token:).call_tool(
         "report_idle", outcome:, summary: "Fake agent reported `#{outcome}` from #{Dir.pwd}."
       )
       say("report_idle #{outcome}: #{result.to_json}")
@@ -114,11 +114,11 @@ module FakeHerdr
     def mcp_endpoint
       config_path = @argv[@argv.index("--mcp-config") + 1] if @argv.include?("--mcp-config")
       if config_path && File.exist?(config_path)
-        server = JSON.parse(File.read(config_path)).dig("mcpServers", "workflow")
+        server = JSON.parse(File.read(config_path)).dig("mcpServers", "paneyard")
         return [ server.fetch("url"), server.dig("headers", "Authorization").to_s.delete_prefix("Bearer ") ]
       end
 
-      [ @env.fetch("FAKE_AGENT_MCP_URL"), @env.fetch("WORKFLOW_RUN_TOKEN") ]
+      [ @env.fetch("FAKE_AGENT_MCP_URL"), @env.fetch("PANEYARD_RUN_TOKEN") ]
     end
 
     def control(**update)

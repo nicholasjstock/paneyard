@@ -27,7 +27,7 @@ module Orchestrator
         end
         @transports[session.id] ||= MCP::Server::Transports::StreamableHTTPTransport.new(
           RunMcpServer.build(server_context: { run_session_id: session.id }),
-          allowed_hosts: WorkflowAllowedHosts.extra
+          allowed_hosts: PaneyardAllowedHosts.extra
         )
       end
     end

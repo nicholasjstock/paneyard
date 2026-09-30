@@ -39,7 +39,7 @@
 # Generated workflow artifacts, logs, prompts, and state never belong in source control.
 /front/demo-output/agents-sdk/
 .DS_Store
-/.workflow-orchestrator/
+/.paneyard/
 
 # Ignore key files for decrypting credentials and more.
 /config/*.key

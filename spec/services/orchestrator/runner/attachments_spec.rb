@@ -9,7 +9,7 @@ RSpec.describe Orchestrator::Runner::Attachments do
     described_class.store(root, "run-1", "b.log", "second")
     path = described_class.store(root, "run-1", "a.db", "first")
 
-    expect(path).to eq(File.join(root, ".workflow-orchestrator", "artifacts", "run-1", "a.db"))
+    expect(path).to eq(File.join(root, ".paneyard", "artifacts", "run-1", "a.db"))
     expect(described_class.list(root, "run-1")).to eq(
       [ { "name" => "a.db", "content" => "first" }, { "name" => "b.log", "content" => "second" } ]
     )

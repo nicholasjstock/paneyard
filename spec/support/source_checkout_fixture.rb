@@ -7,7 +7,7 @@
 # differently.
 module SourceCheckoutFixture
   def create_source_checkout
-    parent = Dir.mktmpdir("workflow-source-checkout")
+    parent = Dir.mktmpdir("paneyard-source-checkout")
     main = File.join(parent, "main")
     FileUtils.mkdir_p(main)
     system("git", "-C", main, "init", "-b", "main", out: File::NULL, err: File::NULL) || raise("could not initialize source checkout")
@@ -16,7 +16,7 @@ module SourceCheckoutFixture
     File.write(File.join(main, "README.md"), "source checkout fixture\n")
     system("git", "-C", main, "add", "README.md") || raise("could not stage source checkout")
     system("git", "-C", main, "commit", "-m", "Initialize spec source checkout", out: File::NULL, err: File::NULL) || raise("could not commit source checkout")
-    system("git", "-C", main, "remote", "add", "origin", "https://example.test/workflow.git") || raise("could not configure source checkout remote")
+    system("git", "-C", main, "remote", "add", "origin", "https://example.test/paneyard.git") || raise("could not configure source checkout remote")
     parent
   end
 end

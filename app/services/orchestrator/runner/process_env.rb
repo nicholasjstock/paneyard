@@ -8,7 +8,7 @@ module Orchestrator
     #
     #   workspace env vars (orchestrator, Orchestrator::WorkspaceEnvVars)
     #   < this machine's process env, sanitized (below)
-    #   < the run's identity: WORKFLOW_RUN_ID and its /mcp/run capability
+    #   < the run's identity: PANEYARD_RUN_ID and its /mcp/run capability
     #   < git credentials
     #   < the driver's own extras (Runner::SessionArgs)
     #

@@ -1,6 +1,6 @@
 # Operating the orchestrator
 
-This guide is for **operators**: people running Workflow Orchestrator and pointing it at their repositories. Start with the [README](../README.md) (and its security model) if you haven't. If you are changing the orchestrator's own code, read [AGENTS.md](../AGENTS.md) and [CONTRIBUTING.md](../CONTRIBUTING.md) instead.
+This guide is for **operators**: people running Paneyard and pointing it at their repositories. Start with the [README](../README.md) (and its security model) if you haven't. If you are changing the orchestrator's own code, read [AGENTS.md](../AGENTS.md) and [CONTRIBUTING.md](../CONTRIBUTING.md) instead.
 
 Every rule below names the code it comes from, so you can check it.
 
@@ -27,10 +27,10 @@ bin/setup
 PORT=3000 bin/dev
 ```
 
-`bin/dev` starts Puma and Solid Queue together. Before starting either one, it checks the bundle and pending migrations and exits with a recovery command if something is missing. Without `PORT` it picks a random free port, and gives both processes the same one: Solid Queue is what launches sessions, and it points each session's MCP server at `SessionArgs.rails_mcp_url` (`WORKFLOW_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`). If you set `WORKFLOW_RAILS_URL`, keep it in step with `PORT`:
+`bin/dev` starts Puma and Solid Queue together. Before starting either one, it checks the bundle and pending migrations and exits with a recovery command if something is missing. Without `PORT` it picks a random free port, and gives both processes the same one: Solid Queue is what launches sessions, and it points each session's MCP server at `SessionArgs.rails_mcp_url` (`PANEYARD_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`). If you set `PANEYARD_RAILS_URL`, keep it in step with `PORT`:
 
 ```sh
-PORT=3300 WORKFLOW_RAILS_URL=http://127.0.0.1:3300 bin/dev
+PORT=3300 PANEYARD_RAILS_URL=http://127.0.0.1:3300 bin/dev
 ```
 
 `bin/dev` is not isolated: it runs the full recurring schedule (dispatch, reconcile, Telegram polling if configured, the worktree janitor) against your real herdr. To try things without that, use [the sandbox](#the-sandbox).
@@ -43,12 +43,12 @@ For the instance you keep running, use `bin/service start|stop|restart|status`. 
 bin/service start
 ```
 
-- **Loopback only.** `bin/production` binds to `127.0.0.1` (`BINDING`), and production answers only loopback `Host` names (`lib/workflow_allowed_hosts.rb`). Read [SECURITY.md](../SECURITY.md) before widening either with `BINDING` or `WORKFLOW_ALLOWED_HOSTS`: the app has no authentication.
+- **Loopback only.** `bin/production` binds to `127.0.0.1` (`BINDING`), and production answers only loopback `Host` names (`lib/paneyard_allowed_hosts.rb`). Read [SECURITY.md](../SECURITY.md) before widening either with `BINDING` or `PANEYARD_ALLOWED_HOSTS`: the app has no authentication.
 - **Credentials.** Production needs a `secret_key_base` from Rails credentials (`config/credentials.yml.enc` plus your own `config/master.key`) or the `SECRET_KEY_BASE` environment variable. See the note in the README's [Quickstart](../README.md#3-start-the-orchestrator).
-- **Restarting.** Application code is hot-reloaded (`WORKFLOW_HOT_RELOAD=1`), but `config/queue.yml`, `config/recurring.yml`, credentials and initializers are read once at boot. After changing any of them, run `bin/service restart`. It first runs `bin/preflight --prod-copy` (the new code booted on a scratch port against a copy of the production database) and leaves the running instance alone if that fails. `bin/service restart --skip-preflight` skips the check.
+- **Restarting.** Application code is hot-reloaded (`PANEYARD_HOT_RELOAD=1`), but `config/queue.yml`, `config/recurring.yml`, credentials and initializers are read once at boot. After changing any of them, run `bin/service restart`. It first runs `bin/preflight --prod-copy` (the new code booted on a scratch port against a copy of the production database) and leaves the running instance alone if that fails. `bin/service restart --skip-preflight` skips the check.
 - **Console commands** against this instance need `RAILS_ENV=production`, for example `RAILS_ENV=production bin/rails runner '...'`.
 
-The health endpoint `/up` returns `{"status":"ok","service":"workflow-orchestrator"}` with an `X-Workflow-Service: workflow-orchestrator` header, so you can't mistake it for a target Rails app's own `/up`.
+The health endpoint `/up` returns `{"status":"ok","service":"paneyard"}` with an `X-Paneyard-Service: paneyard` header, so you can't mistake it for a target Rails app's own `/up`.
 
 ## Preparing a repository
 
@@ -61,8 +61,8 @@ A workspace has a `root_path`: a plain directory that you own and that holds the
 ```
 ~/code/my-app/                    <- root_path (what you register)
 ├── main/                         <- source checkout, on branch main
-├── add-cart-total-1a2b/          <- run worktree, branch workflow/add-cart-total-1a2b
-└── fix-tax-rounding-9f3c/        <- run worktree, branch workflow/fix-tax-rounding-9f3c
+├── add-cart-total-1a2b/          <- run worktree, branch paneyard/add-cart-total-1a2b
+└── fix-tax-rounding-9f3c/        <- run worktree, branch paneyard/fix-tax-rounding-9f3c
 ```
 
 Setting that up for a repository you already have on GitHub:
@@ -80,7 +80,7 @@ Before creating a worktree, `GitWorktree.validate_source!` checks all of these, 
 
 - `<root_path>/main` exists and is a git work tree.
 - Its directory is named `main`, **and it has the `main` branch checked out**. A repository whose default branch is `master` or anything else needs a local `main` branch. The simplest fix is to rename the default branch.
-- It has an `origin` remote. If you ask a session to push, it pushes `workflow/<name>` to `origin`, so `origin` must be a remote this machine can push to. It pushes only when asked to push, not when asked to commit (`Orchestrator::RunPrompt`).
+- It has an `origin` remote. If you ask a session to push, it pushes `paneyard/<name>` to `origin`, so `origin` must be a remote this machine can push to. It pushes only when asked to push, not when asked to commit (`Orchestrator::RunPrompt`).
 
 Each run branches from the source checkout's **current local `HEAD`**. The orchestrator never fetches or pulls, so keep `<root_path>/main` up to date yourself (`git -C ~/code/my-app/main pull`). Uncommitted changes in `main` are not carried into a run's worktree.
 
@@ -142,7 +142,7 @@ What that means in practice:
 
 From the workspace's runs page, choose **Queue a task**, give it a task, and pick a driver (and optionally a model). Or queue it over MCP (below). Within a few seconds `RunDispatchJob` claims it, and a herdr workspace named after the worktree opens with the agent on the left and `nvim` on the right, or with whatever tabs and panes that workspace's layout defines.
 
-It worked when the session calls `report_idle` and the run screen shows its checkpoint. Ask it to commit and push, and `git -C ~/code/my-app/main ls-remote origin 'workflow/*'` then lists the branch.
+It worked when the session calls `report_idle` and the run screen shows its checkpoint. Ask it to commit and push, and `git -C ~/code/my-app/main ls-remote origin 'paneyard/*'` then lists the branch.
 
 If the launch fails, the run screen shows the error. The common ones map back to the steps above:
 
@@ -175,11 +175,11 @@ tabs:
         split: { of: dev-log, direction: down }
 ```
 
-Have as many tabs as you like, each with as many splits as you like. The agent pane is the only one that is required, and it is always the first pane of the first tab, which is the tab a run opens on. Every other pane is split off an earlier pane in its own tab, `right` or `down`; `ratio` is the share the pane being split keeps. A `command` is typed into the pane's own shell in the run's worktree, and every pane gets the same environment as the agent (`GH_TOKEN`, `WORKFLOW_RUN_ID`, the workspace's recorded env vars). A pane with no command is a plain shell. The panes are only set up when the session starts. The orchestrator never watches or restarts them, and Close session, or the agent pane going away, closes all of them. See [workspace-layouts.md](./workspace-layouts.md) for the design.
+Have as many tabs as you like, each with as many splits as you like. The agent pane is the only one that is required, and it is always the first pane of the first tab, which is the tab a run opens on. Every other pane is split off an earlier pane in its own tab, `right` or `down`; `ratio` is the share the pane being split keeps. A `command` is typed into the pane's own shell in the run's worktree, and every pane gets the same environment as the agent (`GH_TOKEN`, `PANEYARD_RUN_ID`, the workspace's recorded env vars). A pane with no command is a plain shell. The panes are only set up when the session starts. The orchestrator never watches or restarts them, and Close session, or the agent pane going away, closes all of them. See [workspace-layouts.md](./workspace-layouts.md) for the design.
 
 ## How a run works
 
-1. **Queue it.** Creating a run starts nothing. It waits for a slot. The cap is global across every workspace: `WORKFLOW_MAX_CONCURRENT_RUNS`, default 4.
+1. **Queue it.** Creating a run starts nothing. It waits for a slot. The cap is global across every workspace: `PANEYARD_MAX_CONCURRENT_RUNS`, default 4.
 2. **Dispatch.** `RunDispatchJob` claims the oldest queued run. `StartRunSessionJob` provisions its worktree and opens one interactive session in a herdr pane rooted there, with the task as its first prompt.
 3. **Work.** The session owns the job. It explores, edits, and runs the repository's own commands, then leaves its changes uncommitted for you to try. Ask it to commit, push, or merge into `main` when you're happy; each is a separate request, and it does only the one you ask for. Watch it in your herdr client, or send it a message from the run screen.
 4. **Report.** The session calls the `report_idle` MCP tool (`done`, `blocked`, or `failed`) each time it stops working. This does not end the run: the pane stays open and the slot stays held. Each report is a checkpoint covering the interval since the last one, written as a full Markdown report, and the run screen lists them in order.
@@ -196,7 +196,7 @@ There is no cost or token accounting for sessions: they are real interactive ter
 - **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, optional `workspace` name and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one is the default when `workspace` is omitted), and `ping_tool`. For example, to add it to Claude Code:
 
   ```sh
-  claude mcp add --transport http workflow-admin http://127.0.0.1:3001/mcp/admin
+  claude mcp add --transport http paneyard-admin http://127.0.0.1:3001/mcp/admin
   ```
 
 See AGENTS.md's "MCP Boundary" for the design rules behind both.
@@ -217,9 +217,9 @@ bin/sandbox reset                               # stop and delete tmp/sandbox
 bin/sandbox verify [--keep]                     # boot a fresh instance and drive a run through it end to end
 ```
 
-It runs real Puma and Solid Queue with the real recurring schedule on a free `127.0.0.1` port, with its own SQLite files, pid and log under `tmp/sandbox/`, beside a **fake herdr** whose "agents" are scripted processes that never call a model. Put a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]` directive in a task to choose what the fake agent does (default `done`). While `WORKFLOW_SANDBOX=1`, `Orchestrator::Sandbox` refuses your real herdr socket, remote-control credentials, GitHub tokens, and any worktree or process outside the sandbox. It never touches `storage/production*.sqlite3`, `tmp/pids/production.pid` or the production port.
+It runs real Puma and Solid Queue with the real recurring schedule on a free `127.0.0.1` port, with its own SQLite files, pid and log under `tmp/sandbox/`, beside a **fake herdr** whose "agents" are scripted processes that never call a model. Put a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]` directive in a task to choose what the fake agent does (default `done`). While `PANEYARD_SANDBOX=1`, `Orchestrator::Sandbox` refuses your real herdr socket, remote-control credentials, GitHub tokens, and any worktree or process outside the sandbox. It never touches `storage/production*.sqlite3`, `tmp/pids/production.pid` or the production port.
 
 Two opt-ins bring real integrations back, one at a time:
 
 - `--real-herdr` opens the sandbox's runs in your own herdr (workspaces labelled `[sandbox] ...`) running the real agent CLI, which **spends real model usage**, on throwaway tasks in the scratch repository.
-- `--telegram` makes the sandbox poll and answer Telegram as a **second bot**. Give it its own token and your user id in `SANDBOX_TELEGRAM_BOT_TOKEN` / `SANDBOX_TELEGRAM_ALLOWED_USER_IDS` (in the environment or `~/.config/workflow-orchestrator/sandbox.env`). Never reuse your main instance's bot: Telegram hands each message to one poller, so two instances sharing a bot split your messages.
+- `--telegram` makes the sandbox poll and answer Telegram as a **second bot**. Give it its own token and your user id in `SANDBOX_TELEGRAM_BOT_TOKEN` / `SANDBOX_TELEGRAM_ALLOWED_USER_IDS` (in the environment or `~/.config/paneyard/sandbox.env`). Never reuse your main instance's bot: Telegram hands each message to one poller, so two instances sharing a bot split your messages.

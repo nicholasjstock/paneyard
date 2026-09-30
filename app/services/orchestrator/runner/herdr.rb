@@ -200,7 +200,7 @@ module Orchestrator
       end
 
       def request(method, **params)
-        id = "workflow:#{method}:#{SecureRandom.hex(4)}"
+        id = "paneyard:#{method}:#{SecureRandom.hex(4)}"
         Timeout.timeout(REQUEST_TIMEOUT_SECONDS) do
           socket = UNIXSocket.new(socket_path)
           begin

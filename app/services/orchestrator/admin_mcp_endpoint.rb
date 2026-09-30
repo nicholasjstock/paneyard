@@ -17,7 +17,7 @@ module Orchestrator
   class AdminMcpEndpoint
     def initialize
       @transport = MCP::Server::Transports::StreamableHTTPTransport.new(
-        AdminMcpServer.build, allowed_hosts: WorkflowAllowedHosts.extra
+        AdminMcpServer.build, allowed_hosts: PaneyardAllowedHosts.extra
       )
     end
 

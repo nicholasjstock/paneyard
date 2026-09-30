@@ -2,13 +2,13 @@ module Orchestrator
   module Runner
     # Files the operator attached to a run at launch, kept on the runner's
     # machine under the workspace's main checkout
-    # (<main>/.workflow-orchestrator/artifacts/<run>/), since that is where
+    # (<main>/.paneyard/artifacts/<run>/), since that is where
     # the session can read them. They are stored before the run's worktree
     # exists, which is why they live under main rather than the worktree.
     module Attachments
       module_function
 
-      OUTPUT_DIR = File.join(".workflow-orchestrator", "artifacts")
+      OUTPUT_DIR = File.join(".paneyard", "artifacts")
 
       def dir(source_root, run_id)
         File.join(source_root, OUTPUT_DIR, sanitize_run_id(run_id))

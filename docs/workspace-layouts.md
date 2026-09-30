@@ -54,7 +54,7 @@ was created or closed.
 
 **Found live, relevant to this design: split panes do not inherit the
 workspace's env.** The env passed to `workspace.create` applies to the root
-pane only. This run's agent pane has `WORKFLOW_RUN_ID`, `WORKFLOW_RUN_TOKEN`
+pane only. This run's agent pane has `PANEYARD_RUN_ID`, `PANEYARD_RUN_TOKEN`
 and `GH_TOKEN`. Its `nvim .` split (`ps eww` on the nvim pid) has only the
 herdr-injected `HERDR_*` values. Every pane therefore gets exactly the env we
 pass on the call that creates it, and nothing else. Since every pane is to get
@@ -221,11 +221,11 @@ Rules:
 **Env: every pane gets all of it (operator decision).** Every pane, including
 the editor, log tails and plain shells, gets the same env hash the agent gets:
 `SessionEnv.for_session(run:, capability_token:, extra:)`. That is the
-workspace's recorded env vars, the sanitised process env, `WORKFLOW_RUN_ID`,
+workspace's recorded env vars, the sanitised process env, `PANEYARD_RUN_ID`,
 the run's MCP capability token, `GH_TOKEN` with the git credential helper,
 and the driver's extras. So `git push` from the nvim pane or a spare shell
 works exactly as it does for the agent, and a command in any pane can
-reference `$WORKFLOW_RUN_ID` and the rest. `SessionLayout` passes that one hash
+reference `$PANEYARD_RUN_ID` and the rest. `SessionLayout` passes that one hash
 to every `workspace.create`, `tab.create` and `pane.split` it makes. This is a
 change from today, where the nvim split has none of it (§1). The token dies
 with the session anyway: `RunSession.authenticate_capability` only accepts

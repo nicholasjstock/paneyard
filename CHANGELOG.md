@@ -11,9 +11,9 @@ The first public version. It includes:
 ### Runs and sessions
 
 - Workspaces: register a repository's parent directory, whose `main` checkout every run branches from. Runs, sessions, reports and worktrees are scoped to their workspace.
-- A global run queue with a concurrency cap (`WORKFLOW_MAX_CONCURRENT_RUNS`, default 4), dispatched oldest first.
-- One git worktree per run, on a `workflow/<name>` branch created from the current local `main`.
-- One live, interactive agent session per run, in a herdr pane rooted in its worktree, with `claude` (Claude Code), `codex` or `opencode` as the driver and a per-driver default model (`WORKFLOW_*_MODEL`) or a model picked per run.
+- A global run queue with a concurrency cap (`PANEYARD_MAX_CONCURRENT_RUNS`, default 4), dispatched oldest first.
+- One git worktree per run, on a `paneyard/<name>` branch created from the current local `main`.
+- One live, interactive agent session per run, in a herdr pane rooted in its worktree, with `claude` (Claude Code), `codex` or `opencode` as the driver and a per-driver default model (`PANEYARD_*_MODEL`) or a model picked per run.
 - Sessions leave changes uncommitted; commit, push and merge into `main` each happen only when the operator asks for that step.
 - Reports: a session calls `report_idle` (`done`, `blocked`, `failed`) with a Markdown summary each time it stops, and reports accumulate as checkpoints on the run screen.
 - A message box on the run screen that types into the live session, and **Close session** to end it and free its slot.
@@ -39,7 +39,7 @@ The first public version. It includes:
 
 ### Security
 
-- Loopback-only by default: Puma binds `127.0.0.1`, and production answers only loopback `Host` names (DNS-rebinding protection, `WORKFLOW_ALLOWED_HOSTS` to extend). See `SECURITY.md`.
+- Loopback-only by default: Puma binds `127.0.0.1`, and production answers only loopback `Host` names (DNS-rebinding protection, `PANEYARD_ALLOWED_HOSTS` to extend). See `SECURITY.md`.
 
 ### Operations and development
 

@@ -39,7 +39,7 @@ end
 warn "bin/dev: starting Rails on http://127.0.0.1:#{port}"
 
 # Solid Queue launches sessions and hands them this app's MCP URL
-# (SessionArgs.rails_mcp_url: WORKFLOW_RAILS_URL, else PORT), so it must see
+# (SessionArgs.rails_mcp_url: PANEYARD_RAILS_URL, else PORT), so it must see
 # the same port Puma listens on.
 env = { "PORT" => port.to_s }
 

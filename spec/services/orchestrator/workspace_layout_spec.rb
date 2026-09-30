@@ -18,7 +18,7 @@ RSpec.describe Orchestrator::WorkspaceLayout do
               - name: dev-log
                 command: tail -f log/development.log
               - name: test-log
-                command: tail -f "log/test.log" && echo $WORKFLOW_RUN_ID
+                command: tail -f "log/test.log" && echo $PANEYARD_RUN_ID
                 split: { of: dev-log }
       YAML
 
@@ -33,7 +33,7 @@ RSpec.describe Orchestrator::WorkspaceLayout do
       expect(tabs.last.panes.first).to have_attributes(name: "dev-log", split_of: nil)
       # Shell text is kept verbatim, and direction defaults to right.
       expect(tabs.last.panes.last).to have_attributes(
-        command: 'tail -f "log/test.log" && echo $WORKFLOW_RUN_ID', direction: "right"
+        command: 'tail -f "log/test.log" && echo $PANEYARD_RUN_ID', direction: "right"
       )
     end
 

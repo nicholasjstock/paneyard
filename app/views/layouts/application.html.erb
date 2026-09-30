@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title><%= content_for(:title) || "Workflow Orchestrator" %></title>
+    <title><%= content_for(:title) || "Paneyard" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="application-name" content="Workflow Orchestrator">
+    <meta name="application-name" content="Paneyard">
     <meta name="mobile-web-app-capable" content="yes">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
@@ -26,7 +26,7 @@
   <body data-controller="runs-drawer"
         data-action="keydown.esc@window->runs-drawer#close turbo:before-morph-element@document->runs-drawer#beforeMorph">
     <header class="topbar">
-      <a class="brand" href="<%= root_path %>">Workflow Orchestrator</a>
+      <a class="brand" href="<%= root_path %>">Paneyard</a>
       <nav>
         <%= link_to "Workspaces", workspaces_path, class: current_page?(workspaces_path) ? "active" : nil %>
         <% if current_workspace %>

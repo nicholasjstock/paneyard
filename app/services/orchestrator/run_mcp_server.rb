@@ -34,8 +34,8 @@ module Orchestrator
 
     def build(server_context:)
       MCP::Server.new(
-        name: "workflow",
-        title: "Workflow Run",
+        name: "paneyard",
+        title: "Paneyard Run",
         version: "0.1.0",
         instructions: INSTRUCTIONS,
         server_context:,
