@@ -75,7 +75,7 @@ export GITHUB_APP_INSTALLATION_ID=98765       # Optional -- see note below befor
 
 ### Option 2: Rails credentials
 
-Store them in the encrypted credentials file, which needs your own `config/master.key` (see the README's [Run it day to day](./README.md#3-run-it-day-to-day); `config/*.key` is gitignored, so never commit it):
+Store them in the encrypted credentials file, which needs your own `config/master.key` (see the README's [Run it day to day](./README.md#2-run-it-day-to-day); `config/*.key` is gitignored, so never commit it):
 
 ```bash
 bin/rails credentials:edit

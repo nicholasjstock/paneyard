@@ -18,7 +18,26 @@ bin/sandbox start         # an isolated instance with a fake herdr and fake agen
 
 `bin/setup` does not start a server. Development and test use their own SQLite databases under `storage/`, separate from the `storage/production.sqlite3` that `bin/service` uses. Run `bin/rails db:prepare` after a schema change, and `bin/rails console` to poke at the development data.
 
-Use `bin/sandbox` rather than `bin/dev` to try a change by hand. `bin/dev` runs the real recurring schedule against your real herdr socket and any configured Telegram bot. The sandbox runs on its own port, database and scratch repository and refuses everything outside itself; see [operating.md](./docs/operating.md#the-sandbox).
+## Trying a change in the sandbox
+
+Use `bin/sandbox` rather than `bin/dev` to try a change by hand:
+
+```sh
+bin/sandbox start     # prints the sandbox's URL and its /mcp/admin URL
+bin/sandbox stop      # or: bin/sandbox reset, to delete it too
+```
+
+The sandbox is a complete, isolated instance of this checkout on a free loopback port, with its own database under `tmp/sandbox/`, a **fake herdr** and a **fake agent**: no real panes open, no model usage is spent, and nothing outside the sandbox is touched. It seeds a scratch repository as its only workspace. Open the URL, choose **Queue a task**, and include a directive such as `[fake-agent: done]` (or `blocked`, `failed`, `dirty`, `crash`, `manual`, `working`) in the task to choose what the fake agent does. You get the whole lifecycle — dispatch, a real worktree, a report, **Close session**, cleanup — without herdr or an agent CLI.
+
+To drive it from Claude Code, register the `mcp admin` URL that `bin/sandbox start` printed, under a name that won't clash with your real instance's:
+
+```sh
+claude mcp add --transport http paneyard-sandbox http://127.0.0.1:<port>/mcp/admin
+```
+
+Without `-s user` this registers it for the current project only. The sandbox picks a new port each time it starts, so update the URL after a restart (`claude mcp remove paneyard-sandbox`, then add it again).
+
+`bin/dev`, by contrast, runs the real recurring schedule against your real herdr socket and any configured Telegram bot. The sandbox refuses everything outside itself; [The sandbox](./docs/operating.md#the-sandbox) in operating.md covers its guards, `bin/sandbox status` and `verify`, and its opt-ins for real herdr (`--real-herdr`) and Telegram (`--telegram`).
 
 ## Running it in development
 
