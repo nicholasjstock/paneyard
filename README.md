@@ -74,7 +74,7 @@ bin/service start            # also: stop | restart | status
 Then open <http://127.0.0.1:7263>. `start` waits for the app to answer and fails after two minutes, naming the log. After changing credentials or other boot-time configuration, run `bin/service restart`; [Long-running: `bin/service`](./docs/operating.md#long-running-binservice) has the details.
 
 > [!NOTE]
-> Production mode needs a `secret_key_base`, which lives in Rails' encrypted credentials. A fresh clone has no `config/master.key`, so the committed `config/credentials.yml.enc` cannot be decrypted by you. Move it aside (`mv config/credentials.yml.enc config/credentials.yml.enc.orig`), then run `bin/rails credentials:edit`, which creates a new key and credentials file containing a `secret_key_base`. That file is also where optional Telegram and GitHub App settings go. Alternatively, export `SECRET_KEY_BASE` (for example from `bin/rails secret`) before `bin/service start`.
+> Production mode needs a `secret_key_base`, which lives in Rails' encrypted credentials. A fresh clone has neither `config/master.key` nor `config/credentials.yml.enc` (both are gitignored), so run `bin/rails credentials:edit`, which creates a new key and credentials file containing a `secret_key_base`. That file is also where optional Telegram and GitHub App settings go. Alternatively, export `SECRET_KEY_BASE` (for example from `bin/rails secret`) before `bin/service start`.
 
 There is also `bin/dev`, which runs the app in the foreground in development mode, and `bin/sandbox`, an isolated instance with a fake herdr and fake agent. Both are for working on Paneyard itself; see [CONTRIBUTING.md](./CONTRIBUTING.md#running-it-in-development).
 
