@@ -60,11 +60,11 @@ cd paneyard
 bin/setup
 ```
 
-`bin/setup` installs gems and prepares a local database. It does not start anything.
+`bin/setup` installs gems. It does not start anything, and you don't need to set up a database: `bin/service` does that when it starts (next step).
 
 ### 2. Run it day to day
 
-Paneyard is meant to stay up all day. `bin/service` runs it in production mode, detached from your terminal, on port 7263 by default, logging to `log/production_service.log`. Its database is `storage/production.sqlite3`, created on first start.
+Paneyard is meant to stay up all day. `bin/service` runs it in production mode, detached from your terminal, on port 7263 by default, logging to `log/production_service.log`. Its database is `storage/production.sqlite3`, created on first start and migrated on every start, so a restart after pulling an update applies any new migrations.
 
 ```sh
 bin/rails credentials:edit   # once: see the note below
