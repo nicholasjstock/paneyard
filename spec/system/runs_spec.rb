@@ -31,7 +31,7 @@ RSpec.describe "workspace runs", type: :system do
   # replaced the whole question protocol -- it must be there whenever there
   # is a live session to talk to, and absent when there is not.
   it "offers a message box for a live session" do
-    run = create_run(workspace:, prefix: "runs-ui-session", branch_name: "workflow/runs-ui-a1b2",
+    run = create_run(workspace:, prefix: "runs-ui-session", branch_name: "paneyard/runs-ui-a1b2",
       worktree_name: "runs-ui-a1b2")
     create_run_and_session(run:, agent_status: "working")
 
@@ -79,7 +79,7 @@ RSpec.describe "workspace runs", type: :system do
   it "flags a worktree kept after its run ended, offers its removal, and says nothing about pull requests" do
     workspace = Workspace.create!(name: "runs-ui-#{SecureRandom.hex(4)}", root_path: create_source_checkout)
     worktree = File.join(workspace.root_path, "runs-ui-kept-a1b2")
-    system("git", "-C", workspace.source_root, "worktree", "add", "-b", "workflow/runs-ui-kept-a1b2",
+    system("git", "-C", workspace.source_root, "worktree", "add", "-b", "paneyard/runs-ui-kept-a1b2",
       worktree, "HEAD", out: File::NULL, err: File::NULL) || raise("could not add worktree")
     File.write(File.join(worktree, "scratch.txt"), "unpushed\n")
     system("git", "-C", worktree, "add", "scratch.txt")
@@ -87,12 +87,12 @@ RSpec.describe "workspace runs", type: :system do
 
     run = create_run(
       workspace:, prefix: "runs-ui-kept", status: "completed", stopped_at: 1.hour.ago,
-      worktree_name: "runs-ui-kept-a1b2", branch_name: "workflow/runs-ui-kept-a1b2", target_root: worktree
+      worktree_name: "runs-ui-kept-a1b2", branch_name: "paneyard/runs-ui-kept-a1b2", target_root: worktree
     )
 
     visit workspace_run_path(workspace, run)
 
-    expect(page).to have_text("workflow/runs-ui-kept-a1b2")
+    expect(page).to have_text("paneyard/runs-ui-kept-a1b2")
     expect(page).to have_text("worktree kept")
     expect(page).to have_button("Remove worktree")
     expect(page).to have_no_text(/pull request/i)
@@ -106,7 +106,7 @@ RSpec.describe "workspace runs", type: :system do
   it "does not flag a finished run whose worktree is already gone" do
     run = create_run(
       workspace:, prefix: "runs-ui-released", status: "completed", stopped_at: 1.hour.ago,
-      worktree_name: "runs-ui-released-a1b2", branch_name: "workflow/runs-ui-released-a1b2",
+      worktree_name: "runs-ui-released-a1b2", branch_name: "paneyard/runs-ui-released-a1b2",
       target_root: File.join(workspace.root_path, "runs-ui-released-a1b2")
     )
 

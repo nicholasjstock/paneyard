@@ -88,7 +88,7 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
   end
 
   it "records every request so specs can assert on what Rails asked for" do
-    herdr.workspace_create(label: "run-1", cwd: "/tmp", env: { "WORKFLOW_RUN_ID" => "run-1" })
+    herdr.workspace_create(label: "run-1", cwd: "/tmp", env: { "PANEYARD_RUN_ID" => "run-1" })
     herdr.notify(title: "hello")
 
     expect(fake_herdr.requests_for("workspace.create").first).to include("label" => "run-1", "focus" => false)

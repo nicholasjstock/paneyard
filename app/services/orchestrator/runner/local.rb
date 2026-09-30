@@ -27,7 +27,7 @@ module Orchestrator
 
       # --- Worktrees --------------------------------------------------------
 
-      # A worktree `name` beside source_root, on workflow/<name>, from main.
+      # A worktree `name` beside source_root, on paneyard/<name>, from main.
       # Returns { "source_root", "target_root", "branch", "base_sha", "reused" }.
       def provision_worktree(source_root:, name:, current_target_root: nil)
         Worktrees.provision!(source_root:, name:, current_target_root:)

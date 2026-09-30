@@ -9,15 +9,15 @@ RSpec.describe Orchestrator::Sandbox do
   # Fixtures are created first, as the real instance would have: the point is
   # what a sandbox does with records it did not create.
   def sandbox_on!
-    ENV["WORKFLOW_SANDBOX"] = "1"
+    ENV["PANEYARD_SANDBOX"] = "1"
   end
 
   around do |example|
-    ENV["WORKFLOW_SANDBOX_ROOT"] = sandbox_root
+    ENV["PANEYARD_SANDBOX_ROOT"] = sandbox_root
     example.run
   ensure
-    ENV.delete("WORKFLOW_SANDBOX")
-    ENV.delete("WORKFLOW_SANDBOX_ROOT")
+    ENV.delete("PANEYARD_SANDBOX")
+    ENV.delete("PANEYARD_SANDBOX_ROOT")
   end
 
   it "ignores an inherited HERDR_SOCKET_PATH and only talks to its own fake herdr" do
@@ -25,7 +25,7 @@ RSpec.describe Orchestrator::Sandbox do
     ENV["HERDR_SOCKET_PATH"] = File.expand_path("~/.config/herdr/herdr.sock")
     sandbox_on!
 
-    expect(Orchestrator::Runner::Herdr.socket_path).to eq(WorkflowSandbox.herdr_socket_path(sandbox_root))
+    expect(Orchestrator::Runner::Herdr.socket_path).to eq(PaneyardSandbox.herdr_socket_path(sandbox_root))
     expect(Orchestrator::Runner::Herdr.socket_path).to start_with(Dir.tmpdir)
     expect(Orchestrator::Runner::Herdr.socket_path.bytesize).to be < 104
   ensure
@@ -108,7 +108,7 @@ RSpec.describe Orchestrator::Sandbox do
     around do |example|
       example.run
     ensure
-      %w[WORKFLOW_SANDBOX_REAL_HERDR WORKFLOW_SANDBOX_TELEGRAM TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_IDS]
+      %w[PANEYARD_SANDBOX_REAL_HERDR PANEYARD_SANDBOX_TELEGRAM TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_IDS]
         .each { |key| ENV.delete(key) }
     end
 
@@ -116,7 +116,7 @@ RSpec.describe Orchestrator::Sandbox do
       original = ENV["HERDR_SOCKET_PATH"]
       ENV["HERDR_SOCKET_PATH"] = "/tmp/operator-herdr.sock"
       sandbox_on!
-      ENV["WORKFLOW_SANDBOX_REAL_HERDR"] = "1"
+      ENV["PANEYARD_SANDBOX_REAL_HERDR"] = "1"
       allow(Orchestrator::Runner::Herdr).to receive(:request!).and_return("root_pane" => {})
       allow(Orchestrator::Runner::Herdr).to receive(:request).and_return({})
 
@@ -136,7 +136,7 @@ RSpec.describe Orchestrator::Sandbox do
       pid = Process.spawn("sleep", "30", pgroup: true)
       _run, session = create_run_and_session(pid:)
       sandbox_on!
-      ENV["WORKFLOW_SANDBOX_REAL_HERDR"] = "1"
+      ENV["PANEYARD_SANDBOX_REAL_HERDR"] = "1"
 
       expect(described_class.allows_signal?(Process.pid)).to be(false)
       Orchestrator::RunSessionRunner.kill_process(session)
@@ -149,7 +149,7 @@ RSpec.describe Orchestrator::Sandbox do
 
     it "uses the Telegram bot it was started with" do
       sandbox_on!
-      ENV["WORKFLOW_SANDBOX_TELEGRAM"] = "1"
+      ENV["PANEYARD_SANDBOX_TELEGRAM"] = "1"
       ENV["TELEGRAM_BOT_TOKEN"] = "999:sandbox-bot"
       ENV["TELEGRAM_ALLOWED_USER_IDS"] = "42"
 
@@ -159,7 +159,7 @@ RSpec.describe Orchestrator::Sandbox do
 
     it "opts in only the adapter it was started with, so a new one is off by default" do
       sandbox_on!
-      ENV["WORKFLOW_SANDBOX_TELEGRAM"] = "1"
+      ENV["PANEYARD_SANDBOX_TELEGRAM"] = "1"
 
       expect(described_class.allows_remote_control?("telegram")).to be(true)
       expect(described_class.allows_remote_control?("discord")).to be(false)
@@ -168,7 +168,7 @@ RSpec.describe Orchestrator::Sandbox do
 
     it "never falls back to production's bot in credentials" do
       sandbox_on!
-      ENV["WORKFLOW_SANDBOX_TELEGRAM"] = "1"
+      ENV["PANEYARD_SANDBOX_TELEGRAM"] = "1"
       allow(Rails.application.credentials).to receive(:dig).with(:telegram, anything).and_return("123:production-bot")
 
       expect(RemoteControl::Adapters::Telegram::Configuration.bot_token).to be_nil
@@ -177,8 +177,8 @@ RSpec.describe Orchestrator::Sandbox do
 
     it "keeps worktrees and GitHub tokens confined either way" do
       sandbox_on!
-      ENV["WORKFLOW_SANDBOX_REAL_HERDR"] = "1"
-      ENV["WORKFLOW_SANDBOX_TELEGRAM"] = "1"
+      ENV["PANEYARD_SANDBOX_REAL_HERDR"] = "1"
+      ENV["PANEYARD_SANDBOX_TELEGRAM"] = "1"
 
       expect(described_class.allows_path?(Dir.mktmpdir("real-project"))).to be(false)
       expect(git_credentials_for(create_run(workspace: Workspace.create!(name: "s", root_path: File.join(sandbox_root, "repos", "s"))))).to eq({})
@@ -194,7 +194,7 @@ end
 
 RSpec.describe "the spec suite's own herdr guard" do
   it "points Orchestrator::Runner::Herdr at a socket that does not exist, so an unstubbed call cannot reach herdr" do
-    expect(Orchestrator::Runner::Herdr.socket_path).to end_with("workflow-specs-have-no-herdr.sock")
+    expect(Orchestrator::Runner::Herdr.socket_path).to end_with("paneyard-specs-have-no-herdr.sock")
     expect(File.exist?(Orchestrator::Runner::Herdr.socket_path)).to be(false)
     expect { Orchestrator::Runner::Herdr.request!("workspace.get", workspace_id: "w1") }
       .to raise_error(Orchestrator::Runner::Herdr::Unreachable)

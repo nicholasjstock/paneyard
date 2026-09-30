@@ -4,7 +4,7 @@ RSpec.describe Orchestrator::RunPrompt do
   let(:run) do
     create_run(
       prefix: "run-prompt", task: "Add a unique index on users.email.",
-      worktree_name: "run-prompt-a1b2", branch_name: "workflow/run-prompt-a1b2",
+      worktree_name: "run-prompt-a1b2", branch_name: "paneyard/run-prompt-a1b2",
       base_sha: "0123456789abcdef0123456789abcdef01234567"
     )
   end
@@ -14,7 +14,7 @@ RSpec.describe Orchestrator::RunPrompt do
   it "states the run's identity, where it is working, and what it branched from" do
     expect(prompt).to include(run.run_id)
     expect(prompt).to include(run.target_root)
-    expect(prompt).to include("workflow/run-prompt-a1b2")
+    expect(prompt).to include("paneyard/run-prompt-a1b2")
     expect(prompt).to include("0123456789ab")
     expect(prompt).to include(run.task)
   end
@@ -65,7 +65,7 @@ RSpec.describe Orchestrator::RunPrompt do
   # worktree exists, so the prompt must point there rather than at a tool.
   it "points the session at the absolute directory holding files attached at launch" do
     run.update!(launch_artifacts: [ { "name" => "failing-test.log", "source_path" => "failing-test.log" } ])
-    dir = File.join(run.workspace.source_root, ".workflow-orchestrator", "artifacts", run.run_id)
+    dir = File.join(run.workspace.source_root, ".paneyard", "artifacts", run.run_id)
 
     expect(described_class.compose(run:, session_driver: "claude"))
       .to include("failing-test.log", dir)

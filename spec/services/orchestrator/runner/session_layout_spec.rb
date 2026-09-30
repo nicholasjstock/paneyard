@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::Runner::SessionLayout do
-  let(:env) { { "WORKFLOW_RUN_ID" => "run-1", "WORKFLOW_RUN_TOKEN" => "secret", "GH_TOKEN" => "gh" } }
+  let(:env) { { "PANEYARD_RUN_ID" => "run-1", "PANEYARD_RUN_TOKEN" => "secret", "GH_TOKEN" => "gh" } }
   let(:cwd) { "/tmp/run-1" }
 
   # The layout as the orchestrator hands it over (WorkspaceLayout.for).

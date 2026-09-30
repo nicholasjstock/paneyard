@@ -12,7 +12,7 @@ require "uri"
 #
 # Needed by config/environments/production.rb before autoloading exists, so
 # config/application.rb requires it and the autoloader ignores it.
-module WorkflowAllowedHosts
+module PaneyardAllowedHosts
   # "[::1]" as well as the IPAddr: Rails only unbrackets an IPv6 Host that
   # has a port.
   LOOPBACK = [ "localhost", IPAddr.new("127.0.0.1"), IPAddr.new("::1"), "[::1]" ].freeze
@@ -20,9 +20,9 @@ module WorkflowAllowedHosts
   module_function
 
   # Loopback, plus the names an operator has deliberately put in front of the
-  # app: WORKFLOW_ALLOWED_HOSTS (comma-separated; Rails' `config.hosts`
+  # app: PANEYARD_ALLOWED_HOSTS (comma-separated; Rails' `config.hosts`
   # syntax, so a leading dot also allows subdomains) and the host of
-  # WORKFLOW_RAILS_URL, the URL sessions are told to reach /mcp on. IP
+  # PANEYARD_RAILS_URL, the URL sessions are told to reach /mcp on. IP
   # literals become IPAddr, which is how Rails matches `[::1]:3000`.
   def hosts(env = ENV)
     LOOPBACK + extra(env).flat_map do |host|
@@ -35,10 +35,10 @@ module WorkflowAllowedHosts
 
   # Bare names, as the MCP transports' `allowed_hosts:` takes them.
   def extra(env = ENV)
-    listed = env.fetch("WORKFLOW_ALLOWED_HOSTS", "").split(",")
+    listed = env.fetch("PANEYARD_ALLOWED_HOSTS", "").split(",")
       .map { |host| host.strip.delete_prefix("[").delete_suffix("]") }.reject(&:empty?)
     rails_url_host = begin
-      URI(env["WORKFLOW_RAILS_URL"].to_s).hostname
+      URI(env["PANEYARD_RAILS_URL"].to_s).hostname
     rescue URI::InvalidURIError
       nil
     end

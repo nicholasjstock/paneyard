@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in Workflow Orchestrator. This guide covers what you need to make a change and get it merged. [AGENTS.md](./AGENTS.md) is the detailed architecture and conventions guide. It is written for AI coding agents working on this repository (the orchestrator is often used to develop itself), but it is the authoritative reference for humans too; this file summarises it and links into it.
+Thanks for your interest in Paneyard. This guide covers what you need to make a change and get it merged. [AGENTS.md](./AGENTS.md) is the detailed architecture and conventions guide. It is written for AI coding agents working on this repository (the orchestrator is often used to develop itself), but it is the authoritative reference for humans too; this file summarises it and links into it.
 
 Please read the README's [security model](./README.md#security-model) first. This is a single-operator local tool with no authentication by design. Changes that add multi-user features, hosted deployment or an auth layer are a much bigger conversation, so open an issue before starting one.
 

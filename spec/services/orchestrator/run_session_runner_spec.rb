@@ -4,7 +4,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
   let(:run) do
     create_run(
       prefix: "session-runner", status: "launching",
-      target_root: Dir.mktmpdir("session-runner-worktree"), branch_name: "workflow/session-runner",
+      target_root: Dir.mktmpdir("session-runner-worktree"), branch_name: "paneyard/session-runner",
       worktree_name: "session-runner-a1b2"
     )
   end
@@ -435,7 +435,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
       codex_run = create_run(
         prefix: "session-runner-codex", launcher_variant: "codex", status: "launching",
-        target_root: Dir.mktmpdir("session-runner-codex"), branch_name: "workflow/codex", worktree_name: "codex-a1b2"
+        target_root: Dir.mktmpdir("session-runner-codex"), branch_name: "paneyard/codex", worktree_name: "codex-a1b2"
       )
       described_class.start!(codex_run)
 
@@ -470,7 +470,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
       described_class.start!(run)
 
       expect(Orchestrator::Runner::ProcessEnv).to have_received(:for_session).with(hash_including(
-        workspace_env: { "BUNDLE_PATH" => "/tmp/gems" }, env: { "WORKFLOW_RUN_ID" => run.run_id },
+        workspace_env: { "BUNDLE_PATH" => "/tmp/gems" }, env: { "PANEYARD_RUN_ID" => run.run_id },
         github_token: nil, ambient_github_auth: true, extra: { "CLAUDE_CODE_DISABLE_AUTO_MEMORY" => "1" }
       ))
     end

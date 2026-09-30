@@ -3,7 +3,7 @@ module McpTools
     tool_name "queue_run"
     # Shared by /mcp/run and /mcp/admin, so the text must not assume which
     # kind of caller is reading it.
-    description "Queue a separate job. It gets its own worktree, `workflow/<name>` branch and agent session, " \
+    description "Queue a separate job. It gets its own worktree, `paneyard/<name>` branch and agent session, " \
       "starts when a concurrency slot frees, and shares none of your context -- write the task as a complete " \
       "brief: goal, constraints, relevant files, and how to tell it worked. From inside a run, use it only for " \
       "follow-up work the operator asked for, never to hand off your own task. Defaults to the calling run's " \

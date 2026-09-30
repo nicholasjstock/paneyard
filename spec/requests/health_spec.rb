@@ -5,7 +5,7 @@ RSpec.describe "Health endpoint", type: :request do
     get "/up"
 
     expect(response).to have_http_status(:ok)
-    expect(response.headers["X-Workflow-Service"]).to eq("workflow-orchestrator")
-    expect(response.parsed_body).to include("service" => "workflow-orchestrator")
+    expect(response.headers["X-Paneyard-Service"]).to eq("paneyard")
+    expect(response.parsed_body).to include("service" => "paneyard")
   end
 end

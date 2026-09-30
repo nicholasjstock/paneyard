@@ -16,9 +16,9 @@ module Orchestrator
 
     def for(driver)
       case driver
-      when "claude" then ENV["WORKFLOW_CLAUDE_MODEL"].presence || "opus"
-      when "codex" then ENV["WORKFLOW_CODEX_MODEL"].presence
-      when "opencode" then ENV["WORKFLOW_OPENCODE_MODEL"].presence
+      when "claude" then ENV["PANEYARD_CLAUDE_MODEL"].presence || "opus"
+      when "codex" then ENV["PANEYARD_CODEX_MODEL"].presence
+      when "opencode" then ENV["PANEYARD_OPENCODE_MODEL"].presence
       end
     end
   end

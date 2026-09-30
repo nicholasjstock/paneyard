@@ -22,10 +22,10 @@
 # (Under Dir.tmpdir: a Unix socket path over 104 bytes raises ArgumentError
 # rather than failing to connect.)
 require "tmpdir"
-ENV["HERDR_SOCKET_PATH"] = File.join(Dir.tmpdir, "workflow-specs-have-no-herdr.sock")
+ENV["HERDR_SOCKET_PATH"] = File.join(Dir.tmpdir, "paneyard-specs-have-no-herdr.sock")
 # Specs describe the real instance; sandbox behaviour is opted into per spec.
-ENV.delete("WORKFLOW_SANDBOX")
-ENV.delete("WORKFLOW_SANDBOX_ROOT")
+ENV.delete("PANEYARD_SANDBOX")
+ENV.delete("PANEYARD_SANDBOX_ROOT")
 
 RSpec.configure do |config|
   # rspec-expectations config goes here. You can use an alternate

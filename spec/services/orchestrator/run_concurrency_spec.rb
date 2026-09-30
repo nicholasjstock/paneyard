@@ -2,28 +2,28 @@ require "rails_helper"
 
 RSpec.describe Orchestrator::RunConcurrency do
   around do |example|
-    original = ENV["WORKFLOW_MAX_CONCURRENT_RUNS"]
+    original = ENV["PANEYARD_MAX_CONCURRENT_RUNS"]
     example.run
-    ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = original
+    ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = original
   end
 
   describe ".limit" do
     it "defaults to 2 and ignores a blank or nonsensical override" do
-      ENV.delete("WORKFLOW_MAX_CONCURRENT_RUNS")
+      ENV.delete("PANEYARD_MAX_CONCURRENT_RUNS")
       expect(described_class.limit).to eq(described_class::DEFAULT_LIMIT)
 
-      ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = ""
+      ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = ""
       expect(described_class.limit).to eq(described_class::DEFAULT_LIMIT)
 
-      ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = "not-a-number"
+      ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "not-a-number"
       expect(described_class.limit).to eq(described_class::DEFAULT_LIMIT)
 
-      ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = "0"
+      ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "0"
       expect(described_class.limit).to eq(described_class::DEFAULT_LIMIT)
     end
 
     it "honours a positive override" do
-      ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = "5"
+      ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "5"
 
       expect(described_class.limit).to eq(5)
     end
@@ -63,7 +63,7 @@ RSpec.describe Orchestrator::RunConcurrency do
 
   describe ".available_slots" do
     it "never goes negative when more runs are in flight than the limit allows" do
-      ENV["WORKFLOW_MAX_CONCURRENT_RUNS"] = "1"
+      ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "1"
       create_run_and_session(prefix: "concurrency-a")
       create_run_and_session(prefix: "concurrency-b")
 

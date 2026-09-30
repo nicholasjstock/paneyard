@@ -1,6 +1,6 @@
 class HealthController < ActionController::API
   def show
-    response.set_header("X-Workflow-Service", "workflow-orchestrator")
-    render json: { status: "ok", service: "workflow-orchestrator" }
+    response.set_header("X-Paneyard-Service", "paneyard")
+    render json: { status: "ok", service: "paneyard" }
   end
 end

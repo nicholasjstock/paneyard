@@ -2,11 +2,11 @@ require "rails_helper"
 
 RSpec.describe Orchestrator::DefaultModels do
   around do |example|
-    saved = ENV.to_h.slice("WORKFLOW_CLAUDE_MODEL", "WORKFLOW_CODEX_MODEL", "WORKFLOW_OPENCODE_MODEL")
-    %w[WORKFLOW_CLAUDE_MODEL WORKFLOW_CODEX_MODEL WORKFLOW_OPENCODE_MODEL].each { |name| ENV.delete(name) }
+    saved = ENV.to_h.slice("PANEYARD_CLAUDE_MODEL", "PANEYARD_CODEX_MODEL", "PANEYARD_OPENCODE_MODEL")
+    %w[PANEYARD_CLAUDE_MODEL PANEYARD_CODEX_MODEL PANEYARD_OPENCODE_MODEL].each { |name| ENV.delete(name) }
     example.run
   ensure
-    %w[WORKFLOW_CLAUDE_MODEL WORKFLOW_CODEX_MODEL WORKFLOW_OPENCODE_MODEL].each { |name| ENV.delete(name) }
+    %w[PANEYARD_CLAUDE_MODEL PANEYARD_CODEX_MODEL PANEYARD_OPENCODE_MODEL].each { |name| ENV.delete(name) }
     ENV.update(saved)
   end
 
@@ -17,8 +17,8 @@ RSpec.describe Orchestrator::DefaultModels do
   end
 
   it "takes a per-driver override from the environment" do
-    ENV["WORKFLOW_CODEX_MODEL"] = "some-codex-model"
-    ENV["WORKFLOW_OPENCODE_MODEL"] = "provider/some-model"
+    ENV["PANEYARD_CODEX_MODEL"] = "some-codex-model"
+    ENV["PANEYARD_OPENCODE_MODEL"] = "provider/some-model"
 
     expect(described_class.for("codex")).to eq("some-codex-model")
     expect(described_class.for("opencode")).to eq("provider/some-model")

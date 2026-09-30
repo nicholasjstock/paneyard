@@ -21,7 +21,7 @@ module Orchestrator
       module_function
 
       # The env var a session's CLI reads its /mcp/run capability from.
-      TOKEN_ENV_VAR = "WORKFLOW_RUN_TOKEN".freeze
+      TOKEN_ENV_VAR = "PANEYARD_RUN_TOKEN".freeze
 
       # Claude Code resolves a worktree's auto-memory to its main checkout, so
       # without this every claude run loads the operator's own per-repo memory
@@ -57,7 +57,7 @@ module Orchestrator
       # --disable-slash-commands (the operator types into this pane and should
       # keep their slash commands).
       #
-      # --strict-mcp-config is kept: it guarantees the workflow MCP server is
+      # --strict-mcp-config is kept: it guarantees the paneyard MCP server is
       # the one the session gets, and keeps startup predictable regardless of
       # whatever .mcp.json the target repo happens to ship.
       def claude_args(root_dir:, mcp_config_path:, model:, resume_session_id: nil)
@@ -88,9 +88,9 @@ module Orchestrator
       # live-verified -- verify before relying on it.
       def codex_args(root_dir:, mcp_url:, model:, resume_session_id: nil)
         config_args = [
-          %(mcp_servers.workflow.url=#{"#{mcp_url}/run".to_json}),
-          %(mcp_servers.workflow.bearer_token_env_var="#{TOKEN_ENV_VAR}"),
-          %(mcp_servers.workflow.default_tools_approval_mode="approve")
+          %(mcp_servers.paneyard.url=#{"#{mcp_url}/run".to_json}),
+          %(mcp_servers.paneyard.bearer_token_env_var="#{TOKEN_ENV_VAR}"),
+          %(mcp_servers.paneyard.default_tools_approval_mode="approve")
         ].flat_map { |override| [ "-c", override ] }
         sandbox_args = [ "-s", "danger-full-access" ]
 
@@ -118,7 +118,7 @@ module Orchestrator
       def opencode_args(root_dir:, capability_token:, mcp_url:, model:, resume_session_id: nil)
         config = JSON.generate({
           mcp: {
-            workflow: {
+            paneyard: {
               type: "remote",
               url: "#{mcp_url}/run",
               headers: { Authorization: "Bearer #{capability_token}" }
@@ -140,7 +140,7 @@ module Orchestrator
       def write_claude_mcp_config(path, capability_token, mcp_url:)
         config = {
           "mcpServers" => {
-            "workflow" => {
+            "paneyard" => {
               "type" => "http",
               "url" => "#{mcp_url}/run",
               "headers" => { "Authorization" => "Bearer #{capability_token}" }

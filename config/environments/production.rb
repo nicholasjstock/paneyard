@@ -7,7 +7,7 @@ Rails.application.configure do
   # long-running process against the real database, so it opts into reloads
   # to pick up source fixes between requests and recurring jobs without a
   # manual restart.
-  local_hot_reload = ENV["WORKFLOW_HOT_RELOAD"] == "1"
+  local_hot_reload = ENV["PANEYARD_HOT_RELOAD"] == "1"
   config.enable_reloading = local_hot_reload
   config.eager_load = !local_hot_reload
 
@@ -98,8 +98,8 @@ Rails.application.configure do
 
   # DNS rebinding protection. There is no auth and Puma binds 127.0.0.1, but a
   # page the operator visits can re-point its own name at 127.0.0.1; only
-  # answering loopback names (plus WORKFLOW_ALLOWED_HOSTS, and the host of
-  # WORKFLOW_RAILS_URL) stops it from driving the UI. See SECURITY.md.
+  # answering loopback names (plus PANEYARD_ALLOWED_HOSTS, and the host of
+  # PANEYARD_RAILS_URL) stops it from driving the UI. See SECURITY.md.
   # /up is not excluded: bin/service and bin/sandbox reach it on 127.0.0.1.
-  config.hosts = WorkflowAllowedHosts.hosts
+  config.hosts = PaneyardAllowedHosts.hosts
 end

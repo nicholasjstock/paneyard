@@ -27,7 +27,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
 
   def add_worktree(name)
     path = File.join(root, name)
-    git(source_root, "worktree", "add", "-b", "workflow/#{name}", path, "HEAD")
+    git(source_root, "worktree", "add", "-b", "paneyard/#{name}", path, "HEAD")
     path
   end
 
@@ -49,7 +49,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
   def terminal_run(name, path, stopped_at: 2.days.ago, status: "failed")
     workspace.runs.create!(
       run_id: name, task: "Exercise #{name}", target_root: path, source_root: source_root,
-      worktree_name: name, branch_name: "workflow/#{name}", launcher_variant: "claude",
+      worktree_name: name, branch_name: "paneyard/#{name}", launcher_variant: "claude",
       status:, stopped_at:
     )
   end
@@ -87,7 +87,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
       add_origin
       path = add_worktree("just-pushed")
       commit_in(path, "pushed.rb")
-      git(path, "push", "origin", "workflow/just-pushed")
+      git(path, "push", "origin", "paneyard/just-pushed")
       terminal_run("just-pushed", path, stopped_at: 1.minute.ago, status: "awaiting_review")
 
       expect(described_class.sweep(workspace)).to eq(1)
@@ -97,7 +97,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
     it "leaves a pushed run alone while its session is still live" do
       add_origin
       path = add_worktree("live-idle")
-      git(path, "push", "origin", "workflow/live-idle")
+      git(path, "push", "origin", "paneyard/live-idle")
       run = terminal_run("live-idle", path, stopped_at: nil, status: "awaiting_review")
       create_run_and_session(run:, prefix: "live-idle")
 
@@ -177,20 +177,20 @@ RSpec.describe Orchestrator::WorktreeJanitor do
     it "removes a clean worktree whose branch is already merged into main, keeping the branch" do
       path = add_worktree("merged")
       commit_in(path, "merged.rb")
-      git(source_root, "merge", "--ff-only", "workflow/merged")
+      git(source_root, "merge", "--ff-only", "paneyard/merged")
       run = terminal_run("merged", path, stopped_at: 1.minute.ago)
 
       expect(described_class.release!(run)).to be(true)
       expect(File.exist?(path)).to be(false)
-      output, _error, _status = Open3.capture3("git", "-C", source_root, "branch", "--list", "workflow/merged")
-      expect(output).to include("workflow/merged")
+      output, _error, _status = Open3.capture3("git", "-C", source_root, "branch", "--list", "paneyard/merged")
+      expect(output).to include("paneyard/merged")
     end
 
     it "removes a clean worktree whose branch is pushed" do
       add_origin
       path = add_worktree("pushed")
       commit_in(path, "pushed.rb")
-      git(path, "push", "origin", "workflow/pushed")
+      git(path, "push", "origin", "paneyard/pushed")
       run = terminal_run("pushed", path, stopped_at: 1.minute.ago)
 
       expect(described_class.release!(run)).to be(true)
@@ -209,7 +209,7 @@ RSpec.describe Orchestrator::WorktreeJanitor do
     it "keeps a pushed worktree that has uncommitted changes" do
       add_origin
       path = add_worktree("pushed-dirty")
-      git(path, "push", "origin", "workflow/pushed-dirty")
+      git(path, "push", "origin", "paneyard/pushed-dirty")
       File.write(File.join(path, "scratch.rb"), "unsaved\n")
       run = terminal_run("pushed-dirty", path, stopped_at: 1.minute.ago)
 

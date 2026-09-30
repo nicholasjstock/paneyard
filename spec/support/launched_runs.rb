@@ -45,8 +45,8 @@ RSpec.shared_context "launched runs" do
 
   def session_token(run = nil)
     creates = fake_herdr.requests_for("workspace.create")
-    create = run ? creates.find { |request| request.dig("env", "WORKFLOW_RUN_ID") == run.run_id } : creates.last
-    create.dig("env", "WORKFLOW_RUN_TOKEN")
+    create = run ? creates.find { |request| request.dig("env", "PANEYARD_RUN_ID") == run.run_id } : creates.last
+    create.dig("env", "PANEYARD_RUN_TOKEN")
   end
 
   # The session's own report_idle, over /mcp/run with its capability.

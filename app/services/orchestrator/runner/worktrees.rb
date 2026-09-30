@@ -21,7 +21,7 @@ module Orchestrator
       class Error < Runner::Error; end
       module_function
 
-      # A new worktree `name` beside source_root on branch workflow/<name>,
+      # A new worktree `name` beside source_root on branch paneyard/<name>,
       # from main's HEAD. When `current_target_root` already is that worktree
       # (a retried launch), it is reused as is.
       #
@@ -30,7 +30,7 @@ module Orchestrator
       def provision!(source_root:, name:, current_target_root: nil)
         source_root = Pathname(source_root)
         Sandbox.guard_path!(source_root, "provision a worktree in")
-        branch = "workflow/#{name}"
+        branch = "paneyard/#{name}"
         worktree = source_root.parent.join(name)
         result = { "source_root" => source_root.to_s, "target_root" => worktree.to_s, "branch" => branch }
         if current_target_root.present? && Pathname(current_target_root).expand_path == worktree.expand_path && worktree.directory?

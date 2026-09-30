@@ -4,7 +4,7 @@ require "net/http"
 require_relative "instance"
 require_relative "mcp_client"
 
-module WorkflowSandbox
+module PaneyardSandbox
   # `bin/sandbox verify`: a run's whole lifecycle against a running sandbox
   # instance, from outside it, the way the operator and a session reach the
   # real one -- /mcp/admin to queue and inspect, the fake agent reporting

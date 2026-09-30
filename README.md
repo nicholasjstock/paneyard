@@ -1,6 +1,6 @@
-# Workflow Orchestrator
+# Paneyard
 
-Workflow Orchestrator is a local, single-operator queue and supervisor for interactive AI coding-agent sessions ([Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) and [opencode](https://opencode.ai)). You queue a task against one of your repositories; when a slot frees, the task gets its own git worktree and one live agent session in a [herdr](https://herdr.dev) pane, which you can watch and type into. The session does the work and leaves it uncommitted. Nothing is committed, pushed or merged until you ask for that particular step.
+Paneyard is a local, single-operator queue and supervisor for interactive AI coding-agent sessions ([Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) and [opencode](https://opencode.ai)). You queue a task against one of your repositories; when a slot frees, the task gets its own git worktree and one live agent session in a [herdr](https://herdr.dev) pane, which you can watch and type into. The session does the work and leaves it uncommitted. Nothing is committed, pushed or merged until you ask for that particular step.
 
 <!-- TODO: add a screenshot or short GIF of the run screen at docs/images/run-screen.png and reference it here:
 ![A run's screen: its checkpoints, message box and worktree status](docs/images/run-screen.png)
@@ -27,10 +27,10 @@ It is a Rails 8 app that runs on your own machine. Rails decides *which* task ru
 This is a tool for one trusted person on their own machine. Treat anything that can reach it as having a shell on that machine. [SECURITY.md](./SECURITY.md) has the full threat model and how to report a vulnerability.
 
 - **No authentication.** Every web page, every form, and the `/mcp/admin` MCP endpoint are open to whoever can connect. There are no user accounts; the operator is whoever is at the keyboard.
-- **Loopback only.** `bin/service` / `bin/production` bind to `127.0.0.1` and `bin/dev` to `localhost`, so nothing else on your network can connect. In production the app also answers only loopback `Host` names (`localhost`, `127.0.0.1`, `[::1]`), which stops DNS-rebinding attacks from web pages you visit. `BINDING` and `WORKFLOW_ALLOWED_HOSTS` widen this; if you set either, whatever sits in front of the app must provide the authentication it lacks.
+- **Loopback only.** `bin/service` / `bin/production` bind to `127.0.0.1` and `bin/dev` to `localhost`, so nothing else on your network can connect. In production the app also answers only loopback `Host` names (`localhost`, `127.0.0.1`, `[::1]`), which stops DNS-rebinding attacks from web pages you visit. `BINDING` and `PANEYARD_ALLOWED_HOSTS` widen this; if you set either, whatever sits in front of the app must provide the authentication it lacks.
 - **Agents run with approvals bypassed.** Each session is launched with full access and no confirmation prompts: `claude --permission-mode bypassPermissions`, `codex -s danger-full-access`, `opencode --auto`. It works in its own worktree but is not sandboxed: it can read and write anything your user account can, run any command, and use your network. The only review gate is you, reading its report and trying its changes before asking it to commit.
 - **Registered repositories are fully exposed to their sessions**, including any secrets you keep in them, and a session's environment includes a GitHub token when one is available (below).
-- **It can edit itself.** If you register this repository as one of its own workspaces, a session can change the orchestrator's code, and the running instance hot-reloads application code (`WORKFLOW_HOT_RELOAD`). Nothing stops a session from merging into `main` when asked to.
+- **It can edit itself.** If you register this repository as one of its own workspaces, a session can change the orchestrator's code, and the running instance hot-reloads application code (`PANEYARD_HOT_RELOAD`). Nothing stops a session from merging into `main` when asked to.
 - **Telegram remote control** (optional, off unless configured) lets the Telegram user IDs on an allow-list list sessions, read their panes and reports, and type into them from a private chat. That is equivalent to shell access. Pane text and reports also pass through Telegram's servers, and bot chats are not end-to-end encrypted.
 - **GitHub credentials.** Rails itself makes no GitHub calls except, if you configure a [GitHub App](./GITHUB_APP_SETUP.md), minting an installation token. The session receives that token (or, without an App, the output of your own `gh auth token`) as `GH_TOKEN`, and can do anything that token allows on the repositories it covers. Scope the App to the repositories you register.
 - **Plaintext state.** Runs, reports and recorded workspace environment variables are stored unencrypted in SQLite under `storage/`.
@@ -41,7 +41,7 @@ This is a tool for one trusted person on their own machine. Treat anything that 
 - **Ruby** at the version in [`.ruby-version`](./.ruby-version) (currently 4.0.1), with Bundler, and **SQLite 3**.
 - **git**, with each target repository checked out as described in [Preparing a repository](./docs/operating.md#preparing-a-repository).
 - **[herdr](https://herdr.dev), running.** Required. herdr owns every terminal pane and agent process; Rails talks to its socket at `~/.config/herdr/herdr.sock` (override with `HERDR_SOCKET_PATH`). Without it a run fails at launch.
-- **At least one agent CLI, already signed in:** `claude`, `codex` and/or `opencode`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow. Unless you choose otherwise, a session uses a sensible default for its driver (`Orchestrator::DefaultModels`; for some drivers that means the CLI's own configured model). Override it per driver with `WORKFLOW_CLAUDE_MODEL`, `WORKFLOW_CODEX_MODEL` or `WORKFLOW_OPENCODE_MODEL`, or pick a model per run in the UI.
+- **At least one agent CLI, already signed in:** `claude`, `codex` and/or `opencode`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow. Unless you choose otherwise, a session uses a sensible default for its driver (`Orchestrator::DefaultModels`; for some drivers that means the CLI's own configured model). Override it per driver with `PANEYARD_CLAUDE_MODEL`, `PANEYARD_CODEX_MODEL` or `PANEYARD_OPENCODE_MODEL`, or pick a model per run in the UI.
 - **Optional:** `nvim` (the default pane layout opens it beside the agent), `gh` signed in (for pushing over HTTPS without a GitHub App), `curl` (only for a GitHub App).
 
 ## Quickstart
@@ -49,8 +49,8 @@ This is a tool for one trusted person on their own machine. Treat anything that 
 ### 1. Install
 
 ```sh
-git clone <this repository's URL> workflow-orchestrator
-cd workflow-orchestrator
+git clone <this repository's URL> paneyard
+cd paneyard
 bin/setup
 ```
 
@@ -104,8 +104,8 @@ You can also queue runs from another MCP client (for example your own Claude Cod
 
 ## How a run works
 
-1. **Queue.** A run waits for a slot. The cap is global across all workspaces: `WORKFLOW_MAX_CONCURRENT_RUNS`, default 4.
-2. **Dispatch.** When a slot frees, the oldest queued run gets a git worktree on a `workflow/<name>` branch (from the current local `HEAD` of `main`) and one interactive agent session in a herdr pane rooted there, with the task as its first prompt.
+1. **Queue.** A run waits for a slot. The cap is global across all workspaces: `PANEYARD_MAX_CONCURRENT_RUNS`, default 4.
+2. **Dispatch.** When a slot frees, the oldest queued run gets a git worktree on a `paneyard/<name>` branch (from the current local `HEAD` of `main`) and one interactive agent session in a herdr pane rooted there, with the task as its first prompt.
 3. **Work.** The session explores, edits and runs the repository's own commands, then leaves its changes uncommitted. Commit, push and merge are separate requests; it does only the one you ask for.
 4. **Report.** Each time it stops, the session calls the `report_idle` MCP tool (`done`, `blocked` or `failed`) with a Markdown report. The session stays open and keeps its slot; reports accumulate as checkpoints on the run screen.
 5. **Close.** **Close session** quits the agent, closes its herdr workspace and frees the slot. A run you haven't closed keeps holding its slot.
@@ -121,10 +121,10 @@ Everything is optional except herdr and an agent CLI.
 | --- | --- | --- |
 | `PORT` | random (`bin/dev`), `3001` (`bin/service`) | HTTP port. |
 | `BINDING` | `localhost` (dev), `127.0.0.1` (`bin/service`) | Interface Rails listens on. Widening it exposes an unauthenticated app; see [SECURITY.md](./SECURITY.md). |
-| `WORKFLOW_ALLOWED_HOSTS` | unset | Extra `Host` names production answers to (comma-separated), for example behind a reverse proxy. |
-| `WORKFLOW_RAILS_URL` | `http://127.0.0.1:$PORT` | URL sessions use to reach the orchestrator's MCP endpoint. Keep it in step with `PORT`. |
-| `WORKFLOW_MAX_CONCURRENT_RUNS` | `4` | Global cap on live sessions. |
-| `WORKFLOW_CLAUDE_MODEL`, `WORKFLOW_CODEX_MODEL`, `WORKFLOW_OPENCODE_MODEL` | per driver | Default model per driver; a model picked per run wins. |
+| `PANEYARD_ALLOWED_HOSTS` | unset | Extra `Host` names production answers to (comma-separated), for example behind a reverse proxy. |
+| `PANEYARD_RAILS_URL` | `http://127.0.0.1:$PORT` | URL sessions use to reach the orchestrator's MCP endpoint. Keep it in step with `PORT`. |
+| `PANEYARD_MAX_CONCURRENT_RUNS` | `4` | Global cap on live sessions. |
+| `PANEYARD_CLAUDE_MODEL`, `PANEYARD_CODEX_MODEL`, `PANEYARD_OPENCODE_MODEL` | per driver | Default model per driver; a model picked per run wins. |
 | `HERDR_SOCKET_PATH` | `~/.config/herdr/herdr.sock` | herdr's socket. |
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` | unset | GitHub App for session push credentials; see [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md). Also settable in credentials. |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` | unset | Telegram remote control; see [docs/telegram.md](./docs/telegram.md). Also settable in credentials. |

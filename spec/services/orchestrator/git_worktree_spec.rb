@@ -12,7 +12,7 @@ RSpec.describe Orchestrator::GitWorktree do
     FileUtils.mkdir_p(root)
     workspace = Workspace.new(name: "not-provisioned", root_path: root.parent.to_s)
     run = Run.new(
-      workspace:, target_root: root.to_s, worktree_name: "add-todo-a1b2", branch_name: "workflow/add-todo-a1b2",
+      workspace:, target_root: root.to_s, worktree_name: "add-todo-a1b2", branch_name: "paneyard/add-todo-a1b2",
       source_root: root.to_s
     )
 
