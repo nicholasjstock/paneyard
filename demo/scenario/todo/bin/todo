@@ -1,0 +1,4 @@
+#!/usr/bin/env ruby
+require_relative "../lib/todo"
+
+exit Todo::CLI.new.run(ARGV)

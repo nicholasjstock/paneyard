@@ -13,7 +13,8 @@ These were written while a feature was being designed and built. They explain *w
 
 - [workspace-layouts.md](./workspace-layouts.md) — per-workspace herdr tab and pane layouts (implemented).
 - [remote-control.md](./remote-control.md) — replacing the old workspace "admin chat" with direct remote control of sessions over Telegram (partly implemented; its update notes at the top say what shipped).
+- [demo-recording-plan.md](./demo-recording-plan.md) — plan for a reproducible, recorded demo (Docker, real herdr, live Claude Code, ffmpeg) for the launch README and a conference talk (partly built: `demo/`).
 
 ## Images
 
-Screenshots for the README belong in `images/`. None have been added yet.
+Screenshots for the README belong in `images/`. `images/demo.gif` is made by `demo/bin/record rehearse` (or `take`); see [demo-recording-plan.md](./demo-recording-plan.md).

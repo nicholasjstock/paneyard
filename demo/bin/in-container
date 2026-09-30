@@ -1,0 +1,192 @@
+#!/usr/bin/env ruby
+# The container side of demo/bin/record (see docs/demo-recording-plan.md).
+# Runs inside the paneyard-demo image as the `demo` user. demo/bin/record
+# mounts this repo read-only at /work/src; the first thing this does is copy
+# it to /work/paneyard (a tmpfs) and run from the copy, so nothing in the
+# container -- least of all a live agent with full access -- can write to the
+# operator's checkout. Only tmp/demo-output is mounted writable, at
+# /work/output. Everything else (herdr, the app's database, the todo repo)
+# lives under /work/demo and dies with the container.
+#
+#   compat    Paneyard against the image's real herdr, with the rehearsal
+#             stand-in as claude (no model): PaneyardSandbox::Verify's whole
+#             lifecycle, then a run ended by closing its herdr workspace by
+#             hand, which is how the demo ends its runs.
+#   smoke     10 s of the herdr UI at the demo's canvas size, the stand-in
+#             drawing Claude's glyphs: smoke.mkv and a frame, smoke.png.
+#   rehearse  The whole story (demo/lib/director.rb), filmed, with the
+#             rehearsal stand-in instead of Claude: no model usage.
+#   take      The whole story with the real Claude Code. Needs
+#             CLAUDE_CODE_OAUTH_TOKEN and spends model usage.
+#   cut NAME  Re-cut a recorded take (rehearsal or take) into NAME.mp4 and
+#             NAME.gif (demo/lib/cut.rb); a passing take is cut automatically.
+SOURCE = "/work/src".freeze
+COPY = "/work/paneyard".freeze
+
+if File.directory?(SOURCE) && !ENV["DEMO_FROM_COPY"]
+  # Top-level entries rather than ".", which would have tar try to set the
+  # tmpfs root's mode and times.
+  entries = Dir.children(SOURCE) - %w[.git tmp log storage node_modules]
+  system("tar -C #{SOURCE} -cf - #{entries.join(' ')} | tar -C #{COPY} -xmf -", exception: true)
+  %w[tmp log storage].each { Dir.mkdir(File.join(COPY, _1)) }
+  exec({ "DEMO_FROM_COPY" => "1" }, "ruby", File.join(COPY, "demo/bin/in-container"), *ARGV)
+end
+
+require_relative "../lib/stage"
+require_relative "../lib/director"
+require_relative "../lib/cut"
+require_relative "../../lib/paneyard_sandbox/verify"
+
+MODEL = ENV.fetch("DEMO_MODEL", "sonnet")
+# Every glyph Claude Code and herdr draw that a font could lack.
+GLYPHS = "⏺ ✻ ✶ ✳ ⎿ ✓ ✗ … · ● ○ │ ─ ╭ ╮ ╰ ╯ ⠋ ⠙ ⠹ ⏸ ⏵ ↑ ↓ → ← ▌ █".freeze
+
+# A run ended the way the demo ends it: its herdr workspace closed by hand.
+# RunSessionReconcileJob (every 30 s) must complete it with its reported
+# outcome and release its worktree, exactly as Close session would.
+def verify_closed_by_hand(instance, workspace)
+  admin = Stage.admin(instance)
+  run_id = admin.call_tool("queue_run", task: "Closed by hand in herdr [fake-agent: done]", workspace:).fetch("runId")
+  get_run = -> { admin.call_tool("get_run", runId: run_id, workspace:) }
+
+  # Past its launch, too: closing the workspace while SessionLauncher is still
+  # watching the prompt get picked up fails the launch, and with it the run.
+  run = Stage.wait_until("#{run_id} to report", timeout: 90) do
+    get_run.call.then { _1 if _1["checkpoints"]&.any? && _1.dig("session", "status") != "starting" }
+  end
+  herdr_workspace = Stage.workspaces.find { |candidate| candidate["label"].to_s.include?(run.fetch("worktreeName")) }
+  raise "no herdr workspace labelled #{run['worktreeName']}" unless herdr_workspace
+
+  Stage.herdr("workspace", "close", herdr_workspace.fetch("workspace_id"))
+  run = Stage.wait_until("#{run_id} to complete after the close", timeout: 90) do
+    get_run.call.then { _1 if _1["status"] == "completed" }
+  end
+  raise "session still live after its workspace closed: #{run['session']}" if run.dig("session", "live")
+  raise "clean worktree #{run['worktree']} was not released" if File.directory?(run["worktree"])
+end
+
+def compat
+  Stage.prepare!(rehearsal: true)
+  herdr_pid = Stage.start_herdr!("compat-herdr.log")
+  puts Stage.herdr("--version").strip
+  puts Stage.herdr("status", "server").lines.grep(/version|protocol/).map(&:strip).join(", ")
+  puts "claude manifest: #{Stage.herdr('server', 'agent-manifests').lines.grep(/^\s*claude\s/).first.to_s.split.join(' ')}"
+
+  instance = PaneyardSandbox::Instance.new(
+    app_root: Stage::APP_ROOT, root: File.join(Stage::DEMO_ROOT, "sandbox"), fake_herdr: false,
+    env: { "PANEYARD_SANDBOX_REAL_HERDR" => "1", "HERDR_SOCKET_PATH" => Stage::HERDR_SOCKET }
+  )
+  passed = false
+  begin
+    instance.start!(modes: [ "real-herdr" ])
+    output, ok = instance.run("bin/rails", "sandbox:seed")
+    raise "sandbox:seed failed:\n#{output}" unless ok
+
+    name, id, = output.lines.last.split(" ", 3)
+    puts "sandbox up at #{instance.url}, workspace #{name}"
+    passed = PaneyardSandbox::Verify.new(instance, workspace: name, workspace_id: id).call
+    begin
+      started = Time.now
+      verify_closed_by_hand(instance, name)
+      puts "  ok   closed by hand in herdr: run completed, worktree released (#{(Time.now - started).round(1)}s)"
+    rescue StandardError => error
+      passed = false
+      puts "  FAIL closed by hand in herdr: #{error.message}"
+    end
+  ensure
+    FileUtils.cp(instance.log_path, File.join(Stage::OUTPUT_DIR, "compat-instance.log")) if File.exist?(instance.log_path)
+    instance.stop!
+    Stage.stop_herdr(herdr_pid)
+  end
+  puts(passed ? "compat: all green" : "compat: FAILED (logs in tmp/demo-output/compat-*.log)")
+  exit(passed ? 0 : 1)
+end
+
+def smoke
+  Stage.prepare!(rehearsal: true)
+  herdr_pid = Stage.start_herdr!("smoke-herdr.log")
+  display_pid = Stage.start_display!
+  repo = File.join(Stage::DEMO_ROOT, "smoke")
+  FileUtils.mkdir_p(repo)
+  created = Stage.herdr_json("workspace", "create", "--cwd", repo, "--label", "smoke", "--no-focus")
+  pane = created.dig("root_pane", "pane_id")
+  terminal_pid = Stage.start_terminal!
+  sleep 2
+  Stage.herdr("workspace", "focus", created.dig("root_pane", "workspace_id"))
+  video = File.join(Stage::OUTPUT_DIR, "smoke.mkv")
+  recorder = Stage.start_recording!(video, seconds: 10)
+  sleep 1
+  Stage.herdr("agent", "start", "smoke", "--kind", "claude", "--pane", pane)
+  Stage.wait_until("the stand-in to be ready", timeout: 20) { Stage.agent(pane)&.dig("interactive_ready") }
+  Stage.herdr("agent", "prompt", pane, "glyphs: #{GLYPHS} [fake-agent: done]")
+  Process.wait(recorder)
+  probe, = Open3.capture2("ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+                          "-show_entries", "stream=width,height,nb_read_frames", "-of", "csv=p=0", video)
+  Stage.sh!("ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-ss", "8", "-i", video, "-frames:v", "1",
+            File.join(Stage::OUTPUT_DIR, "smoke.png"))
+  puts "smoke: tmp/demo-output/smoke.mkv (width,height,frames #{probe.strip}; want #{Stage::CANVAS.join(',')},#{Stage::FPS * 10})"
+  puts "       frame at 8s: tmp/demo-output/smoke.png"
+ensure
+  Stage.stop_group(terminal_pid)
+  Stage.stop_group(display_pid)
+  Stage.stop_herdr(herdr_pid) if herdr_pid
+end
+
+def story(rehearsal:)
+  if !rehearsal && ENV["CLAUDE_CODE_OAUTH_TOKEN"].to_s.strip.empty?
+    abort "take: CLAUDE_CODE_OAUTH_TOKEN is not set (see demo/bin/record's header)"
+  end
+
+  name = rehearsal ? "rehearsal" : "take"
+  Stage.prepare!(rehearsal:)
+  Stage.configure_user!
+  base = Stage.materialize_todo!
+  herdr_pid = Stage.start_herdr!("#{name}-herdr.log")
+  instance = Stage.start_app!(model: MODEL)
+  Stage.register_todo!(instance)
+  puts "#{name}: app at #{instance.url}, todo repo at #{base[0, 12]}, model #{rehearsal ? 'none (stand-in)' : MODEL}"
+  display_pid = Stage.start_display!
+  terminal_pid = Stage.start_terminal!
+  sleep 2
+  video = File.join(Stage::OUTPUT_DIR, "#{name}.mkv")
+  timings_path = File.join(Stage::OUTPUT_DIR, "#{name}-timings.json")
+  director = Director.new(instance:, model: MODEL, video:, timings_path:)
+  begin
+    director.call
+  rescue StandardError => error
+    director.failures << "stopped: #{error.message}" unless director.failures.any? { _1.include?(error.message) }
+  end
+  director.timings.each { |beat, span| puts format("  %-8s %6.1fs - %6.1fs", beat, span["start"], span["end"]) }
+  if director.failures.empty?
+    puts "#{name}: all checks passed -> tmp/demo-output/#{name}.mkv, #{name}-timings.json"
+    cut(name)
+  else
+    puts "#{name}: FAILED\n#{director.failures.map { "  - #{_1}" }.join("\n")}"
+  end
+  director.failures.empty?
+ensure
+  if instance
+    FileUtils.cp(instance.log_path, File.join(Stage::OUTPUT_DIR, "#{name}-app.log")) if File.exist?(instance.log_path)
+    instance.stop!
+  end
+  Stage.stop_group(terminal_pid)
+  Stage.stop_group(display_pid)
+  Stage.stop_herdr(herdr_pid) if herdr_pid
+end
+
+def cut(name)
+  mp4, gif = Cut.call(video: File.join(Stage::OUTPUT_DIR, "#{name}.mkv"),
+                      timings: File.join(Stage::OUTPUT_DIR, "#{name}-timings.json"), out_dir: Stage::OUTPUT_DIR, name:)
+  [ mp4, gif ].each { puts format("  %-40s %5.1f MB", "tmp/demo-output/#{File.basename(_1)}", File.size(_1) / 1e6) }
+end
+
+case ARGV.first
+when "compat" then compat
+when "smoke" then smoke
+when "rehearse" then exit(story(rehearsal: true) ? 0 : 1)
+when "take" then exit(story(rehearsal: false) ? 0 : 1)
+when "cut" then cut(ARGV.fetch(1, "take"))
+else
+  warn "Usage: demo/bin/in-container compat|smoke|rehearse|take|cut NAME"
+  exit 1
+end

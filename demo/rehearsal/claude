@@ -1,0 +1,266 @@
+#!/usr/local/bin/ruby
+# The demo container's rehearsal stand-in for Claude Code (see
+# docs/demo-recording-plan.md): what demo/bin/claude runs instead of the real
+# CLI while /work/demo/rehearsal exists, so the demo's choreography can be
+# developed, and Paneyard checked against a real herdr, without spending any
+# model usage. It never appears in a published recording.
+#
+# Unlike script/fake_agent, which talks to the fake herdr over JSON lines, this
+# runs under a REAL herdr, which knows nothing about it except what it draws
+# and what its process is called. So it is named `claude` (herdr detects the
+# agent by process name) and draws what herdr's claude manifest reads: an OSC
+# title starting with a braille spinner while working, a plain title and a
+# prompt when idle. Input arrives the way it does for the real CLI, as bytes on
+# the pane's pty from agent.prompt / agent.send_keys, and Enter submits.
+#
+# The interpreter is named absolutely: through /usr/bin/env the process would
+# be called "ruby" once env exec'd it, and herdr would never detect it.
+#
+# Directives, anywhere in a prompt, as for the fake agent:
+#   [fake-agent: done|blocked|failed]  work a moment, report that outcome, go idle
+#   [fake-agent: dirty]                leave FAKE_AGENT_CHANGES.md uncommitted, report done
+#   [fake-agent: crash]                exit without reporting
+#   [fake-agent: working]              keep working, never report
+# REHEARSAL_WORK_SECONDS sets how long "work" lasts (default 3).
+#
+# Without a directive it plays its part in the demo's story instead
+# (demo/lib/director.rb), for real as far as Paneyard and git can tell:
+#   - as the operator's own Claude (its MCP server is /mcp/admin): a prompt
+#     asking to queue queues the two story jobs with queue_run; "how did"
+#     answers from list_runs;
+#   - as a run's Claude: its task (the prompt with "# Task") picks a canned
+#     change from demo/rehearsal/changes/, which it copies in and tests, then
+#     reports done; "merge" later commits and merges from the main checkout,
+#     then reports done.
+require "io/console"
+require "fileutils"
+require "json"
+require "open3"
+require_relative "../../lib/paneyard_sandbox/mcp_client"
+
+class RehearsalClaude
+  DIRECTIVE = /\[fake-agent:\s*([a-z]+)\]/
+  SPINNER = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
+  PASTE_START = "\e[200~".freeze
+  PASTE_END = "\e[201~".freeze
+
+  def initialize(argv: ARGV, env: ENV, input: $stdin, output: $stdout)
+    @argv = argv
+    @env = env
+    @input = input
+    @output = output
+    @output.sync = true
+    @buffer = +""
+    @pasting = false
+  end
+
+  def run
+    trap("TERM") { exit 0 }
+    @input.tty? ? @input.raw { loop_input } : loop_input
+  end
+
+  private
+
+  def loop_input
+    # Bracketed paste on, as the real CLI turns it on: then a multi-line prompt
+    # arrives between paste markers instead of as lines, each of which Enter
+    # would submit on its own.
+    write("\e[?2004h\e[2J\e[H")
+    write("✻ Claude Code (rehearsal stand-in: no model)\r\n  #{Dir.pwd}\r\n")
+    idle
+    while (char = @input.getc)
+      char == "\e" ? escape_sequence : key(char)
+    end
+  end
+
+  # Bracketed paste markers bracket a pasted prompt; any other escape
+  # sequence (arrows, focus reports) is swallowed.
+  def escape_sequence
+    sequence = +"\e"
+    while (char = @input.getc)
+      sequence << char
+      break if sequence.length > 2 && char.match?(/[A-Za-z~]/)
+    end
+    @pasting = true if sequence == PASTE_START
+    @pasting = false if sequence == PASTE_END
+  end
+
+  def key(char)
+    case char
+    when "\r", "\n"
+      return @buffer << " " if @pasting
+
+      submit
+    when "\u007f", "\b"
+      write("\b \b") unless @buffer.empty?
+      @buffer.chop!
+    when "\u0003" then nil
+    else
+      @buffer << char
+      write(char)
+    end
+  end
+
+  def submit
+    text = @buffer.strip
+    @buffer = +""
+    return if text.empty?
+
+    mode = text[DIRECTIVE, 1] || @env["FAKE_AGENT_MODE"]
+    write("\r\n")
+    return play_story(text) unless mode
+
+    work(Float(@env.fetch("REHEARSAL_WORK_SECONDS", "3")), forever: mode == "working")
+
+    case mode
+    when "done", "blocked", "failed" then finish(report(mode))
+    when "dirty"
+      File.write("FAKE_AGENT_CHANGES.md", "Left uncommitted by the rehearsal stand-in.\n")
+      finish(report("done"))
+    when "crash"
+      write("\r\n⏺ Crashing without reporting.\r\n")
+      exit 3
+    else finish("unknown directive #{mode.inspect}")
+    end
+  end
+
+  STORY_JOBS = [
+    "Add optional due dates to todos: `todo add \"Pay rent\" --due 2026-10-01`, and show them in `todo list`.",
+    "Add a `todo clear` command that removes finished todos."
+  ].freeze
+  CHANGES = File.expand_path("changes", __dir__)
+
+  def play_story(text)
+    if operator?
+      text.match?(/queue/i) ? queue_story_jobs : answer_from_runs
+    elsif text.include?("# Task")
+      make_change(text.split("# Task", 2).last.match?(/clear/i) ? "clear" : "due-dates")
+    elsif text.match?(/merge/i)
+      merge_to_main
+    else
+      work(2)
+      finish(report("done"))
+    end
+  end
+
+  def queue_story_jobs
+    work(2)
+    write("⏺ I'll queue both as separate Paneyard jobs on the todo workspace.\r\n\r\n")
+    STORY_JOBS.each do |task|
+      write("⏺ paneyard - queue_run (MCP)(workspace: \"todo\", task: \"#{task[0, 60]}…\")\r\n")
+      run_id = admin.call_tool("queue_run", task:, workspace: "todo").fetch("runId")
+      write("  ⎿  Queued #{run_id}\r\n\r\n")
+      sleep 0.6
+    end
+    finish("Both jobs are queued; each gets its own worktree and session.")
+  end
+
+  def answer_from_runs
+    work(2)
+    write("⏺ paneyard - list_runs (MCP)(workspace: \"todo\")\r\n\r\n")
+    runs = admin.call_tool("list_runs", workspace: "todo", includeFinished: true)
+    runs = runs["runs"] if runs.is_a?(Hash)
+    Array(runs).each do |run|
+      write("  • #{run['runId']}: #{run['status']} — #{run['task'].to_s[0, 70]}\r\n")
+    end
+    finish("\r\n  Both finished, were merged to main, and their worktrees are cleaned up.")
+  end
+
+  def make_change(name)
+    work(3)
+    Dir.glob("**/*", File::FNM_DOTMATCH, base: File.join(CHANGES, name)).sort.each do |path|
+      source = File.join(CHANGES, name, path)
+      next if File.directory?(source)
+
+      existed = File.exist?(path)
+      FileUtils.mkdir_p(File.dirname(path))
+      FileUtils.cp(source, path)
+      write("⏺ #{existed ? 'Update' : 'Write'}(#{path})\r\n")
+      work(2.5)
+    end
+    write("⏺ Bash(bin/test)\r\n")
+    tests = IO.popen([ "ruby", "bin/test" ], err: [ :child, :out ], &:read).lines.last.to_s.strip
+    write("  ⎿  #{tests}\r\n")
+    work(1)
+    finish(report("done", "Made the #{name} change; `bin/test`: #{tests}"))
+  end
+
+  def merge_to_main
+    work(2)
+    branch = git("branch", "--show-current")
+    main_checkout = File.dirname(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
+    write("⏺ Bash(git add -A && git commit)\r\n")
+    git("add", "-A")
+    git("commit", "--quiet", "-m", branch.delete_prefix("paneyard/").tr("-", " "))
+    work(1.5)
+    write("⏺ Bash(git -C #{main_checkout} merge #{branch})\r\n")
+    git("-C", main_checkout, "merge", "--quiet", "--no-edit", branch)
+    write("  ⎿  Merged #{branch} into main\r\n")
+    work(1)
+    finish(report("done", "Committed and merged `#{branch}` into main."))
+  end
+
+  def git(*args)
+    output, status = Open3.capture2e("git", *args)
+    raise "git #{args.join(' ')}: #{output}" unless status.success?
+
+    output.strip
+  end
+
+  def operator?
+    mcp_endpoint.first.end_with?("/mcp/admin")
+  end
+
+  def admin
+    PaneyardSandbox::McpClient.new(mcp_endpoint.first)
+  end
+
+  def work(seconds, forever: false)
+    started = Time.now
+    frame = 0
+    while forever || Time.now - started < seconds
+      spinner = SPINNER[frame % SPINNER.size]
+      title("#{spinner} Working")
+      write("\r\e[K✻ Working… (#{(Time.now - started).to_i}s · esc to interrupt)")
+      frame += 1
+      sleep 0.1
+    end
+    write("\r\e[K")
+  end
+
+  def finish(message)
+    write("⏺ #{message}\r\n")
+    idle
+  end
+
+  def idle
+    title("Claude Code")
+    write("\r\n> ")
+  end
+
+  def report(outcome, summary = "Rehearsal stand-in reported `#{outcome}` from `#{Dir.pwd}`.")
+    url, token = mcp_endpoint
+    PaneyardSandbox::McpClient.new(url, token:).call_tool("report_idle", outcome:, summary:)
+    "Reported #{outcome}."
+  rescue StandardError => error
+    "report_idle failed: #{error.class}: #{error.message}"
+  end
+
+  # Paneyard launches claude with the MCP config it wrote; read the URL and
+  # bearer from it, as the real CLI does.
+  def mcp_endpoint
+    path = @argv[@argv.index("--mcp-config") + 1] if @argv.include?("--mcp-config")
+    server = JSON.parse(File.read(path.to_s)).dig("mcpServers", "paneyard")
+    [ server.fetch("url"), server.dig("headers", "Authorization").to_s.delete_prefix("Bearer ") ]
+  end
+
+  def title(text)
+    write("\e]0;#{text}\a")
+  end
+
+  def write(text)
+    @output.write(text)
+  end
+end
+
+RehearsalClaude.new.run

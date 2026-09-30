@@ -1,0 +1,11 @@
+#!/bin/sh
+# Installed as /usr/local/bin/claude in the demo container (demo/Dockerfile).
+# A herdr pane's login shell sets its own PATH and Paneyard hands a session
+# no switch of ours, so which claude runs is chosen by a flag file instead:
+# with /work/demo/rehearsal present it is the stand-in (demo/rehearsal/claude,
+# no model), otherwise the real CLI. Either way the file exec'd is named
+# `claude`, which is what herdr's agent detection keys on (process=claude).
+if [ -e /work/demo/rehearsal ]; then
+  exec /work/paneyard/demo/rehearsal/claude "$@"
+fi
+exec /opt/claude-code/bin/claude "$@"
