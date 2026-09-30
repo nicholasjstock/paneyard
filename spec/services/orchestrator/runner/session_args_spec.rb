@@ -115,6 +115,19 @@ RSpec.describe Orchestrator::Runner::SessionArgs do
       expect(args.first(2)).to eq([ "resume", "codex-7" ])
       expect(args).not_to include("-C")
     end
+
+    # With an update pending, codex otherwise opens on an update picker whose
+    # default is "Update now", which the submitted prompt's Enter selects.
+    it "turns off codex's startup update check, fresh and resumed" do
+      [ nil, "codex-7" ].each do |resume_session_id|
+        _command, args, _env = described_class.build(
+          driver: "codex", root_dir: "/repos/app-1", mcp_config_path: "/tmp/mcp.json",
+          capability_token: "tok", mcp_url:, model: "a-model", resume_session_id:
+        )
+
+        expect(args.each_cons(2)).to include([ "-c", "check_for_update_on_startup=false" ]), "resume=#{resume_session_id.inspect}: #{args.inspect}"
+      end
+    end
   end
 
   describe "opencode" do
