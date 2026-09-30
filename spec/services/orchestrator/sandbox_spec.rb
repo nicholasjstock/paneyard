@@ -42,6 +42,17 @@ RSpec.describe Orchestrator::Sandbox do
     expect(inside).to be_valid
   end
 
+  it "will not even look at a workspace root outside the sandbox when registering one" do
+    root = create_source_checkout
+    sandbox_on!
+
+    result = Orchestrator::WorkspaceRegistration.register(name: "real", root_path: root).last
+
+    expect(result["problems"].map { |problem| problem["code"] }).to eq(%w[outside_sandbox])
+    expect(result["problems"].first["message"]).to match(/sandbox refuses to register a workspace at .* outside/)
+    expect(Workspace.find_by(name: "real")).to be_nil
+  end
+
   it "refuses to provision a worktree outside the sandbox, whatever the database says" do
     workspace = create_workspace(root_path: create_source_checkout)
     run = create_run(workspace:, status: "launching")

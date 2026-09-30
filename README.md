@@ -87,7 +87,7 @@ mkdir -p ~/code/my-app
 git clone git@github.com:you/my-app.git ~/code/my-app/main   # must be on branch main, with an origin remote
 ```
 
-Open Paneyard's URL, choose **Add workspace**, and enter a name and the **workspace root** (`~/code/my-app` as an absolute path, not `.../main`). [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
+Open Paneyard's URL, choose **Add workspace**, and enter a name and the **workspace root** (`~/code/my-app`; giving `.../main` also works). Registration checks that layout and lists anything to fix before it saves. You can also register it from your own agent with the `register_workspace` tool over `/mcp/admin` ([step 5](#5-queue-runs-from-your-own-agent)). [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
 
 ### 4. Queue a run
 

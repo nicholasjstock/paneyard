@@ -27,12 +27,13 @@ RSpec.describe "workspaces", type: :system do
   # runs straight away, and sessions record what they learn as they go.
   it "creates a workspace from the index flow and can queue a task in it immediately" do
     suffix = SecureRandom.hex(4)
+    root = create_source_checkout
 
     expect do
       visit workspaces_path
       click_link "Add workspace"
       fill_in "Name", with: "planner-app-#{suffix}"
-      fill_in "Workspace root", with: "/tmp/planner-app-#{suffix}"
+      fill_in "Workspace root", with: root
       click_button "Add workspace"
     end.not_to change(Run, :count)
 
@@ -43,9 +44,25 @@ RSpec.describe "workspaces", type: :system do
     expect(page).to have_no_button("Re-run project setup")
   end
 
+  # The same checks as the register_workspace MCP tool, so a broken layout is
+  # caught here rather than by the first run.
+  it "refuses to add a workspace whose root is not laid out for runs, and says how to fix it" do
+    clone = File.join(create_source_checkout, "main")
+    plain = File.join(Dir.mktmpdir, "plain-clone")
+    FileUtils.mv(clone, plain)
+
+    visit new_workspace_path
+    fill_in "Name", with: "wrong-root"
+    fill_in "Workspace root", with: plain
+    click_button "Add workspace"
+
+    expect(page).to have_text("is itself a git checkout, but a workspace root must hold the checkout as a child named `main`")
+    expect(Workspace.find_by(name: "wrong-root")).to be_nil
+  end
+
   it "lets an operator edit a workspace's root" do
     workspace = Workspace.create!(name: "planner-app-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
-    new_root = Dir.mktmpdir
+    new_root = create_source_checkout
 
     visit workspaces_path
     within(find(".card", text: workspace.name, match: :first)) { click_link "Edit" }
@@ -55,6 +72,18 @@ RSpec.describe "workspaces", type: :system do
 
     expect(page).to have_text("Updated workspace #{workspace.name}.")
     expect(workspace.reload.root_path).to eq(new_root)
+  end
+
+  it "does not let an edit move a workspace's root somewhere runs cannot use" do
+    workspace = Workspace.create!(name: "planner-app-#{SecureRandom.hex(4)}", root_path: create_source_checkout)
+    empty = Dir.mktmpdir
+
+    visit edit_workspace_path(workspace)
+    fill_in "Workspace root", with: empty
+    click_button "Save"
+
+    expect(page).to have_text("There is no `main` checkout at #{empty}/main")
+    expect(workspace.reload.root_path).not_to eq(empty)
   end
 
   it "shows the empty state when no workspaces exist" do

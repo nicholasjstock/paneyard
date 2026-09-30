@@ -16,6 +16,64 @@ RSpec.describe "the admin MCP endpoint", type: :request do
   it "exposes exactly the external tool set" do
     names = Orchestrator::AdminMcpServer::TOOLS.map(&:tool_name)
 
-    expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces")
+    expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces", "register_workspace")
+  end
+
+  it "tells clients how to find or register the workspace before queuing" do
+    host! "127.0.0.1"
+    post_mcp(jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "spec", version: "1" } })
+
+    body = response.body
+    body = body.lines.find { |line| line.start_with?("data:") }.delete_prefix("data:") if body.start_with?("event:", "data:")
+    expect(JSON.parse(body).dig("result", "instructions")).to include("list_workspaces", "register_workspace", "queue_run")
+  end
+
+  it "keeps register_workspace off the run endpoint" do
+    expect(Orchestrator::RunMcpServer::TOOLS).not_to include(McpTools::RegisterWorkspaceTool)
+  end
+
+  describe "register_workspace" do
+    before { host! "127.0.0.1" }
+
+    # The full handshake a real client makes, then the call; the raw result,
+    # since a failed registration is an error result the caller must read.
+    def register(name, root)
+      headers = { "CONTENT_TYPE" => "application/json", "ACCEPT" => "application/json, text/event-stream" }
+      post "/mcp/admin", headers:, params: JSON.generate(
+        jsonrpc: "2.0", id: 1, method: "initialize",
+        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "spec", version: "1" } }
+      )
+      headers["HTTP_MCP_SESSION_ID"] = response.headers["mcp-session-id"]
+      post "/mcp/admin", headers:, params: JSON.generate(jsonrpc: "2.0", method: "notifications/initialized")
+      post "/mcp/admin", headers:, params: JSON.generate(
+        jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "register_workspace", arguments: { name:, rootPath: root } }
+      )
+      body = response.body
+      body = body.lines.find { |line| line.start_with?("data:") }.delete_prefix("data:") if body.start_with?("event:", "data:")
+      JSON.parse(body).fetch("result")
+    end
+
+    it "registers a laid-out repository over the wire" do
+      root = create_source_checkout
+
+      result = register("over-the-wire", root)
+
+      expect(result["isError"]).to be_falsey
+      expect(result["structuredContent"]).to include(
+        "name" => "over-the-wire", "sourceRoot" => File.join(root, "main"), "originUrl" => "https://example.test/paneyard.git"
+      )
+      expect(Workspace.find_by(name: "over-the-wire")&.root_path).to eq(root)
+    end
+
+    it "creates nothing for a bad layout, and says why" do
+      empty = Dir.mktmpdir("no-checkout")
+
+      result = register("bad-layout", empty)
+
+      expect(result["isError"]).to be(true)
+      expect(result["structuredContent"]["problems"].map { |problem| problem["code"] }).to eq(%w[source_missing])
+      expect(Workspace.find_by(name: "bad-layout")).to be_nil
+    end
   end
 end

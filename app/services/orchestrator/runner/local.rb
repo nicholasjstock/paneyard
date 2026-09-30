@@ -5,7 +5,7 @@ module Orchestrator
     # are the whole runner interface -- a runner on another machine would
     # answer the same calls with the same plain data -- and the modules beside
     # it (Runner::Herdr, SessionLauncher, SessionLayout, SessionArgs,
-    # ProcessEnv, Worktrees, ModelDiscovery, Attachments) are its internals,
+    # ProcessEnv, Worktrees, WorkspaceRoots, ModelDiscovery, Attachments) are its internals,
     # which nothing outside Orchestrator::Runner uses.
     #
     # Errors leave as Runner::Error (or Runner::Unreachable when herdr never
@@ -58,6 +58,14 @@ module Orchestrator
       # The checkout's `origin` remote URL.
       def origin_url(path:)
         Worktrees.origin_url(path)
+      end
+
+      # Whether root_path is laid out as a workspace root: a `main` checkout
+      # beneath it, on main, with an origin. Looks only; changes nothing.
+      # Returns { "root_path" (expanded), "source_root", "origin_url",
+      # "problems" => [{ "code", "message" }] }, problems empty when it is fine.
+      def check_workspace_root(root_path:)
+        WorkspaceRoots.check(root_path)
       end
 
       # --- Sessions ---------------------------------------------------------

@@ -11,10 +11,16 @@ module McpTools
   # own workspace (a session queuing follow-up work defaults to "here");
   # absent that too (the bare /mcp/admin endpoint has no run session behind
   # it), the oldest registered workspace.
+  #
+  # That last fallback is only for reading. A caller that would create
+  # something (queue_run) passes `explicit: true` and must name the workspace
+  # when it has no run of its own: an agent opened in a repository nobody has
+  # registered would otherwise queue its job into whichever unrelated
+  # workspace happens to be oldest.
   module WorkspaceResolution
     module_function
 
-    def resolve!(server_context:, workspace: nil)
+    def resolve!(server_context:, workspace: nil, explicit: false)
       return find_named!(workspace) if workspace.present?
 
       run_session_id = context_value(server_context, :run_session_id)
@@ -22,8 +28,17 @@ module McpTools
         session = RunSession.find_by(id: run_session_id)
         return session.run.workspace if session
       end
+      raise ArgumentError, workspace_required_message if explicit
 
       Workspace.default || raise(ArgumentError, "no workspace is registered")
+    end
+
+    def workspace_required_message
+      registered = Workspace.order(:created_at).map { |w| "#{w.name} (#{w.source_root})" }
+      listed = registered.any? ? "Registered workspaces: #{registered.join(', ')}." : "No workspace is registered yet."
+      "workspace is required when calling from outside a run. #{listed} Pass the one whose source checkout is the " \
+        "repository you mean; if it is not listed, register it first with register_workspace (rootPath can be " \
+        "the repository's own directory), then queue again."
     end
 
     def run!(server_context:, run_id:, workspace: nil)

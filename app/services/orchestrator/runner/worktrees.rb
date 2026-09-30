@@ -1,4 +1,5 @@
 require "open3"
+require "shellwords"
 
 module Orchestrator
   module Runner
@@ -47,12 +48,65 @@ module Orchestrator
         raise Error, error.message
       end
 
+      # The launch-time rules for a source checkout, raised one at a time.
       def validate_source!(source_root)
-        raise Error, "Source checkout does not exist: #{source_root}" unless source_root.directory?
+        source_root = Pathname(source_root)
         raise Error, "Source checkout must be named main: #{source_root}" unless source_root.basename.to_s == "main"
-        raise Error, "Source checkout is not a Git repository: #{source_root}" unless git_success?(source_root, "rev-parse", "--is-inside-work-tree")
-        raise Error, "Source checkout must be on main" unless git!(source_root, "branch", "--show-current").strip == "main"
-        raise Error, "Source checkout has no origin remote: #{source_root}" unless git_success?(source_root, "remote", "get-url", "origin")
+
+        problem = source_problems(source_root).first
+        raise Error, problem.fetch("message") if problem
+      end
+
+      # Everything wrong with `source_root` as a workspace's `main` checkout,
+      # each as { "code", "message" } with how to fix it; [] when nothing is.
+      # validate_source! (every launch) and WorkspaceRoots.check (registering
+      # a workspace) both use these, so the two can never disagree.
+      def source_problems(source_root)
+        source_root = Pathname(source_root)
+        return [ source_problem("source_missing", "Source checkout does not exist: #{source_root}") ] unless source_root.exist?
+        return [ source_problem("source_missing", "Source checkout is not a directory: #{source_root}") ] unless source_root.directory?
+        unless git_success?(source_root, "rev-parse", "--is-inside-work-tree")
+          return [ source_problem("source_not_git", "Source checkout is not a Git repository: #{source_root}. " \
+            "Clone the repository there: git clone <repository-url> #{Shellwords.escape(source_root.to_s)}") ]
+        end
+        unless same_path?(git!(source_root, "rev-parse", "--show-toplevel").strip, source_root)
+          return [ source_problem("source_not_git", "Source checkout is not a Git repository of its own: #{source_root} " \
+            "is a directory inside another checkout. Clone the repository there instead.") ]
+        end
+
+        [ branch_problem(source_root), origin_problem(source_root) ].compact
+      end
+
+      def branch_problem(source_root)
+        branch = git!(source_root, "branch", "--show-current").strip
+        return if branch == "main"
+
+        dir = Shellwords.escape(source_root.to_s)
+        fix =
+          if git_success?(source_root, "rev-parse", "--verify", "--quiet", "refs/heads/main")
+            "Check it out: git -C #{dir} switch main"
+          elsif git_success?(source_root, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")
+            "Create it from origin: git -C #{dir} switch -c main --track origin/main"
+          elsif branch.present?
+            "Runs branch from and merge into `main`, so rename the default branch: git -C #{dir} branch -m #{Shellwords.escape(branch)} main " \
+              "(and rename it on the remote too, e.g. in the GitHub repository's branch settings, then " \
+              "git -C #{dir} push -u origin main)"
+          else
+            "Create it: git -C #{dir} switch -c main"
+          end
+        current = branch.present? ? "`#{branch}`" : "a detached HEAD"
+        source_problem("source_not_on_main", "Source checkout must be on main, but #{source_root} has #{current} checked out. #{fix}")
+      end
+
+      def origin_problem(source_root)
+        return if git_success?(source_root, "remote", "get-url", "origin")
+
+        source_problem("no_origin", "Source checkout has no origin remote: #{source_root}. Sessions push their branch " \
+          "to origin when asked to; add it: git -C #{Shellwords.escape(source_root.to_s)} remote add origin <repository-url>")
+      end
+
+      def source_problem(code, message)
+        { "code" => code, "message" => message }
       end
 
       # Whether `path` is a worktree git itself knows about, as opposed to a

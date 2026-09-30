@@ -34,7 +34,9 @@ The first public version. It includes:
 ### Integrations
 
 - `/mcp/run`, a per-session authenticated MCP endpoint wired into every session.
-- `/mcp/admin`, an unauthenticated loopback MCP endpoint for the operator's own MCP clients: `queue_run`, `list_runs`, `get_run`, `list_workspaces`.
+- `/mcp/admin`, an unauthenticated loopback MCP endpoint for the operator's own MCP clients: `queue_run`, `list_runs`, `get_run`, `list_workspaces`, `register_workspace`.
+- `register_workspace` on `/mcp/admin`: registers a workspace from your own agent. It accepts the workspace root, the `main` checkout, or any directory in it, and works out the root. It checks the layout a run needs (`<root>/main` a git checkout on `main` with an `origin`, unique name and root) and creates nothing if anything is wrong, returning every problem with how to fix it. The web UI's **Add workspace** and root edits now run the same check.
+- `queue_run` over `/mcp/admin` now requires `workspace` instead of falling back to the oldest workspace, and `/mcp/admin` has server instructions for the flow: find the workspace for this repository, register it if missing, then queue. From inside a run it still defaults to the run's own workspace.
 - Telegram remote control: list sessions, read panes and reports, and type into sessions from an allow-listed private chat, behind a platform-neutral adapter interface.
 
 ### Security

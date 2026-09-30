@@ -19,6 +19,26 @@ RSpec.describe McpTools::QueueRunTool do
     expect(run.workspace.runs.find_by(task: "Follow-up work.")).to be_present
   end
 
+  # An agent opened in a repository nobody registered must not have its job
+  # land in whichever workspace happens to be oldest.
+  it "requires a workspace from outside a run, even when only one is registered, and points at register_workspace" do
+    only = create_workspace(prefix: "queue-run-only")
+
+    response = described_class.call(task: "Do something here.", server_context: {})
+
+    expect(response.error?).to be(true)
+    expect(response.structured_content[:message]).to include(
+      "workspace is required", "#{only.name} (#{only.source_root})", "register_workspace"
+    )
+    expect(only.runs).to be_empty
+  end
+
+  it "says no workspace is registered yet, and how to register one" do
+    response = described_class.call(task: "Do something here.", server_context: {})
+
+    expect(response.structured_content[:message]).to include("No workspace is registered yet", "register_workspace")
+  end
+
   it "rejects a blank task" do
     workspace = create_workspace(prefix: "queue-run-blank")
 
