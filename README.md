@@ -64,14 +64,14 @@ bin/setup
 
 ### 2. Run it day to day
 
-Paneyard is meant to stay up all day. `bin/service` runs it in production mode, detached from your terminal, on port 3001 by default, logging to `log/production_service.log`. Its database is `storage/production.sqlite3`, created on first start.
+Paneyard is meant to stay up all day. `bin/service` runs it in production mode, detached from your terminal, on port 7263 by default, logging to `log/production_service.log`. Its database is `storage/production.sqlite3`, created on first start.
 
 ```sh
 bin/rails credentials:edit   # once: see the note below
 bin/service start            # also: stop | restart | status
 ```
 
-Then open <http://127.0.0.1:3001>. `start` waits for the app to answer and fails after two minutes, naming the log. After changing credentials or other boot-time configuration, run `bin/service restart`; [Long-running: `bin/service`](./docs/operating.md#long-running-binservice) has the details.
+Then open <http://127.0.0.1:7263>. `start` waits for the app to answer and fails after two minutes, naming the log. After changing credentials or other boot-time configuration, run `bin/service restart`; [Long-running: `bin/service`](./docs/operating.md#long-running-binservice) has the details.
 
 > [!NOTE]
 > Production mode needs a `secret_key_base`, which lives in Rails' encrypted credentials. A fresh clone has no `config/master.key`, so the committed `config/credentials.yml.enc` cannot be decrypted by you. Move it aside (`mv config/credentials.yml.enc config/credentials.yml.enc.orig`), then run `bin/rails credentials:edit`, which creates a new key and credentials file containing a `secret_key_base`. That file is also where optional Telegram and GitHub App settings go. Alternatively, export `SECRET_KEY_BASE` (for example from `bin/rails secret`) before `bin/service start`.
@@ -98,10 +98,10 @@ On the workspace's runs page, choose **Queue a task**, describe the task, pick a
 Optionally, Paneyard's `/mcp/admin` endpoint lets an MCP client, such as your everyday Claude Code session, queue and inspect runs without opening the web UI. Register it once, at user scope so it is available from every project:
 
 ```sh
-claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:3001/mcp/admin
+claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:7263/mcp/admin
 ```
 
-Use the port your instance listens on (3001 for `bin/service`). Then ask your agent to queue a task in a workspace, list runs, or check on one. The endpoint is unauthenticated, like the rest of the app, so keep it on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
+Use the port your instance listens on (7263 for `bin/service`). Then ask your agent to queue a task in a workspace, list runs, or check on one. The endpoint is unauthenticated, like the rest of the app, so keep it on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
 
 ## How a run works
 
@@ -142,7 +142,7 @@ Everything is optional except herdr and an agent CLI.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `PORT` | random (`bin/dev`), `3001` (`bin/service`) | HTTP port. |
+| `PORT` | random (`bin/dev`), `7263` (`bin/service`) | HTTP port. |
 | `BINDING` | `localhost` (dev), `127.0.0.1` (`bin/service`) | Interface Rails listens on. Widening it exposes an unauthenticated app; see [SECURITY.md](./SECURITY.md). |
 | `PANEYARD_ALLOWED_HOSTS` | unset | Extra `Host` names production answers to (comma-separated), for example behind a reverse proxy. |
 | `PANEYARD_RAILS_URL` | `http://127.0.0.1:$PORT` | URL sessions use to reach the orchestrator's MCP endpoint. Keep it in step with `PORT`. |
