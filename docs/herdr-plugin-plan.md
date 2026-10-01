@@ -207,7 +207,7 @@ the directory is inside its repository, or git says the directory is in a linked
 herdr put that). If none matches, it registers the repository through the existing `register_workspace`
 tool (using `Orchestrator::WorkspaceRegistration`; the server names it and works
 out its default branch), and shows the problems and their fixes if anything is wrong — nothing on disk is
-changed. Then it reads the task (a blank line submits; Ctrl-C cancels), asks for the base branch (Enter for
+changed. Then it reads the task (Enter submits, Shift-Enter adds a line, Ctrl-C cancels), asks for the base branch (Enter for
 the workspace's default; it mentions the branch the pane is on), asks for the driver (Enter for `claude`),
 queues it, and shows the run id, its base branch and the queue position. The run's herdr workspace opens on its own when a slot frees, as today.
 
