@@ -70,7 +70,7 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(status).to eq(0)
       expect(client).to have_received(:queue)
         .with(task: "Fix the flaky spec.\nRun it ten times.", workspace: "app", base_branch: nil, driver: "codex")
-      expect(out.string).to include("Queue a task in app", "Base branch (Enter for main)", "Queued run-1 from main.")
+      expect(out.string).to include("PANEYARD  /  NEW RUN", "Base branch (Enter for main)", "Queued run-1 from main.")
     end
 
     it "offers the branch the pane is on, and queues from the one the operator types" do
@@ -126,6 +126,19 @@ RSpec.describe PaneyardPlugin::Cli do
 
       expect(status).to eq(1)
       expect(out.string).to include("Paneyard: Paneyard exited while starting.", "Press Enter to close.")
+    end
+
+    it "submits on Enter and inserts a line on Shift-Enter in a terminal" do
+      input = StringIO.new("First line\nSecond line\r")
+      input.define_singleton_method(:tty?) { true }
+      input.define_singleton_method(:raw) { |&block| block.call }
+      input.define_singleton_method(:getch) { getc }
+      terminal = StringIO.new
+      terminal.define_singleton_method(:tty?) { true }
+      cli = described_class.new(env: {}, out: terminal, input:)
+
+      expect(cli.send(:read_task)).to eq("First line\nSecond line")
+      expect(terminal.string).to include("First line", "Second line")
     end
   end
 

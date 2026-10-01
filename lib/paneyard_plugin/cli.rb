@@ -338,11 +338,15 @@ module PaneyardPlugin
       return unless workspace
 
       default = workspace.fetch("defaultBaseBranch")
-      heading "Queue a task in #{workspace.fetch('name')}"
-      say dim(workspace.fetch("repositoryPath"))
+      clear_screen
+      say accent("PANEYARD  /  NEW RUN")
+      say rule
+      say "#{bold(workspace.fetch('name'))}  #{dim(workspace.fetch('repositoryPath'))}"
       say ""
-      say "Describe the task: the goal, constraints, and how to tell it worked."
-      say dim("A blank line queues it. Ctrl-C cancels.")
+      say bold("Task")
+      say dim("Describe the goal, constraints, and how to tell it worked.")
+      say dim("Enter submits  ·  Shift-Enter adds a line  ·  Ctrl-C cancels")
+      say ""
       task = read_task
       return say("Nothing queued.") if task.empty?
 
@@ -632,6 +636,62 @@ module PaneyardPlugin
     end
 
     def read_task
+      return read_task_lines unless @in.tty? && @out.tty? && @in.respond_to?(:getch)
+
+      read_task_keys
+    end
+
+    # In raw mode Enter and Shift-Enter remain distinct. Most macOS terminals
+    # send CR for Enter and LF for Shift-Enter; terminals using the Kitty
+    # keyboard protocol send CSI 13;2u for Shift-Enter instead.
+    def read_task_keys
+      task = +""
+      @out.print(accent("› "))
+      @out.flush
+      @in.raw do
+        loop do
+          key = @in.getch
+          case key
+          when "\r"
+            @out.puts
+            break
+          when "\n"
+            task << "\n"
+            @out.print("\r\n#{accent('› ')}")
+          when "\u0003"
+            raise Interrupt
+          when "\u007f", "\b"
+            next if task.empty? || task.end_with?("\n")
+
+            task.chop!
+            @out.print("\b \b")
+          when "\e"
+            sequence = read_escape_sequence
+            if sequence == "[13;2u"
+              task << "\n"
+              @out.print("\r\n#{accent('› ')}")
+            end
+          else
+            task << key
+            @out.print(key)
+          end
+          @out.flush
+        end
+      end
+      task.strip
+    end
+
+    def read_escape_sequence
+      sequence = +""
+      while IO.select([ @in ], nil, nil, 0.01)
+        character = @in.getch
+        sequence << character
+        break if character.match?(/[A-Za-z~]/)
+      end
+      sequence
+    end
+
+    def read_task_lines
       lines = []
       while (line = @in.gets)
         break if line.strip.empty? && lines.any?
@@ -748,6 +808,15 @@ module PaneyardPlugin
       say bold(text)
     end
 
+    def clear_screen
+      @out.print("\e[2J\e[H") if @out.tty?
+    end
+
+    def rule
+      width = [ (IO.console&.winsize&.last || 72) - 1, 72 ].min
+      dim("─" * [ width, 24 ].max)
+    end
+
     def say(text)
       @out.puts(text)
     end
@@ -755,6 +824,7 @@ module PaneyardPlugin
 
     def bold(text) = style(text, 1)
     def dim(text) = style(text, 2)
+    def accent(text) = style(text, 36)
 
     def style(text, code)
       @out.tty? ? "\e[#{code}m#{text}\e[0m" : text

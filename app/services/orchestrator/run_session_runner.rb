@@ -122,8 +122,9 @@ module Orchestrator
 
       # claude's folder-trust gate defaults to "No, exit", so an untrusted
       # repo looks like a CLI that quit on its own. Say what it was.
-      hint = "\n\nclaude stopped at its folder-trust prompt: open claude once in #{session.run.workspace.repository_path} " \
-             "and trust it." if screen.match?(/trust this folder/i)
+      hint = "\n\nclaude stopped at its folder-trust prompt although Paneyard marks each worktree as trusted: " \
+             "check that CLAUDE_CONFIG_DIR is the same for Paneyard and for " \
+             "your login shell, and the log for a warning about it." if screen.match?(/trust this folder/i)
       "#{error.message}#{hint}\n\n--- Last screen of agent pane #{session.herdr_pane_id} ---\n#{screen}"
     end
 

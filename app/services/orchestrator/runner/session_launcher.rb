@@ -77,6 +77,7 @@ module Orchestrator
       # Returns its pid, or raises LaunchError.
       def launch(spec, pane_id:, mcp_config_path:)
         kind, args = command(spec, mcp_config_path)
+        trust_claude_folder!(spec.fetch(:cwd)) if spec.fetch(:driver) == "claude"
         start_agent!(name: spec.fetch(:run_id), kind:, pane_id:, args:)
         wait_for_agent_detected!(pane_id, kind:)
         dismiss_codex_trust_prompt!(pane_id) if spec.fetch(:driver) == "codex"
@@ -85,6 +86,14 @@ module Orchestrator
         submit_prompt_if_unsent!(pane_id, run_id: spec.fetch(:run_id))
 
         wait_for_pid(pane_id) || raise(LaunchError, "session for run #{spec.fetch(:run_id)} never started a foreground process")
+      end
+
+      # A config problem should not mask the launch. If trust could not be
+      # recorded, the normal launch diagnostics will show Claude's prompt.
+      def trust_claude_folder!(dir)
+        ClaudeTrust.trust!(dir)
+      rescue StandardError => error
+        Rails.logger.warn("[SessionLauncher] could not mark #{dir} as trusted for claude: #{error.message}")
       end
 
       def command(spec, mcp_config_path)

@@ -343,7 +343,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
       expect { described_class.start!(run) }.to raise_error(Orchestrator::Runner::LaunchError)
 
-      expect(run.run_sessions.sole.result).to include("claude stopped at its folder-trust prompt: open claude once in #{run.workspace.repository_path}")
+      expect(run.run_sessions.sole.result).to include("claude stopped at its folder-trust prompt although Paneyard marks each worktree as trusted")
     end
 
     it "keeps only the tail of a long pane screen" do
