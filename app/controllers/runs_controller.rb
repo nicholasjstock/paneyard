@@ -11,7 +11,7 @@ class RunsController < ApplicationController
   end
 
   def new
-    @run = current_workspace.runs.new(launcher_variant: "claude")
+    @run = current_workspace.runs.new(launcher_variant: "claude", base_branch: current_workspace.default_base_branch)
   end
 
   # Creating a run only queues it. RunDispatchJob starts it when a slot is
@@ -22,9 +22,13 @@ class RunsController < ApplicationController
     @run.worktree_name = Orchestrator::GitWorktree.name_for(@run)
     @run.status = "queued"
     @run.launched_by = current_operator
-    @run.target_root = current_workspace.source_root
+    @run.target_root = current_workspace.repository_path
+    @run.base_branch = Orchestrator::RunBaseBranch.for(current_workspace, @run.base_branch)
     @run.model = @run.model.presence
     validate_model_choice(@run)
+    if (problem = Orchestrator::RunBaseBranch.problem(current_workspace, @run.base_branch))
+      @run.errors.add(:base, problem)
+    end
     @run.launch_artifacts = uploaded_artifacts(launch_files_params) if @run.errors.empty?
 
     if @run.errors.empty? && @run.save
@@ -97,7 +101,7 @@ class RunsController < ApplicationController
   end
 
   def run_params
-    params.require(:run).permit(:task, :launcher_variant, :model)
+    params.require(:run).permit(:task, :launcher_variant, :model, :base_branch)
   end
 
   # The dropdown only ever offers what the chosen agent's own CLI lists
@@ -115,15 +119,16 @@ class RunsController < ApplicationController
     params.fetch(:run, {}).permit(launch_files: [])[:launch_files]
   end
 
-  # Files the operator attached at launch. The runner stores them under the
-  # workspace's main checkout (there is no worktree yet); RunPrompt gives the
-  # session their path and the run screen lists them.
+  # Files the operator attached at launch. The runner stores them beside the
+  # run's runtime files (there is no worktree yet, and the repository is the
+  # operator's own checkout); RunPrompt gives the session their path and the
+  # run screen lists them.
   def uploaded_artifacts(files)
     Array(files).filter_map do |uploaded|
       next unless uploaded.respond_to?(:original_filename) && uploaded.original_filename.present?
 
       name = File.basename(uploaded.original_filename)
-      runner.store_attachment(source_root: current_workspace.source_root, run_id: @run.run_id, name:, content: uploaded.read)
+      runner.store_attachment(run_id: @run.run_id, name:, content: uploaded.read)
       { "name" => name, "source_path" => uploaded.original_filename }
     end
   end
@@ -132,10 +137,10 @@ class RunsController < ApplicationController
     "run-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}"
   end
 
-  # Launch files live under the main checkout, not the run's worktree (see
-  # #uploaded_artifacts).
+  # Launch files live on the runner, not in the run's worktree (see
+  # #uploaded_artifacts); older runs kept them in the repository.
   def collect_artifacts
-    runner.attachments(source_root: current_workspace.source_root, run_id: @run.run_id)
+    runner.attachments(run_id: @run.run_id, legacy_root: @run.source_root.presence || current_workspace.repository_path)
       .map { |attachment| { name: attachment["name"], content: attachment["content"] } }
   end
 

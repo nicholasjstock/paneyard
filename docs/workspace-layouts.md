@@ -2,8 +2,11 @@
 
 > This is a design record, kept for its reasoning (see [the docs index](./README.md#design-records)).
 > For how to use layouts, see [operating.md](./operating.md#workspace-layouts). Some class names
-> below have since moved behind `Orchestrator::Runner` (for example `SessionEnv` is now
-> `Runner::ProcessEnv` and the pane building is `Runner::SessionLayout`).
+> below have since moved behind `Orchestrator::Runner` (the pane building is
+> `Runner::SessionLayout`). Superseded in part: panes no longer get any environment from
+> Paneyard (session env, and `Runner::ProcessEnv` with it, was removed), and the layout is
+> built in the workspace herdr opens for the run's worktree (`worktree.create`), whose root
+> pane is the agent's. Everything below about every pane getting the agent's env is history.
 
 Status: implemented. This started as a proposal and has been updated to match
 what was built, and what was verified live against herdr during

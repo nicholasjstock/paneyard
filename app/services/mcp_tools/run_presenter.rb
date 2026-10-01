@@ -13,6 +13,8 @@ module McpTools
         task: run.task.to_s.squish.truncate(160),
         driver: run.launcher_variant,
         branch: run.branch_name,
+        # What it started from, and merges back into.
+        base_branch: run.base_branch,
         session: session && session_summary(session),
         started_at: run.started_at&.iso8601,
         stopped_at: run.stopped_at&.iso8601

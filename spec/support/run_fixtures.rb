@@ -5,7 +5,7 @@ module RunFixtures
   def create_workspace(prefix: "workspace", **attributes)
     Workspace.create!(
       name: "#{prefix}-#{SecureRandom.hex(4)}",
-      root_path: Dir.mktmpdir(prefix),
+      repository_path: Dir.mktmpdir(prefix),
       **attributes
     )
   end
@@ -15,7 +15,7 @@ module RunFixtures
     workspace.runs.create!(
       run_id: "#{prefix}-#{SecureRandom.hex(4)}",
       task: attributes.delete(:task) || "Exercise #{prefix}",
-      target_root: attributes.delete(:target_root) || workspace.source_root,
+      target_root: attributes.delete(:target_root) || workspace.repository_path,
       launcher_variant: "claude",
       status: "running",
       **attributes

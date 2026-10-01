@@ -4,7 +4,7 @@ RSpec.describe "runs", type: :request do
   # Creating a run starts nothing by itself -- it queues, and the dispatcher
   # decides when it runs. That separation is the whole scheduler.
   it "queues a run rather than starting one, and asks the dispatcher to look" do
-    workspace = create_workspace(prefix: "runs-controller")
+    workspace = create_workspace(prefix: "runs-controller", repository_path: create_source_checkout)
 
     get new_workspace_run_path(workspace)
     expect(response).to have_http_status(:ok)
@@ -17,18 +17,40 @@ RSpec.describe "runs", type: :request do
     run = workspace.runs.order(:created_at).last
     expect(run.status).to eq("queued")
     expect(run.worktree_name).to start_with("do-something-")
-    expect(run.target_root).to eq(workspace.source_root)
+    expect(run.target_root).to eq(workspace.repository_path)
+    expect(run.base_branch).to eq("main")
     expect(run.run_sessions).to be_empty
   end
 
+  describe "base branch" do
+    let(:workspace) { create_workspace(prefix: "runs-controller-branch", repository_path: create_source_checkout(branches: [ "release/2.0" ])) }
+
+    it "offers the workspace's default and queues from the branch the operator names" do
+      get new_workspace_run_path(workspace)
+      expect(response.body).to include("Base branch", %(placeholder="main"))
+
+      post workspace_runs_path(workspace), params: { run: { task: "Backport", launcher_variant: "claude", base_branch: "release/2.0" } }
+
+      expect(workspace.runs.sole.base_branch).to eq("release/2.0")
+    end
+
+    it "refuses a base branch the repository does not have, queueing nothing" do
+      expect do
+        post workspace_runs_path(workspace), params: { run: { task: "Nope", launcher_variant: "claude", base_branch: "release/9" } }
+      end.not_to change(Run, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.body).to include("no local branch `release/9`")
+    end
+  end
+
   describe "model choice" do
-    let(:workspace) { create_workspace(prefix: "runs-controller-model") }
+    let(:workspace) { create_workspace(prefix: "runs-controller-model", repository_path: create_source_checkout) }
 
     before do
       allow(Orchestrator::ModelCatalog).to receive(:all).and_return(
         "claude" => [ { "id" => "claude-sonnet-5", "label" => "Sonnet 5 — claude-sonnet-5" } ],
-        "codex" => [ { "id" => "gpt-5.5", "label" => "gpt-5.5" } ],
-        "opencode" => []
+        "codex" => [ { "id" => "gpt-5.5", "label" => "gpt-5.5" } ]
       )
     end
 
@@ -67,8 +89,8 @@ RSpec.describe "runs", type: :request do
     end
   end
 
-  it "stores uploaded files under the main checkout, where the prompt points the session" do
-    workspace = create_workspace(prefix: "runs-controller-upload")
+  it "stores uploaded files on the runner, never in the repository, where the prompt points the session" do
+    workspace = create_workspace(prefix: "runs-controller-upload", repository_path: create_source_checkout)
     first = Tempfile.new([ "first", ".db" ])
     second = Tempfile.new([ "second", ".log" ])
     first.write("first artifact")
@@ -94,14 +116,15 @@ RSpec.describe "runs", type: :request do
       { "name" => "first.db", "source_path" => "first.db" },
       { "name" => "second.log", "source_path" => "second.log" }
     )
-    expect(File.read(Orchestrator::Runner::Attachments.path(run.target_root, run.run_id, "first.db"))).to eq("first artifact")
-    expect(File.read(Orchestrator::Runner::Attachments.path(run.target_root, run.run_id, "second.log"))).to eq("second artifact")
-    expect(Orchestrator::RunPrompt.compose(run:, session_driver: "claude"))
-      .to include(File.dirname(Orchestrator::Runner::Attachments.path(workspace.source_root, run.run_id, "first.db")))
+    dir = Orchestrator::Runner.for(workspace).attachments_dir(run_id: run.run_id)
+    expect(File.read(File.join(dir, "first.db"))).to eq("first artifact")
+    expect(File.read(File.join(dir, "second.log"))).to eq("second artifact")
+    expect(Orchestrator::RunPrompt.compose(run:, session_driver: "claude")).to include(dir)
+    expect(`git -C #{Shellwords.escape(workspace.repository_path)} status --porcelain`).to be_empty
 
     # Once the worktree is provisioned target_root moves, but the run screen
     # still lists the files from where they were stored.
-    run.update!(target_root: File.join(File.dirname(workspace.source_root), "some-worktree"))
+    run.update!(target_root: File.join(File.dirname(workspace.repository_path), "some-worktree"))
     get workspace_run_path(workspace, run)
     expect(response.body).to include("second.log", "second artifact")
   ensure

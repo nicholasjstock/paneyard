@@ -82,7 +82,7 @@ ruby@4.0` / `brew install ruby` away. To keep the friction as low as A allows:
   replaces both together.
 - The daemon runs with that Ruby's `bin` directory first on `PATH`, so `bin/production`'s `bundle` and
   `./bin/rails` (`#!/usr/bin/env ruby`) use the same interpreter. This does not reach agent sessions: herdr
-  panes never inherit the Rails process's environment (`Runner::ProcessEnv`).
+  panes never inherit the Rails process's environment (and Paneyard sets none in them).
 - `herdr plugin link <checkout>` runs no build, so a linked development checkout uses the bundle the
   contributor already has (`bin/setup`). The build's `bundle config --local` is never written into a
   contributor's checkout.
@@ -134,8 +134,8 @@ on every start (migrations), and the recurring schedule all behave exactly as un
   Rails' `tmp/` (bootsnap cache) stays in the plugin root: it is a cache, safe to lose on reinstall.
 - **Secrets.** `SECRET_KEY_BASE` comes from `state/secret_key_base`, generated with
   `SecureRandom.hex(64)` the first time and reused after. Nothing else in the app needs credentials: every
-  credentials lookup (Telegram, GitHub App) already prefers an environment variable, so the `.env` covers
-  them. A `SECRET_KEY_BASE` in the `.env` wins, for someone moving an existing instance over.
+  credentials lookup (Telegram) already prefers an environment variable, so the `.env` covers
+  it. A `SECRET_KEY_BASE` in the `.env` wins, for someone moving an existing instance over.
 - **Port.** The first start picks a free loopback port and writes it to `state/port`; later starts reuse it,
   so a URL registered with Claude Code keeps working. If something else has taken it by then, a new free one
   is picked, written back, and a herdr notification says the MCP registration needs updating (the `mcp`
@@ -162,15 +162,15 @@ on every start (migrations), and the recurring schedule all behave exactly as un
 None of this touches `bin/dev`, `bin/sandbox`, `bin/preflight` or `bin/service`: they do not set the new
 variables, so the app behaves exactly as before for them.
 
-### One Paneyard per machine
+### Running beside `bin/service`
 
-Two instances that both register the same repository will remove each other's fresh worktrees: the
-janitor treats a clean worktree that its own database does not know as an orphan
-(`Orchestrator::WorktreeJanitor.in_use`). The plugin is a second instance with its own database, so:
-**someone already running `bin/service` should stop it before using the plugin**, or keep the two on
-different repositories. The README says so, and says how to move the data over (stop `bin/service`, copy
-`storage/production*.sqlite3` into the plugin's `storage/`). Not automated: it is a one-off, and an
-automatic migration that guessed wrong would lose the operator's history.
+When this plan was first built, two instances that registered the same repository would remove each
+other's fresh worktrees, because the janitor treated any clean worktree its own database did not know as
+an orphan. That is gone: worktrees are now made and removed by herdr, and the janitor only ever considers
+its own runs' worktrees. A plugin instance beside `bin/service` is therefore safe for worktrees, though
+the two share no queue or concurrency cap. Moving data over stays manual (stop `bin/service`, copy
+`storage/production*.sqlite3` into the plugin's `storage/`): it is a one-off, and an automatic migration
+that guessed wrong would lose the operator's history.
 
 ## 2. HERDR_SOCKET_PATH
 
@@ -182,9 +182,9 @@ in the app changes. The sandbox guard (`Orchestrator::Sandbox`) is untouched.
 
 `HERDR_PLUGIN_CONFIG_DIR/.env` — print the directory with `herdr plugin config-dir paneyard`. On first start
 the plugin writes a commented sample (only if no `.env` exists, never overwriting) listing what is
-configurable: `PANEYARD_MAX_CONCURRENT_RUNS`, `PANEYARD_CLAUDE_MODEL`/`CODEX`/`OPENCODE`, `TELEGRAM_*`,
-`GITHUB_APP_*`, `PORT`, `PANEYARD_RUBY`. The format is dotenv: `KEY=value`, optional `export`, `#` comments,
-single or double quotes, and double-quoted values may span lines (a GitHub App private key). Every key is
+configurable: `PANEYARD_MAX_CONCURRENT_RUNS`, `PANEYARD_CLAUDE_MODEL`/`CODEX`, `TELEGRAM_*`,
+`PORT`, `PANEYARD_RUBY`. The format is dotenv: `KEY=value`, optional `export`, `#` comments,
+single or double quotes, and double-quoted values may span lines. Every key is
 passed to the daemon except the few the plugin owns (`RAILS_ENV`, `HERDR_SOCKET_PATH`, `PIDFILE`,
 `PANEYARD_STORAGE_DIR`, `PANEYARD_RUNTIME_DIR`, `PANEYARD_RAILS_URL`, `BINDING`, `PANEYARD_SANDBOX*`,
 `PANEYARD_HOT_RELOAD`), which are ignored with a log line. The `.env` is read at daemon start; the
@@ -213,12 +213,13 @@ herdr workspace id (added to the MCP run summary), falling back to the focused p
 the run's worktree.
 
 **Queue popup.** Resolves the focused pane's directory to a registered workspace: a workspace matches when
-the directory is its `main` checkout or anything beside it under its root (that includes run worktrees).
-If none matches, it registers one through the existing `register_workspace` tool (the same
-`Orchestrator::WorkspaceRegistration` checks the web UI uses), named after the root directory, and shows the
-problems and their fixes if the layout is wrong — nothing on disk is changed. Then it reads the task (a
-blank line submits; Ctrl-C cancels), asks for the driver (Enter for `claude`), queues it, and shows the run
-id and the queue position. The run's herdr workspace opens on its own when a slot frees, as today.
+the directory is inside its repository, or git says the directory is in a linked worktree of it (wherever
+herdr put that). If none matches, it registers the repository through the existing `register_workspace`
+tool (the same `Orchestrator::WorkspaceRegistration` checks the web UI uses; the server names it and works
+out its default branch), and shows the problems and their fixes if anything is wrong — nothing on disk is
+changed. Then it reads the task (a blank line submits; Ctrl-C cancels), asks for the base branch (Enter for
+the workspace's default; it mentions the branch the pane is on), asks for the driver (Enter for `claude`),
+queues it, and shows the run id, its base branch and the queue position. The run's herdr workspace opens on its own when a slot frees, as today.
 
 **Runs popup.** A numbered list (run id's last four characters, status and herdr's agent state, driver,
 workspace, first line of the task), newest first; Enter refreshes. A number selects a run and shows its

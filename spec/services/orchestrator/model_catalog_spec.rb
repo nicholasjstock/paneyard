@@ -10,7 +10,7 @@ RSpec.describe Orchestrator::ModelCatalog do
 
     expect(described_class.all(workspace)).to eq(
       "claude" => [ { "id" => "claude-sonnet-5", "label" => "Sonnet 5 — claude-sonnet-5" } ],
-      "codex" => [], "opencode" => []
+      "codex" => []
     )
   end
 

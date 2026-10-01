@@ -166,7 +166,7 @@ export default class extends Controller {
       row.classList.add("layout-pane-agent")
       row.append(
         this.el("strong", null, "agent"),
-        this.el("span", "muted", "The run's claude/codex/opencode session. Always here, always first.")
+        this.el("span", "muted", "The run's claude or codex session. Always here, always first.")
       )
       return row
     }

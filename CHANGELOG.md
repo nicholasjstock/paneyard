@@ -15,12 +15,25 @@ The first public version. It includes:
 - Settings from `$(herdr plugin config-dir paneyard)/.env`, written as a commented sample on first start.
 - `close_session` on `/mcp/admin`, `PANEYARD_RUNTIME_DIR`, and each run's herdr workspace id in `list_runs`/`get_run`.
 
+### Repositories, base branches and herdr worktrees
+
+- A workspace is any existing git checkout plus a default base branch (`repository_path`, `default_base_branch`), registered directly (`register_workspace` takes `path`, and optionally `name` and `defaultBaseBranch`). No `<root>/main` layout, no need to have the default branch checked out; the default is detected from the repository (origin's HEAD, `init.defaultBranch`, `main`/`master`).
+- Each run records its own `base_branch` (`queue_run`'s `baseBranch`, the new-run form's **Base branch**; default the workspace's), validated when queued. Runs of one workspace can start from different branches at once, and each merges back into its own.
+- herdr creates and removes run worktrees (`worktree.create` / `worktree.remove`), wherever its config puts them, and the worktree's herdr workspace is the run's session workspace.
+- Cleanup judges a worktree against its run's base branch, and only ever touches Paneyard's own runs' worktrees, never other worktrees of the repository or the checkout itself.
+- Existing `<root>/main` workspaces migrate to `repository_path = <root>/main`, `default_base_branch = main`; existing runs to `base_branch = main`.
+- Launch attachments are stored beside a run's runtime files instead of in the repository.
+
+### Removed
+
+- Session environment: no pane gets env from Paneyard. claude's MCP capability is in its config file, codex's in a `-c` header override. With it went workspace environment variables (`record_workspace_env_var`), GitHub App token minting (`GITHUB_APP_*`), and the opencode driver, whose MCP config could only travel through env.
+
 ### Runs and sessions
 
 - Workspaces: register a repository's parent directory, whose `main` checkout every run branches from. Runs, sessions, reports and worktrees are scoped to their workspace.
 - A global run queue with a concurrency cap (`PANEYARD_MAX_CONCURRENT_RUNS`, default 4), dispatched oldest first.
 - One git worktree per run, on a `paneyard/<name>` branch created from the current local `main`.
-- One live, interactive agent session per run, in a herdr pane rooted in its worktree, with `claude` (Claude Code), `codex` or `opencode` as the driver and a per-driver default model (`PANEYARD_*_MODEL`) or a model picked per run.
+- One live, interactive agent session per run, in a herdr pane rooted in its worktree, with `claude` (Claude Code) or `codex` as the driver and a per-driver default model (`PANEYARD_*_MODEL`) or a model picked per run.
 - Sessions leave changes uncommitted; commit, push and merge into `main` each happen only when the operator asks for that step.
 - Reports: a session calls `report_idle` (`done`, `blocked`, `failed`) with a Markdown summary each time it stops, and reports accumulate as checkpoints on the run screen.
 - A message box on the run screen that types into the live session, and **Close session** to end it and free its slot.
@@ -35,14 +48,12 @@ The first public version. It includes:
 ### Configuration
 
 - Per-workspace herdr layouts (tabs and split panes with commands), edited visually, defaulting to the agent beside `nvim`.
-- Per-workspace environment variables that sessions can record for later runs (`record_workspace_env_var`).
-- Optional GitHub App authentication for session pushes, falling back to the operator's `gh` login.
 
 ### Integrations
 
 - `/mcp/run`, a per-session authenticated MCP endpoint wired into every session.
 - `/mcp/admin`, an unauthenticated loopback MCP endpoint for the operator's own MCP clients: `queue_run`, `list_runs`, `get_run`, `list_workspaces`, `register_workspace`.
-- `register_workspace` on `/mcp/admin`: registers a workspace from your own agent. It accepts the workspace root, the `main` checkout, or any directory in it, and works out the root. It checks the layout a run needs (`<root>/main` a git checkout on `main` with an `origin`, unique name and root) and creates nothing if anything is wrong, returning every problem with how to fix it. The web UI's **Add workspace** and root edits now run the same check.
+- `register_workspace` on `/mcp/admin`: registers a workspace from your own agent, given the repository's path (or a directory or linked worktree in it). It checks everything first, creates nothing if anything is wrong, and returns every problem with how to fix it. The web UI's Add workspace form runs the same checks.
 - `queue_run` over `/mcp/admin` now requires `workspace` instead of falling back to the oldest workspace, and `/mcp/admin` has server instructions for the flow: find the workspace for this repository, register it if missing, then queue. From inside a run it still defaults to the run's own workspace.
 - Telegram remote control: list sessions, read panes and reports, and type into sessions from an allow-listed private chat, behind a platform-neutral adapter interface.
 

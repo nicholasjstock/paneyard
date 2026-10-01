@@ -10,7 +10,7 @@ module PaneyardPlugin
   # line-based prompts, since an action's own output only ever reaches
   # `herdr plugin log list`.
   class Cli
-    DRIVERS = %w[claude codex opencode].freeze
+    DRIVERS = %w[claude codex].freeze
 
     USAGE = <<~TEXT.freeze
       Usage: bin/herdr-plugin <command>
@@ -139,27 +139,39 @@ module PaneyardPlugin
       dir = context_dir
       raise Error, "herdr did not say which directory this pane is in." unless dir
 
+      repository, current_branch = WorkspaceMatch.repository_of(dir)
       workspaces = client.workspaces
-      workspace = WorkspaceMatch.workspace_for(workspaces, dir) || register!(client, dir, workspaces)
+      workspace = WorkspaceMatch.workspace_for(workspaces, dir, repository:) || register!(client, repository || dir)
       return unless workspace
 
+      default = workspace.fetch("defaultBaseBranch")
       heading "Queue a task in #{workspace.fetch('name')}"
-      say dim(workspace.fetch("sourceRoot"))
+      say dim(workspace.fetch("repositoryPath"))
       say ""
       say "Describe the task: the goal, constraints, and how to tell it worked."
       say dim("A blank line queues it. Ctrl-C cancels.")
       task = read_task
       return say("Nothing queued.") if task.empty?
 
+      base_branch = ask_base_branch(default, current_branch)
       driver = ask_driver
-      queued = client.queue(task:, workspace: workspace.fetch("name"), driver:)
+      queued = client.queue(task:, workspace: workspace.fetch("name"), base_branch:, driver:)
       capacity = queued.fetch("capacity", {})
       say ""
-      say bold("Queued #{queued.fetch('runId')}.")
+      say bold("Queued #{queued.fetch('runId')} from #{queued.fetch('baseBranch', base_branch || default)}.")
       behind = queued.fetch("queuedBehind", 0)
       say "#{capacity['inFlight']} of #{capacity['limit']} sessions in use#{behind.positive? ? ", #{behind} queued ahead of it" : ''}. " \
         "Its herdr workspace opens when it starts."
       pause
+    end
+
+    # The workspace's default, unless the operator names another branch; the
+    # branch this pane is on is offered, since starting from it is the usual
+    # reason not to use the default.
+    def ask_base_branch(default, current_branch)
+      hint = current_branch && current_branch != default ? "; this pane is on #{current_branch}" : ""
+      answer = ask("Base branch (Enter for #{default}#{hint}): ")
+      answer.nil? || answer.empty? ? nil : answer
     end
 
     def runs_ui
@@ -236,7 +248,7 @@ module PaneyardPlugin
         session = run["session"] || {}
         live = session["live"]
         heading "#{run.fetch('runId')} · #{run.fetch('status')}#{" · agent #{session['agentStatus']}" if live && session['agentStatus']}"
-        say dim("#{workspace.fetch('name')} · #{run['driver']} · #{run['branch'] || 'no branch yet'}")
+        say dim("#{workspace.fetch('name')} · #{run['driver']} · #{run['branch'] || 'no branch yet'} from #{run['baseBranch']}")
         say dim(run["worktree"]) if run["worktree"]
         say "Launch error: #{run['launchError']}" if run["launchError"]
         show_report(run)
@@ -291,7 +303,7 @@ module PaneyardPlugin
     def close!(client, workspace, run)
       say ""
       say "Closing the session quits its agent and closes its herdr workspace. Its worktree is removed only if its"
-      say "work is saved (merged into main or pushed)."
+      say "work is saved (in #{run['baseBranch'] || 'its base branch'}, or pushed)."
       return say("Left it running.") unless ask("Close #{run.fetch('runId')}'s session? [y/N] ")&.downcase == "y"
 
       closed = client.close(run.fetch("runId"), workspace: workspace.fetch("name"))
@@ -303,11 +315,11 @@ module PaneyardPlugin
       end
     end
 
-    def register!(client, dir, workspaces)
-      name = WorkspaceMatch.registration_name(dir, workspaces.map { |workspace| workspace.fetch("name") })
-      say "#{dir} is not in a Paneyard workspace yet. Registering it as #{bold(name)}…"
-      workspace = client.register(name:, root_path: dir)
-      say "Registered #{workspace.fetch('name')} (#{workspace.fetch('sourceRoot')})."
+    def register!(client, path)
+      say "#{path} is not in a Paneyard workspace yet. Registering it…"
+      workspace = client.register(path:)
+      say "Registered #{workspace.fetch('name')} (#{workspace.fetch('repositoryPath')}), whose runs start from " \
+        "#{workspace.fetch('defaultBaseBranch')} by default."
       say ""
       workspace
     rescue PaneyardSandbox::McpClient::ToolError => error

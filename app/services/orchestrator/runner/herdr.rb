@@ -7,7 +7,7 @@ module Orchestrator
     # already-running terminal workspace manager (their tmux replacement; see
     # ~/.config/herdr/config.toml). herdr owns every pty/process lifecycle in
     # this application; Rails only asks it to open workspaces and drive real
-    # interactive claude/codex/opencode sessions inside them, so a run's actual
+    # interactive claude/codex sessions inside them, so a run's actual
     # work -- tool calls, diffs, approvals -- is visible exactly as it would be
     # to someone running the CLI by hand.
     #
@@ -23,13 +23,6 @@ module Orchestrator
     # line back. Every method below was confirmed against a running server via
     # `herdr api schema --json` plus direct socket probes:
     #
-    #   - workspace.create {label, cwd, env, focus} -> {root_pane: {pane_id,
-    #     tab_id, workspace_id}, ...}. env is a plain string->string map applied
-    #     to that pane's shell before anything is launched in it. Unlike
-    #     Process.spawn's env hash it cannot express "unset this inherited var",
-    #     but a brand-new pane's shell never inherited Rails' own
-    #     BUNDLE_GEMFILE/RAILS_ENV/nested-Claude-Code vars in the first place, so
-    #     nil-valued entries are simply dropped (see #compact_env).
     #   - agent.start {name, kind, pane_id, args} launches a real interactive CLI
     #     session in an existing pane and returns almost immediately (confirmed:
     #     0.0s, response carries launch_pending: true) -- a kickoff, not a
@@ -62,7 +55,7 @@ module Orchestrator
     #     --print/exec process a real interactive CLI never exits on its own.
     #     That group id is what Rails records as the session pid and what it must
     #     explicitly kill for "session over" to mean "process gone".
-    #   - pane.split {target_pane_id, direction, ratio, cwd, env, focus} ->
+    #   - pane.split {target_pane_id, direction, ratio, cwd, focus} ->
     #     {pane: {pane_id, ...}}. direction is right|down; ratio is the share the
     #     split (target) pane keeps (confirmed live: 0.3 left the target 23 of 78
     #     columns). It takes no command to run: the new pane is a plain shell, so
@@ -71,15 +64,17 @@ module Orchestrator
     #     shell is still running its rc files, is held as typeahead and runs once
     #     the prompt comes up, and that workspace.close takes every pane in the
     #     workspace (and the process in it) down with it.
-    #   - tab.create {workspace_id, label, cwd, env, focus} -> {tab: {tab_id,
+    #   - tab.create {workspace_id, label, cwd, focus} -> {tab: {tab_id,
     #     ...}, root_pane: {pane_id, ...}}. Confirmed live that focus: false in an
     #     unfocused workspace leaves both the workspace unfocused and its active
     #     tab where it was, and that workspace.close kills the processes in every
     #     tab, not just the first.
-    #   - env on workspace.create / tab.create / pane.split applies to that one
-    #     new pane only. Confirmed live: a split or a new tab inherits nothing
-    #     from the workspace's root pane, so every pane gets exactly the env its
-    #     own creating call passed (plus herdr's HERDR_* vars).
+    #   - Paneyard passes no env to any pane. herdr's env on tab.create and
+    #     pane.split applies to that one new pane, a pane inherits nothing from
+    #     another, and worktree.create (which makes the agent's pane) takes none,
+    #     so every pane is the operator's own login shell. A session's identity
+    #     travels in its CLI's arguments and config files instead
+    #     (Runner::SessionArgs).
     #   - focus: true on pane.split does NOT just pick the tab's active pane: it
     #     was confirmed live to focus the whole herdr workspace and switch to that
     #     tab, taking over the operator's screen. Never pass it for a run.
@@ -89,6 +84,25 @@ module Orchestrator
     #     visible|recent|recent_unwrapped|detection.
     #   - workspace.close {workspace_id} takes every tab and pane in the
     #     workspace down, and the processes in them.
+    #   - worktree.create {cwd, branch, base, label, focus} (herdr 0.7.5) makes
+    #     a linked git worktree of the repository at cwd, wherever the
+    #     operator's herdr config puts worktrees (~/.herdr/worktrees/<repo>/
+    #     <branch> by default; never given a path here), and opens it as a herdr
+    #     workspace. Returns {workspace, tab, root_pane, worktree: {path,
+    #     branch, ...}}. A new branch is created from `base` (any ref; confirmed
+    #     live that a branch other than the one checked out at cwd works), an
+    #     existing one is checked out as is. It also opens a primary workspace
+    #     for the repository itself if none is open. It takes no env, so the
+    #     root pane's shell is the operator's login shell and nothing more.
+    #   - worktree.open {cwd, path, focus} returns the worktree's open workspace,
+    #     opening one if it is closed (already_open says which).
+    #   - worktree.remove {workspace_id, force} runs `git worktree remove` for
+    #     a linked worktree's *open* workspace (a closed one is
+    #     workspace_not_found: open it first) and closes that workspace. It never
+    #     deletes the branch, refuses a dirty worktree with
+    #     dirty_worktree_requires_force unless forced, and refuses a primary
+    #     checkout outright (not_linked_worktree).
+    #   - tab.close {tab_id}.
     module Herdr
       module_function
 
@@ -114,12 +128,22 @@ module Orchestrator
         ENV["HERDR_SOCKET_PATH"].presence || File.expand_path("~/.config/herdr/herdr.sock")
       end
 
-      def workspace_create(label:, cwd:, env: {}, focus: false)
-        request!("workspace.create", label: Sandbox.label(label), cwd:, env: compact_env(env), focus:)
-      end
-
       def workspace_close(workspace_id)
         request("workspace.close", workspace_id:)
+      end
+
+      def worktree_create(cwd:, branch:, base:, label:, focus: false)
+        request!("worktree.create", cwd:, branch:, base:, label: Sandbox.label(label), focus:)
+      end
+
+      def worktree_open(cwd:, path:, label: nil, focus: false)
+        params = { cwd:, path:, focus: }
+        params[:label] = Sandbox.label(label) if label
+        request!("worktree.open", **params)
+      end
+
+      def worktree_remove(workspace_id, force: false)
+        request!("worktree.remove", workspace_id:, force:)
       end
 
       def agent_start(name:, kind:, pane_id:, args:)
@@ -142,19 +166,26 @@ module Orchestrator
         request!("pane.process_info", pane_id:).fetch("process_info")
       end
 
-      def pane_split(target_pane_id:, direction:, cwd:, focus: false, ratio: nil, env: nil)
+      def pane_split(target_pane_id:, direction:, cwd:, focus: false, ratio: nil)
         params = { target_pane_id:, direction:, cwd:, focus: }
         params[:ratio] = ratio if ratio
-        params[:env] = compact_env(env) if env
         request!("pane.split", **params).fetch("pane")
+      end
+
+      def pane_list(workspace_id:)
+        request!("pane.list", workspace_id:).fetch("panes")
       end
 
       def pane_rename(pane_id, label)
         request!("pane.rename", pane_id:, label:)
       end
 
-      def tab_create(workspace_id:, cwd:, label: nil, env: {}, focus: false)
-        request!("tab.create", workspace_id:, label:, cwd:, env: compact_env(env), focus:)
+      def tab_create(workspace_id:, cwd:, label: nil, focus: false)
+        request!("tab.create", workspace_id:, label:, cwd:, focus:)
+      end
+
+      def tab_close(tab_id)
+        request!("tab.close", tab_id:)
       end
 
       def tab_rename(tab_id, label)
@@ -219,15 +250,6 @@ module Orchestrator
         raise Unreachable, "herdr #{method} timed out after #{REQUEST_TIMEOUT_SECONDS}s"
       rescue JSON::ParserError => e
         raise Unreachable, "herdr sent an unparseable response to #{method}: #{e.message}"
-      end
-
-      # herdr's env map has no "unset this variable" representation, and every
-      # value must be a string. Callers build env hashes in Process.spawn's
-      # shape (where a nil value means "remove it from the child"), so drop
-      # those entries rather than sending "" -- see this module's header for why
-      # that is safe for a freshly created pane.
-      def compact_env(env)
-        env.compact.transform_values(&:to_s)
       end
     end
   end

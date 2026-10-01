@@ -1,4 +1,5 @@
 require "json"
+require "open3"
 require "socket"
 require "fileutils"
 
@@ -17,6 +18,11 @@ module FakeHerdr
   # RunSessionReconcileJob's "the CLI exited" path behave exactly as they do
   # against herdr. The agent reports its status back over its stdout and
   # receives prompts on its stdin (see FakeHerdr::Agent).
+  #
+  # worktree.create/open/remove make and remove real git worktrees, as herdr
+  # does, in a directory the fake chooses the way herdr's own config would:
+  # <repository's parent>/.herdr-worktrees/<repository>/<branch>, so a
+  # sandbox's worktrees stay inside the sandbox.
   #
   # Nothing here runs a model or touches the operator's real herdr.
   class Server
@@ -136,6 +142,12 @@ module FakeHerdr
         when "workspace.close" then workspace_close(params["workspace_id"])
         when "tab.create" then tab_create(params)
         when "tab.rename" then {}
+        when "tab.close" then tab_close(params["tab_id"])
+        when "pane.list" then { "panes" => panes_in(workspace!(params["workspace_id"])["workspace_id"]) }
+        when "worktree.create" then worktree_create(params)
+        when "worktree.open" then worktree_open(params)
+        when "worktree.remove" then worktree_remove(params)
+        when "worktree.list" then { "worktrees" => git_worktrees(repository_root!(params["cwd"])) }
         when "pane.split" then { "pane" => new_pane(pane!(params["target_pane_id"])[:workspace_id], params) }
         when "pane.rename" then pane_rename(params)
         when "pane.get" then { "pane" => public_pane(pane!(params["pane_id"])) }
@@ -158,6 +170,117 @@ module FakeHerdr
       @workspaces[workspace_id] = { "workspace_id" => workspace_id, "label" => params["label"], tabs: 0, panes: 0 }
       root_pane = new_pane(workspace_id, params, new_tab: true)
       { "workspace" => { "workspace_id" => workspace_id, "label" => params["label"] }, "root_pane" => root_pane }
+    end
+
+    # A linked worktree of the repository at cwd, from `base` (or HEAD) on a
+    # new branch, or on `branch` as is when it already exists; opened as a
+    # workspace, like herdr.
+    def worktree_create(params)
+      repository = repository_root!(params["cwd"])
+      branch = params["branch"].to_s
+      path = File.join(File.dirname(repository), ".herdr-worktrees", File.basename(repository), branch.tr("/", "-"))
+      raise MethodError.new("worktree_create_failed", "fatal: '#{path}' already exists") if File.exist?(path)
+
+      FileUtils.mkdir_p(File.dirname(path))
+      args = if git_ok?(repository, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}")
+        [ "worktree", "add", path, branch ]
+      else
+        base = params["base"].to_s
+        [ "worktree", "add", "-b", branch, path, base.empty? ? "HEAD" : base ]
+      end
+      git!(repository, *args, code: "worktree_create_failed")
+      opened = open_worktree_workspace(repository, path, params["label"])
+      opened.merge("worktree" => worktree_record(path, branch, opened.dig("workspace", "workspace_id")))
+    end
+
+    def worktree_open(params)
+      repository = repository_root!(params["cwd"])
+      path = params["path"]
+      entry = git_worktrees(repository).find { |worktree| same_path?(worktree["path"], path) }
+      raise MethodError.new("worktree_not_found", "no worktree at #{path}") unless entry
+
+      open_id = @workspaces.find { |_, workspace| workspace[:path] && same_path?(workspace[:path], path) }&.first
+      if open_id
+        return { "workspace" => @workspaces[open_id].slice("workspace_id", "label"), "already_open" => true,
+                 "worktree" => entry.merge("open_workspace_id" => open_id) }
+      end
+
+      opened = open_worktree_workspace(repository, path, params["label"])
+      opened.merge("already_open" => false, "worktree" => entry.merge("open_workspace_id" => opened.dig("workspace", "workspace_id")))
+    end
+
+    # Like herdr: only an open, linked worktree's workspace; refuses a dirty
+    # one unless forced; closes the workspace; keeps the branch.
+    def worktree_remove(params)
+      workspace = workspace!(params["workspace_id"])
+      path = workspace[:path]
+      raise MethodError.new("not_linked_worktree", "workspace is not a linked worktree checkout") unless path && workspace[:linked]
+
+      args = [ "worktree", "remove", *("--force" if params["force"]), path ]
+      _out, error, status = Open3.capture3("git", "-C", workspace[:repository], *args)
+      unless status.success?
+        code = error.include?("modified or untracked") ? "dirty_worktree_requires_force" : "worktree_remove_failed"
+        raise MethodError.new(code, error.strip)
+      end
+      workspace_close(params["workspace_id"])
+      { "type" => "worktree_removed", "workspace_id" => params["workspace_id"], "path" => path, "forced" => !!params["force"] }
+    end
+
+    def open_worktree_workspace(repository, path, label)
+      created = workspace_create("cwd" => path, "label" => label)
+      workspace_id = created.dig("workspace", "workspace_id")
+      @workspaces[workspace_id].merge!(path:, repository:, linked: true)
+      created.merge("tab" => { "tab_id" => created.dig("root_pane", "tab_id") })
+    end
+
+    def worktree_record(path, branch, workspace_id)
+      { "path" => File.realpath(path), "branch" => branch, "is_linked_worktree" => true, "open_workspace_id" => workspace_id }
+    end
+
+    def git_worktrees(repository)
+      git!(repository, "worktree", "list", "--porcelain").split("\n\n").map do |block|
+        fields = block.lines.to_h { |line| line.chomp.split(" ", 2) }
+        { "path" => fields["worktree"], "branch" => fields["branch"].to_s.delete_prefix("refs/heads/") }
+      end
+    end
+
+    def repository_root!(cwd)
+      raise MethodError.new("invalid_params", "cwd must be absolute") unless cwd.to_s.start_with?("/")
+
+      git!(cwd, "rev-parse", "--show-toplevel", code: "not_a_repository").strip
+    end
+
+    def git_ok?(dir, *args)
+      _out, _err, status = Open3.capture3("git", "-C", dir, *args)
+      status.success?
+    end
+
+    def git!(dir, *args, code: "git_failed")
+      out, error, status = Open3.capture3("git", "-C", dir.to_s, *args)
+      raise MethodError.new(code, error.strip.empty? ? out.strip : error.strip) unless status.success?
+
+      out
+    end
+
+    def same_path?(one, other)
+      File.realpath(one.to_s) == File.realpath(other.to_s)
+    rescue SystemCallError
+      File.expand_path(one.to_s) == File.expand_path(other.to_s)
+    end
+
+    def panes_in(workspace_id)
+      @panes.values.select { |pane| pane[:workspace_id] == workspace_id }.map { |pane| public_pane(pane) }
+    end
+
+    def tab_close(tab_id)
+      panes = @panes.select { |_, pane| pane[:tab_id] == tab_id }
+      raise MethodError.new("tab_not_found", "tab #{tab_id} not found") if panes.empty?
+
+      panes.each do |pane_id, pane|
+        kill_agent(pane)
+        @panes.delete(pane_id)
+      end
+      {}
     end
 
     def workspace_close(workspace_id)

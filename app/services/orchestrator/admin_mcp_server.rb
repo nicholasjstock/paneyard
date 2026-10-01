@@ -26,11 +26,13 @@ module Orchestrator
 
     # Clients that surface server instructions (Claude Code does) get the one
     # workflow that is easy to get wrong from outside a run: which workspace.
-    INSTRUCTIONS = "Paneyard queues jobs for agent sessions, each in its own worktree of a registered workspace. " \
-      "To queue a job for the repository you are working in: call list_workspaces and find the workspace whose " \
-      "sourceRoot is that repository; if there is none, call register_workspace with rootPath set to " \
-      "the repository's directory (it works out the workspace root) and follow any fixes it returns before " \
-      "calling it again; then call queue_run with that workspace. queue_run always needs workspace from here.".freeze
+    INSTRUCTIONS = "Paneyard queues jobs for agent sessions, each in its own worktree of a registered workspace's " \
+      "repository. To queue a job for the repository you are working in: call list_workspaces and find the " \
+      "workspace whose repositoryPath is that repository (its main checkout, if you are in a linked worktree); if " \
+      "there is none, call register_workspace with path set to the repository's directory and follow any fixes it " \
+      "returns before calling it again; then call queue_run with that workspace. queue_run always needs workspace " \
+      "from here. A job starts from the workspace's defaultBaseBranch; pass baseBranch to start from another local " \
+      "branch, such as the one you are on.".freeze
 
     def build
       MCP::Server.new(

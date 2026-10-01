@@ -6,8 +6,8 @@ Every rule below names the code it comes from, so you can check it.
 
 - [Running it](#running-it)
 - [Preparing a repository](#preparing-a-repository)
-  1. [Directory layout](#1-directory-layout)
-  2. [Git requirements](#2-git-requirements)
+  1. [The repository and its worktrees](#1-the-repository-and-its-worktrees)
+  2. [Branches and git requirements](#2-branches-and-git-requirements)
   3. [What a run starts with inside the repo](#3-what-a-run-starts-with-inside-the-repo)
   4. [GitHub access](#4-github-access)
   5. [Register the workspace](#5-register-the-workspace)
@@ -57,6 +57,7 @@ bin/service start
 ```
 
 - **Upgrading from port 3001.** The default used to be `3001`. To keep it, start the service with `PORT=3001 bin/service start` (and `restart`). Otherwise, re-register your MCP client against the new port (`claude mcp remove paneyard-admin -s user`, then the `claude mcp add` in [MCP endpoints](#mcp-endpoints)), and point any `tailscale serve` config at `7263`.
+- **Upgrading to repository workspaces.** The migration turns every `<root>/main` workspace into that repository with `main` as its default base branch, and every existing run into one from `main`. Nothing on disk moves. Old runs' worktrees beside `main` keep working: herdr can open and remove any linked worktree of the repository.
 - **Loopback only.** `bin/production` binds to `127.0.0.1` (`BINDING`), and production answers only loopback `Host` names (`lib/paneyard_allowed_hosts.rb`). Read [SECURITY.md](../SECURITY.md) before widening either with `BINDING` or `PANEYARD_ALLOWED_HOSTS`: the app has no authentication.
 - **Credentials.** Production needs a `secret_key_base` from Rails credentials (`config/credentials.yml.enc` plus your own `config/master.key`) or the `SECRET_KEY_BASE` environment variable. `bin/rails credentials:edit` creates both (README, [Running without the plugin](../README.md#running-without-the-plugin)). The herdr plugin generates its own instead.
 - **Restarting.** Application code is hot-reloaded (`PANEYARD_HOT_RELOAD=1`), but `config/queue.yml`, `config/recurring.yml`, credentials and initializers are read once at boot. After changing any of them, run `bin/service restart`. It first runs `bin/preflight --prod-copy` (the new code booted on a scratch port against a copy of the production database) and leaves the running instance alone if that fails. `bin/service restart --skip-preflight` skips the check.
@@ -68,118 +69,92 @@ The health endpoint `/up` returns `{"status":"ok","service":"paneyard"}` with an
 
 Follow these steps once for each repository you want to run jobs against.
 
-### 1. Directory layout
+### 1. The repository and its worktrees
 
-A workspace has a `root_path`: a plain directory that you own and that holds the repository's checkouts. The source checkout **must** be a direct child of it named `main` (`Workspace#source_root` is `<root_path>/main`). Each run's worktree is created as a sibling of that checkout:
+A workspace is an existing git checkout you already work in (`Workspace#repository_path`), plus the branch runs start from by default (`default_base_branch`). Any directory name, any parent directory, and any branch checked out: runs never work in your checkout, and Paneyard never switches, resets, stashes or deletes it.
+
+Each run gets its own **linked worktree** of the repository, on a branch `paneyard/<name>`, made by herdr (`worktree.create`) wherever your herdr config puts worktrees (by default `~/.herdr/worktrees/<repository>/<branch>`). Paneyard never chooses that location. herdr opens the worktree as the run's herdr workspace, and the session's layout is built in it. Worktree and branch names are a slug of the task plus a short run-id suffix (`GitWorktree.name_for`). The first run in a repository may also open a herdr workspace for the repository itself: that is herdr grouping a repository's worktrees, and Paneyard leaves it alone.
 
 ```
-~/code/my-app/                    <- root_path (what you register)
-├── main/                         <- source checkout, on branch main
-├── add-cart-total-1a2b/          <- run worktree, branch paneyard/add-cart-total-1a2b
-└── fix-tax-rounding-9f3c/        <- run worktree, branch paneyard/fix-tax-rounding-9f3c
+~/code/my-app/                                    <- the repository you register, on whatever branch
+~/.herdr/worktrees/my-app/paneyard-add-cart-1a2b  <- a run from main
+~/.herdr/worktrees/my-app/paneyard-fix-tax-9f3c   <- a run from feature/payments
 ```
 
-Setting that up for a repository you already have on GitHub:
+### 2. Branches and git requirements
 
-```sh
-mkdir -p ~/code/my-app
-git clone git@github.com:you/my-app.git ~/code/my-app/main
+Each run has a **base branch**: the workspace's default unless the run names another when it is queued (`base_branch` on the run, `baseBranch` on `queue_run`, **Base branch** on the new-run form). It is fixed on the run when it is queued, so changing the workspace's default later doesn't move it, and two runs of one workspace can start from different branches at the same time. The run's branch starts from the base branch's current **local** tip (`git worktree add -b paneyard/<name> <path> <base>`, done by herdr), whatever your checkout has checked out, and the run merges back into that same branch when asked to merge (`Orchestrator::RunPrompt`):
+
+```
+feature/payments -> paneyard/fix-tax-9f3c -> merged back into feature/payments
+main             -> paneyard/add-cart-1a2b -> merged back into main
 ```
 
-Worktree and branch names are a slug of the task plus a short run-id suffix (`GitWorktree.name_for`). Keep everything else out of `root_path`. Launching a run fails if its worktree path already exists.
+The rules, checked when a workspace is registered and again when a run is queued (`Runner::Worktrees.base_branch_problem`), so a bad branch is an error then rather than a failed launch later:
 
-### 2. Git requirements
+- The base branch must exist **locally**. A branch that only exists on `origin` is not used directly; the error gives the command to create it locally (`git branch <name> origin/<name>`, which checks nothing out).
+- The repository needs an `origin` remote. If you ask a session to push, it pushes `paneyard/<name>` to `origin`, so it must be a remote this machine can push to. It pushes only when asked to push, not when asked to commit.
+- The orchestrator never fetches or pulls, so keep your base branches up to date yourself. Uncommitted changes in your checkout are not carried into a run.
 
-Before creating a worktree, `GitWorktree.validate_source!` checks all of these, and fails the run if any one is untrue:
+To merge, a session merges into the base branch where it is checked out (if that checkout is clean), or, when it is checked out nowhere, fast-forwards it with `git fetch . paneyard/<name>:<base>`. It never switches your checkout to do it, and reports `blocked` when neither works.
 
-- `<root_path>/main` exists and is a git work tree.
-- Its directory is named `main`, **and it has the `main` branch checked out**. A repository whose default branch is `master` or anything else needs a local `main` branch. The simplest fix is to rename the default branch.
-- It has an `origin` remote. If you ask a session to push, it pushes `paneyard/<name>` to `origin`, so `origin` must be a remote this machine can push to. It pushes only when asked to push, not when asked to commit (`Orchestrator::RunPrompt`).
-
-Each run branches from the source checkout's **current local `HEAD`**. The orchestrator never fetches or pulls, so keep `<root_path>/main` up to date yourself (`git -C ~/code/my-app/main pull`). Uncommitted changes in `main` are not carried into a run's worktree.
-
-For the cleanup side, `Orchestrator::WorktreeJanitor` removes a worktree (never its branch) on **Close session**, when you close a run's herdr workspace by hand, and on a ten-minute sweep (`WorktreeCleanupJob`, `config/recurring.yml`). It removes one only when all of these hold:
+For the cleanup side, `Orchestrator::WorktreeJanitor` removes a run's worktree (never its branch) on **Close session**, when you close a run's herdr workspace by hand, and on a ten-minute sweep (`WorktreeCleanupJob`, `config/recurring.yml`). It considers **only worktrees that belong to its own runs**, and removes one only when all of these hold:
 
 - the run's session is over;
 - `git status --porcelain` is empty in the worktree;
-- `HEAD` is either an ancestor of the local `main` branch (`git merge-base --is-ancestor HEAD main`) or contained in some remote-tracking branch (`git branch --remotes --contains HEAD`).
+- `HEAD` is either an ancestor of the run's own base branch (`git merge-base --is-ancestor HEAD refs/heads/<base>`) or contained in some remote-tracking branch (`git branch --remotes --contains HEAD`).
 
-So removal depends on the local `main` ref and on remote-tracking refs. A plain `git push -u origin ...` updates `refs/remotes/origin/...`, which is enough. Anything else stays on disk indefinitely and is flagged as a **kept worktree** on the runs list and run screen, where **Remove worktree** removes it by hand. The janitor never touches a worktree named `main`.
-
-> [!IMPORTANT]
-> The sweep covers **every** worktree of the source repository, not only the ones the orchestrator created. A worktree you made by hand with no matching run is treated as an orphan and removed once it is clean and pushed or merged (its branch is kept). Don't keep your own worktrees of a registered repository if you expect them to stay.
+Removal goes through herdr (`worktree.remove`, which needs the worktree's herdr workspace open, so the janitor reopens it first when it was closed). Anything else stays on disk indefinitely and is flagged as a **kept worktree** on the runs list and run screen, where **Remove worktree** removes it by hand. Worktrees you make yourself, and your repository's own checkout, are never touched.
 
 ### 3. What a run starts with inside the repo
 
-A worktree is a fresh checkout of committed files only. Anything untracked or gitignored in `main` (`.env`, `config/master.key`, `node_modules`, a local database) is **not** there. The orchestrator runs no setup commands and never infers a language, package manager, or ports. The session works those out itself each run. That puts the burden on the repository:
+A worktree is a fresh checkout of committed files only. Anything untracked or gitignored in your checkout (`.env`, `config/master.key`, `node_modules`, a local database) is **not** there. The orchestrator runs no setup commands and never infers a language, package manager, or ports. The session works those out itself each run. That puts the burden on the repository:
 
-- **`AGENTS.md` / `CLAUDE.md` in the target repository** are how you tell a session how to set up, build, and test. Sessions start in the worktree and read the repository's own instruction files the way they would if you ran the CLI there yourself. `claude` is deliberately launched without `--setting-sources`, so it loads the repository's `CLAUDE.md` and `.claude/` settings. It does get `--strict-mcp-config`, so any `.mcp.json` in the repository is ignored in favour of the orchestrator's MCP server (`Runner::SessionArgs`). `codex` and `opencode` read `AGENTS.md`.
+- **`AGENTS.md` / `CLAUDE.md` in the target repository** are how you tell a session how to set up, build, and test. Sessions start in the worktree and read the repository's own instruction files the way they would if you ran the CLI there yourself. `claude` is deliberately launched without `--setting-sources`, so it loads the repository's `CLAUDE.md` and `.claude/` settings. It does get `--strict-mcp-config`, so any `.mcp.json` in the repository is ignored in favour of the orchestrator's MCP server (`Runner::SessionArgs`). `codex` reads `AGENTS.md`.
 - **Tests.** The run prompt (`Orchestrator::RunPrompt`) does not tell the session to run tests. It tells the session to leave its changes uncommitted until asked, and asks for a `report_idle` summary that includes how the change was verified. If a repository needs particular verification, put the commands in its `AGENTS.md`/`CLAUDE.md`, or in the task text.
-- **Environment variables.** A session can call the `record_workspace_env_var` MCP tool to save a workaround (for example a bundler path). The value is stored as a `WorkspaceEnvVar` on the workspace and set in every later session's pane environment (`Orchestrator::WorkspaceEnvVars`, merged first in `Runner::ProcessEnv.for_session`, so it can't override anything the orchestrator sets). Values are literal and must not contain `$` or a backtick, because they are never shell-expanded. They are stored in plaintext in the orchestrator's database, so don't use them for secrets. There is no UI for them. To inspect them or seed them yourself, use the console:
-
-  ```sh
-  bin/rails runner 'w = Workspace.find_by!(name: "my-app"); pp w.workspace_env_vars.pluck(:name, :value)'
-  bin/rails runner 'Workspace.find_by!(name: "my-app").workspace_env_vars.create!(name: "FOO", value: "/abs/path", evidence_ref: "operator", recorded_by: "operator")'
-  ```
-
-  (Against `bin/service`, prefix those commands with `RAILS_ENV=production`.)
-- **Environment the orchestrator removes.** `Runner::ProcessEnv` unsets the orchestrator's own Bundler activation (`BUNDLE_GEMFILE`, `RUBYOPT`, …), `RAILS_ENV`, and nested-Claude-Code markers, so the target repository resolves its own `Gemfile.lock` and picks its own Rails env.
-- **Permissions.** Every session runs with full access and approvals bypassed (`--permission-mode bypassPermissions`, `-s danger-full-access`, `--auto`). The review gate is you trying the session's changes before you ask it to commit.
+- **Environment.** Paneyard gives a session's panes no environment of its own: each pane is your normal login shell, exactly as any herdr pane is (herdr's `worktree.create` takes no environment, and a pane inherits nothing from Paneyard's process). What a session needs from Paneyard -- its `/mcp/run` capability -- is in its CLI's own config: claude's `--mcp-config` file, codex's `-c` header override. Anything a repository needs set belongs in its own tooling (`.envrc`, `mise.toml`, its `AGENTS.md`).
+- **Permissions.** Every session runs with full access and approvals bypassed (`--permission-mode bypassPermissions`, `-s danger-full-access`). The review gate is you trying the session's changes before you ask it to commit.
 
 ### 4. GitHub access
 
-The orchestrator opens no pull requests and makes no GitHub API calls about your repository. The only GitHub call it makes is to mint a GitHub App token, below. What needs credentials is the session's `git push`. The session's credentials are chosen (`RunSessionRunner.session_spec`, then `Runner::ProcessEnv`) in this order:
-
-1. **GitHub App configured** (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`, or `github_app:` in credentials; see [GITHUB_APP_SETUP.md](../GITHUB_APP_SETUP.md)): the orchestrator reads the worktree's `remote.origin.url`, finds the App installation whose account matches the repository's **owner**, and mints an installation token. The session gets it as `GH_TOKEN`, with `gh auth git-credential` as a git credential helper.
-2. **No App, or minting fails** (App not installed on that owner, a non-GitHub `origin`, an API error): it falls back to `gh auth token`, which is your own `gh` login.
-3. **Neither is available**: the session gets no injected credentials and pushes with whatever your login shell already has.
-
-What that means in practice:
-
-- **You don't need a GitHub App at all** if you're happy for sessions to push as you. Being signed in to `gh` (`gh auth login`) is enough for an HTTPS `origin`.
-- **With an SSH `origin`** (`git@github.com:...`), `git push` goes over SSH and never uses the token or credential helper. Pushing then depends only on your SSH key being usable from a herdr pane (for example through ssh-agent), with or without a GitHub App. `gh` inside the session still uses `GH_TOKEN`.
-- **If you do use the App**, its installation must cover this repository with **Contents: Read & write**. **Pull requests: Read & write** is only needed if you'll ask sessions to run `gh pr create`. The installation is matched by owner only: if the owner has the App installed but this repository isn't among its selected repositories, a token is still minted and the push fails with 403. Add the repository under the installation's **Configure** page.
-- Tokens are fixed when a session starts and cached for 55 minutes, so a long-lived session can find its token expired. Also, the cache key is per App, not per installation: if you run repositories under two different owners through one App, a session can be handed the other owner's cached token and fail to push until it expires.
+The orchestrator opens no pull requests and makes no GitHub calls. What needs credentials is a session's `git push`, and it uses whatever your login shell has: an SSH key through ssh-agent for an SSH `origin`, or your `gh` login (`gh auth login`, with gh as git's credential helper) for an HTTPS one. A session pushes as you.
 
 ### 5. Register the workspace
 
-Every way in takes a **name** (unique; it's what `queue_run` and the other MCP tools take as `workspace`) and a **root**: `root_path`, the parent directory (`~/code/my-app`). The web UI and the MCP tool also accept the `main` checkout itself, a directory inside it, or a run's worktree, and register the root above it. The name can't be changed later. You can change the root, except while the workspace has an active run.
+Registering takes the repository's **path** -- the checkout, any directory in it, or a linked worktree of it, from which its main checkout is worked out -- and optionally a **name** (default: the checkout's directory name, made unique) and a **default base branch** (default: the repository's own default branch: `origin/HEAD`, then `init.defaultBranch`, then `main` or `master`, whichever exists locally; never just whatever happens to be checked out). The name can't be changed later. You can change the repository and the default branch, though not the repository while the workspace has an active run.
 
-The web UI and the MCP tool check the layout before saving, with the same rules a launch enforces in [step 2](#2-git-requirements) (`Orchestrator::WorkspaceRegistration`, which asks the runner's `check_workspace_root`): the root is an absolute path (`~` is expanded) to an existing directory, `<root>/main` is a git checkout of its own with `main` checked out and an `origin` remote, and no other workspace has the name or the root. If anything is wrong, nothing is saved and every problem is listed with how to fix it, including the usual mistakes: giving a plain clone with no `main/` child (the `mkdir` and `git clone` commands for the right layout), and a checkout on `master` (how to switch to or rename it to `main`). The check only looks; it never clones, moves or renames anything. The saved root is the expanded path.
+Registration checks everything first (`Orchestrator::WorkspaceRegistration`, which asks the runner's `check_repository`): the path exists and is in a git checkout, the default base branch exists locally, the repository has an `origin`, and no other workspace has the name or the repository. If anything is wrong, nothing is saved and every problem is listed with how to fix it. The check only looks; it never clones, fetches, switches or renames anything.
 
-- **Web UI**: open the orchestrator, choose **Add workspace**, and enter a **Name** and the **Workspace root**. Editing a workspace's root runs the same check; editing only its layout does not.
-- **MCP**, from your own agent over [`/mcp/admin`](#mcp-endpoints): the `register_workspace` tool, with `name` and `rootPath`. For example, in a Claude Code session with `paneyard-admin` registered, ask:
-
-  > Register ~/code/my-app as a Paneyard workspace called my-app.
-
-  which calls
+- **The herdr plugin**: the **queue** action registers the repository the focused pane is in, the first time you queue a task there.
+- **Web UI**: choose **Add workspace** and enter the **Repository** (name and default base branch are optional). Editing a workspace's repository or default branch runs the same check; editing only its layout does not.
+- **MCP**, from your own agent over [`/mcp/admin`](#mcp-endpoints): the `register_workspace` tool. For example, in a Claude Code session with Paneyard registered, ask "register this repository with Paneyard", which calls
 
   ```json
-  { "name": "register_workspace", "arguments": { "name": "my-app", "rootPath": "~/code/my-app" } }
+  { "name": "register_workspace", "arguments": { "path": "~/code/my-app" } }
   ```
 
-  On success it returns the workspace as `list_workspaces` shows it, plus `rootPath` and `originUrl`. Otherwise it returns an error result whose `problems` list every problem (`code` and `message`), and your agent can run the fixes it suggests and call it again. The tool is on `/mcp/admin` only; a run session can't register workspaces.
+  or, to choose the branch runs start from, `{ "path": "~/code/my-app", "defaultBaseBranch": "develop" }`. On success it returns the workspace as `list_workspaces` shows it, plus `originUrl`. Otherwise it returns an error result whose `problems` list every problem (`code` and `message`), and your agent can run the fixes it suggests and call it again. The tool is on `/mcp/admin` only; a run session can't register workspaces.
 - **Console**, which skips the check:
 
   ```sh
-  bin/rails runner 'Workspace.create!(name: "my-app", root_path: File.expand_path("~/code/my-app"))'
+  bin/rails runner 'Workspace.create!(name: "my-app", repository_path: File.expand_path("~/code/my-app"), default_base_branch: "main")'
   ```
 
 ### 6. First run
 
-From the workspace's runs page, choose **Queue a task**, give it a task, and pick a driver (and optionally a model). Or queue it over MCP (below). Within a few seconds `RunDispatchJob` claims it, and a herdr workspace named after the worktree opens with the agent on the left and `nvim` on the right, or with whatever tabs and panes that workspace's layout defines.
+From the workspace's runs page, choose **Queue a task**, give it a task, a base branch if not the default, and a driver (and optionally a model). Or queue it from herdr with the plugin's **queue** action, or over MCP (below). Within a few seconds `RunDispatchJob` claims it, and herdr opens a workspace for the run's new worktree with the agent on the left and `nvim` on the right, or with whatever tabs and panes that workspace's layout defines.
 
-It worked when the session calls `report_idle` and the run screen shows its checkpoint. Ask it to commit and push, and `git -C ~/code/my-app/main ls-remote origin 'paneyard/*'` then lists the branch.
+It worked when the session calls `report_idle` and the run screen shows its checkpoint. Ask it to commit and push, and `git -C ~/code/my-app ls-remote origin 'paneyard/*'` then lists the branch.
 
-If the launch fails, the run screen shows the error. The common ones map back to the steps above:
+If the launch fails, the run screen shows the error. The common ones:
 
 | Error | Cause |
 | --- | --- |
-| "Source checkout must be on main" | `<root_path>/main` has another branch checked out ([step 2](#2-git-requirements)). |
-| "has no origin remote" | Add an `origin` remote ([step 2](#2-git-requirements)). |
-| "Worktree path already exists" | Something else is at the worktree's path under `root_path` ([step 1](#1-directory-layout)). |
+| "Base branch `x`: there is no local branch `x`" | The base branch was deleted or renamed after the run was queued ([step 2](#2-branches-and-git-requirements)). |
+| "herdr could not create the worktree" | herdr refused `worktree.create`, for example because something already exists at the path it chose for the branch. |
 | herdr unreachable | herdr isn't running, or `HERDR_SOCKET_PATH` points at the wrong socket. |
 | "never became ready" | The agent CLI is missing from your login shell's `PATH`, isn't signed in, or rejected the model. The run screen keeps the agent pane's last screen. |
+| "claude stopped at its folder-trust prompt" | Open `claude` once in the repository and trust it; its worktrees count as the same project. |
 
 ## Workspace layouts
 
@@ -202,16 +177,16 @@ tabs:
         split: { of: dev-log, direction: down }
 ```
 
-Have as many tabs as you like, each with as many splits as you like. The agent pane is the only one that is required, and it is always the first pane of the first tab, which is the tab a run opens on. Every other pane is split off an earlier pane in its own tab, `right` or `down`; `ratio` is the share the pane being split keeps. A `command` is typed into the pane's own shell in the run's worktree, and every pane gets the same environment as the agent (`GH_TOKEN`, `PANEYARD_RUN_ID`, the workspace's recorded env vars). A pane with no command is a plain shell. The panes are only set up when the session starts. The orchestrator never watches or restarts them, and Close session, or the agent pane going away, closes all of them. See [workspace-layouts.md](./workspace-layouts.md) for the design.
+Have as many tabs as you like, each with as many splits as you like. The agent pane is the only one that is required, and it is always the first pane of the first tab, which is the tab a run opens on. Every other pane is split off an earlier pane in its own tab, `right` or `down`; `ratio` is the share the pane being split keeps. A `command` is typed into the pane's own shell in the run's worktree; every pane is your normal login shell, with no environment of Paneyard's. A pane with no command is a plain shell. The panes are only set up when the session starts. The orchestrator never watches or restarts them, and Close session, or the agent pane going away, closes all of them. See [workspace-layouts.md](./workspace-layouts.md) for the design.
 
 ## How a run works
 
 1. **Queue it.** Creating a run starts nothing. It waits for a slot. The cap is global across every workspace: `PANEYARD_MAX_CONCURRENT_RUNS`, default 4.
-2. **Dispatch.** `RunDispatchJob` claims the oldest queued run. `StartRunSessionJob` provisions its worktree and opens one interactive session in a herdr pane rooted there, with the task as its first prompt.
-3. **Work.** The session owns the job. It explores, edits, and runs the repository's own commands, then leaves its changes uncommitted for you to try. Ask it to commit, push, or merge into `main` when you're happy; each is a separate request, and it does only the one you ask for. Watch it in your herdr client, or send it a message from the run screen.
+2. **Dispatch.** `RunDispatchJob` claims the oldest queued run. `StartRunSessionJob` has herdr create its worktree from the run's base branch and open it as a herdr workspace, and starts one interactive session in it, with the task as its first prompt.
+3. **Work.** The session owns the job. It explores, edits, and runs the repository's own commands, then leaves its changes uncommitted for you to try. Ask it to commit, push, or merge back into its base branch when you're happy; each is a separate request, and it does only the one you ask for. Watch it in your herdr client, or send it a message from the run screen.
 4. **Report.** The session calls the `report_idle` MCP tool (`done`, `blocked`, or `failed`) each time it stops working. This does not end the run: the pane stays open and the slot stays held. Each report is a checkpoint covering the interval since the last one, written as a full Markdown report, and the run screen lists them in order.
 5. **Decide.** Read the reports, then either send more work or **Close session**, which quits the CLI, closes the herdr workspace, and frees the slot. An unreviewed run keeps holding its slot, so it blocks the queue. Pull requests are yours to open from a pushed branch.
-6. **Clean up.** `WorktreeJanitor` removes the worktree on Close session if its work is saved (see [Git requirements](#2-git-requirements)), and otherwise keeps it and flags it until you push, merge, or remove it.
+6. **Clean up.** `WorktreeJanitor` has herdr remove the worktree on Close session if its work is saved (in its base branch, or pushed; see [Branches and git requirements](#2-branches-and-git-requirements)), and otherwise keeps it and flags it until you push, merge, or remove it.
 
 If a session dies without reporting (pane closed, CLI crashed), `RunSessionReconcileJob` notices within about 30 seconds and frees the slot.
 
@@ -219,14 +194,14 @@ There is no cost or token accounting for sessions: they are real interactive ter
 
 ## MCP endpoints
 
-- **`/mcp/run`** is what each session talks to, authenticated by a per-session bearer token that dies with the session. It has `report_idle`, `record_workspace_env_var`, and the shared tools below. The orchestrator wires it into each CLI automatically, so you don't configure anything.
-- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, `workspace` name, optional `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, source checkout path, active-run count, and which one `list_runs` and `get_run` default to when `workspace` is omitted), `register_workspace` (`name`, `rootPath`; checks the layout first and creates nothing if it is wrong, see [step 5](#5-register-the-workspace)), `close_session` (`runId`, `workspace`; the run screen's **Close session**, which the herdr plugin's close action uses), and `ping_tool`. The herdr plugin's `paneyard.mcp` action registers it for you, at the plugin's own port. For example, to add it to Claude Code for every project (`-s user`; without it, the server is registered only for the project you run the command in):
+- **`/mcp/run`** is what each session talks to, authenticated by a per-session bearer token that dies with the session. It has `report_idle` and the shared tools below. The orchestrator wires it into each CLI automatically, so you don't configure anything.
+- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, `workspace` name, optional `baseBranch` and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, repository path, default base branch, active-run count, and which one `list_runs` and `get_run` default to when `workspace` is omitted), `register_workspace` (`path`, optional `name` and `defaultBaseBranch`; checks everything first and creates nothing if anything is wrong, see [step 5](#5-register-the-workspace)), `close_session` (`runId`, `workspace`; the run screen's **Close session**, which the herdr plugin's close action uses), and `ping_tool`. The herdr plugin's `paneyard.mcp` action registers it for you, at the plugin's own port. For example, to add it to Claude Code for every project (`-s user`; without it, the server is registered only for the project you run the command in):
 
   ```sh
-  claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:7263/mcp/admin
+  claude mcp add --transport http -s user paneyard http://127.0.0.1:7263/mcp/admin
   ```
 
-  From here `queue_run` always needs `workspace`: it never falls back to a default, so a job can't land in an unrelated workspace because the repository you are in isn't registered. The endpoint's server instructions, which Claude Code reads, spell out the flow: `list_workspaces`, match `sourceRoot` against the repository, `register_workspace` if nothing matches, then `queue_run`. So in a repository that isn't registered, "queue a job to …" registers it first, from the `main` checkout the agent was opened in. A plain clone (`.git` at the top) doesn't pass the layout check, and the fix `register_workspace` returns clones it into `<new root>/main`. Runs then work from that clone, not the directory you opened.
+  From here `queue_run` always needs `workspace`: it never falls back to a default, so a job can't land in an unrelated workspace because the repository you are in isn't registered. The endpoint's server instructions, which Claude Code reads, spell out the flow: `list_workspaces`, match `repositoryPath` against the repository (its main checkout, from a linked worktree), `register_workspace` if nothing matches, then `queue_run`. So in a repository that isn't registered, "queue a job to …" registers it first, and "queue a job from this branch" passes the branch the agent is on as `baseBranch`.
 
 See AGENTS.md's "MCP Boundary" for the design rules behind both.
 
@@ -246,7 +221,7 @@ bin/sandbox reset                               # stop and delete tmp/sandbox
 bin/sandbox verify [--keep]                     # boot a fresh instance and drive a run through it end to end
 ```
 
-It runs real Puma and Solid Queue with the real recurring schedule on a free `127.0.0.1` port, with its own SQLite files, pid and log under `tmp/sandbox/`, beside a **fake herdr** whose "agents" are scripted processes that never call a model. Put a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]` directive in a task to choose what the fake agent does (default `done`). While `PANEYARD_SANDBOX=1`, `Orchestrator::Sandbox` refuses your real herdr socket, remote-control credentials, GitHub tokens, and any worktree or process outside the sandbox. It never touches `storage/production*.sqlite3`, `tmp/pids/production.pid` or the production port.
+It runs real Puma and Solid Queue with the real recurring schedule on a free `127.0.0.1` port, with its own SQLite files, pid and log under `tmp/sandbox/`, beside a **fake herdr** whose "agents" are scripted processes that never call a model. Put a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]` directive in a task to choose what the fake agent does (default `done`). While `PANEYARD_SANDBOX=1`, `Orchestrator::Sandbox` refuses your real herdr socket, remote-control credentials, and any repository or process outside the sandbox. Its scratch repository has a second branch, `feature/sandbox`, to queue a run from something other than `main`. It never touches `storage/production*.sqlite3`, `tmp/pids/production.pid` or the production port.
 
 Two opt-ins bring real integrations back, one at a time:
 

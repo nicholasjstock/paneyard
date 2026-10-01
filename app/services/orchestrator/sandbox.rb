@@ -9,11 +9,12 @@ module Orchestrator
   # full of real workspace paths and real session pids:
   #
   #   - herdr: only the sandbox's fake herdr socket, never the operator's;
-  #   - git worktrees: provisioning and removal only under the sandbox root;
+  #   - git worktrees: provisioning and removal only for repositories under the
+  #     sandbox root (herdr picks where the worktree itself goes: the fake herdr
+  #     beside the repository, so inside the root too);
   #   - processes: a session pid is only signalled if it is a fake agent;
   #   - remote control (Telegram, and any other RemoteControl adapter): no
-  #     credentials, so no polling or sending;
-  #   - GitHub: no installation or `gh` token handed to a session.
+  #     credentials, so no polling or sending.
   #
   # Two of those can be opted back in, for an operator who wants to see the
   # real thing (`bin/sandbox start --real-herdr --telegram`), never by

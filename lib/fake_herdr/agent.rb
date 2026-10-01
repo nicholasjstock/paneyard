@@ -3,7 +3,7 @@ require "securerandom"
 require_relative "../paneyard_sandbox/mcp_client"
 
 module FakeHerdr
-  # The process FakeHerdr::Server launches in place of claude/codex/opencode.
+  # The process FakeHerdr::Server launches in place of claude or codex.
   # No model: it becomes "ready", takes the prompt herdr's agent.prompt hands
   # it, and does what a directive in that prompt says -- by default, report
   # `done` through the real /mcp/run endpoint with the capability the session
@@ -109,8 +109,9 @@ module FakeHerdr
       say("report_idle failed: #{error.class}: #{error.message}")
     end
 
-    # Claude's launch args carry the MCP config file RunSessionRunner wrote,
-    # so read the URL and bearer from there, as claude would.
+    # Read the URL and bearer from the launch args, as the real CLI would:
+    # claude's point at the MCP config file RunSessionRunner wrote; codex's
+    # carry them as -c overrides. Sessions get nothing in their environment.
     def mcp_endpoint
       config_path = @argv[@argv.index("--mcp-config") + 1] if @argv.include?("--mcp-config")
       if config_path && File.exist?(config_path)
@@ -118,7 +119,12 @@ module FakeHerdr
         return [ server.fetch("url"), server.dig("headers", "Authorization").to_s.delete_prefix("Bearer ") ]
       end
 
-      [ @env.fetch("FAKE_AGENT_MCP_URL"), @env.fetch("PANEYARD_RUN_TOKEN") ]
+      overrides = @argv.each_cons(2).select { |flag, _| flag == "-c" }.map(&:last)
+      url = overrides.find { |value| value.start_with?("mcp_servers.paneyard.url=") }
+      headers = overrides.find { |value| value.start_with?("mcp_servers.paneyard.http_headers=") }
+      raise "no paneyard MCP config in the launch args" unless url && headers
+
+      [ JSON.parse(url.split("=", 2).last), headers[/Bearer ([^"]+)"/, 1] ]
     end
 
     def control(**update)

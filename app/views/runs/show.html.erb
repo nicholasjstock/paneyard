@@ -49,12 +49,12 @@
   <h2>Worktree</h2>
   <% if @run.managed_worktree? %>
     <p class="mono"><%= @run.target_root %></p>
-    <p class="muted mono"><%= @run.branch_name || "branch not provisioned" %></p>
+    <p class="muted mono"><%= @run.branch_name || "branch not provisioned" %> &larr; <%= @run.base_branch %></p>
     <% if @run.kept_worktree? %>
       <p><span class="badge attention">worktree kept</span></p>
       <p class="muted">
-        This worktree has uncommitted changes or commits that are not pushed or merged, so it is kept until you push,
-        merge, or remove it. Removing it keeps the branch but discards uncommitted changes.
+        This worktree has uncommitted changes, or commits that are neither pushed nor in <span class="mono"><%= @run.base_branch %></span>,
+        so it is kept until you push, merge, or remove it. Removing it keeps the branch but discards uncommitted changes.
       </p>
       <%= button_to "Remove worktree", remove_worktree_workspace_run_path(current_workspace, @run),
             method: :post, class: "btn",

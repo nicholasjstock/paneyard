@@ -7,8 +7,8 @@ RSpec.describe Run, type: :model do
   # the runner's #worktree_registered? (Orchestrator::Runner::Worktrees).
   describe "#kept_worktree?" do
     let(:root) { Dir.mktmpdir("run-kept-worktree") }
-    let(:source_root) { File.join(root, "main") }
-    let(:workspace) { Workspace.create!(name: "kept-worktree-#{SecureRandom.hex(4)}", root_path: root) }
+    let(:source_root) { File.join(root, "my-app") }
+    let(:workspace) { Workspace.create!(name: "kept-worktree-#{SecureRandom.hex(4)}", repository_path: source_root) }
 
     before do
       FileUtils.mkdir_p(source_root)
@@ -46,11 +46,11 @@ RSpec.describe Run, type: :model do
       expect(run.kept_worktree?).to be(true)
     end
 
-    # RunsController#create seeds target_root to the source checkout before
-    # GitWorktree.provision! ever runs, so a run that dies before provisioning
-    # leaves target_root pointing at `main` itself -- a real, existing
-    # directory that is not a worktree of anything.
-    it "is false for a run whose target_root was never provisioned past the source checkout" do
+    # A run is queued with target_root at the repository itself, until
+    # GitWorktree.provision! records its worktree, so a run that dies before
+    # provisioning leaves it pointing at the operator's own checkout -- a real
+    # directory that is not a linked worktree.
+    it "is false for a run whose target_root was never provisioned past the repository" do
       run = terminal_run("never-provisioned", source_root)
 
       expect(run.kept_worktree?).to be(false)

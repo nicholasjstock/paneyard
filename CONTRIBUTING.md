@@ -83,7 +83,7 @@ It is a Rails 8 app organised around `Workspace` as the top-level boundary: runs
 | `app/controllers`, `app/views` | The web UI. |
 | `app/models` | Persistence: `Workspace`, `Run`, `RunSession`, `RunCheckpoint`, … |
 | `app/jobs` | Solid Queue jobs: dispatch, starting a session, reconcile, worktree cleanup, Telegram polling. |
-| `app/services/orchestrator` | Orchestration logic: run and session state, prompts, concurrency, layouts, GitHub App tokens, and the two MCP endpoints (mounted in `config/routes.rb`). |
+| `app/services/orchestrator` | Orchestration logic: run and session state, base branches, prompts, concurrency, layouts, and the two MCP endpoints (mounted in `config/routes.rb`). |
 | `app/services/orchestrator/runner` | Everything that touches the machine: herdr, agent CLIs, git worktrees, processes (see [the runner boundary](#design-rules)). |
 | `app/services/mcp_tools` | The MCP tools behind `/mcp/run` and `/mcp/admin`. |
 | `app/services/remote_control` | Telegram remote control and its adapter interface. |

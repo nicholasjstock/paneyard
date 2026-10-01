@@ -2,7 +2,7 @@ require "rails_helper"
 
 RSpec.describe "workspace runs", type: :system do
   let(:workspace) do
-    Workspace.create!(name: "runs-ui-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir("runs-ui"))
+    Workspace.create!(name: "runs-ui-#{SecureRandom.hex(4)}", repository_path: create_source_checkout)
   end
 
   it "queues a task and lands on its detail page, with nothing started yet" do
@@ -77,9 +77,9 @@ RSpec.describe "workspace runs", type: :system do
   # -- so this needs an actual source checkout and `git worktree add`, not a
   # bare directory.
   it "flags a worktree kept after its run ended, offers its removal, and says nothing about pull requests" do
-    workspace = Workspace.create!(name: "runs-ui-#{SecureRandom.hex(4)}", root_path: create_source_checkout)
-    worktree = File.join(workspace.root_path, "runs-ui-kept-a1b2")
-    system("git", "-C", workspace.source_root, "worktree", "add", "-b", "paneyard/runs-ui-kept-a1b2",
+    workspace = Workspace.create!(name: "runs-ui-#{SecureRandom.hex(4)}", repository_path: create_source_checkout)
+    worktree = File.join(File.dirname(workspace.repository_path), "runs-ui-kept-a1b2")
+    system("git", "-C", workspace.repository_path, "worktree", "add", "-b", "paneyard/runs-ui-kept-a1b2",
       worktree, "HEAD", out: File::NULL, err: File::NULL) || raise("could not add worktree")
     File.write(File.join(worktree, "scratch.txt"), "unpushed\n")
     system("git", "-C", worktree, "add", "scratch.txt")
@@ -107,7 +107,7 @@ RSpec.describe "workspace runs", type: :system do
     run = create_run(
       workspace:, prefix: "runs-ui-released", status: "completed", stopped_at: 1.hour.ago,
       worktree_name: "runs-ui-released-a1b2", branch_name: "paneyard/runs-ui-released-a1b2",
-      target_root: File.join(workspace.root_path, "runs-ui-released-a1b2")
+      target_root: File.join(File.dirname(workspace.repository_path), "runs-ui-released-a1b2")
     )
 
     visit workspace_run_path(workspace, run)

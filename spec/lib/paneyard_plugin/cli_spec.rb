@@ -35,40 +35,57 @@ RSpec.describe PaneyardPlugin::Cli do
   after { FileUtils.rm_rf(state) }
 
   describe "queue-ui" do
-    let(:workspace) { { "id" => 3, "name" => "app", "sourceRoot" => "/code/app/main" } }
+    let(:workspace) { { "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main" } }
 
-    it "queues a multi-line task in the workspace the pane is in" do
+    before { allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ nil, nil ]) }
+
+    it "queues a multi-line task in the workspace the pane is in, from its default base branch" do
       allow(client).to receive(:workspaces).and_return([ workspace ])
-      allow(client).to receive(:queue).and_return("runId" => "run-1", "queuedBehind" => 0, "capacity" => { "inFlight" => 1, "limit" => 4 })
+      allow(client).to receive(:queue).and_return("runId" => "run-1", "baseBranch" => "main", "queuedBehind" => 0,
+        "capacity" => { "inFlight" => 1, "limit" => 4 })
 
-      status = run_cli("queue-ui", input: "Fix the flaky spec.\nRun it ten times.\n\ncodex\n\n",
-        context: { "focused_pane_cwd" => "/code/app/main/spec" })
+      status = run_cli("queue-ui", input: "Fix the flaky spec.\nRun it ten times.\n\n\ncodex\n\n",
+        context: { "focused_pane_cwd" => "/code/app/spec" })
 
       expect(status).to eq(0)
-      expect(client).to have_received(:queue).with(task: "Fix the flaky spec.\nRun it ten times.", workspace: "app", driver: "codex")
-      expect(out.string).to include("Queue a task in app", "Queued run-1.")
+      expect(client).to have_received(:queue)
+        .with(task: "Fix the flaky spec.\nRun it ten times.", workspace: "app", base_branch: nil, driver: "codex")
+      expect(out.string).to include("Queue a task in app", "Base branch (Enter for main)", "Queued run-1 from main.")
+    end
+
+    it "offers the branch the pane is on, and queues from the one the operator types" do
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "feature/payments" ])
+      allow(client).to receive(:workspaces).and_return([ workspace ])
+      allow(client).to receive(:queue).and_return("runId" => "run-3", "baseBranch" => "feature/payments", "capacity" => {})
+
+      # A pane in a herdr worktree of the repository, wherever herdr put it.
+      run_cli("queue-ui", input: "Task\n\nfeature/payments\n\n\n", context: { "focused_pane_cwd" => "/Users/me/.herdr/worktrees/app/x" })
+
+      expect(out.string).to include("Base branch (Enter for main; this pane is on feature/payments)")
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "feature/payments", driver: nil)
     end
 
     it "registers the pane's repository first when it is not a workspace yet" do
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/other", "main" ])
       allow(client).to receive(:workspaces).and_return([ workspace ])
-      allow(client).to receive(:register).and_return("name" => "other", "sourceRoot" => "/code/other/main")
+      allow(client).to receive(:register).and_return("name" => "other", "repositoryPath" => "/code/other", "defaultBaseBranch" => "main")
       allow(client).to receive(:queue).and_return("runId" => "run-2", "queuedBehind" => 2, "capacity" => {})
 
-      run_cli("queue-ui", input: "Task\n\n\n", context: { "focused_pane_cwd" => "/code/other/main" })
+      run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/code/other/lib" })
 
-      expect(client).to have_received(:register).with(name: "other", root_path: "/code/other/main")
-      expect(client).to have_received(:queue).with(task: "Task", workspace: "other", driver: nil)
+      expect(client).to have_received(:register).with(path: "/code/other")
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "other", base_branch: nil, driver: nil)
     end
 
     it "shows what to fix, and queues nothing, when the directory cannot be a workspace" do
       allow(client).to receive(:workspaces).and_return([])
       allow(client).to receive(:register).and_raise(PaneyardSandbox::McpClient::ToolError.new("register_workspace failed",
-        "message" => "Nothing was registered.", "problems" => [ { "code" => "source_missing", "message" => "Clone it into <root>/main." } ]))
+        "message" => "Nothing was registered.", "problems" => [ { "code" => "not_git", "message" => "Clone the repository first." } ]))
       allow(client).to receive(:queue)
 
       run_cli("queue-ui", input: "\n", context: { "focused_pane_cwd" => "/code/plain" })
 
-      expect(out.string).to include("Nothing was changed", "1. Clone it into <root>/main.")
+      expect(out.string).to include("Nothing was changed", "1. Clone the repository first.")
       expect(client).not_to have_received(:queue)
     end
 
@@ -93,7 +110,7 @@ RSpec.describe PaneyardPlugin::Cli do
   end
 
   describe "close-ui" do
-    let(:workspace) { { "id" => 3, "name" => "app", "sourceRoot" => "/code/app/main" } }
+    let(:workspace) { { "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main" } }
     let(:run) { { "runId" => "run-9", "status" => "running", "session" => { "live" => true, "herdrWorkspace" => "w5" } } }
 
     before do

@@ -1,17 +1,16 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::Runner::SessionLayout do
-  let(:env) { { "PANEYARD_RUN_ID" => "run-1", "PANEYARD_RUN_TOKEN" => "secret", "GH_TOKEN" => "gh" } }
   let(:cwd) { "/tmp/run-1" }
+  # The root pane of the workspace herdr's worktree.create opened.
+  let(:root_pane) { { "pane_id" => "w1:p1", "tab_id" => "w1:t1", "workspace_id" => "w1" } }
 
   # The layout as the orchestrator hands it over (WorkspaceLayout.for).
   def layout(yaml)
-    Orchestrator::WorkspaceLayout.for(Workspace.new(name: "layout", root_path: "/tmp/layout", layout: yaml))
+    Orchestrator::WorkspaceLayout.for(Workspace.new(name: "layout", repository_path: "/tmp/layout", layout: yaml))
   end
 
   before do
-    allow(Orchestrator::Runner::Herdr).to receive(:workspace_create)
-      .and_return("root_pane" => { "pane_id" => "w1:p1", "tab_id" => "w1:t1", "workspace_id" => "w1" })
     tab_ids = Enumerator.new { |y| (2..).each { |n| y << n } }
     allow(Orchestrator::Runner::Herdr).to receive(:tab_create) do
       n = tab_ids.next
@@ -23,18 +22,17 @@ RSpec.describe Orchestrator::Runner::SessionLayout do
     allow(Orchestrator::Runner::Herdr).to receive(:pane_send_input)
   end
 
-  it "opens the workspace unfocused with the agent as the first tab's root, and returns that pane" do
-    pane = described_class.open!(label: "run-1", cwd:, env:, tabs: layout("tabs:\n  - panes: [agent]\n"))
+  it "uses the worktree workspace's root pane as the agent's, and returns it" do
+    pane = described_class.open!(root_pane:, cwd:, tabs: layout("tabs:\n  - panes: [agent]\n"))
 
-    expect(pane).to include("pane_id" => "w1:p1", "tab_id" => "w1:t1", "workspace_id" => "w1")
-    expect(Orchestrator::Runner::Herdr).to have_received(:workspace_create).with(label: "run-1", cwd:, env:, focus: false)
+    expect(pane).to eq(root_pane)
     # The agent is started by SessionLauncher, never typed into here.
     expect(Orchestrator::Runner::Herdr).not_to have_received(:pane_send_input)
     expect(Orchestrator::Runner::Herdr).not_to have_received(:tab_rename)
   end
 
-  it "builds every tab and split in order, each pane with the full session env, none of them focused" do
-    described_class.open!(label: "run-1", cwd:, env:, tabs: layout(<<~YAML))
+  it "builds every tab and split in order, no pane with an env of its own, none of them focused" do
+    described_class.open!(root_pane:, cwd:, tabs: layout(<<~YAML))
       tabs:
         - name: main
           panes:
@@ -59,15 +57,15 @@ RSpec.describe Orchestrator::Runner::SessionLayout do
 
     expect(Orchestrator::Runner::Herdr).to have_received(:tab_rename).with("w1:t1", "main")
     expect(Orchestrator::Runner::Herdr).to have_received(:pane_split)
-      .with(target_pane_id: "w1:p1", direction: "right", ratio: 0.6, cwd:, env:, focus: false)
+      .with(target_pane_id: "w1:p1", direction: "right", ratio: 0.6, cwd:, focus: false)
     expect(Orchestrator::Runner::Herdr).to have_received(:pane_split)
-      .with(target_pane_id: "w1:p1>", direction: "down", ratio: nil, cwd:, env:, focus: false)
+      .with(target_pane_id: "w1:p1>", direction: "down", ratio: nil, cwd:, focus: false)
     expect(Orchestrator::Runner::Herdr).to have_received(:tab_create)
-      .with(workspace_id: "w1", label: "logs", cwd:, env:, focus: false)
+      .with(workspace_id: "w1", label: "logs", cwd:, focus: false)
     expect(Orchestrator::Runner::Herdr).to have_received(:tab_create)
-      .with(workspace_id: "w1", label: "specs", cwd:, env:, focus: false)
+      .with(workspace_id: "w1", label: "specs", cwd:, focus: false)
     expect(Orchestrator::Runner::Herdr).to have_received(:pane_split)
-      .with(target_pane_id: "w1:t2root", direction: "down", ratio: nil, cwd:, env:, focus: false)
+      .with(target_pane_id: "w1:t2root", direction: "down", ratio: nil, cwd:, focus: false)
 
     expect(Orchestrator::Runner::Herdr).to have_received(:pane_send_input).with("w1:p1>", text: "nvim .", keys: [ "Enter" ])
     expect(Orchestrator::Runner::Herdr).to have_received(:pane_send_input)
@@ -89,7 +87,7 @@ RSpec.describe Orchestrator::Runner::SessionLayout do
     allow(Orchestrator::Runner::Herdr).to receive(:pane_split).with(hash_including(target_pane_id: "w1:p1"))
       .and_raise(Orchestrator::Runner::Herdr::Error, "no room")
 
-    described_class.open!(label: "run-1", cwd:, env:, tabs: layout(<<~YAML))
+    described_class.open!(root_pane:, cwd:, tabs: layout(<<~YAML))
       tabs:
         - panes:
             - agent
@@ -109,7 +107,7 @@ RSpec.describe Orchestrator::Runner::SessionLayout do
     allow(Orchestrator::Runner::Herdr).to receive(:tab_create).with(hash_including(label: "fine"))
       .and_return("tab" => { "tab_id" => "w1:t3" }, "root_pane" => { "pane_id" => "w1:t3root" })
 
-    described_class.open!(label: "run-1", cwd:, env:, tabs: layout(<<~YAML))
+    described_class.open!(root_pane:, cwd:, tabs: layout(<<~YAML))
       tabs:
         - panes: [agent]
         - name: broken
@@ -126,17 +124,10 @@ RSpec.describe Orchestrator::Runner::SessionLayout do
   it "keeps a pane it could not label, and still starts its command" do
     allow(Orchestrator::Runner::Herdr).to receive(:pane_rename).and_raise(Orchestrator::Runner::Herdr::Error, "nope")
 
-    described_class.open!(label: "run-1", cwd:, env:,
+    described_class.open!(root_pane:, cwd:,
                           tabs: layout("tabs:\n  - panes: [agent, { name: e, command: nvim ., split: { of: agent } }]\n"))
 
     expect(Orchestrator::Runner::Herdr).to have_received(:pane_send_input).with("w1:p1>", text: "nvim .", keys: [ "Enter" ])
-  end
-
-  it "fails when the agent's workspace itself cannot be created" do
-    allow(Orchestrator::Runner::Herdr).to receive(:workspace_create).and_raise(Orchestrator::Runner::Herdr::Unreachable, "down")
-
-    expect { described_class.open!(label: "run-1", cwd:, env:, tabs: layout("tabs:\n  - panes: [agent]\n")) }
-      .to raise_error(Orchestrator::Runner::Herdr::Unreachable)
   end
 
   it "leaves out a pane whose required command this machine does not have" do
@@ -146,7 +137,7 @@ RSpec.describe Orchestrator::Runner::SessionLayout do
       { "name" => "editor", "command" => "nvim .", "split_of" => "agent", "direction" => "right", "requires" => "nvim" }
     ] } ]
 
-    described_class.open!(label: "run-1", cwd:, env:, tabs:)
+    described_class.open!(root_pane:, cwd:, tabs:)
 
     expect(Orchestrator::Runner::Herdr).not_to have_received(:pane_split)
     expect(Orchestrator::Runner::Herdr).not_to have_received(:pane_send_input)

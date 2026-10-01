@@ -3,176 +3,152 @@ require "shellwords"
 
 module Orchestrator
   module Runner
-    # Git on the runner's machine: a workspace's `main` checkout and the
-    # sibling worktrees runs work in. Which worktree belongs to which run, and
-    # whether that run's session is over, is the orchestrator's knowledge
-    # (Orchestrator::GitWorktree, Orchestrator::WorktreeJanitor); this only
-    # answers questions about git and acts on paths it is given.
+    # Run worktrees on the runner's machine. herdr makes and removes them
+    # (worktree.create puts each where the operator's herdr config says, and
+    # opens it as the run's herdr workspace; worktree.remove takes it away);
+    # this module decides, with git, whether a removal is safe. Which worktree
+    # belongs to which run, and whether that run's session is over, is the
+    # orchestrator's knowledge (Orchestrator::GitWorktree,
+    # Orchestrator::WorktreeJanitor): this only acts on the paths it is given,
+    # never on whatever else `git worktree list` shows.
     #
-    # Two rules make removal safe to run unattended:
+    # Three rules make removal safe to run unattended:
     #
-    #   * never `main`. The source checkout is where every worktree's real .git
-    #     lives; removing it would take the whole workspace with it.
+    #   * never the repository's own checkout, or anything that is not a linked
+    #     worktree of it. herdr refuses a primary checkout too
+    #     (not_linked_worktree); this does not rely on that.
     #   * never a dirty worktree, unless forced. Uncommitted work in a failed
     #     run is exactly the work an operator is most likely to want back, so
     #     `force` is reserved for the operator's explicit per-run button.
+    #   * only work that is saved: HEAD already in the run's own base branch,
+    #     or on a remote branch.
     #
     # And removing a worktree never deletes its branch.
     module Worktrees
       class Error < Runner::Error; end
       module_function
 
-      # A new worktree `name` beside source_root on branch paneyard/<name>,
-      # from main's HEAD. When `current_target_root` already is that worktree
-      # (a retried launch), it is reused as is.
+      # A worktree of `repository_path` on `branch`, from `base_branch` (a
+      # local branch, whatever the repository has checked out), made and
+      # opened by herdr. When `current_target_root` already is a worktree of
+      # the repository (a retried launch), herdr reopens it instead.
       #
-      # Returns { "source_root", "target_root", "branch", "base_sha", "reused" };
-      # base_sha is nil when reused.
-      def provision!(source_root:, name:, current_target_root: nil)
-        source_root = Pathname(source_root)
-        Sandbox.guard_path!(source_root, "provision a worktree in")
-        branch = "paneyard/#{name}"
-        worktree = source_root.parent.join(name)
-        result = { "source_root" => source_root.to_s, "target_root" => worktree.to_s, "branch" => branch }
-        if current_target_root.present? && Pathname(current_target_root).expand_path == worktree.expand_path && worktree.directory?
-          return result.merge("base_sha" => nil, "reused" => true)
+      # Returns { "repository_path", "target_root", "branch", "base_sha",
+      # "reused", "workspace_id", "tab_id", "pane_id" }: the herdr workspace
+      # and its root pane, which becomes the agent's. base_sha is nil when
+      # reused.
+      def provision!(repository_path:, branch:, base_branch:, label:, current_target_root: nil)
+        repository = Pathname(repository_path)
+        Sandbox.guard_path!(repository, "provision a worktree in")
+        raise Error, "Repository does not exist: #{repository}" unless repository.directory?
+
+        if current_target_root.present? && registered?(repository_path: repository, path: current_target_root)
+          opened = Herdr.worktree_open(cwd: repository.to_s, path: current_target_root.to_s, label:, focus: false)
+          return provisioned(repository, opened, branch:, base_sha: nil, reused: true)
         end
 
-        validate_source!(source_root)
-        raise Error, "Worktree path already exists: #{worktree}" if worktree.exist?
+        problem = base_branch_problem(repository, base_branch)
+        raise Error, "Base branch `#{base_branch}`: #{problem.fetch('message')}" if problem
 
-        base_sha = git!(source_root, "rev-parse", "HEAD").strip
-        git!(source_root, "worktree", "add", "-b", branch, worktree.to_s, base_sha)
-        result.merge("base_sha" => base_sha, "reused" => false)
+        created = Herdr.worktree_create(cwd: repository.to_s, branch:, base: base_branch, label:, focus: false)
+        path = created.dig("worktree", "path")
+        provisioned(repository, created, branch:, base_sha: path && git!(Pathname(path), "rev-parse", "HEAD").strip, reused: false)
       rescue Sandbox::Violation => error
         raise Error, error.message
+      rescue Herdr::Error => error
+        raise Error, "herdr could not create the worktree: #{error.message}"
       end
 
-      # The launch-time rules for a source checkout, raised one at a time.
-      def validate_source!(source_root)
-        source_root = Pathname(source_root)
-        raise Error, "Source checkout must be named main: #{source_root}" unless source_root.basename.to_s == "main"
-
-        problem = source_problems(source_root).first
-        raise Error, problem.fetch("message") if problem
+      def provisioned(repository, herdr_result, branch:, base_sha:, reused:)
+        workspace = herdr_result.fetch("workspace")
+        root_pane = herdr_result["root_pane"] || first_pane(workspace.fetch("workspace_id"))
+        {
+          "repository_path" => repository.to_s, "target_root" => herdr_result.dig("worktree", "path"),
+          "branch" => herdr_result.dig("worktree", "branch").presence || branch, "base_sha" => base_sha, "reused" => reused,
+          "workspace_id" => workspace.fetch("workspace_id"), "tab_id" => root_pane.fetch("tab_id"),
+          "pane_id" => root_pane.fetch("pane_id")
+        }
       end
 
-      # Everything wrong with `source_root` as a workspace's `main` checkout,
-      # each as { "code", "message" } with how to fix it; [] when nothing is.
-      # validate_source! (every launch) and WorkspaceRoots.check (registering
-      # a workspace) both use these, so the two can never disagree.
-      def source_problems(source_root)
-        source_root = Pathname(source_root)
-        return [ source_problem("source_missing", "Source checkout does not exist: #{source_root}") ] unless source_root.exist?
-        return [ source_problem("source_missing", "Source checkout is not a directory: #{source_root}") ] unless source_root.directory?
-        unless git_success?(source_root, "rev-parse", "--is-inside-work-tree")
-          return [ source_problem("source_not_git", "Source checkout is not a Git repository: #{source_root}. " \
-            "Clone the repository there: git clone <repository-url> #{Shellwords.escape(source_root.to_s)}") ]
+      # worktree.open answers with the workspace only; its first pane is the
+      # one a reopened workspace starts with.
+      def first_pane(workspace_id)
+        Herdr.pane_list(workspace_id:).first || raise(Error, "herdr opened workspace #{workspace_id} with no pane")
+      end
+
+      # nil when a run can start from `branch` in `repository`, else
+      # { "code", "message" } with how to fix it. A local branch is required:
+      # herdr creates the run's branch from it, and the run merges back into it.
+      def base_branch_problem(repository, branch)
+        repository = Pathname(repository)
+        unless GitRef.branch?(branch)
+          return problem("base_branch_invalid", "#{branch.to_s.inspect} is not a valid branch name.")
         end
-        unless same_path?(git!(source_root, "rev-parse", "--show-toplevel").strip, source_root)
-          return [ source_problem("source_not_git", "Source checkout is not a Git repository of its own: #{source_root} " \
-            "is a directory inside another checkout. Clone the repository there instead.") ]
-        end
+        return nil if local_branch?(repository, branch)
 
-        [ branch_problem(source_root), origin_problem(source_root) ].compact
-      end
-
-      def branch_problem(source_root)
-        branch = git!(source_root, "branch", "--show-current").strip
-        return if branch == "main"
-
-        dir = Shellwords.escape(source_root.to_s)
+        dir = Shellwords.escape(repository.to_s)
+        name = Shellwords.escape(branch)
         fix =
-          if git_success?(source_root, "rev-parse", "--verify", "--quiet", "refs/heads/main")
-            "Check it out: git -C #{dir} switch main"
-          elsif git_success?(source_root, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")
-            "Create it from origin: git -C #{dir} switch -c main --track origin/main"
-          elsif branch.present?
-            "Runs branch from and merge into `main`, so rename the default branch: git -C #{dir} branch -m #{Shellwords.escape(branch)} main " \
-              "(and rename it on the remote too, e.g. in the GitHub repository's branch settings, then " \
-              "git -C #{dir} push -u origin main)"
+          if git_success?(repository, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/#{branch}^{commit}")
+            "It exists on origin; create it locally (this checks nothing out): git -C #{dir} branch #{name} origin/#{name}"
           else
-            "Create it: git -C #{dir} switch -c main"
+            "Check the name with git -C #{dir} branch --list, or git -C #{dir} fetch origin first."
           end
-        current = branch.present? ? "`#{branch}`" : "a detached HEAD"
-        source_problem("source_not_on_main", "Source checkout must be on main, but #{source_root} has #{current} checked out. #{fix}")
+        problem("base_branch_missing", "there is no local branch `#{branch}` in #{repository}. #{fix}")
       end
 
-      def origin_problem(source_root)
-        return if git_success?(source_root, "remote", "get-url", "origin")
-
-        source_problem("no_origin", "Source checkout has no origin remote: #{source_root}. Sessions push their branch " \
-          "to origin when asked to; add it: git -C #{Shellwords.escape(source_root.to_s)} remote add origin <repository-url>")
+      def local_branch?(repository, branch)
+        git_success?(repository, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}^{commit}")
       end
 
-      def source_problem(code, message)
+      def problem(code, message)
         { "code" => code, "message" => message }
       end
 
-      # Whether `path` is a worktree git itself knows about, as opposed to a
-      # directory that merely exists there. A run's target_root can point at a
-      # directory for reasons that have nothing to do with a provisioned
-      # worktree -- it defaults to the source checkout until provisioning
-      # succeeds, and a worktree `git worktree remove` already reclaimed can
-      # leave an inert leftover directory behind -- so this asks git rather
-      # than trusting File.directory? alone.
-      def registered?(source_root:, path:)
-        source_root = Pathname(source_root)
+      # Whether `path` is a linked worktree of the repository that git knows
+      # about, as opposed to a directory that merely exists there or the
+      # repository's own checkout.
+      def registered?(repository_path:, path:)
+        repository = Pathname(repository_path)
         target = Pathname(path)
-        return false unless target.directory? && source_root.directory?
-        return false if protected_path?(source_root, target)
+        return false unless target.directory? && repository.directory?
+        return false if protected_path?(repository, target)
 
-        entries(source_root).any? { |entry| same_path?(entry, target) }
+        linked_entries(repository).any? { |entry| same_path?(entry, target) }
       end
 
-      # Removes every worktree of source_root whose work is saved elsewhere,
-      # except those in `keep` (worktrees a run's session is still using).
-      # A worktree no run owns at all is an orphan -- a run whose record was
-      # destroyed, or a leftover from an earlier version of this tool -- and
-      # goes on the same terms. Returns the number removed.
-      def reclaim(source_root:, keep:)
-        source_root = Pathname(source_root)
-        return 0 unless source_root.directory?
-
-        removed = 0
-        entries(source_root).each do |path|
-          next if protected_path?(source_root, path)
-          next if keep.any? { |kept| same_path?(kept, path) }
-          next unless work_saved?(path)
-
-          remove!(source_root, path)
-          removed += 1
+      # Removes each of `worktrees` ([{ "path", "base_branch" }], the run
+      # worktrees whose sessions are over) whose work is saved. Nothing else of
+      # the repository's is looked at. Returns the number removed.
+      def reclaim(repository_path:, worktrees:)
+        worktrees.count do |worktree|
+          release(repository_path:, path: worktree.fetch("path"), base_branch: worktree.fetch("base_branch"))
+        rescue Error => error
+          Rails.logger.warn("WorktreeJanitor: #{worktree.fetch('path')}: #{error.message}")
+          false
         end
-        # Also reaps entries whose directory an operator deleted by hand, which
-        # git otherwise keeps listing as "prunable" forever.
-        prune!(source_root)
-        removed
-      rescue Error => error
-        Rails.logger.warn("WorktreeJanitor: #{source_root}: #{error.message}")
-        removed || 0
       end
 
       # Removes `path` when nothing in it would be lost; returns whether it did.
-      def release(source_root:, path:)
-        source_root = Pathname(source_root)
+      def release(repository_path:, path:, base_branch:)
+        repository = Pathname(repository_path)
         path = Pathname(path)
-        return false if !path.directory? || protected_path?(source_root, path) || !work_saved?(path)
+        return false unless registered?(repository_path: repository, path:) && work_saved?(path, repository:, base_branch:)
 
-        remove!(source_root, path)
-        prune!(source_root)
+        remove!(repository, path)
         true
       end
 
       # The explicit per-run removal. `force` is the operator's own decision
       # about their own uncommitted work.
-      def remove(source_root:, path:, force: false)
-        source_root = Pathname(source_root)
+      def remove(repository_path:, path:, force: false)
+        repository = Pathname(repository_path)
         path = Pathname(path)
-        raise Error, "Refusing to remove the source checkout" if protected_path?(source_root, path)
+        raise Error, "Refusing to remove the repository's own checkout" if protected_path?(repository, path)
+        raise Error, "#{path} is not a worktree of #{repository}" unless registered?(repository_path: repository, path:)
         raise Error, "Worktree has uncommitted changes; removing it would discard them" if !force && dirty?(path)
 
-        remove!(source_root, path, force:)
-        prune!(source_root)
+        remove!(repository, path, force:)
         nil
       end
 
@@ -180,20 +156,20 @@ module Orchestrator
         git!(Pathname(path), "config", "--get", "remote.origin.url").strip
       end
 
-      def entries(source_root)
-        git!(source_root, "worktree", "list", "--porcelain")
+      # The linked worktrees git lists for the repository: every entry after
+      # the first, which is the main checkout (or the bare repository).
+      def linked_entries(repository)
+        git!(repository, "worktree", "list", "--porcelain")
           .split("\n")
           .filter_map { |line| Pathname(line.delete_prefix("worktree ")) if line.start_with?("worktree ") }
+          .drop(1)
       end
 
       # `git worktree list` reports every path with its symlinks resolved, while
       # a Run's target_root is whatever string provisioned it. Those two are not
       # interchangeable: anywhere a parent directory is a symlink (on macOS
       # /tmp and /var both are) git says /private/var/... where the Run row says
-      # /var/..., and an exact-string match finds no owning run, so a worktree
-      # still in use looks like a reclaimable orphan. That mistook live runs for
-      # orphans and reclaimed their worktrees, so every path comparison here
-      # resolves both sides first.
+      # /var/..., so every path comparison here resolves both sides first.
       def same_path?(one, other)
         real_path(one) == real_path(other)
       end
@@ -204,8 +180,11 @@ module Orchestrator
         Pathname(path).expand_path
       end
 
-      def protected_path?(source_root, path)
-        same_path?(path, source_root) || Pathname(path).basename.to_s == "main"
+      def protected_path?(repository, path)
+        same_path?(path, repository) ||
+          same_path?(path, git!(repository, "rev-parse", "--show-toplevel").strip)
+      rescue Error
+        true
       end
 
       def dirty?(path)
@@ -218,26 +197,26 @@ module Orchestrator
         true
       end
 
-      # Clean, and HEAD is already on main or on a remote branch.
-      def work_saved?(path)
+      # Clean, and HEAD is already in the run's base branch or on a remote
+      # branch. A base branch that no longer exists saves nothing.
+      def work_saved?(path, repository:, base_branch:)
         return false if dirty?(path)
 
-        git_success?(path, "merge-base", "--is-ancestor", "HEAD", "main") ||
+        (local_branch?(repository, base_branch) &&
+          git_success?(path, "merge-base", "--is-ancestor", "HEAD", "refs/heads/#{base_branch}")) ||
           git!(path, "branch", "--remotes", "--contains", "HEAD").strip.present?
       rescue Error
         false
       end
 
-      def remove!(source_root, path, force: false)
-        guard_sandbox!(path)
-        args = [ "worktree", "remove" ]
-        args << "--force" if force
-        git!(source_root, *args, path.to_s)
-      end
-
-      def prune!(source_root)
-        guard_sandbox!(source_root)
-        git!(source_root, "worktree", "prune")
+      # herdr removes only a worktree whose workspace is open, so open it first
+      # (worktree.open returns it if it already is); removing it closes it.
+      def remove!(repository, path, force: false)
+        guard_sandbox!(repository)
+        opened = Herdr.worktree_open(cwd: repository.to_s, path: path.to_s, focus: false)
+        Herdr.worktree_remove(opened.fetch("workspace").fetch("workspace_id"), force:)
+      rescue Herdr::Error => error
+        raise Error, "herdr could not remove #{path}: #{error.message}"
       end
 
       def guard_sandbox!(path)

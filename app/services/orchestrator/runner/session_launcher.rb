@@ -49,9 +49,10 @@ module Orchestrator
       PROMPT_SUBMIT_RETRY_WINDOWS = [ 6, 10, 14, 20, 30, 40 ].freeze
 
       # Writes the files the CLI reads (its MCP config for claude, and the
-      # prompt, kept for the record), builds the session env and opens the
-      # layout. Returns { "workspace_id", "tab_id", "pane_id",
-      # "mcp_config_path", "prompt_path" }, the pane ids being the agent's.
+      # prompt, kept for the record) and builds the layout in the herdr
+      # workspace herdr opened for the run's worktree. Returns
+      # { "workspace_id", "tab_id", "pane_id", "mcp_config_path",
+      # "prompt_path" }, the pane ids being the agent's.
       def open(spec, runtime_root:)
         runtime_dir = File.join(runtime_root.to_s, Attachments.sanitize_run_id(spec.fetch(:run_id)))
         FileUtils.mkdir_p(runtime_dir)
@@ -60,25 +61,22 @@ module Orchestrator
           SessionArgs.write_claude_mcp_config(mcp_config_path, spec.fetch(:capability_token), mcp_url: spec.fetch(:mcp_url))
         end
 
-        _kind, _args, extra_env = command(spec, mcp_config_path)
-        env = ProcessEnv.for_session(
-          workspace_env: spec.fetch(:workspace_env), env: spec.fetch(:env),
-          capability_token: spec.fetch(:capability_token), github_token: spec[:github_token],
-          ambient_github_auth: spec.fetch(:ambient_github_auth), extra: extra_env
-        )
-
         prompt_path = File.join(runtime_dir, "prompt.txt")
         File.write(prompt_path, spec.fetch(:prompt))
 
         # Only the agent pane is recorded -- see SessionLayout.
-        root_pane = SessionLayout.open!(label: spec.fetch(:label), cwd: spec.fetch(:cwd), env:, tabs: spec.fetch(:layout))
-        root_pane.slice("workspace_id", "tab_id", "pane_id").merge("mcp_config_path" => mcp_config_path, "prompt_path" => prompt_path)
+        root_pane = {
+          "workspace_id" => spec.fetch(:herdr_workspace_id), "tab_id" => spec.fetch(:herdr_tab_id),
+          "pane_id" => spec.fetch(:herdr_pane_id)
+        }
+        agent_pane = SessionLayout.open!(root_pane:, cwd: spec.fetch(:cwd), tabs: spec.fetch(:layout))
+        agent_pane.slice("workspace_id", "tab_id", "pane_id").merge("mcp_config_path" => mcp_config_path, "prompt_path" => prompt_path)
       end
 
       # Starts the agent in the pane #open returned and submits the prompt.
       # Returns its pid, or raises LaunchError.
       def launch(spec, pane_id:, mcp_config_path:)
-        kind, args, _extra_env = command(spec, mcp_config_path)
+        kind, args = command(spec, mcp_config_path)
         start_agent!(name: spec.fetch(:run_id), kind:, pane_id:, args:)
         wait_for_agent_detected!(pane_id, kind:)
         dismiss_codex_trust_prompt!(pane_id) if spec.fetch(:driver) == "codex"
@@ -114,7 +112,7 @@ module Orchestrator
         Herdr.agent_send_keys(pane_id, [ "Enter" ])
       end
 
-      # workspace.create returns a pane whose shell exists immediately, but that
+      # worktree.create returns a pane whose shell exists immediately, but that
       # shell then runs the operator's own rc files -- confirmed live on this
       # machine: pyenv-rehash (which forks bash and chmod), starship's prompt
       # init, and git. herdr refuses agent.start while any of that holds the

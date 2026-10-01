@@ -101,7 +101,7 @@ RSpec.describe Orchestrator::WorkspaceLayout do
   end
 
   describe ".for" do
-    let(:workspace) { Workspace.new(name: "layout-for", root_path: "/tmp/layout-for") }
+    let(:workspace) { Workspace.new(name: "layout-for", repository_path: "/tmp/layout-for") }
 
     def pane_names(tabs)
       tabs.map { |tab| tab["panes"].map { |pane| pane["name"] } }

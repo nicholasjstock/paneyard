@@ -18,9 +18,13 @@ module Orchestrator
       raise NoLiveSession, "Run #{run.run_id} has no live session." if session.nil?
 
       outcome = session.outcome.presence || "failed"
-      RunSessionRunner.finish!(session, outcome:, result: session.result)
+      workspace_id = session.herdr_workspace_id
+      RunSessionRunner.finish!(session, outcome:, result: session.result, close_workspace: false)
       RunCompletion.call(run:, outcome:, summary: session.result)
-      { outcome:, **release(run) }
+      released = release(run)
+      # Removing the worktree closed its workspace; a kept one is still open.
+      Runner.for(run.workspace).close_workspace(workspace_id) if workspace_id.present? && released[:worktree] != "removed"
+      { outcome:, **released }
     end
 
     def release(run)

@@ -21,15 +21,15 @@ RSpec.describe PaneyardPlugin::EnvFile do
       )
     end
 
-    it "reads a double-quoted value across lines, as a private key is pasted" do
+    it "reads a double-quoted value across lines, as a pasted key would be" do
       values, = described_class.parse(<<~ENV)
-        GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+        SOME_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
         MIIabc
         -----END RSA PRIVATE KEY-----"
         AFTER=1
       ENV
 
-      expect(values["GITHUB_APP_PRIVATE_KEY"]).to eq("-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----")
+      expect(values["SOME_PRIVATE_KEY"]).to eq("-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----")
       expect(values["AFTER"]).to eq("1")
     end
 

@@ -27,6 +27,12 @@
   </div>
 
   <div class="field">
+    <%= form.label :base_branch, "Base branch" %>
+    <p class="muted">The branch the run starts from and merges back into. Any local branch of <span class="mono"><%= current_workspace.repository_path %></span>, whether or not it is checked out.</p>
+    <%= form.text_field :base_branch, placeholder: current_workspace.default_base_branch %>
+  </div>
+
+  <div class="field">
     <%= form.label :launcher_variant, "Agent" %>
     <%= form.select :launcher_variant, Run::LAUNCHER_VARIANTS.map { |v| [v, v] }, {},
           data: { run_model_target: "agent", action: "change->run-model#agentChanged" } %>

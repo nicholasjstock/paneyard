@@ -16,7 +16,7 @@ class Run < ApplicationRecord
     pull_request_url last_pull_request_comment_id
   ]
 
-  LAUNCHER_VARIANTS = %w[claude codex opencode].freeze
+  LAUNCHER_VARIANTS = %w[claude codex].freeze
   # queued          -- created, waiting for a concurrency slot
   # launching       -- claimed by the dispatcher; worktree/session coming up
   # running         -- a live session owns it
@@ -39,13 +39,20 @@ class Run < ApplicationRecord
   validates :run_id, presence: true, uniqueness: true
   validates :task, presence: true
   validates :target_root, presence: true
-  validates :launcher_variant, inclusion: { in: LAUNCHER_VARIANTS }
+  # The branch the run's worktree starts from and its work merges back into.
+  # Fixed when the run is queued (the workspace's default unless the caller
+  # named one), so changing the workspace's default later does not move it.
+  validates :base_branch, presence: true, format: { with: Orchestrator::GitRef::BRANCH_FORMAT, message: "is not a valid branch name" }
+  # On create only: runs from before opencode was dropped still settle.
+  validates :launcher_variant, inclusion: { in: LAUNCHER_VARIANTS }, on: :create
   # Blank means the driver's default (Orchestrator::DefaultModels). A model id
   # becomes one argv element of the session's command line, so it may never
   # look like a flag.
   validates :model, format: { with: %r{\A[A-Za-z0-9][\w.:/\[\]@-]*\z} }, allow_blank: true
   validates :status, inclusion: { in: STATUSES }
   validate :launch_artifacts_are_safe
+
+  before_validation :default_base_branch, on: :create
 
   scope :active, -> { where(status: NON_TERMINAL_STATUSES) }
   scope :queued, -> { where(status: "queued") }
@@ -71,7 +78,7 @@ class Run < ApplicationRecord
       run_id: run_id,
       task: "(unspecified — auto-created from bus activity)",
       workspace: default_workspace,
-      target_root: default_workspace.source_root,
+      target_root: default_workspace.repository_path,
       launcher_variant: "codex",
       status: "running"
     )
@@ -109,19 +116,18 @@ class Run < ApplicationRecord
   end
 
   # Still on disk after its session ended. WorktreeJanitor removes every such
-  # worktree whose work is pushed or merged, so one that remains holds work
-  # that exists nowhere else, and is kept until the operator deals with it.
+  # worktree whose work is in its base branch or pushed, so one that remains
+  # holds work that exists nowhere else, and is kept until the operator deals
+  # with it.
   #
-  # target_root existing as a directory is not enough: it defaults to the
-  # workspace's source checkout until GitWorktree.provision! succeeds, so a
-  # run that died before provisioning still has a target_root that resolves
-  # (to `main`, never a worktree of it), and a worktree already removed by
-  # the janitor can leave an inert leftover directory behind. The runner asks
-  # git whether target_root is actually a registered worktree, ruling out
-  # both.
+  # target_root existing as a directory is not enough: it is the workspace's
+  # repository until GitWorktree.provision! records the run's own worktree,
+  # and a worktree already removed can leave an inert leftover directory
+  # behind. The runner asks git whether target_root is actually a linked
+  # worktree of the repository, ruling out both.
   def kept_worktree?
     managed_worktree? && target_root.present? && session_over? &&
-      Orchestrator::Runner.for(workspace).worktree_registered?(source_root: workspace.source_root, path: target_root)
+      Orchestrator::Runner.for(workspace).worktree_registered?(repository_path: workspace.repository_path, path: target_root)
   end
 
   def to_param
@@ -129,6 +135,10 @@ class Run < ApplicationRecord
   end
 
   private
+
+  def default_base_branch
+    self.base_branch = workspace&.default_base_branch if base_branch.blank?
+  end
 
   def launch_artifacts_are_safe
     Array(launch_artifacts).each do |artifact|

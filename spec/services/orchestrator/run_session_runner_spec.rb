@@ -1,18 +1,10 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::RunSessionRunner do
-  let(:run) do
-    create_run(
-      prefix: "session-runner", status: "launching",
-      target_root: Dir.mktmpdir("session-runner-worktree"), branch_name: "paneyard/session-runner",
-      worktree_name: "session-runner-a1b2"
-    )
-  end
+  let(:run) { create_run(prefix: "session-runner", status: "launching", worktree_name: "session-runner-a1b2") }
+  let(:worktree) { Dir.mktmpdir("session-runner-worktree") }
 
   before do
-    # gh/GitHub App resolution shells out; the session's environment is
-    # Runner::ProcessEnv's concern, not this module's.
-    allow(Orchestrator::Runner::ProcessEnv).to receive(:for_session).and_return({ "FOO" => "bar" })
     allow(Orchestrator::Runner::Herdr).to receive(:notify)
     # Every failure path closes the pane's workspace; stubbed here so no
     # example can reach the real socket through it.
@@ -60,9 +52,13 @@ RSpec.describe Orchestrator::RunSessionRunner do
     # rather than a fixed call sequence so this survives a retried launch, and
     # a second start! (whose fresh pane is idle again) in the same example.
     launched = false
-    allow(Orchestrator::Runner::Herdr).to receive(:workspace_create) do
+    # herdr's worktree.create: the run's worktree, opened as its workspace,
+    # whose root pane becomes the agent's.
+    allow(Orchestrator::Runner.local).to receive(:provision_worktree) do |**arguments|
       launched = false
-      { "root_pane" => { "pane_id" => pane_id, "tab_id" => "w9:t1", "workspace_id" => "w9" } }
+      { "repository_path" => arguments.fetch(:repository_path), "target_root" => worktree,
+        "branch" => arguments.fetch(:branch), "base_sha" => "abc123def4567890", "reused" => false,
+        "workspace_id" => "w9", "tab_id" => "w9:t1", "pane_id" => pane_id }
     end
     allow(Orchestrator::Runner::Herdr).to receive(:agent_get)
       .and_return("agent" => "claude", "interactive_ready" => true, "agent_status" => agent_status)
@@ -77,8 +73,12 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
       session = described_class.start!(run)
 
-      expect(Orchestrator::Runner::Herdr).to have_received(:workspace_create)
-        .with(hash_including(label: "session-runner-a1b2", cwd: run.target_root, focus: false))
+      expect(Orchestrator::Runner.local).to have_received(:provision_worktree).with(
+        repository_path: run.workspace.repository_path, branch: "paneyard/session-runner-a1b2", base_branch: "main",
+        label: "session-runner-a1b2", current_target_root: nil
+      )
+      expect(run.reload).to have_attributes(target_root: worktree, branch_name: "paneyard/session-runner-a1b2",
+        source_root: run.workspace.repository_path, base_sha: "abc123def4567890")
       expect(Orchestrator::Runner::Herdr).to have_received(:agent_start)
         .with(hash_including(kind: "claude", pane_id: "w9:p1"))
       # The prompt is live input, never an argv element.
@@ -94,8 +94,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
       session = described_class.start!(run)
 
       expect(Orchestrator::Runner::Herdr).to have_received(:pane_split).with(
-        target_pane_id: "w9:p1", direction: "right", ratio: nil, cwd: run.target_root, env: { "FOO" => "bar" },
-        focus: false
+        target_pane_id: "w9:p1", direction: "right", ratio: nil, cwd: worktree, focus: false
       )
       expect(Orchestrator::Runner::Herdr).to have_received(:pane_send_input).with("w9:p2", text: "nvim .", keys: [ "Enter" ])
       expect(Orchestrator::Runner::Herdr).to have_received(:agent_start).with(hash_including(pane_id: "w9:p1"))
@@ -125,7 +124,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(session).to have_attributes(status: "running", pid: 555, herdr_pane_id: "w9:p1")
     end
 
-    it "opens the workspace's own layout: extra tabs and splits, all with the session env, the agent still tracked" do
+    it "opens the workspace's own layout in the worktree's workspace: extra tabs and splits, the agent still tracked" do
       stub_successful_launch
       run.workspace.update!(layout: <<~YAML)
         tabs:
@@ -147,11 +146,11 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
       expect(Orchestrator::Runner::Herdr).to have_received(:tab_rename).with("w9:t1", "main")
       expect(Orchestrator::Runner::Herdr).to have_received(:tab_create)
-        .with(workspace_id: "w9", label: "logs", cwd: run.target_root, env: { "FOO" => "bar" }, focus: false)
+        .with(workspace_id: "w9", label: "logs", cwd: worktree, focus: false)
       expect(Orchestrator::Runner::Herdr).to have_received(:pane_send_input)
         .with("w9:p3", text: "tail -f log/development.log", keys: [ "Enter" ])
       expect(Orchestrator::Runner::Herdr).to have_received(:pane_split).with(
-        hash_including(target_pane_id: "w9:p3", direction: "down", env: { "FOO" => "bar" }, focus: false)
+        hash_including(target_pane_id: "w9:p3", direction: "down", focus: false)
       )
       expect(Orchestrator::Runner::Herdr).to have_received(:pane_send_input)
         .with("w9:p4", text: "tail -f log/test.log", keys: [ "Enter" ])
@@ -291,12 +290,13 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(Orchestrator::Runner::Herdr).not_to have_received(:agent_send_keys)
     end
 
-    it "refuses a run whose worktree was never provisioned" do
-      unprovisioned = create_run(prefix: "session-runner-bad", branch_name: nil)
+    it "fails the session, with nothing to close, when herdr cannot make the worktree" do
+      allow(Orchestrator::Runner.local).to receive(:provision_worktree)
+        .and_raise(Orchestrator::Runner::Error, "Base branch `gone`: there is no local branch `gone`")
 
-      expect { described_class.start!(unprovisioned) }
-        .to raise_error(described_class::Error, /no provisioned worktree/)
-      expect(unprovisioned.run_sessions).to be_empty
+      expect { described_class.start!(run) }.to raise_error(Orchestrator::Runner::Error, /no local branch/)
+      expect(run.latest_session).to have_attributes(status: "failed", herdr_workspace_id: nil, result: include("no local branch"))
+      expect(Orchestrator::Runner::Herdr).not_to have_received(:workspace_close)
     end
 
     # A half-started session would hold a pane and a concurrency slot forever.
@@ -343,7 +343,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
       expect { described_class.start!(run) }.to raise_error(Orchestrator::Runner::LaunchError)
 
-      expect(run.run_sessions.sole.result).to include("claude stopped at its folder-trust prompt: open claude once in #{run.workspace.source_root}")
+      expect(run.run_sessions.sole.result).to include("claude stopped at its folder-trust prompt: open claude once in #{run.workspace.repository_path}")
     end
 
     it "keeps only the tail of a long pane screen" do
@@ -463,16 +463,12 @@ RSpec.describe Orchestrator::RunSessionRunner do
         .with(hash_including(args: array_including("--model", Orchestrator::DefaultModels.for("claude"))))
     end
 
-    it "hands the runner the orchestrator's env layers separately, for it to merge around its own" do
+    it "gives no pane an environment of its own" do
       stub_successful_launch
-      run.workspace.workspace_env_vars.create!(name: "BUNDLE_PATH", value: "/tmp/gems", evidence_ref: "x", recorded_by: "spec")
 
       described_class.start!(run)
 
-      expect(Orchestrator::Runner::ProcessEnv).to have_received(:for_session).with(hash_including(
-        workspace_env: { "BUNDLE_PATH" => "/tmp/gems" }, env: { "PANEYARD_RUN_ID" => run.run_id },
-        github_token: nil, ambient_github_auth: true, extra: { "CLAUDE_CODE_DISABLE_AUTO_MEMORY" => "1" }
-      ))
+      expect(Orchestrator::Runner::Herdr).to have_received(:pane_split).with(hash_excluding(:env))
     end
 
     it "passes a resume id through to the driver args when one is known" do

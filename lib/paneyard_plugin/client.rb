@@ -27,12 +27,13 @@ module PaneyardPlugin
       @mcp.call_tool("get_run", runId: run_id, workspace:)
     end
 
-    def queue(task:, workspace:, driver: nil)
-      @mcp.call_tool("queue_run", task:, workspace:, **(driver ? { driver: } : {}))
+    def queue(task:, workspace:, base_branch: nil, driver: nil)
+      @mcp.call_tool("queue_run", task:, workspace:, **{ baseBranch: base_branch, driver: }.compact)
     end
 
-    def register(name:, root_path:)
-      @mcp.call_tool("register_workspace", name:, rootPath: root_path)
+    # The server names it after the repository and works out its default branch.
+    def register(path:)
+      @mcp.call_tool("register_workspace", path:)
     end
 
     def close(run_id, workspace:)

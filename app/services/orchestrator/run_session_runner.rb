@@ -30,9 +30,9 @@ module Orchestrator
     # past this the worker that was starting it must have died.
     STARTING_GRACE = 10.minutes
 
+    # Provisions the run's worktree, which herdr opens as the session's
+    # workspace, builds the layout in it and launches the agent.
     def start!(run, resume_session_id: nil, prompt: nil)
-      raise Error, "run #{run.run_id} has no provisioned worktree" if run.target_root.blank? || run.branch_name.blank?
-
       capability_token, digest = RunSession.issue_capability
       session = run.run_sessions.create!(
         driver: run.launcher_variant, model: run.model.presence || DefaultModels.for(run.launcher_variant),
@@ -41,13 +41,16 @@ module Orchestrator
 
       begin
         runner = runner_for(session)
+        # herdr makes the worktree and its workspace in one call; both are
+        # recorded before anything else, so a launch that fails -- or a worker
+        # that dies mid-launch -- still leaves a pane to read, a workspace to
+        # close, and a worktree the janitor knows belongs to this run.
+        GitWorktree.provision!(run, session:)
         spec = session_spec(run:, session:, capability_token:, resume_session_id:, prompt:)
 
         # The workspace's layout: the agent pane plus whatever tabs and splits
         # the workspace is configured with (nvim beside it, by default). Only
-        # the agent pane is recorded, and it is recorded before the launch, so
-        # a launch that fails -- or a worker that dies mid-launch -- still
-        # leaves a pane to read and a workspace to close.
+        # the agent pane is recorded.
         opened = runner.open_session(spec)
         session.update!(
           herdr_workspace_id: opened.fetch("workspace_id"),
@@ -74,10 +77,10 @@ module Orchestrator
     end
 
     # Everything the runner needs to open this session, as plain data (see
-    # Runner::Local). The model and the MCP endpoint are resolved here, and
-    # the environment is handed over in the orchestrator's own layers -- the
-    # workspace's recorded env vars and the run's identity -- for the runner
-    # to merge around what only its machine knows (Runner::ProcessEnv).
+    # Runner::Local): the herdr workspace provisioning opened, and the model,
+    # MCP endpoint, prompt and layout resolved here. No environment: the
+    # session's identity is its capability, which the runner puts in the
+    # CLI's own config (Runner::SessionArgs).
     def session_spec(run:, session:, capability_token:, resume_session_id: nil, prompt: nil)
       {
         run_id: run.run_id,
@@ -89,14 +92,10 @@ module Orchestrator
         resume_session_id:,
         prompt: prompt || RunPrompt.compose(run:, session_driver: run.launcher_variant),
         mcp_url:,
-        workspace_env: WorkspaceEnvVars.for_workspace(run.workspace),
-        env: { "PANEYARD_RUN_ID" => run.run_id },
-        # A sandbox instance (Orchestrator::Sandbox) hands its sessions no
-        # GitHub credentials at all: they are fake agents in scratch repos
-        # with a local origin.
-        github_token: (github_app_token(run) unless Sandbox.enabled?),
-        ambient_github_auth: !Sandbox.enabled?,
-        layout: WorkspaceLayout.for(run.workspace)
+        layout: WorkspaceLayout.for(run.workspace),
+        herdr_workspace_id: session.herdr_workspace_id,
+        herdr_tab_id: session.herdr_tab_id,
+        herdr_pane_id: session.herdr_pane_id
       }
     end
 
@@ -104,20 +103,6 @@ module Orchestrator
     def mcp_url
       base = ENV.fetch("PANEYARD_RAILS_URL", "http://127.0.0.1:#{ENV.fetch('PORT', 3000)}")
       "#{base}/mcp"
-    end
-
-    # Any session may be asked to push its own branch (only ever on an explicit
-    # request -- see RunPrompt), so it gets credentials unconditionally. A GitHub App installation token -- scoped
-    # to this one repository/installation rather than the operator's whole
-    # identity -- is preferred; without one, the runner falls back to its own
-    # machine's `gh auth token`.
-    def github_app_token(run)
-      return unless GitHubAppAuth.app_configured?
-
-      GitHubAppAuth.installation_token_for { Runner.for(run.workspace).origin_url(path: run.target_root) }
-    rescue GitHubAppAuth::Error, Runner::Error => e
-      Rails.logger.warn("RunSessionRunner: GitHub App token unavailable, falling back to ambient gh auth: #{e.message}")
-      nil
     end
 
     # Best effort by design: nothing here may mask the launch error itself.
@@ -137,7 +122,7 @@ module Orchestrator
 
       # claude's folder-trust gate defaults to "No, exit", so an untrusted
       # repo looks like a CLI that quit on its own. Say what it was.
-      hint = "\n\nclaude stopped at its folder-trust prompt: open claude once in #{session.run.workspace.source_root} " \
+      hint = "\n\nclaude stopped at its folder-trust prompt: open claude once in #{session.run.workspace.repository_path} " \
              "and trust it." if screen.match?(/trust this folder/i)
       "#{error.message}#{hint}\n\n--- Last screen of agent pane #{session.herdr_pane_id} ---\n#{screen}"
     end
@@ -206,9 +191,13 @@ module Orchestrator
     # foreground indefinitely after the model finishes responding -- so
     # "finished" only becomes "process gone" because something calls this.
     # Without it a run would hold its concurrency slot forever.
-    def finish!(session, outcome:, result: nil)
+    #
+    # close_workspace: false leaves the herdr workspace open for the caller,
+    # which is how SessionClose removes a worktree herdr's way (worktree.remove
+    # needs it open, and closes it) without herdr having to reopen it.
+    def finish!(session, outcome:, result: nil, close_workspace: true)
       kill_process(session)
-      close_herdr_workspace(session)
+      close_herdr_workspace(session) if close_workspace
       # ended_at is what actually frees the slot; status is only descriptive,
       # and must not be left at a live-looking value like "blocked" (which
       # means "waiting at a question", not "gave up and handed the run back").

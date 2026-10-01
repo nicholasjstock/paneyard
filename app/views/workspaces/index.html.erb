@@ -18,7 +18,7 @@
                 class: "btn danger",
                 data: { turbo_confirm: "Remove workspace #{workspace.name}? This only works when the workspace has no runs." } %>
         </div>
-        <p class="muted mono"><%= workspace.root_path %></p>
+        <p class="muted mono"><%= workspace.repository_path %> · runs from <%= workspace.default_base_branch %></p>
       </div>
     <% end %>
   <% end %>

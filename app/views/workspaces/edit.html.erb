@@ -6,9 +6,15 @@
   <%= render "errors", workspace: @workspace %>
 
   <div class="field">
-    <%= form.label :root_path, "Workspace root" %>
-    <p class="muted">The clean Git checkout is expected at <span class="mono">main</span> beneath this directory. Task runs receive sibling worktrees.</p>
-    <%= form.text_field :root_path, disabled: @workspace.runs.active.exists? %>
+    <%= form.label :repository_path, "Repository" %>
+    <p class="muted">An existing Git checkout. Runs get their own worktrees of it and never change it.</p>
+    <%= form.text_field :repository_path, disabled: @workspace.runs.active.exists? %>
+  </div>
+
+  <div class="field">
+    <%= form.label :default_base_branch, "Default base branch" %>
+    <p class="muted">The branch new runs start from and merge back into unless they name another. Runs already queued keep their own.</p>
+    <%= form.text_field :default_base_branch %>
   </div>
 
   <%= render "layout_field", form: %>

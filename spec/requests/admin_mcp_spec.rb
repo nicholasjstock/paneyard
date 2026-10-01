@@ -38,7 +38,7 @@ RSpec.describe "the admin MCP endpoint", type: :request do
 
     # The full handshake a real client makes, then the call; the raw result,
     # since a failed registration is an error result the caller must read.
-    def register(name, root)
+    def register(path)
       headers = { "CONTENT_TYPE" => "application/json", "ACCEPT" => "application/json, text/event-stream" }
       post "/mcp/admin", headers:, params: JSON.generate(
         jsonrpc: "2.0", id: 1, method: "initialize",
@@ -47,33 +47,34 @@ RSpec.describe "the admin MCP endpoint", type: :request do
       headers["HTTP_MCP_SESSION_ID"] = response.headers["mcp-session-id"]
       post "/mcp/admin", headers:, params: JSON.generate(jsonrpc: "2.0", method: "notifications/initialized")
       post "/mcp/admin", headers:, params: JSON.generate(
-        jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "register_workspace", arguments: { name:, rootPath: root } }
+        jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "register_workspace", arguments: { path: } }
       )
       body = response.body
       body = body.lines.find { |line| line.start_with?("data:") }.delete_prefix("data:") if body.start_with?("event:", "data:")
       JSON.parse(body).fetch("result")
     end
 
-    it "registers a laid-out repository over the wire" do
-      root = create_source_checkout
+    it "registers an existing checkout over the wire from its path alone" do
+      repository = File.realpath(create_source_checkout(name: "over-the-wire"))
 
-      result = register("over-the-wire", root)
+      result = register(repository)
 
       expect(result["isError"]).to be_falsey
       expect(result["structuredContent"]).to include(
-        "name" => "over-the-wire", "sourceRoot" => File.join(root, "main"), "originUrl" => "https://example.test/paneyard.git"
+        "name" => "over-the-wire", "repositoryPath" => repository, "defaultBaseBranch" => "main",
+        "originUrl" => "https://example.test/paneyard.git"
       )
-      expect(Workspace.find_by(name: "over-the-wire")&.root_path).to eq(root)
+      expect(Workspace.find_by(name: "over-the-wire")&.repository_path).to eq(repository)
     end
 
-    it "creates nothing for a bad layout, and says why" do
+    it "creates nothing for a directory that is not a checkout, and says why" do
       empty = Dir.mktmpdir("no-checkout")
 
-      result = register("bad-layout", empty)
+      result = register(empty)
 
       expect(result["isError"]).to be(true)
-      expect(result["structuredContent"]["problems"].map { |problem| problem["code"] }).to eq(%w[source_missing])
-      expect(Workspace.find_by(name: "bad-layout")).to be_nil
+      expect(result["structuredContent"]["problems"].map { |problem| problem["code"] }).to eq(%w[not_git])
+      expect(Workspace.count).to eq(0)
     end
   end
 end

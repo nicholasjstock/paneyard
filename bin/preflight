@@ -117,7 +117,6 @@ begin
 
   unless @failed
     output, ok = instance.run("bin/rails", "runner", "script/preflight_checks.rb")
-    output = output.lines.grep_v(/GitHub App credentials not configured/).join
     @failed = true unless ok
     if ok || output.match?(/^\s+(ok|FAIL) /)
       puts output

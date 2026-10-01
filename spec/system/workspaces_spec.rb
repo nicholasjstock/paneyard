@@ -2,8 +2,8 @@ require "rails_helper"
 
 RSpec.describe "workspaces", type: :system do
   it "lists current runs in the panel and switches to the selected run's workspace", js: true do
-    first_workspace = Workspace.create!(name: "first-#{SecureRandom.hex(4)}", root_path: "/tmp/first-#{SecureRandom.hex(4)}")
-    second_workspace = Workspace.create!(name: "second-#{SecureRandom.hex(4)}", root_path: "/tmp/second-#{SecureRandom.hex(4)}")
+    first_workspace = Workspace.create!(name: "first-#{SecureRandom.hex(4)}", repository_path: "/tmp/first-#{SecureRandom.hex(4)}")
+    second_workspace = Workspace.create!(name: "second-#{SecureRandom.hex(4)}", repository_path: "/tmp/second-#{SecureRandom.hex(4)}")
     first_run = create_active_run(first_workspace, "first-current")
     second_run = create_active_run(second_workspace, "second-current")
 
@@ -25,65 +25,63 @@ RSpec.describe "workspaces", type: :system do
 
   # There is no bootstrap discovery run any more: a new workspace takes task
   # runs straight away, and sessions record what they learn as they go.
-  it "creates a workspace from the index flow and can queue a task in it immediately" do
-    suffix = SecureRandom.hex(4)
-    root = create_source_checkout
+  it "adds an existing checkout as a workspace, named after it, and can queue a task in it immediately" do
+    repository = File.realpath(create_source_checkout(name: "planner-app"))
+    system("git", "-C", repository, "switch", "-q", "-c", "feature/elsewhere", exception: true)
 
     expect do
       visit workspaces_path
       click_link "Add workspace"
-      fill_in "Name", with: "planner-app-#{suffix}"
-      fill_in "Workspace root", with: root
+      fill_in "Repository", with: repository
       click_button "Add workspace"
     end.not_to change(Run, :count)
 
-    expect(page).to have_text("Added workspace planner-app-#{suffix}.")
+    expect(page).to have_text("Added workspace planner-app.")
+    expect(Workspace.find_by!(name: "planner-app")).to have_attributes(repository_path: repository, default_base_branch: "main")
     expect(page).to have_current_path(%r{/workspaces/\d+/runs})
-    expect(page).to have_text("planner-app-#{suffix} Runs")
     expect(page).to have_link("Queue a task")
-    expect(page).to have_no_button("Re-run project setup")
   end
 
-  # The same checks as the register_workspace MCP tool, so a broken layout is
-  # caught here rather than by the first run.
-  it "refuses to add a workspace whose root is not laid out for runs, and says how to fix it" do
-    clone = File.join(create_source_checkout, "main")
-    plain = File.join(Dir.mktmpdir, "plain-clone")
-    FileUtils.mv(clone, plain)
+  # The same checks as the register_workspace MCP tool, so a broken
+  # repository is caught here rather than by the first run.
+  it "refuses a default base branch the repository does not have, and says how to fix it" do
+    repository = create_source_checkout
 
     visit new_workspace_path
-    fill_in "Name", with: "wrong-root"
-    fill_in "Workspace root", with: plain
+    fill_in "Repository", with: repository
+    fill_in "Name", with: "wrong-branch"
+    fill_in "Default base branch", with: "develop"
     click_button "Add workspace"
 
-    expect(page).to have_text("is itself a git checkout, but a workspace root must hold the checkout as a child named `main`")
-    expect(Workspace.find_by(name: "wrong-root")).to be_nil
+    expect(page).to have_text("there is no local branch `develop`")
+    expect(Workspace.find_by(name: "wrong-branch")).to be_nil
   end
 
-  it "lets an operator edit a workspace's root" do
-    workspace = Workspace.create!(name: "planner-app-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
-    new_root = create_source_checkout
+  it "lets an operator move a workspace to another repository, and change its default base branch" do
+    workspace = Workspace.create!(name: "planner-app-#{SecureRandom.hex(4)}", repository_path: Dir.mktmpdir)
+    new_repository = File.realpath(create_source_checkout(branches: [ "develop" ]))
 
     visit workspaces_path
     within(find(".card", text: workspace.name, match: :first)) { click_link "Edit" }
 
-    fill_in "Workspace root", with: new_root
+    fill_in "Repository", with: new_repository
+    fill_in "Default base branch", with: "develop"
     click_button "Save"
 
     expect(page).to have_text("Updated workspace #{workspace.name}.")
-    expect(workspace.reload.root_path).to eq(new_root)
+    expect(workspace.reload).to have_attributes(repository_path: new_repository, default_base_branch: "develop")
   end
 
-  it "does not let an edit move a workspace's root somewhere runs cannot use" do
-    workspace = Workspace.create!(name: "planner-app-#{SecureRandom.hex(4)}", root_path: create_source_checkout)
+  it "does not let an edit move a workspace somewhere runs cannot use" do
+    workspace = Workspace.create!(name: "planner-app-#{SecureRandom.hex(4)}", repository_path: create_source_checkout)
     empty = Dir.mktmpdir
 
     visit edit_workspace_path(workspace)
-    fill_in "Workspace root", with: empty
+    fill_in "Repository", with: empty
     click_button "Save"
 
-    expect(page).to have_text("There is no `main` checkout at #{empty}/main")
-    expect(workspace.reload.root_path).not_to eq(empty)
+    expect(page).to have_text("is not inside a git checkout")
+    expect(workspace.reload.repository_path).not_to eq(empty)
   end
 
   it "shows the empty state when no workspaces exist" do
@@ -94,12 +92,12 @@ RSpec.describe "workspaces", type: :system do
 
   it "refuses to delete a workspace that still owns runs" do
     suffix = SecureRandom.hex(4)
-    workspace = Workspace.create!(name: "planner-app-#{suffix}", root_path: "/tmp/planner-app-#{suffix}")
+    workspace = Workspace.create!(name: "planner-app-#{suffix}", repository_path: "/tmp/planner-app-#{suffix}")
     Run.create!(
       run_id: "demo-workspace-delete",
       task: "Keep this workspace busy",
       workspace: workspace,
-      target_root: workspace.root_path,
+      target_root: workspace.repository_path,
       launcher_variant: "claude",
       status: "running",
       launched_by: "operator",
@@ -118,7 +116,7 @@ RSpec.describe "workspaces", type: :system do
 
   it "deletes an empty workspace from the index" do
     suffix = SecureRandom.hex(4)
-    workspace = Workspace.create!(name: "planner-app-#{suffix}", root_path: "/tmp/planner-app-#{suffix}")
+    workspace = Workspace.create!(name: "planner-app-#{suffix}", repository_path: "/tmp/planner-app-#{suffix}")
 
     visit workspaces_path
     within(find(".card", text: workspace.name, match: :first)) do
@@ -132,14 +130,14 @@ RSpec.describe "workspaces", type: :system do
 
   def create_active_run(workspace, run_id)
     Run.create!(
-      run_id:, task: run_id, workspace:, target_root: workspace.source_root,
+      run_id:, task: run_id, workspace:, target_root: workspace.repository_path,
       launcher_variant: "claude", status: "running", launched_by: "operator", started_at: Time.current
     )
   end
 
   describe "the layout editor", js: true do
     let(:workspace) do
-      Workspace.create!(name: "layout-#{SecureRandom.hex(4)}", root_path: "/tmp/layout-#{SecureRandom.hex(4)}")
+      Workspace.create!(name: "layout-#{SecureRandom.hex(4)}", repository_path: "/tmp/layout-#{SecureRandom.hex(4)}")
     end
 
     it "builds named tabs and splits without any YAML, and saves them as the workspace's layout" do

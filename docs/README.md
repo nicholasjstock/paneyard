@@ -4,7 +4,6 @@
 
 - [operating.md](./operating.md) — running the orchestrator: `bin/dev` and `bin/service`, preparing a repository, git and worktree-cleanup rules, GitHub access, workspace layouts and env vars, MCP endpoints, the sandbox.
 - [telegram.md](./telegram.md) — Telegram remote control, and how to add another chat platform.
-- [../GITHUB_APP_SETUP.md](../GITHUB_APP_SETUP.md) — optional GitHub App for session push credentials.
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) and [../AGENTS.md](../AGENTS.md) — changing the orchestrator itself.
 
 ## Design records

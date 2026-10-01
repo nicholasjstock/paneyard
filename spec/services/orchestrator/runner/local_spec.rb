@@ -57,24 +57,25 @@ RSpec.describe Orchestrator::Runner::Local do
     expect(runner.process_alive?(1)).to be(true)
   end
 
-  it "writes a session's runtime files under its own runtime root" do
-    allow(herdr).to receive(:workspace_create)
-      .and_return("root_pane" => { "pane_id" => "w1:p1", "tab_id" => "w1:t1", "workspace_id" => "w1" })
-    allow(Orchestrator::Runner::ProcessEnv).to receive(:sanitized_process_env).and_return({})
-
+  it "writes a session's runtime files under its own runtime root, and builds the layout in herdr's worktree workspace" do
     opened = runner.open_session(
       run_id: "run/1", label: "run-1", driver: "claude", model: "opus", cwd: "/tmp", capability_token: "tok",
-      prompt: "Do it", mcp_url: "http://127.0.0.1:3000/mcp", workspace_env: {}, env: {}, github_token: "ghs",
-      ambient_github_auth: false, layout: [ { "name" => nil, "panes" => [ { "name" => "agent" } ] } ]
+      prompt: "Do it", mcp_url: "http://127.0.0.1:3000/mcp", layout: [ { "name" => nil, "panes" => [ { "name" => "agent" } ] } ],
+      herdr_workspace_id: "w1", herdr_tab_id: "w1:t1", herdr_pane_id: "w1:p1"
     )
 
     expect(opened).to include("pane_id" => "w1:p1", "tab_id" => "w1:t1", "workspace_id" => "w1")
     expect(opened["prompt_path"]).to eq(File.join(runner.runtime_root, "run_1", "prompt.txt"))
     expect(File.read(opened["prompt_path"])).to eq("Do it")
-    expect(JSON.parse(File.read(opened["mcp_config_path"])).dig("mcpServers", "paneyard", "url"))
-      .to eq("http://127.0.0.1:3000/mcp/run")
-    expect(herdr).to have_received(:workspace_create).with(hash_including(
-      cwd: "/tmp", focus: false, env: hash_including("GH_TOKEN" => "ghs", "PANEYARD_RUN_TOKEN" => "tok")
-    ))
+    server = JSON.parse(File.read(opened["mcp_config_path"])).dig("mcpServers", "paneyard")
+    expect(server).to include("url" => "http://127.0.0.1:3000/mcp/run", "headers" => { "Authorization" => "Bearer tok" })
+  end
+
+  it "keeps launch attachments beside the run's runtime files, never in the repository" do
+    path = runner.store_attachment(run_id: "run-7", name: "notes.md", content: "hi")
+
+    expect(path).to eq(File.join(runner.runtime_root, "run-7", "attachments", "notes.md"))
+    expect(runner.attachments_dir(run_id: "run-7")).to eq(File.dirname(path))
+    expect(runner.attachments(run_id: "run-7")).to eq([ { "name" => "notes.md", "content" => "hi" } ])
   end
 end

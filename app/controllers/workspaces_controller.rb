@@ -14,6 +14,8 @@ class WorkspacesController < ApplicationController
 
   def create
     @workspace = Workspace.new(workspace_params)
+    # The column's own default is a guess; blank asks registration to detect it.
+    @workspace.default_base_branch = workspace_params[:default_base_branch].to_s.strip
 
     if checked_save(@workspace)
       redirect_to workspace_runs_path(@workspace), notice: "Added workspace #{@workspace.name}."
@@ -50,30 +52,40 @@ class WorkspacesController < ApplicationController
   private
 
   # The same checks register_workspace makes (Orchestrator::WorkspaceRegistration):
-  # a new root, or a changed one, must already be laid out for runs. An edit
-  # that leaves the root alone (a layout change) is not held up by it, so a
-  # checkout that is briefly on another branch doesn't block that.
+  # a new repository, or a changed repository or default branch, must already
+  # be usable for runs. An edit that leaves both alone (a layout change) is
+  # not held up by it.
   def checked_save(workspace)
-    workspace.valid?
-    if workspace.new_record? || workspace.will_save_change_to_root_path?
-      result = Orchestrator::WorkspaceRegistration.check(name: workspace.name, root_path: workspace.root_path, workspace:)
+    if workspace.new_record? || workspace.will_save_change_to_repository_path? || workspace.will_save_change_to_default_base_branch?
+      result = Orchestrator::WorkspaceRegistration.check(
+        # Blank (a new workspace's empty field) means detect it.
+        path: workspace.repository_path, name: workspace.name, default_base_branch: workspace.default_base_branch.presence,
+        workspace:
+      )
+      workspace.name = result.fetch("name") if workspace.name.blank?
+      if result.fetch("problems").empty?
+        workspace.repository_path = result.fetch("repository_path")
+        workspace.default_base_branch = result.fetch("default_base_branch")
+      end
+      workspace.valid?
       result.fetch("problems").each do |problem|
         # The model's own presence/uniqueness validations already say these.
-        next if problem.fetch("code").in?(%w[name_blank name_taken root_path_blank])
-        next if problem.fetch("code") == "root_path_taken" && workspace.errors.added?(:root_path, :taken)
+        next if problem.fetch("code").in?(%w[name_blank name_taken path_blank])
+        next if problem.fetch("code") == "repository_taken" && workspace.errors.added?(:repository_path, :taken)
 
         workspace.errors.add(:base, problem.fetch("message"))
       end
-      workspace.root_path = result.fetch("root_path") if workspace.errors.empty?
+    else
+      workspace.valid?
     end
     workspace.errors.empty? && workspace.save
   end
 
   def workspace_params
-    params.require(:workspace).permit(:name, :root_path, :layout)
+    params.require(:workspace).permit(:name, :repository_path, :default_base_branch, :layout)
   end
 
   def workspace_edit_params
-    params.require(:workspace).permit(:root_path, :layout)
+    params.require(:workspace).permit(:repository_path, :default_base_branch, :layout)
   end
 end

@@ -17,9 +17,4 @@
 
 ActiveSupport::Inflector.inflections(:en) do |inflect|
   inflect.irregular "criterion", "criteria"
-  # Orchestrator::GitHubAppAuth (app/services/orchestrator/github_app_auth.rb)
-  # is named after the product's own "GitHub" capitalization; without this,
-  # Zeitwerk's default camelization of "github" expects "Github" instead and
-  # eager loading fails at boot.
-  inflect.acronym "GitHub"
 end

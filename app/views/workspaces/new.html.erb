@@ -6,13 +6,21 @@
   <%= render "errors", workspace: @workspace %>
 
   <div class="field">
+    <%= form.label :repository_path, "Repository" %>
+    <p class="muted">An existing Git checkout, with whatever branch it has checked out. Runs never work in it: each gets its own worktree, wherever your herdr config puts them.</p>
+    <%= form.text_field :repository_path, placeholder: "~/code/my-project" %>
+  </div>
+
+  <div class="field">
     <%= form.label :name, "Name" %>
+    <p class="muted">Leave blank to use the repository's directory name.</p>
     <%= form.text_field :name, placeholder: "my-project" %>
   </div>
 
   <div class="field">
-    <%= form.label :root_path, "Workspace root" %>
-    <%= form.text_field :root_path, placeholder: "~/src/my-project" %>
+    <%= form.label :default_base_branch, "Default base branch" %>
+    <p class="muted">The branch runs start from and merge back into unless one names another. Leave blank to use the repository's own default branch.</p>
+    <%= form.text_field :default_base_branch, value: "", placeholder: "main" %>
   </div>
 
   <%= render "layout_field", form: %>

@@ -28,12 +28,12 @@
           <%= link_to run.worktree_name.presence || run.run_id, workspace_run_path(current_workspace, run), class: "mono" %>
           <span class="badge <%= run.status %>"><%= run.status.humanize %></span>
           <% if @kept_worktrees.include?(run) %>
-            <span class="badge attention" title="Uncommitted or unpushed work; kept until you push, merge, or remove it">worktree kept</span>
+            <span class="badge attention" title="Uncommitted work, or commits neither pushed nor in its base branch; kept until you push, merge, or remove it">worktree kept</span>
           <% end %>
         </div>
         <p><%= truncate(run.task, length: 140) %></p>
         <% if run.branch_name.present? %>
-          <p class="muted mono"><%= run.branch_name %></p>
+          <p class="muted mono"><%= run.branch_name %> &larr; <%= run.base_branch %></p>
         <% end %>
         <p class="muted">
           <%= run.launcher_variant %><% if run.model.present? %> (<%= run.model %>)<% end %>

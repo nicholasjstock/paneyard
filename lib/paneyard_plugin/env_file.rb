@@ -9,8 +9,7 @@ module PaneyardPlugin
   #
   # Format: KEY=value, an optional leading `export`, `#` comments (also after
   # an unquoted value), single quotes taken literally, double quotes with \n,
-  # \t, \" and \\ escapes, and a double-quoted value may span lines, which is
-  # how a GitHub App private key fits.
+  # \t, \" and \\ escapes, and a double-quoted value may span lines.
   module EnvFile
     RESERVED = %w[
       RAILS_ENV BINDING PIDFILE HERDR_SOCKET_PATH PANEYARD_STORAGE_DIR PANEYARD_RUNTIME_DIR
@@ -30,19 +29,10 @@ module PaneyardPlugin
       # Default model per agent CLI. A model picked for a run wins.
       # PANEYARD_CLAUDE_MODEL=opus
       # PANEYARD_CODEX_MODEL=
-      # PANEYARD_OPENCODE_MODEL=
 
       # Telegram remote control (docs/telegram.md).
       # TELEGRAM_BOT_TOKEN=
       # TELEGRAM_ALLOWED_USER_IDS=123456789
-
-      # GitHub App for sessions' push credentials (GITHUB_APP_SETUP.md). Without
-      # one, sessions use your own `gh auth token`.
-      # GITHUB_APP_ID=
-      # GITHUB_APP_INSTALLATION_ID=
-      # GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
-      # ...
-      # -----END RSA PRIVATE KEY-----"
 
       # A fixed port for the web UI and /mcp/admin. By default Paneyard picks a
       # free one the first time and keeps it.

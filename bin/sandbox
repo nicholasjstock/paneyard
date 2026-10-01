@@ -25,7 +25,7 @@
 # To try the real thing, opt integrations back in, one at a time:
 #
 #   --real-herdr  runs open in YOUR herdr (workspaces labelled "[sandbox] ..."),
-#                 running the real claude/codex/opencode CLI -- real model
+#                 running the real claude/codex CLI -- real model
 #                 usage -- on throwaway tasks in the sandbox's scratch repo.
 #                 Their MCP reports go to this sandbox, not production.
 #   --telegram    the sandbox polls and answers Telegram for real, as a SECOND
@@ -117,7 +117,7 @@ end
 # A real claude opened in a folder it has never been told to trust stops at
 # "Is this a project you trust?", whose default answer exits -- so the run
 # fails to launch. Trust is per repository (a run's worktree counts as its
-# main checkout), and the scratch repo's path survives bin/sandbox reset, so
+# repository), and the scratch repo's path survives bin/sandbox reset, so
 # the operator only has to accept it once. Read-only: this never edits
 # Claude's config.
 def warn_untrusted!(repo)
@@ -135,22 +135,22 @@ def seed!(instance)
   output, ok = instance.run("bin/rails", "sandbox:seed")
   abort "bin/sandbox: seeding failed:\n#{output}" unless ok
 
-  name, id, root = output.lines.last.split(" ", 3)
-  [ name, id, root.strip ]
+  name, id, repository = output.lines.last.split(" ", 3)
+  [ name, id, repository.strip ]
 end
 
 def boot(instance, modes: [])
   started = Time.now
   instance.start!(modes:)
-  name, id, root = seed!(instance)
+  name, id, repository = seed!(instance)
   puts "bin/sandbox: up at #{instance.url} in #{(Time.now - started).round(1)}s"
   puts "  herdr      #{modes.include?('real-herdr') ? 'YOUR herdr: runs launch real CLIs, labelled [sandbox]' : 'fake (scripted agents, no model)'}"
   puts "  telegram   #{modes.include?('telegram') ? "live, as #{@telegram_bot}" : 'off'}"
-  puts "  workspace  #{name} -> #{instance.url}/workspaces/#{id} (scratch repo #{File.join(root, "main")})"
+  puts "  workspace  #{name} -> #{instance.url}/workspaces/#{id} (scratch repo #{repository}, branches main and feature/sandbox)"
   puts "  mcp admin  #{instance.url}/mcp/admin"
   puts "  database   #{instance.storage_dir}"
   puts "  log        #{instance.log_path}"
-  warn_untrusted!(File.join(root, "main")) if modes.include?("real-herdr")
+  warn_untrusted!(repository) if modes.include?("real-herdr")
   [ name, id ]
 rescue PaneyardSandbox::Instance::Error => error
   abort "bin/sandbox: #{error.message}"
