@@ -13,7 +13,11 @@ class StartRunSessionJob < ApplicationJob
     return unless run.status == "launching"
 
     Orchestrator::RunSessionRunner.start!(run)
-    run.update!(status: "running", started_at: Time.current)
+    # Still launching unless the session already reported (awaiting_review),
+    # which must stand.
+    run.with_lock do
+      run.update!(started_at: Time.current, **(run.status == "launching" ? { status: "running" } : {}))
+    end
   rescue => error
     # Whatever went wrong -- a missing base branch, herdr not running, a CLI
     # that never became ready -- the run is done and its slot must go back.

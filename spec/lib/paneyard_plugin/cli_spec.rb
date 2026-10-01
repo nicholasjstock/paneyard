@@ -97,6 +97,35 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(client).to have_received(:queue).with(task: "Task", workspace: "other", base_branch: nil, driver: nil)
     end
 
+    it "asks for the base branch again, keeping the task, when the one typed does not exist" do
+      allow(client).to receive(:workspaces).and_return([ workspace ])
+      calls = 0
+      allow(client).to receive(:queue) do |**args|
+        calls += 1
+        if calls == 1
+          raise PaneyardSandbox::McpClient::ToolError.new("queue_run failed",
+            "error" => "base_branch_invalid", "message" => "Base branch `nope`: there is no local branch `nope`.")
+        end
+        { "runId" => "run-4", "baseBranch" => args[:base_branch], "capacity" => {} }
+      end
+
+      run_cli("queue-ui", input: "Task\n\nnope\n\nmain\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "nope", driver: nil)
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil)
+      expect(out.string).to include("no local branch `nope`", "Queued run-4 from main.")
+    end
+
+    it "says it registered the repository on the task screen, which clears what came before" do
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/other", "main" ])
+      allow(client).to receive(:workspaces).and_return([])
+      allow(client).to receive(:register).and_return("name" => "other", "repositoryPath" => "/code/other", "defaultBaseBranch" => "main")
+
+      run_cli("queue-ui", input: "", context: { "focused_pane_cwd" => "/code/other" })
+
+      expect(out.string.split("PANEYARD  /  NEW RUN").last).to include("Registered as a new workspace")
+    end
+
     it "shows what to fix, and queues nothing, when the directory cannot be a workspace" do
       allow(client).to receive(:workspaces).and_return([])
       allow(client).to receive(:register).and_raise(PaneyardSandbox::McpClient::ToolError.new("register_workspace failed",
@@ -139,6 +168,8 @@ RSpec.describe PaneyardPlugin::Cli do
 
       expect(cli.send(:read_task)).to eq("First line\nSecond line")
       expect(terminal.string).to include("First line", "Second line")
+      # Still in raw mode: Enter's newline needs its own carriage return.
+      expect(terminal.string).to end_with("\r\n")
     end
 
     it "repaints while backspacing across a line boundary" do
@@ -337,6 +368,31 @@ RSpec.describe PaneyardPlugin::Cli do
       run_cli("layout-ui", input: "r\ns\n\n", context: { "focused_pane_cwd" => "/code/app" })
 
       expect(out.string).to include("Reset to the default layout.")
+    end
+
+    it "rejects edited YAML whose tabs or panes the builder could not work on" do
+      allow(client).to receive(:workspaces).and_return([ workspace ])
+      allow(client).to receive(:update_layout)
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "main" ])
+      editor = File.join(state, "editor")
+      File.write(editor, "#!/bin/sh\nprintf 'tabs:\\n- just-a-string\\n' > \"$1\"\n")
+      File.chmod(0o755, editor)
+
+      status = run_cli("layout-ui", input: "y\na\nshell\n\n1\n\n\nq\n", context: { "focused_pane_cwd" => "/code/app" }) do |cli|
+        cli.instance_variable_get(:@env)["VISUAL"] = editor
+      end
+
+      expect(status).to eq(0)
+      expect(out.string).to include("YAML was not applied: tab 1 must be a mapping", "1.2 └─ shell [right of agent]")
+    end
+
+    it "keeps an unexpected error on screen instead of vanishing" do
+      allow(client).to receive(:workspaces).and_raise(NoMethodError, "undefined method 'fetch'")
+
+      status = run_cli("layout-ui", input: "\n", context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(status).to eq(1)
+      expect(out.string).to include("unexpected error: NoMethodError", "Press Enter to close.")
     end
 
     it "explains when the pane is not registered" do

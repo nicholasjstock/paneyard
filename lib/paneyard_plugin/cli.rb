@@ -287,8 +287,9 @@ module PaneyardPlugin
         return data unless system(*editor_command, file.path)
 
         parsed = YAML.safe_load(File.read(file.path))
-        unless parsed.is_a?(Hash) && parsed["tabs"].is_a?(Array)
-          say "YAML was not applied: layout must have a `tabs:` list."
+        problem = layout_shape_problem(parsed)
+        if problem
+          say "YAML was not applied: #{problem}"
           return data
         end
 
@@ -297,6 +298,20 @@ module PaneyardPlugin
         say "YAML was not applied: #{error.message}"
         data
       end
+    end
+
+    # Only the shape the builder itself needs; whether the layout is valid is
+    # the server's call, on save.
+    def layout_shape_problem(parsed)
+      return "layout must have a `tabs:` list." unless parsed.is_a?(Hash) && parsed["tabs"].is_a?(Array) && parsed["tabs"].any?
+
+      parsed["tabs"].each_with_index do |tab, index|
+        return "tab #{index + 1} must be a mapping with a `panes:` list." unless tab.is_a?(Hash) && tab["panes"].is_a?(Array)
+        unless tab["panes"].all? { |pane| pane == "agent" || (pane.is_a?(Hash) && pane["name"].is_a?(String)) }
+          return "every pane in tab #{index + 1} must be `agent` or a mapping with a `name:`."
+        end
+      end
+      nil
     end
 
     def editor_command
@@ -334,7 +349,9 @@ module PaneyardPlugin
 
       repository, current_branch = WorkspaceMatch.repository_of(dir)
       workspaces = client.workspaces
-      workspace = WorkspaceMatch.workspace_for(workspaces, dir, repository:) || register!(client, repository || dir)
+      registered = false
+      workspace = WorkspaceMatch.workspace_for(workspaces, dir, repository:) ||
+        register!(client, repository || dir).tap { |found| registered = !found.nil? }
       return unless workspace
 
       default = workspace.fetch("defaultBaseBranch")
@@ -342,6 +359,7 @@ module PaneyardPlugin
       say accent("PANEYARD  /  NEW RUN")
       say rule
       say "#{bold(workspace.fetch('name'))}  #{dim(workspace.fetch('repositoryPath'))}"
+      say dim("Registered as a new workspace; runs start from #{default} by default.") if registered
       say ""
       say bold("Task")
       say dim("Describe the goal, constraints, and how to tell it worked.")
@@ -352,7 +370,9 @@ module PaneyardPlugin
 
       base_branch = ask_base_branch(default, current_branch)
       driver = ask_driver
-      queued = client.queue(task:, workspace: workspace.fetch("name"), base_branch:, driver:)
+      queued = queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, current_branch:)
+      return unless queued
+
       capacity = queued.fetch("capacity", {})
       say ""
       say bold("Queued #{queued.fetch('runId')} from #{queued.fetch('baseBranch', base_branch || default)}.")
@@ -362,12 +382,33 @@ module PaneyardPlugin
       pause
     end
 
+    # A mistyped base branch is the one queue error worth another try: asking
+    # again keeps the task the operator just wrote.
+    def queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, current_branch:)
+      loop do
+        return client.queue(task:, workspace: workspace.fetch("name"), base_branch:, driver:)
+      rescue PaneyardSandbox::McpClient::ToolError => error
+        raise unless error.payload["error"] == "base_branch_invalid"
+
+        say ""
+        say error.payload["message"]
+        base_branch = ask_base_branch(workspace.fetch("defaultBaseBranch"), current_branch, again: true)
+        if base_branch == :cancel
+          say "Nothing queued."
+          return pause
+        end
+      end
+    end
+
     # The workspace's default, unless the operator names another branch; the
     # branch this pane is on is offered, since starting from it is the usual
     # reason not to use the default.
-    def ask_base_branch(default, current_branch)
+    def ask_base_branch(default, current_branch, again: false)
       hint = current_branch && current_branch != default ? "; this pane is on #{current_branch}" : ""
+      hint += "; q cancels" if again
       answer = ask("Base branch (Enter for #{default}#{hint}): ")
+      return :cancel if again && (answer.nil? || answer == "q")
+
       answer.nil? || answer.empty? ? nil : answer
     end
 
@@ -623,7 +664,7 @@ module PaneyardPlugin
 
     def run_entries(client)
       client.runs.flat_map { |workspace, listed| listed.fetch("runs").map { |run| [ workspace, run ] } }
-        .sort_by { |_workspace, run| run["startedAt"] || "9999" }.reverse.first(40)
+        .sort_by { |_workspace, run| run.fetch("runId") }.reverse.first(40)
     end
 
     def run_line(number, workspace, run)
@@ -657,7 +698,8 @@ module PaneyardPlugin
           key = @in.getch
           case key
           when "\r"
-            @out.puts
+            # Raw mode: a bare newline would leave the next prompt mid-line.
+            @out.print("\r\n")
             break
           when "\n"
             task << "\n"
@@ -800,6 +842,12 @@ module PaneyardPlugin
     rescue Error, Client::Error, SystemCallError => error
       say ""
       say "Paneyard: #{error.message}"
+      pause
+      1
+    rescue StandardError => error
+      say ""
+      say "Paneyard hit an unexpected error: #{error.class}: #{error.message}"
+      say dim(error.backtrace&.first.to_s)
       pause
       1
     end

@@ -88,6 +88,20 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(File.read(session.prompt_path)).to include(run.task)
     end
 
+    it "keeps a report the agent made before launch_agent returned" do
+      stub_successful_launch
+      allow(Orchestrator::Runner.local).to receive(:launch_agent).and_wrap_original do |original, *args, **kwargs|
+        original.call(*args, **kwargs).tap do
+          RunSession.where(run:).update_all(status: "done", outcome: "done", result: "Already finished.")
+        end
+      end
+
+      session = described_class.start!(run)
+
+      expect(session.reload).to have_attributes(status: "done", outcome: "done", pid: 555)
+      expect(session.started_at).to be_present
+    end
+
     it "splits nvim opened on the worktree beside the agent by default, and keeps tracking only the agent pane" do
       stub_successful_launch
 

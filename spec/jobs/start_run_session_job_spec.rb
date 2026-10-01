@@ -12,6 +12,16 @@ RSpec.describe StartRunSessionJob do
     expect(run.started_at).to be_present
   end
 
+  it "keeps a report the session made while it was still launching" do
+    run = create_run(prefix: "start-session-quick", status: "launching")
+    allow(Orchestrator::RunSessionRunner).to receive(:start!) { run.update!(status: "awaiting_review") }
+
+    described_class.perform_now(run.id)
+
+    expect(run.reload).to have_attributes(status: "awaiting_review")
+    expect(run.started_at).to be_present
+  end
+
   # A run left stuck in "launching" would hold a concurrency slot forever,
   # wedging the dispatcher for every other queued run.
   it "fails the run and frees its slot when provisioning blows up" do

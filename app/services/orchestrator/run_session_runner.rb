@@ -60,7 +60,12 @@ module Orchestrator
         )
 
         pid = runner.launch_agent(spec, pane_id: session.herdr_pane_id, mcp_config_path: session.mcp_config_path)
-        session.update!(status: "running", pid:, started_at: Time.current, last_seen_at: Time.current)
+        # A quick agent can call report_idle before launch_agent returns; its
+        # report (session done/blocked/failed) must not be overwritten here.
+        session.with_lock do
+          session.update!(pid:, started_at: Time.current, last_seen_at: Time.current,
+            **(session.status == "starting" ? { status: "running" } : {}))
+        end
         session
       rescue StandardError => error
         # Closing the workspace destroys the only evidence of why the agent

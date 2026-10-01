@@ -102,12 +102,14 @@ command = ["/bin/sh", "bin/herdr-plugin", "stop"]
 
 # --- popups behind the actions ----------------------------------------------
 
+# The menu runs its choice in place (queue, runs, a report, the layout
+# builder), so it needs the room those popups have.
 [[panes]]
 id = "menu"
 title = "Paneyard"
 placement = "popup"
-width = 54
-height = 18
+width = "90%"
+height = "80%"
 command = ["/bin/sh", "bin/herdr-plugin", "menu-ui"]
 
 [[panes]]
