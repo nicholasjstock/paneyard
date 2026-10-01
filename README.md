@@ -63,7 +63,19 @@ herdr plugin install nicholasjstock/paneyard
 
 herdr shows what the plugin will run, then downloads the matching bundled Ruby and production gems. No compiler is used on your machine. Paneyard starts on its own the next time herdr starts, or the first time you use any of its actions. Its database, logs and generated secrets live in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard`), and it picks a free local port for itself and keeps it.
 
-### 2. Bind keys
+### 2. Connect your coding agents
+
+The installer prints this as its final step:
+
+```sh
+herdr plugin action invoke paneyard.setup --plugin paneyard
+```
+
+Run it once. The setup pane starts Paneyard, detects installed Claude Code and Codex CLIs, shows what it found, and asks for approval before changing either client's user-level MCP configuration. It configures each approved client independently, reports registrations that are already current, and leaves missing clients alone. You can safely run it again after an update or port change.
+
+Herdr plugin builds do not have a reliable interactive-input contract, so this explicit action is the safe equivalent of an installer prompt. If you skip it, Paneyard still works through its Herdr actions and web UI; [manual MCP commands](#6-queue-runs-from-your-own-agent) remain available.
+
+### 3. Bind keys
 
 Plugins can't bind keys themselves. Add these to herdr's `config.toml` (or pick your own keys), then `herdr server reload-config`:
 
@@ -91,7 +103,7 @@ Every action is also available without a key: `herdr plugin action list --plugin
 
 | Action | What it does |
 | --- | --- |
-| `paneyard.queue` | In a pane inside a repository: queue a task for it. The first time, it registers the repository as a workspace (and tells you what to fix if its layout is wrong). |
+| `paneyard.queue` | Queue a task for the repository containing the current pane. |
 | `paneyard.runs` | Every run, newest first. Pick one to read its newest report, jump to its herdr workspace, close its session, or open it in the browser. |
 | `paneyard.report` | Inside a run's herdr workspace: that run's newest report. |
 | `paneyard.close` | Inside a run's herdr workspace: close its session (asks first). |
@@ -101,15 +113,15 @@ Every action is also available without a key: `herdr plugin action list --plugin
 | `paneyard.mcp-url` | Show the `/mcp/admin` URL as a notification. |
 | `paneyard.restart`, `paneyard.stop` | Apply a settings change; stop Paneyard (any action starts it again). Running sessions are not affected by either. |
 
-### 3. Queue a task
+### 4. Queue a task
 
-Any git checkout you already have will do, with any branch checked out, as long as it has an `origin` remote. Open a herdr pane anywhere in it and press your **queue** key. The first time, Paneyard registers the repository as a **workspace** (named after its directory, with the repository's default branch as the branch runs start from). Describe the task (a blank line submits), choose the **base branch** to start from (Enter for the default; it offers the branch your pane is on), pick a driver (`claude` or `codex`; Enter for `claude`), and it is queued. When a slot frees, herdr creates the run's worktree from that branch, wherever your herdr config puts worktrees, and opens it as a herdr workspace with the agent in it. Your own checkout is never touched. [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
+Any git checkout you already have will do, with any branch checked out, as long as it has an `origin` remote. Open a herdr pane anywhere in it and press your **queue** key. Paneyard resolves the checkout to a workspace, registering it through the same repository checks as the web UI when needed. Describe the task (a blank line submits), choose the **base branch** to start from (Enter for the default; it offers the branch your pane is on), pick a driver (`claude` or `codex`; Enter for `claude`), and it is queued. When a slot frees, herdr creates the run's worktree from that branch, wherever your herdr config puts worktrees, and opens it as a herdr workspace with the agent in it. Your own checkout is never touched. [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
 
-### 4. Read reports and close sessions
+### 5. Read reports and close sessions
 
 When the agent stops, it posts a report. Read it with the **runs** key (or **report** inside the run's workspace). Type into the agent's pane to give it more work, and ask it to commit, push or merge when you are happy; it merges back into the branch it started from. When you are done with it, the **close** key ends the session and frees its slot. The web UI (`paneyard.open`) has the same, plus workspace settings and the [layout editor](#workspace-layouts).
 
-### 5. Queue runs from your own agent
+### 6. Queue runs from your own agent
 
 Paneyard's `/mcp/admin` endpoint lets an MCP client queue and inspect runs. At the end of installation, Herdr prints the command for the interactive `paneyard.setup` action. It detects installed Claude Code and Codex CLIs, asks before changing either one, and registers the endpoint at user scope. Running it again recognizes an up-to-date entry and does not duplicate it. By hand:
 
@@ -122,7 +134,7 @@ The port stays the same across restarts; if it ever has to change (something els
 
 ### Settings, updates and removal
 
-- **Settings** live in `$(herdr plugin config-dir paneyard)/.env`, written on first start with every option commented out: concurrency, default models, [Telegram](./docs/telegram.md), a fixed port, and which Ruby to use. Run `paneyard.restart` after editing it (the next action notices the edit and restarts too).
+- **Settings** live in `$(herdr plugin config-dir paneyard)/.env`, written on first start with every option commented out: concurrency, default models, [Telegram](./docs/telegram.md), and a fixed port. Run `paneyard.restart` after editing it (the next action notices the edit and restarts too).
 - **Updating:** `herdr plugin install nicholasjstock/paneyard` again (`--ref <tag-or-commit>` to pin a version). The next action or herdr start restarts Paneyard on the new code and migrates its database; state and settings are kept.
 - **Removing:** `herdr plugin action invoke paneyard.stop --plugin paneyard`, then `herdr plugin uninstall paneyard`. herdr leaves the state and config directories in place; delete them to remove your run history too.
 - **Logs:** `~/.local/state/herdr/plugins/paneyard/log/paneyard.log`, and `herdr plugin log list --plugin paneyard` for the actions themselves.
