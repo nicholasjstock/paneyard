@@ -38,8 +38,9 @@ module PaneyardPlugin
       # free one the first time and keeps it.
       # PORT=
 
-      # The Ruby to run Paneyard with, if the one found is not the right version.
-      # PANEYARD_RUBY=/opt/homebrew/opt/ruby/bin/ruby
+      # For a development checkout linked without the plugin build, an optional
+      # Ruby override. Installed plugins use their bundled runtime.
+      # PANEYARD_RUBY=/path/to/ruby
     ENV
 
     module_function

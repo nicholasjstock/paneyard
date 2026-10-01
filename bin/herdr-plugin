@@ -4,11 +4,9 @@
 #   bin/herdr-plugin pane <entrypoint>   open one of the plugin's popups (no Ruby needed)
 #   bin/herdr-plugin <command>           anything else: see lib/paneyard_plugin/cli.rb
 #
-# herdr runs plugin commands with its server's environment, whose `ruby` may
-# be the wrong version or none at all, so this finds a Ruby at least as new as
-# .ruby-version's major.minor first: PANEYARD_RUBY (environment, or the
-# plugin's .env), the Ruby [[build]] installed the gems with, `ruby` on PATH,
-# then the usual version-manager and Homebrew locations.
+# An installed plugin carries its own Ruby and production bundle. `plugin link`
+# deliberately skips [[build]], so linked development checkouts retain the
+# system-Ruby discovery fallback below.
 set -u
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -36,6 +34,7 @@ fi
 
 ruby=""
 for candidate in \
+  "$root/.paneyard/runtime/bin/ruby" \
   "$configured" \
   "$( [ -f "$root/.paneyard-ruby" ] && cat "$root/.paneyard-ruby" )" \
   "$(command -v ruby 2>/dev/null)" \
@@ -58,9 +57,9 @@ do
 done
 
 if [ -z "$ruby" ]; then
-  echo "paneyard: needs Ruby $want or newer, and none was found." >&2
-  echo "Install one (for example \`mise use -g ruby@$want\` or \`brew install ruby\`)," >&2
-  echo "or set PANEYARD_RUBY=/path/to/ruby in $config_dir/.env." >&2
+  echo "paneyard: its bundled Ruby is missing, and no Ruby $want or newer was found." >&2
+  echo "Reinstall the plugin, or (for a linked development checkout) set" >&2
+  echo "PANEYARD_RUBY=/path/to/ruby in $config_dir/.env." >&2
   if [ -t 0 ]; then
     printf 'Press Enter to close.'
     read -r _

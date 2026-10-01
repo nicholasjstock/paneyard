@@ -1,7 +1,7 @@
 # Paneyard as a herdr plugin: `herdr plugin install <owner>/paneyard`.
 #
-# The plugin is the whole Rails app. [[build]] installs its gems into the
-# managed checkout; the daemon (this checkout's bin/production) keeps its
+# The plugin is the whole Rails app. [[build]] downloads its matching Ruby
+# runtime and production bundle into the managed checkout; the daemon keeps its
 # databases, logs, generated secret and port in HERDR_PLUGIN_STATE_DIR, and
 # reads the operator's settings from HERDR_PLUGIN_CONFIG_DIR/.env
 # (`herdr plugin config-dir paneyard`). Every command goes through
@@ -19,7 +19,7 @@ description = "Queue tasks for Claude Code, Codex or opencode; each runs in its 
 platforms = ["macos", "linux"]
 
 [[build]]
-command = ["/bin/sh", "bin/herdr-plugin", "build"]
+command = ["/bin/sh", "script/install_plugin_runtime"]
 
 [[startup]]
 command = ["/bin/sh", "bin/herdr-plugin", "startup"]

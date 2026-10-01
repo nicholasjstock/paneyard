@@ -1,0 +1,65 @@
+name: Plugin runtime
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .ruby-version
+      - Gemfile
+      - Gemfile.lock
+      - script/build_plugin_runtime
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            platform: x86_64-darwin
+          - runner: macos-15
+            platform: arm64-darwin
+          - runner: ubuntu-24.04
+            platform: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            platform: aarch64-linux
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+      - if: matrix.platform == 'x86_64-darwin'
+        run: brew install coreutils
+      - run: script/build_plugin_runtime "${{ matrix.platform }}" artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.platform }}
+          path: artifacts/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: runtime-*
+          path: artifacts
+          merge-multiple: true
+      - id: runtime
+        run: echo "tag=runtime-$(cat .ruby-version Gemfile Gemfile.lock script/build_plugin_runtime | sha256sum | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.runtime.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG is already published; leaving its immutable assets unchanged."
+          else
+            gh release create "$TAG" --title "Paneyard plugin runtime" --notes "Bundled Ruby and production gems for Paneyard plugin installs."
+            gh release upload "$TAG" artifacts/*
+          fi

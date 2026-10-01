@@ -56,39 +56,29 @@ who prefers it.
 
 ## 1. Packaging and lifecycle
 
-### Ruby and gems: decision
+### Ruby and gems: bundled runtime
 
-Paneyard needs Ruby at the version in `.ruby-version` (4.0) and its gems. The options:
+An installed plugin does not use or compile against the operator's Ruby. The `Plugin runtime` workflow
+builds four archives (macOS and Linux, each on x86-64 and ARM64) containing:
 
-| Option | Friction for the user | Cost |
-| --- | --- | --- |
-| **A. The user's Ruby, gems vendored into the plugin checkout** (`bundle install` with `path vendor/bundle`, in `[[build]]`) | Needs a Ruby 4.0 somewhere on the machine. Install is a normal `bundle install`: sqlite3, nokogiri and commonmarker come prebuilt for darwin and linux, and the rest (puma, bootsnap, msgpack, nio4r…) compile small C extensions, which needs a C compiler (Xcode command-line tools on macOS). | None beyond what exists. |
-| B. Ship or build a private Ruby inside the plugin (ruby-build in `[[build]]`, or a portable Ruby tarball per platform) | None if it works. | `ruby-build` compiles for several minutes and needs a C toolchain and openssl/libyaml headers, which is *more* friction for a user without them. Portable Ruby tarballs mean hosting and signing release artifacts per platform and keeping them in step with `.ruby-version`. |
-| C. A container | Docker, and herdr/git/agent CLIs from inside it | Wrong shape: the runner has to drive the operator's own herdr, git checkouts and agent CLIs. |
+- the exact Ruby in `.ruby-version`, from jdx/ruby's relocatable binaries;
+- a production-only `vendor/bundle`, installed and compiled on the target platform; and
+- the relative Bundler configuration that ties the two together.
 
-**Picked: A.** It is the only option that adds no new moving part, and Ruby 4.0 is one `mise use -g
-ruby@4.0` / `brew install ruby` away. To keep the friction as low as A allows:
+The release tag is `runtime-<sha256>`, where the digest covers `.ruby-version`, `Gemfile`, `Gemfile.lock`,
+and the runtime builder. Old plugin revisions therefore keep resolving to their own immutable dependency
+set and archive format, while a dependency, Ruby, or packaging update selects a new release. Each platform
+archive has a companion SHA-256 file.
 
-- The entry point (`bin/herdr-plugin`, POSIX `sh`) **finds** a suitable Ruby instead of trusting `ruby` on
-  the server's `PATH`: `PANEYARD_RUBY` (from the plugin's `.env`), then the Ruby the build used, then `ruby`
-  on `PATH`, then the usual version-manager and Homebrew locations (asdf, mise, rbenv, chruby,
-  `/opt/homebrew/opt/ruby`, `/usr/local/opt/ruby`). The first one at least `.ruby-version`'s major.minor
-  wins. If none is found it fails with one message saying which Ruby to install and how to point
-  `PANEYARD_RUBY` at one.
-- `[[build]]` runs `bundle install` against that Ruby into `vendor/bundle` inside the managed checkout,
-  without the development and test groups, and records the interpreter in `.paneyard-ruby` (gitignored),
-  because gems with native extensions only work under the Ruby that built them. Gems belong to that exact
-  checkout and lockfile, so the plugin root (not the state dir) is the right place for them: a reinstall
-  replaces both together.
-- The daemon runs with that Ruby's `bin` directory first on `PATH`, so `bin/production`'s `bundle` and
-  `./bin/rails` (`#!/usr/bin/env ruby`) use the same interpreter. This does not reach agent sessions: herdr
-  panes never inherit the Rails process's environment (and Paneyard sets none in them).
-- `herdr plugin link <checkout>` runs no build, so a linked development checkout uses the bundle the
-  contributor already has (`bin/setup`). The build's `bundle config --local` is never written into a
-  contributor's checkout.
+Herdr's `[[build]]` runs `script/install_plugin_runtime`, a POSIX shell script which detects the platform,
+downloads the matching archive, verifies it, extracts it into `.paneyard/runtime` and `vendor/bundle`, and
+runs `bundle check`. The only host tools are `curl`, `tar`, and `sha256sum` or `shasum`; no Ruby, Bundler,
+compiler, or development headers are needed. `bin/herdr-plugin` always prefers this private Ruby and the
+daemon puts its `bin` directory first on `PATH`, without changing any agent pane's environment.
 
-Open question for the operator: whether Ruby 3.4 is good enough (it would widen who can install without a
-version manager). Nothing here has been run on it; relaxing the check is one line once CI covers it.
+`herdr plugin link <checkout>` does not run `[[build]]`. For contributor convenience only, the entry point
+falls back to `PANEYARD_RUBY`, then version-manager, Homebrew, and system Ruby locations, so a normal
+development checkout continues to use the bundle prepared by `bin/setup`.
 
 ### Repo layout
 
@@ -292,10 +282,9 @@ What was run, and what it showed (on the operator's machine, herdr 0.7.5, Ruby 4
   the queue flow registered a scratch repository from a directory deep inside its `main`, matched a run
   worktree path the second time, rejected a bad driver, and showed `register_workspace`'s fixes for a plain
   clone; the runs list and run screen rendered.
-- **The install build, simulated** on a copy of the checkout (a managed install needs the repository on
-  GitHub): `bin/herdr-plugin build` installed the bundle into `vendor/bundle` in 34 seconds without
-  touching `Gemfile.lock`, and the copy then booted from that bundle under a `PATH` whose only Ruby was
-  macOS's 2.6, by finding the build's Ruby. With no suitable Ruby, the entry point says what to install.
+- **The install build:** the shell installer is covered with a local release fixture, including archive
+  verification, runtime selection, `bundle check`, and checksum rejection. The platform archives are built
+  on their target GitHub runners; a clean Ubuntu host test exercises the published x86-64 Linux archive.
 - **In the real herdr**, with this worktree linked: the manifest linked without warnings; the first
   `paneyard.mcp-url` started the daemon (port 49573, state in `~/.local/state/herdr/plugins/paneyard`,
   herdr's own socket), the second reused it; the queue pane, opened as a tab in a scratch herdr workspace so

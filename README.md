@@ -47,8 +47,8 @@ This is a tool for one trusted person on their own machine. Treat anything that 
 ## Requirements
 
 - **[herdr](https://herdr.dev) 0.7.0 or newer, running.** herdr owns every terminal pane and agent process, and Paneyard installs into it as a plugin.
-- **macOS.** This is where it is developed and tested. Linux is untested; nothing in the code is knowingly macOS-only, but expect rough edges. Windows is not supported.
-- **Ruby 4.0** (the version in [`.ruby-version`](./.ruby-version)) somewhere on the machine, and a C compiler for a few gems' native extensions (Xcode command-line tools on macOS). It does not have to be your default Ruby: the plugin finds one installed with asdf, mise, rbenv, chruby or Homebrew, or you point it at one. You never run Rails or Bundler yourself.
+- **macOS or Linux**, on Intel or ARM64. Windows is not supported.
+- **`curl`, `tar`, and a SHA-256 utility** (`shasum` on macOS, `sha256sum` on Linux). The plugin downloads a verified, platform-specific Ruby and production gem bundle; it does not need a system Ruby, Bundler, compiler, or development headers.
 - **git**, with each repository you want to queue tasks for checked out as described in [Preparing a repository](./docs/operating.md#preparing-a-repository).
 - **At least one agent CLI, already signed in:** `claude` and/or `codex`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow, or Claude Code's folder-trust prompt: open `claude` once in a new repository's `main` checkout and trust it. Unless you choose otherwise, a session uses a sensible default model for its driver (`Orchestrator::DefaultModels`).
 - **Optional:** `nvim` (the default pane layout opens it beside the agent), `gh` signed in (for sessions pushing over HTTPS).
@@ -61,7 +61,7 @@ This is a tool for one trusted person on their own machine. Treat anything that 
 herdr plugin install nicholasjstock/paneyard
 ```
 
-herdr shows what the plugin will run, then installs its gems (about a minute the first time). That is the whole installation: Paneyard starts on its own the next time herdr starts, or the first time you use any of its actions. Its database, logs and generated secrets live in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard`), and it picks a free local port for itself and keeps it.
+herdr shows what the plugin will run, then downloads the matching bundled Ruby and production gems. No compiler is used on your machine. Paneyard starts on its own the next time herdr starts, or the first time you use any of its actions. Its database, logs and generated secrets live in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard`), and it picks a free local port for itself and keeps it.
 
 ### 2. Bind keys
 
@@ -188,7 +188,7 @@ Everything is optional except herdr and an agent CLI. With the plugin, put these
 | `PANEYARD_MAX_CONCURRENT_RUNS` | `4` | Global cap on live sessions. |
 | `PANEYARD_CLAUDE_MODEL`, `PANEYARD_CODEX_MODEL` | per driver | Default model per driver; a model picked per run wins. |
 | `HERDR_SOCKET_PATH` | the socket herdr gives the plugin, else `~/.config/herdr/herdr.sock` | herdr's socket. |
-| `PANEYARD_RUBY` | found automatically | Plugin only: the Ruby to run Paneyard with. |
+| `PANEYARD_RUBY` | bundled runtime | Development links only: fallback Ruby when `[[build]]` has not installed the bundle. |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` | unset | Telegram remote control; see [docs/telegram.md](./docs/telegram.md). Also settable in credentials when running from a clone. |
 
 Pane layouts are set per workspace ([above](#workspace-layouts)). So are environment variables, which sessions record for later runs; see [What a run starts with](./docs/operating.md#3-what-a-run-starts-with-inside-the-repo).

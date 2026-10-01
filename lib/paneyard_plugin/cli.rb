@@ -16,7 +16,6 @@ module PaneyardPlugin
     USAGE = <<~TEXT.freeze
       Usage: bin/herdr-plugin <command>
 
-        build        install gems into vendor/bundle ([[build]], once per install)
         startup      start Paneyard if it is not running ([[startup]])
         start | restart | stop | status
         url          print the web UI's URL
@@ -40,7 +39,6 @@ module PaneyardPlugin
     def call(argv)
       command = argv.first.to_s.tr("_", "-")
       case command
-      when "build" then build
       when "startup", "start" then start
       when "restart" then restart
       when "stop" then stop
@@ -67,29 +65,6 @@ module PaneyardPlugin
     attr_reader :paths
 
     # --- lifecycle --------------------------------------------------------
-
-    def build
-      bindir = RbConfig::CONFIG["bindir"]
-      bundle = File.join(bindir, "bundle")
-      bundle = "bundle" unless File.executable?(bundle)
-      env = @env.keys.select { |key| key.start_with?("BUNDLE_", "BUNDLER_") }.to_h { |key| [ key, nil ] }
-        .merge("PATH" => [ bindir, @env["PATH"] ].compact.join(File::PATH_SEPARATOR), "RUBYOPT" => nil,
-          "BUNDLE_GEMFILE" => File.join(paths.app_root, "Gemfile"))
-      [
-        [ bundle, "config", "set", "--local", "path", "vendor/bundle" ],
-        [ bundle, "config", "set", "--local", "without", "development test" ],
-        [ bundle, "install", "--jobs", "4" ]
-      ].each do |argv|
-        puts "paneyard build: #{argv.drop(1).join(' ')}"
-        raise Error, "#{argv.join(' ')} failed" unless system(env, *argv, chdir: paths.app_root)
-      end
-      # Gems with native extensions only load under the Ruby that built them.
-      File.write(File.join(paths.app_root, ".paneyard-ruby"), RbConfig.ruby)
-      puts "paneyard build: done (Ruby #{RUBY_VERSION} at #{RbConfig.ruby})"
-      puts ""
-      puts "Next: configure Paneyard in your coding agents:"
-      puts "  herdr plugin action invoke paneyard.setup --plugin paneyard"
-    end
 
     def start
       result = daemon.ensure_running
