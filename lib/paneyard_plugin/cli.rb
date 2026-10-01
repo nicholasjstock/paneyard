@@ -1,5 +1,6 @@
 require "io/console"
 require "json"
+require "open3"
 require "rbconfig"
 require "tempfile"
 require_relative "../paneyard_plugin"
@@ -21,7 +22,7 @@ module PaneyardPlugin
         url          print the web UI's URL
         mcp-url      print /mcp/admin's URL (and show it as a herdr notification)
         open         open the web UI (this run's page, inside a run's herdr workspace)
-        queue-ui | runs-ui | report-ui | close-ui | mcp-ui
+        queue-ui | runs-ui | report-ui | close-ui | setup-ui | mcp-ui
                      the interactive popups behind the plugin's actions
     TEXT
 
@@ -51,7 +52,7 @@ module PaneyardPlugin
       when "runs-ui" then interactive { runs_ui }
       when "report-ui" then interactive { this_run_ui(:report) }
       when "close-ui" then interactive { this_run_ui(:close) }
-      when "mcp-ui" then interactive { mcp_ui }
+      when "setup-ui", "mcp-ui" then interactive { mcp_ui }
       else
         @out.puts USAGE
         command.empty? || %w[help -h --help].include?(command) ? 0 : 2
@@ -85,6 +86,9 @@ module PaneyardPlugin
       # Gems with native extensions only load under the Ruby that built them.
       File.write(File.join(paths.app_root, ".paneyard-ruby"), RbConfig.ruby)
       puts "paneyard build: done (Ruby #{RUBY_VERSION} at #{RbConfig.ruby})"
+      puts ""
+      puts "Next: configure Paneyard in your coding agents:"
+      puts "  herdr plugin action invoke paneyard.setup --plugin paneyard"
     end
 
     def start
@@ -218,27 +222,116 @@ module PaneyardPlugin
     def mcp_ui
       connect!
       url = "#{@url}/mcp/admin"
-      heading "Connect Claude Code to Paneyard"
+      heading "Connect coding agents to Paneyard"
       say "Paneyard's MCP endpoint is #{bold(url)}"
       say ""
-      say "Register it for every project with:"
-      say "  claude mcp add --transport http -s user paneyard #{url}"
-      say dim("This port stays the same across restarts. If it ever has to change, Paneyard says so.")
-      say dim("Registered it before under another name (earlier docs used paneyard-admin)? Remove that one:")
-      say dim("  claude mcp remove -s user paneyard-admin")
-      unless executable?("claude")
-        say ""
-        say "(claude is not on this PATH, so run that line yourself.)"
+      clients = mcp_clients.select { |client| executable?(client.fetch(:executable)) }
+      if clients.empty?
+        say "No supported agent CLIs were found on this PATH."
+        show_manual_mcp_commands(url)
         return pause
       end
 
+      clients.each { |client| say "✓ #{client.fetch(:label)} detected" }
       say ""
-      return unless ask("Register it now, replacing any existing \"paneyard\" entry? [y/N] ")&.downcase == "y"
+      answer = ask("Configure Paneyard MCP integrations? [Y/n] ")
+      unless answer.nil? || answer.empty? || answer.downcase == "y"
+        say "No configuration changed."
+        show_manual_mcp_commands(url)
+        return pause
+      end
 
-      system("claude", "mcp", "remove", "-s", "user", "paneyard", out: File::NULL, err: File::NULL)
-      ok = system("claude", "mcp", "add", "--transport", "http", "-s", "user", "paneyard", url)
-      say(ok ? "Registered. New Claude Code sessions have Paneyard's tools." : "claude mcp add failed; see above.")
+      clients.each { |client| configure_mcp_client(client, url) }
+      say ""
+      say dim("New agent sessions will have Paneyard's tools. This setup is safe to run again.")
       pause
+    end
+
+    def mcp_clients
+      [
+        { id: :claude, label: "Claude Code", executable: "claude" },
+        { id: :codex, label: "Codex", executable: "codex" }
+      ]
+    end
+
+    def configure_mcp_client(client, url)
+      existing = existing_mcp(client)
+      if existing && existing.fetch(:url) == url
+        return say "✓ Paneyard MCP already configured for #{client.fetch(:label)}"
+      end
+      if existing && existing[:scope] && existing.fetch(:scope) != :user
+        return say "✗ #{client.fetch(:label)} has a non-user \"paneyard\" entry; left it unchanged."
+      end
+
+      if existing
+        removed = remove_mcp(client)
+        unless removed.fetch(:success)
+          detail = removed.fetch(:error).lines.last&.strip
+          return say "✗ Could not update #{client.fetch(:label)} because its existing entry could not be removed" \
+            "#{detail.to_s.empty? ? '.' : ": #{detail}"}"
+        end
+      end
+      result = add_mcp(client, url)
+      if result.fetch(:success)
+        say "✓ Paneyard MCP configured for #{client.fetch(:label)}"
+      else
+        rollback = add_mcp(client, existing.fetch(:url)) if existing
+        detail = result.fetch(:error).lines.last&.strip
+        message = "✗ Could not configure #{client.fetch(:label)}#{detail.to_s.empty? ? '' : ": #{detail}"}"
+        message += rollback&.fetch(:success) ? " (restored its previous entry)." : "."
+        say message
+      end
+    rescue StandardError => error
+      say "✗ Could not inspect or configure #{client.fetch(:label)}: #{error.message}"
+    end
+
+    def existing_mcp(client)
+      case client.fetch(:id)
+      when :claude
+        result = run_command("claude", "mcp", "get", "paneyard")
+        return unless result.fetch(:success)
+
+        scope = result.fetch(:output)[/Scope:\s+([^\n]+)/, 1]
+        url = result.fetch(:output)[/URL:\s+(\S+)/, 1]
+        raise Error, "Claude Code returned an unrecognized MCP entry" unless url
+
+        { url:, scope: scope&.start_with?("User") ? :user : :other }
+      when :codex
+        result = run_command("codex", "mcp", "get", "paneyard", "--json")
+        return unless result.fetch(:success)
+
+        url = JSON.parse(result.fetch(:output)).dig("transport", "url")
+        raise Error, "Codex returned an unrecognized MCP entry" unless url
+
+        { url:, scope: :user }
+      end
+    end
+
+    def add_mcp(client, url)
+      case client.fetch(:id)
+      when :claude then run_command("claude", "mcp", "add", "--transport", "http", "-s", "user", "paneyard", url)
+      when :codex then run_command("codex", "mcp", "add", "paneyard", "--url", url)
+      end
+    end
+
+    def remove_mcp(client)
+      argv = [ client.fetch(:executable), "mcp", "remove" ]
+      argv += [ "-s", "user" ] if client.fetch(:id) == :claude
+      run_command(*argv, "paneyard")
+    end
+
+    def show_manual_mcp_commands(url)
+      say ""
+      say "Manual setup:"
+      say "  claude mcp add --transport http -s user paneyard #{url}"
+      say "  codex mcp add paneyard --url #{url}"
+    end
+
+    def run_command(*argv)
+      stdout, stderr, status = Open3.capture3(*argv)
+      { success: status.success?, output: stdout, error: stderr.empty? ? stdout : stderr }
+    rescue SystemCallError => error
+      { success: false, output: "", error: error.message }
     end
 
     # A run's detail and newest report. Returns :quit to leave the popup.

@@ -24,6 +24,7 @@ RSpec.describe PaneyardPlugin::Cli do
     }
     cli = described_class.new(env:, out:, input: StringIO.new(input))
     allow(cli).to receive(:herdr) { |*args| herdr_calls << args }
+    yield cli if block_given?
     cli.call([ command ])
   end
 
@@ -143,6 +144,114 @@ RSpec.describe PaneyardPlugin::Cli do
 
       expect(out.string).to include("not a Paneyard run's")
       expect(client).not_to have_received(:close)
+    end
+  end
+
+  describe "setup-ui" do
+    let(:url) { "http://127.0.0.1:7999/mcp/admin" }
+
+    it "asks before configuring every detected client" do
+      commands = []
+      run_cli("setup-ui", input: "y\n\n") do |cli|
+        allow(cli).to receive(:executable?).with("claude").and_return(true)
+        allow(cli).to receive(:executable?).with("codex").and_return(true)
+        allow(cli).to receive(:run_command) do |*argv|
+          commands << argv
+          if argv.take(4) == [ "codex", "mcp", "get", "paneyard" ]
+            { success: false, output: "", error: "not found" }
+          elsif argv.take(4) == [ "claude", "mcp", "get", "paneyard" ]
+            { success: false, output: "", error: "not found" }
+          else
+            { success: true, output: "", error: "" }
+          end
+        end
+      end
+
+      expect(commands).to include(
+        [ "claude", "mcp", "add", "--transport", "http", "-s", "user", "paneyard", url ],
+        [ "codex", "mcp", "add", "paneyard", "--url", url ]
+      )
+      expect(out.string).to include("✓ Claude Code detected", "✓ Codex detected",
+        "✓ Paneyard MCP configured for Claude Code", "✓ Paneyard MCP configured for Codex")
+    end
+
+    it "changes nothing when the operator declines" do
+      run_cli("setup-ui", input: "n\n\n") do |cli|
+        allow(cli).to receive(:executable?).and_return(true)
+        expect(cli).not_to receive(:run_command)
+      end
+
+      expect(out.string).to include("No configuration changed.", "Manual setup:", "claude mcp add", "codex mcp add")
+    end
+
+    it "recognizes current entries and does not add duplicates" do
+      run_cli("setup-ui", input: "\n\n") do |cli|
+        allow(cli).to receive(:executable?).and_return(true)
+        allow(cli).to receive(:run_command) do |*argv|
+          case argv.first
+          when "claude"
+            { success: true, output: "Scope: User config\nType: http\nURL: #{url}\n", error: "" }
+          when "codex"
+            { success: true, output: JSON.generate("transport" => { "url" => url }), error: "" }
+          end
+        end
+      end
+
+      expect(out.string).to include("already configured for Claude Code", "already configured for Codex")
+      expect(out.string).not_to include("MCP configured for")
+    end
+
+    it "continues when one client fails" do
+      run_cli("setup-ui", input: "\n\n") do |cli|
+        allow(cli).to receive(:executable?).and_return(true)
+        allow(cli).to receive(:run_command) do |*argv|
+          if argv[1..3] == [ "mcp", "get", "paneyard" ]
+            { success: false, output: "", error: "not found" }
+          elsif argv.first == "claude"
+            { success: false, output: "", error: "permission denied\n" }
+          else
+            { success: true, output: "", error: "" }
+          end
+        end
+      end
+
+      expect(out.string).to include("Could not configure Claude Code: permission denied",
+        "Paneyard MCP configured for Codex")
+    end
+
+    it "updates a stale entry and restores it if adding the new URL fails" do
+      old_url = "http://127.0.0.1:7001/mcp/admin"
+      commands = []
+      run_cli("setup-ui", input: "\n\n") do |cli|
+        allow(cli).to receive(:executable?).with("claude").and_return(true)
+        allow(cli).to receive(:executable?).with("codex").and_return(false)
+        allow(cli).to receive(:run_command) do |*argv|
+          commands << argv
+          case argv
+          when [ "claude", "mcp", "get", "paneyard" ]
+            { success: true, output: "Scope: User config\nURL: #{old_url}\n", error: "" }
+          when [ "claude", "mcp", "add", "--transport", "http", "-s", "user", "paneyard", url ]
+            { success: false, output: "", error: "write failed" }
+          else
+            { success: true, output: "", error: "" }
+          end
+        end
+      end
+
+      expect(commands).to include(
+        [ "claude", "mcp", "remove", "-s", "user", "paneyard" ],
+        [ "claude", "mcp", "add", "--transport", "http", "-s", "user", "paneyard", old_url ]
+      )
+      expect(out.string).to include("Could not configure Claude Code: write failed (restored its previous entry).")
+    end
+
+    it "reports no clients without treating that as an error" do
+      status = run_cli("setup-ui", input: "\n") do |cli|
+        allow(cli).to receive(:executable?).and_return(false)
+      end
+
+      expect(status).to eq(0)
+      expect(out.string).to include("No supported agent CLIs", "Manual setup:")
     end
   end
 

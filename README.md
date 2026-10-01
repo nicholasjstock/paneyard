@@ -96,7 +96,8 @@ Every action is also available without a key: `herdr plugin action list --plugin
 | `paneyard.report` | Inside a run's herdr workspace: that run's newest report. |
 | `paneyard.close` | Inside a run's herdr workspace: close its session (asks first). |
 | `paneyard.open` | Open the web UI, at the run's page when invoked in a run's workspace. |
-| `paneyard.mcp` | Connect Claude Code to Paneyard ([step 5](#5-queue-runs-from-your-own-agent)). |
+| `paneyard.setup` | Detect Claude Code and Codex, then offer to connect them to Paneyard. |
+| `paneyard.mcp` | Alias for `paneyard.setup` (kept for existing key bindings). |
 | `paneyard.mcp-url` | Show the `/mcp/admin` URL as a notification. |
 | `paneyard.restart`, `paneyard.stop` | Apply a settings change; stop Paneyard (any action starts it again). Running sessions are not affected by either. |
 
@@ -110,13 +111,14 @@ When the agent stops, it posts a report. Read it with the **runs** key (or **rep
 
 ### 5. Queue runs from your own agent
 
-Paneyard's `/mcp/admin` endpoint lets an MCP client, such as your everyday Claude Code session, queue and inspect runs. The `paneyard.mcp` action shows its URL and registers it for you at user scope, so it is available from every project. By hand:
+Paneyard's `/mcp/admin` endpoint lets an MCP client queue and inspect runs. At the end of installation, Herdr prints the command for the interactive `paneyard.setup` action. It detects installed Claude Code and Codex CLIs, asks before changing either one, and registers the endpoint at user scope. Running it again recognizes an up-to-date entry and does not duplicate it. By hand:
 
 ```sh
 claude mcp add --transport http -s user paneyard "$(cat ~/.local/state/herdr/plugins/paneyard/url)/mcp/admin"
+codex mcp add paneyard --url "$(cat ~/.local/state/herdr/plugins/paneyard/url)/mcp/admin"
 ```
 
-The port stays the same across restarts; if it ever has to change (something else took it), Paneyard shows a notification, and `paneyard.mcp` re-registers in one key. Then ask your agent to queue a task, list runs, or check on one. The endpoint is unauthenticated, like the rest of the app, so it only listens on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
+The port stays the same across restarts; if it ever has to change (something else took it), Paneyard shows a notification, and `paneyard.setup` updates the registrations in one action. Then ask your agent to queue a task, list runs, or check on one. The endpoint is unauthenticated, like the rest of the app, so it only listens on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
 
 ### Settings, updates and removal
 

@@ -203,7 +203,7 @@ time), then does its one thing. Interactive ones open a popup pane, because acti
 | `report` — Show this run's report | workspace | In a run's herdr workspace: opens the runs popup on that run's report. |
 | `close` — Close this run's session | workspace | In a run's herdr workspace: asks for confirmation in a popup, then closes the session (kills the CLI, closes the herdr workspace, frees the slot, removes the worktree if its work is saved) — the run screen's **Close session**. |
 | `open` — Open Paneyard in the browser | workspace | Opens the web UI (the run's page when invoked in a run's workspace). |
-| `mcp` — Connect Claude Code | workspace | Opens a popup with the `/mcp/admin` URL and the `claude mcp add` line, and offers to run it (replacing a stale `paneyard` registration). |
+| `setup` — Configure coding agents | workspace | Opens a popup, detects Claude Code and Codex, asks before changing anything, and idempotently adds or updates their user-level `paneyard` registrations. `mcp` remains an alias for existing key bindings. |
 | `mcp-url` — Print the MCP URL | — | Prints the URL to the plugin log and shows it as a herdr notification, for scripts and for the user. |
 | `restart` — Restart Paneyard | — | Applies a `.env` change or a reinstall. |
 | `stop` — Stop Paneyard | — | Stops the daemon (before uninstalling, say). |
@@ -262,10 +262,12 @@ description = "paneyard: queue a task here"
 
 ## 5. MCP registration
 
-The URL is `http://127.0.0.1:<port>/mcp/admin`, with the port kept stable across restarts (above). Three
-ways to get at it: the `mcp` popup (shows it and runs `claude mcp remove -s user paneyard` then
-`claude mcp add --transport http -s user paneyard <url>` on a keypress), `herdr plugin action invoke
-paneyard.mcp-url --plugin paneyard` (notification + plugin log), and `state/url` for scripts. If the port
+The URL is `http://127.0.0.1:<port>/mcp/admin`, with the port kept stable across restarts (above). The
+install build cannot safely prompt (Herdr has no post-install hook and build stdin is not an interactive
+contract), so its final output immediately points to the `setup` action. That popup detects installed
+Claude Code and Codex CLIs, asks once before making changes, recognizes current registrations, and
+updates stale ones independently with rollback on an add failure. Other ways to get the URL are
+`herdr plugin action invoke paneyard.mcp-url --plugin paneyard` (notification + plugin log), and `state/url` for scripts. If the port
 ever has to change, the startup log and a notification say so.
 
 ## 6. Upgrade story

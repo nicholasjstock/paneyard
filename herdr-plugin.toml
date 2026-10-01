@@ -62,11 +62,18 @@ contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "open"]
 
 [[actions]]
-id = "mcp"
-title = "Paneyard: connect Claude Code"
-description = "Show Paneyard's /mcp/admin URL and register it with Claude Code."
+id = "setup"
+title = "Paneyard: configure coding agents"
+description = "Detect installed coding agents and offer to connect them to Paneyard's MCP endpoint."
 contexts = ["workspace"]
-command = ["/bin/sh", "bin/herdr-plugin", "pane", "mcp"]
+command = ["/bin/sh", "bin/herdr-plugin", "pane", "setup"]
+
+[[actions]]
+id = "mcp"
+title = "Paneyard: configure coding agents"
+description = "Alias for the setup action."
+contexts = ["workspace"]
+command = ["/bin/sh", "bin/herdr-plugin", "pane", "setup"]
 
 [[actions]]
 id = "mcp-url"
@@ -121,9 +128,9 @@ height = 16
 command = ["/bin/sh", "bin/herdr-plugin", "close-ui"]
 
 [[panes]]
-id = "mcp"
-title = "Paneyard: connect Claude Code"
+id = "setup"
+title = "Paneyard: configure coding agents"
 placement = "popup"
 width = "80%"
-height = 16
+height = 20
 command = ["/bin/sh", "bin/herdr-plugin", "mcp-ui"]
