@@ -142,7 +142,7 @@ Registration checks everything first (`Orchestrator::WorkspaceRegistration`, whi
 
 ### 6. First run
 
-From the workspace's runs page, choose **Queue a task**, give it a task, a base branch if not the default, and a driver (and optionally a model). Or queue it from herdr with the plugin's **queue** action, or over MCP (below). Within a few seconds `RunDispatchJob` claims it, and herdr opens a workspace for the run's new worktree with the agent on the left and `nvim` on the right, or with whatever tabs and panes that workspace's layout defines.
+From the workspace's runs page, choose **Queue a task**, give it a task, a base branch if not the default, and a driver (and optionally a model). Or queue it from herdr with the plugin's **queue** action, or over MCP (below). Within a few seconds `RunDispatchJob` claims it, and herdr opens a workspace for the run's new worktree with the agent in it, plus whatever tabs and panes that workspace's layout defines.
 
 It worked when the session calls `report_idle` and the report action shows its checkpoint. Ask it to commit and push, and `git -C ~/code/my-app ls-remote origin 'paneyard/*'` then lists the branch.
 
@@ -158,7 +158,7 @@ If the launch fails, the runs action shows the error. The common ones:
 
 ## Workspace layouts
 
-The plugin's `paneyard.layout` action opens the primary **Layout** editor inside Herdr: an interactive builder for the tabs and panes its runs open with. It redraws a tree preview while you add or edit panes, choose the earlier pane each splits from, set right/down and an optional ratio, delete leaf panes, or reset to the default. Raw YAML is available as an advanced option. Until you change anything, the workspace uses the default layout (the agent with `nvim .` split beside it, or only the agent when `nvim` isn't on the orchestrator's `PATH`). The layout is stored as YAML (`workspaces.layout`), in this shape:
+The plugin's `paneyard.layout` action opens the primary **Layout** editor inside Herdr: an interactive builder for the tabs and panes its runs open with. It redraws a tree preview while you add or edit panes, choose the earlier pane each splits from, set right/down and an optional ratio, delete leaf panes, or reset to the default. Raw YAML is available as an advanced option. Until you change anything, the workspace uses the default layout: the agent alone. The layout is stored as YAML (`workspaces.layout`), in this shape:
 
 ```yaml
 tabs:

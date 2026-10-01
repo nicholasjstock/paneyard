@@ -72,7 +72,7 @@ This is a tool for one trusted person on their own machine. Treat anything that 
 - **`curl`, `tar`, and a SHA-256 utility** (`shasum` on macOS, `sha256sum` on Linux). The plugin downloads a verified, platform-specific Ruby and production gem bundle; it does not need a system Ruby, Bundler, compiler, or development headers.
 - **git**, with each repository you want to queue tasks for checked out as described in [Preparing a repository](./docs/operating.md#preparing-a-repository).
 - **At least one agent CLI, already signed in:** `claude` and/or `codex`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow, or Claude Code's folder-trust prompt: open `claude` once in a new repository's `main` checkout and trust it. Unless you choose otherwise, a session uses a sensible default model for its driver (`Orchestrator::DefaultModels`).
-- **Optional:** `nvim` (the default pane layout opens it beside the agent), `gh` signed in (for sessions pushing over HTTPS).
+- **Optional:** `gh` signed in (for sessions pushing over HTTPS).
 
 ## Getting started
 
@@ -177,7 +177,7 @@ If a session dies without reporting, the orchestrator notices within about 30 se
 
 ## Workspace layouts
 
-Each run opens in its own herdr workspace. A workspace's **layout** decides which tabs and panes that herdr workspace has: the agent, plus anything you want running beside it, such as an editor, a dev server or a log tail. By default a run gets the agent with `nvim .` split to its right, or just the agent when `nvim` isn't installed.
+Each run opens in its own herdr workspace. A workspace's **layout** decides which tabs and panes that herdr workspace has: the agent, plus anything you want running beside it, such as an editor, a dev server or a log tail. By default a run gets just the agent.
 
 To change it from Herdr, invoke `paneyard.layout` in any pane belonging to the repository. Its interactive builder redraws a tree preview as you add tabs and panes, edit commands, choose split targets, directions and ratios, or delete leaf panes. Save validates the complete result before changing anything; Reset restores the default. Raw YAML remains available under the builder's advanced `y` option:
 

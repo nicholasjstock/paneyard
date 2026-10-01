@@ -47,7 +47,7 @@ The first public version. It includes:
 
 ### Configuration
 
-- Per-workspace herdr layouts (tabs and split panes with commands), edited visually, defaulting to the agent beside `nvim`.
+- Per-workspace herdr layouts (tabs and split panes with commands), edited visually, defaulting to the agent alone.
 
 ### Integrations
 

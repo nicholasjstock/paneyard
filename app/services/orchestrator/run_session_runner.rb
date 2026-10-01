@@ -49,8 +49,8 @@ module Orchestrator
         spec = session_spec(run:, session:, capability_token:, resume_session_id:, prompt:)
 
         # The workspace's layout: the agent pane plus whatever tabs and splits
-        # the workspace is configured with (nvim beside it, by default). Only
-        # the agent pane is recorded.
+        # the workspace is configured with (none, by default). Only the agent
+        # pane is recorded.
         opened = runner.open_session(spec)
         session.update!(
           herdr_workspace_id: opened.fetch("workspace_id"),

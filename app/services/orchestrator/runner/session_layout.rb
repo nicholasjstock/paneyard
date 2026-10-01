@@ -37,24 +37,13 @@ module Orchestrator
         root_pane
       end
 
-      # A pane that `requires` a command this machine does not have (the
-      # default layout's nvim) is left out, and so is a tab left empty by that.
       def load(tabs)
-        tabs.filter_map do |tab|
-          panes = tab.fetch("panes").filter_map do |pane|
-            next if pane["requires"].present? && !executable_on_path?(pane["requires"])
-
+        tabs.map do |tab|
+          panes = tab.fetch("panes").map do |pane|
             Pane.new(name: pane.fetch("name"), command: pane["command"], split_of: pane["split_of"],
                      direction: pane["direction"], ratio: pane["ratio"])
           end
-          Tab.new(name: tab["name"], panes:) if panes.any?
-        end
-      end
-
-      def executable_on_path?(command)
-        ENV["PATH"].to_s.split(File::PATH_SEPARATOR).any? do |dir|
-          path = File.join(dir, command)
-          File.file?(path) && File.executable?(path)
+          Tab.new(name: tab["name"], panes:)
         end
       end
 

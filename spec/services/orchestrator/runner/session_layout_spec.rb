@@ -129,17 +129,4 @@ RSpec.describe Orchestrator::Runner::SessionLayout do
 
     expect(Orchestrator::Runner::Herdr).to have_received(:pane_send_input).with("w1:p1>", text: "nvim .", keys: [ "Enter" ])
   end
-
-  it "leaves out a pane whose required command this machine does not have" do
-    allow(described_class).to receive(:executable_on_path?).with("nvim").and_return(false)
-    tabs = [ { "name" => nil, "panes" => [
-      { "name" => "agent" },
-      { "name" => "editor", "command" => "nvim .", "split_of" => "agent", "direction" => "right", "requires" => "nvim" }
-    ] } ]
-
-    described_class.open!(root_pane:, cwd:, tabs:)
-
-    expect(Orchestrator::Runner::Herdr).not_to have_received(:pane_split)
-    expect(Orchestrator::Runner::Herdr).not_to have_received(:pane_send_input)
-  end
 end

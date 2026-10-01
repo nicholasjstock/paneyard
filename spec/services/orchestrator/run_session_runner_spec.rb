@@ -11,9 +11,6 @@ RSpec.describe Orchestrator::RunSessionRunner do
     allow(Orchestrator::Runner::Herdr).to receive(:workspace_close)
     # ...and first reads the agent pane's last screen for the failure record.
     allow(Orchestrator::Runner::Herdr).to receive(:pane_read).and_return("")
-    # The default layout's nvim pane beside the agent. PATH is stubbed so
-    # examples do not depend on whether this machine has nvim installed.
-    allow(Orchestrator::Runner::SessionLayout).to receive(:executable_on_path?).with("nvim").and_return(true)
     allow(Orchestrator::Runner::Herdr).to receive(:pane_split)
       .and_return("pane_id" => "w9:p2", "tab_id" => "w9:t1", "workspace_id" => "w9")
     allow(Orchestrator::Runner::Herdr).to receive(:pane_send_input)
@@ -68,6 +65,8 @@ RSpec.describe Orchestrator::RunSessionRunner do
   end
 
   describe ".start!" do
+    let(:editor_layout) { "tabs:\n  - panes: [agent, { name: editor, command: nvim ., split: { of: agent } }]\n" }
+
     it "opens a pane in the worktree, launches the agent, submits the prompt, and records the process group" do
       stub_successful_launch
 
@@ -102,8 +101,20 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(session.started_at).to be_present
     end
 
-    it "splits nvim opened on the worktree beside the agent by default, and keeps tracking only the agent pane" do
+    it "opens just the agent pane by default" do
       stub_successful_launch
+
+      session = described_class.start!(run)
+
+      expect(Orchestrator::Runner::Herdr).not_to have_received(:pane_split)
+      expect(Orchestrator::Runner::Herdr).not_to have_received(:pane_send_input)
+      expect(Orchestrator::Runner::Herdr).to have_received(:agent_start).with(hash_including(pane_id: "w9:p1"))
+      expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1", herdr_workspace_id: "w9")
+    end
+
+    it "splits a layout's pane beside the agent, and keeps tracking only the agent pane" do
+      stub_successful_launch
+      run.workspace.update!(layout: editor_layout)
 
       session = described_class.start!(run)
 
@@ -111,24 +122,13 @@ RSpec.describe Orchestrator::RunSessionRunner do
         target_pane_id: "w9:p1", direction: "right", ratio: nil, cwd: worktree, focus: false
       )
       expect(Orchestrator::Runner::Herdr).to have_received(:pane_send_input).with("w9:p2", text: "nvim .", keys: [ "Enter" ])
-      expect(Orchestrator::Runner::Herdr).to have_received(:agent_start).with(hash_including(pane_id: "w9:p1"))
       expect(Orchestrator::Runner::Herdr).not_to have_received(:agent_prompt).with("w9:p2", anything)
       expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1", herdr_workspace_id: "w9")
     end
 
-    it "launches with just the agent pane when nvim is not on PATH" do
-      stub_successful_launch
-      allow(Orchestrator::Runner::SessionLayout).to receive(:executable_on_path?).with("nvim").and_return(false)
-
-      session = described_class.start!(run)
-
-      expect(Orchestrator::Runner::Herdr).not_to have_received(:pane_split)
-      expect(Orchestrator::Runner::Herdr).not_to have_received(:pane_send_input)
-      expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1")
-    end
-
     it "launches with just the agent pane when herdr refuses the split" do
       stub_successful_launch
+      run.workspace.update!(layout: editor_layout)
       allow(Orchestrator::Runner::Herdr).to receive(:pane_split).and_raise(Orchestrator::Runner::Herdr::Error, "no such pane")
 
       session = described_class.start!(run)
@@ -182,8 +182,9 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(session).to have_attributes(status: "running", herdr_pane_id: "w9:p1")
     end
 
-    it "still launches the agent when nvim cannot be typed into the split pane" do
+    it "still launches the agent when a command cannot be typed into the split pane" do
       stub_successful_launch
+      run.workspace.update!(layout: editor_layout)
       allow(Orchestrator::Runner::Herdr).to receive(:pane_send_input).and_raise(Orchestrator::Runner::Herdr::Unreachable, "timed out")
 
       session = described_class.start!(run)
@@ -479,6 +480,7 @@ RSpec.describe Orchestrator::RunSessionRunner do
 
     it "gives no pane an environment of its own" do
       stub_successful_launch
+      run.workspace.update!(layout: editor_layout)
 
       described_class.start!(run)
 
