@@ -646,7 +646,11 @@ module PaneyardPlugin
     # keyboard protocol send CSI 13;2u for Shift-Enter instead.
     def read_task_keys
       task = +""
-      @out.print(accent("› "))
+      # Keep an anchor immediately above the composer. Repainting from it is
+      # what makes deletion work across both explicit newlines and terminal
+      # line wrapping; cursor-relative "backspace, space, backspace" does not.
+      @out.print("\e[s")
+      repaint_task(task)
       @out.flush
       @in.raw do
         loop do
@@ -657,28 +661,36 @@ module PaneyardPlugin
             break
           when "\n"
             task << "\n"
-            @out.print("\r\n#{accent('› ')}")
+            repaint_task(task)
           when "\u0003"
             raise Interrupt
           when "\u007f", "\b"
-            next if task.empty? || task.end_with?("\n")
+            next if task.empty?
 
             task.chop!
-            @out.print("\b \b")
+            repaint_task(task)
           when "\e"
             sequence = read_escape_sequence
             if sequence == "[13;2u"
               task << "\n"
-              @out.print("\r\n#{accent('› ')}")
+              repaint_task(task)
             end
           else
             task << key
-            @out.print(key)
+            repaint_task(task)
           end
           @out.flush
         end
       end
       task.strip
+    end
+
+    def repaint_task(task)
+      @out.print("\e[u\e[J")
+      task.split("\n", -1).each_with_index do |line, index|
+        @out.print("\r\n") if index.positive?
+        @out.print(accent("› "), line)
+      end
     end
 
     def read_escape_sequence

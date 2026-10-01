@@ -140,6 +140,19 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(cli.send(:read_task)).to eq("First line\nSecond line")
       expect(terminal.string).to include("First line", "Second line")
     end
+
+    it "repaints while backspacing across a line boundary" do
+      input = StringIO.new("First\nxy\u007f\u007f\u007f line\r")
+      input.define_singleton_method(:tty?) { true }
+      input.define_singleton_method(:raw) { |&block| block.call }
+      input.define_singleton_method(:getch) { getc }
+      terminal = StringIO.new
+      terminal.define_singleton_method(:tty?) { true }
+      cli = described_class.new(env: {}, out: terminal, input:)
+
+      expect(cli.send(:read_task)).to eq("First line")
+      expect(terminal.string.scan("\e[u\e[J").length).to be > 3
+    end
   end
 
   describe "close-ui" do
