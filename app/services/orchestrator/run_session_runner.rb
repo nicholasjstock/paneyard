@@ -21,7 +21,7 @@ module Orchestrator
 
     class Error < StandardError; end
 
-    # How much of the agent pane a failed launch keeps for the run screen. The
+    # How much of the agent pane a failed launch keeps in the run record. The
     # tail is what matters (the shell's last error, the CLI's exit message).
     LAUNCH_SCREEN_LINES = 80
     LAUNCH_SCREEN_MAX_CHARS = 8_000
@@ -128,7 +128,7 @@ module Orchestrator
     end
 
     # Submits text as the agent's own live input. This is the operator's
-    # steering wheel (the run screen's message box) and the inbound path for a
+    # steering wheel (the Herdr pane and remote-control adapters) and the inbound path for a
     # pull-request comment -- it is what replaced the whole blocking-question
     # protocol, because there is now always a live session to say it to.
     def prompt!(session, text)
@@ -143,7 +143,7 @@ module Orchestrator
     # Polls herdr for what it knows about the pane. Returns the session.
     #
     # Two things are recorded: agent_status (herdr's own
-    # idle/working/blocked/done enum, which the run screen renders) and the
+    # idle/working/blocked/done enum, which operator clients render) and the
     # CLI's own session id, which is the only way to get a --resume id for an
     # interactive session -- there is no structured log to parse one out of.
     #

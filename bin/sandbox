@@ -146,7 +146,7 @@ def boot(instance, modes: [])
   puts "bin/sandbox: up at #{instance.url} in #{(Time.now - started).round(1)}s"
   puts "  herdr      #{modes.include?('real-herdr') ? 'YOUR herdr: runs launch real CLIs, labelled [sandbox]' : 'fake (scripted agents, no model)'}"
   puts "  telegram   #{modes.include?('telegram') ? "live, as #{@telegram_bot}" : 'off'}"
-  puts "  workspace  #{name} -> #{instance.url}/workspaces/#{id} (scratch repo #{repository}, branches main and feature/sandbox)"
+  puts "  workspace  #{name} (scratch repo #{repository}, branches main and feature/sandbox)"
   puts "  mcp admin  #{instance.url}/mcp/admin"
   puts "  database   #{instance.storage_dir}"
   puts "  log        #{instance.log_path}"

@@ -1,6 +1,5 @@
 module McpTools
-  # The run screen's Close session, for an MCP client: the herdr plugin's
-  # close action (which has no browser to press the button in), or the
+  # Close session for an MCP client: the herdr plugin's close action or the
   # operator's own agent. Orchestrator::SessionClose does the work for both.
   #
   # Admin-only (AdminMcpServer), like register_workspace: ending a session is
@@ -8,7 +7,7 @@ module McpTools
   # another one, or its own.
   class CloseSessionTool < MCP::Tool
     tool_name "close_session"
-    description "Close a run's live session, as Close session on the run screen does: quits its agent CLI, " \
+    description "Close a run's live session: quits its agent CLI, " \
       "closes its herdr workspace and frees its concurrency slot. Its worktree is removed too when its work is " \
       "already saved (clean, and merged into main or pushed); otherwise it is kept. Only do this when the " \
       "operator asks: an idle session is waiting for them, not finished. workspace is required."

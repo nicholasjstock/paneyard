@@ -57,7 +57,6 @@ class Run < ApplicationRecord
   scope :active, -> { where(status: NON_TERMINAL_STATUSES) }
   scope :queued, -> { where(status: "queued") }
 
-  after_commit :broadcast_workspace_refresh, on: %i[create update]
 
   # Every bus-only entrypoint (a session's own MCP calls) can reference a
   # runId that was never launched through the UI. Placeholder values keep the
@@ -147,10 +146,5 @@ class Run < ApplicationRecord
         errors.add(:launch_artifacts, "contains an unsafe artifact name")
       end
     end
-  end
-
-  def broadcast_workspace_refresh
-    Turbo::StreamsChannel.broadcast_refresh_to("run_#{run_id}")
-    Turbo::StreamsChannel.broadcast_refresh_to("workspace_#{workspace_id}_runs") if workspace_id.present?
   end
 end

@@ -3,7 +3,7 @@ name: CI
 # Runs bin/verify, the same one command a change is checked with locally:
 # rspec (unit, service, job, request, system, and the :fake_herdr /
 # :fake_telegram integration specs), rubocop, git diff --check, bin/preflight,
-# bin/sandbox verify, bundler-audit, importmap audit and brakeman.
+# bin/sandbox verify, bundler-audit and brakeman.
 #
 # Nothing here reaches a real herdr, a model, Telegram or GitHub's API:
 # spec_helper points HERDR_SOCKET_PATH at a socket that does not exist, the

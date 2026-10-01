@@ -55,7 +55,7 @@ It installs as a herdr plugin and is used from one menu inside herdr: queue a ta
 
 This is a tool for one trusted person on their own machine. Treat anything that can reach it as having a shell on that machine. [SECURITY.md](./SECURITY.md) has the full threat model and how to report a vulnerability.
 
-- **No authentication.** Every web page, every form, and the `/mcp/admin` MCP endpoint are open to whoever can connect. There are no user accounts; the operator is whoever is at the keyboard.
+- **No authentication.** The `/mcp/admin` MCP endpoint is open to whoever can connect. There are no user accounts; the operator is whoever is at the keyboard.
 - **Loopback only.** The plugin, `bin/service` and `bin/production` bind to `127.0.0.1` and `bin/dev` to `localhost`, so nothing else on your network can connect. In production the app also answers only loopback `Host` names (`localhost`, `127.0.0.1`, `[::1]`), which stops DNS-rebinding attacks from web pages you visit. `BINDING` and `PANEYARD_ALLOWED_HOSTS` widen this; if you set either, whatever sits in front of the app must provide the authentication it lacks.
 - **Agents run with approvals bypassed.** Each session is launched with full access and no confirmation prompts: `claude --permission-mode bypassPermissions`, `codex -s danger-full-access`. It works in its own worktree but is not sandboxed: it can read and write anything your user account can, run any command, and use your network. The only review gate is you, reading its report and trying its changes before asking it to commit.
 - **Registered repositories are fully exposed to their sessions**, including any secrets you keep in them. A session's panes are your own login shell, with whatever credentials it has (your SSH agent, your `gh` login).
@@ -94,7 +94,7 @@ herdr plugin action invoke paneyard.setup --plugin paneyard
 
 Run it once. The setup pane starts Paneyard, detects installed Claude Code and Codex CLIs, shows what it found, and asks for approval before changing either client's user-level MCP configuration. It configures each approved client independently, reports registrations that are already current, and leaves missing clients alone. You can safely run it again after an update or port change.
 
-Herdr plugin builds do not have a reliable interactive-input contract, so this explicit action is the safe equivalent of an installer prompt. If you skip it, Paneyard still works through its Herdr actions and web UI; [manual MCP commands](#6-queue-runs-from-your-own-agent) remain available.
+Herdr plugin builds do not have a reliable interactive-input contract, so this explicit action is the safe equivalent of an installer prompt. If you skip it, Paneyard still works through its Herdr actions; [manual MCP commands](#6-queue-runs-from-your-own-agent) remain available.
 
 ### 3. Bind one menu key
 
@@ -108,16 +108,15 @@ command = "paneyard.menu"
 description = "paneyard menu"
 ```
 
-The menu offers queue, runs and reports, close session, edit layout, configure MCP, and open the web UI. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke paneyard.<id> --plugin paneyard`.
+The menu offers queue, runs and reports, close session, edit layout, and configure MCP. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke paneyard.<id> --plugin paneyard`.
 
 | Action | What it does |
 | --- | --- |
 | `paneyard.menu` | Open the single Paneyard menu recommended for key binding. |
 | `paneyard.queue` | Queue a task for the repository containing the current pane. |
-| `paneyard.runs` | Every run, newest first. Pick one to read its newest report, jump to its herdr workspace, close its session, or open it in the browser. |
+| `paneyard.runs` | Every run, newest first. Pick one to read its newest report, jump to its herdr workspace, or close its session. |
 | `paneyard.report` | Inside a run's herdr workspace: that run's newest report. |
 | `paneyard.close` | Inside a run's herdr workspace: close its session (asks first). |
-| `paneyard.open` | Open the web UI, at the run's page when invoked in a run's workspace. |
 | `paneyard.layout` | Visually build and validate the current repository's tabs and panes in a Herdr popup, including from one of its run worktrees. |
 | `paneyard.setup` | Detect Claude Code and Codex, then offer to connect them to Paneyard. |
 | `paneyard.mcp` | Alias for `paneyard.setup` (kept for existing key bindings). |
@@ -126,11 +125,11 @@ The menu offers queue, runs and reports, close session, edit layout, configure M
 
 ### 4. Queue a task
 
-Any git checkout you already have will do, with any branch checked out, as long as it has an `origin` remote. Open a herdr pane anywhere in it, open the **Paneyard menu**, and choose **Queue**. Paneyard resolves the checkout to a workspace, registering it through the same repository checks as the web UI when needed. Describe the task (a blank line submits), choose the **base branch** to start from (Enter for the default; it offers the branch your pane is on), pick a driver (`claude` or `codex`; Enter for `claude`), and it is queued. When a slot frees, herdr creates the run's worktree from that branch, wherever your herdr config puts worktrees, and opens it as a herdr workspace with the agent in it. Your own checkout is never touched. [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
+Any git checkout you already have will do, with any branch checked out, as long as it has an `origin` remote. Open a herdr pane anywhere in it, open the **Paneyard menu**, and choose **Queue**. Paneyard resolves the checkout to a workspace, registering it through the same repository checks as the admin MCP tool when needed. Describe the task (a blank line submits), choose the **base branch** to start from (Enter for the default; it offers the branch your pane is on), pick a driver (`claude` or `codex`; Enter for `claude`), and it is queued. When a slot frees, herdr creates the run's worktree from that branch, wherever your herdr config puts worktrees, and opens it as a herdr workspace with the agent in it. Your own checkout is never touched. [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
 
 ### 5. Read reports and close sessions
 
-When the agent stops, it posts a report. Open **Runs** from the Paneyard menu (or choose **Report** inside the run's workspace). Type into the agent's pane to give it more work, and ask it to commit, push or merge when you are happy; it merges back into the branch it started from. When you are done with it, choose **Close** to end the session and free its slot. The web UI (`paneyard.open`) has the same, plus workspace settings and the [layout editor](#workspace-layouts).
+When the agent stops, it posts a report. Open **Runs** from the Paneyard menu (or choose **Report** inside the run's workspace). Type into the agent's pane to give it more work, and ask it to commit, push or merge when you are happy; it merges back into the branch it started from. When you are done with it, choose **Close** to end the session and free its slot. Workspace settings and layouts are available through the menu and admin MCP tools.
 
 ### 6. Queue runs from your own agent
 
@@ -170,7 +169,7 @@ To move from `bin/service` to the plugin with your history, stop `bin/service`, 
 1. **Queue.** A run waits for a slot. The cap is global across all workspaces: `PANEYARD_MAX_CONCURRENT_RUNS`, default 4.
 2. **Dispatch.** When a slot frees, herdr creates the oldest queued run's worktree on a `paneyard/<name>` branch, from the current local tip of the run's **base branch** (the workspace's default unless the run named another), and opens it as a herdr workspace, where one interactive agent session starts with the task as its first prompt. Several runs of one repository can start from different branches at once.
 3. **Work.** The session explores, edits and runs the repository's own commands, then leaves its changes uncommitted. Commit, push and merge are separate requests; it does only the one you ask for, and a merge goes back into the run's own base branch.
-4. **Report.** Each time it stops, the session calls the `report_idle` MCP tool (`done`, `blocked` or `failed`) with a Markdown report. The session stays open and keeps its slot; reports accumulate as checkpoints on the run screen.
+4. **Report.** Each time it stops, the session calls the `report_idle` MCP tool (`done`, `blocked` or `failed`) with a Markdown report. The session stays open and keeps its slot; reports accumulate as checkpoints shown by the Herdr actions and MCP tools.
 5. **Close.** **Close session** quits the agent, closes its herdr workspace and frees the slot. A run you haven't closed keeps holding its slot.
 6. **Clean up.** herdr removes the worktree once its work is saved (clean, and in the run's base branch or pushed). Otherwise it is kept and flagged until you push, merge, or choose **Remove worktree**. Only Paneyard's own run worktrees are ever removed, never yours.
 

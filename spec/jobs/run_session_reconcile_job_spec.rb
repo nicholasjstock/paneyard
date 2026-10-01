@@ -98,7 +98,7 @@ RSpec.describe RunSessionReconcileJob do
   end
 
   # Closing a run's herdr workspace by hand is the operator finishing with it
-  # without the run screen, so it must release the worktree just as Close
+  # without an operator client polling, so it must release the worktree just as Close
   # session does, not leave it for the next ten-minute sweep.
   it "releases the worktree of a session whose pane is gone" do
     run, = create_run_and_session(prefix: "reconcile-release")

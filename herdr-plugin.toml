@@ -29,7 +29,7 @@ command = ["/bin/sh", "bin/herdr-plugin", "startup"]
 [[actions]]
 id = "menu"
 title = "Paneyard: menu"
-description = "Open one Paneyard menu for queueing, runs, reports, sessions, layouts, setup and the web UI."
+description = "Open one Paneyard menu for queueing, runs, reports, sessions, layouts and setup."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "menu"]
 
@@ -60,13 +60,6 @@ title = "Paneyard: close this run's session"
 description = "Inside a run's herdr workspace: quit its agent, close the workspace and free its slot (asks first)."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "close"]
-
-[[actions]]
-id = "open"
-title = "Paneyard: open in the browser"
-description = "Open Paneyard's web UI (this run's page, inside a run's herdr workspace)."
-contexts = ["workspace"]
-command = ["/bin/sh", "bin/herdr-plugin", "open"]
 
 [[actions]]
 id = "layout"

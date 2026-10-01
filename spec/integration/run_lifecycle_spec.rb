@@ -5,8 +5,8 @@ require "open3"
 # through /mcp/admin, RunDispatchJob, StartRunSessionJob having (fake) herdr
 # make a real git worktree, RunSessionRunner.start! driving that herdr over its real
 # socket until a real agent process is running, report_idle through /mcp/run
-# with the capability the session was launched with, the operator's message
-# box, RunSessionReconcileJob, Close session and WorktreeJanitor.
+# with the capability the session was launched with, operator steering,
+# RunSessionReconcileJob, SessionClose and WorktreeJanitor.
 #
 # The agent is FakeHerdr::Agent in "manual" mode: it becomes ready and takes
 # the prompt, and the spec reports on its behalf. bin/sandbox verify runs the
@@ -48,13 +48,12 @@ RSpec.describe "a run's lifecycle", type: :request do
     expect(session.reload).to be_live
     expect(session.cli_session_id).to start_with("fake-")
 
-    post send_message_workspace_run_path(workspace, run), params: { message: "one more thing" }
+    Orchestrator::RunSessionRunner.prompt!(session, "one more thing")
     expect(fake_herdr.requests_for("agent.prompt").last["text"]).to eq("one more thing")
     expect(wait_for { fake_herdr.pane("w1:p1")[:transcript].scan("received a").size == 2 }).to be(true)
 
-    expect { post close_session_workspace_run_path(workspace, run) }.to have_enqueued_job(RunDispatchJob)
+    expect { Orchestrator::SessionClose.call(run) }.to have_enqueued_job(RunDispatchJob)
 
-    expect(flash[:notice]).to include("removed #{run.worktree_name}")
     expect(run.reload.status).to eq("completed")
     expect(session.reload).to have_attributes(outcome: "done", herdr_pane_id: nil)
     expect(session).to be_ended
@@ -81,9 +80,9 @@ RSpec.describe "a run's lifecycle", type: :request do
     mcp_call("/mcp/run", "report_idle", token: session_token, outcome: "done", summary: "Left a file")
     File.write(File.join(run.target_root, "notes.md"), "uncommitted\n")
 
-    post close_session_workspace_run_path(workspace, run)
+    closed = Orchestrator::SessionClose.call(run)
 
-    expect(flash[:notice]).to include("Kept #{run.worktree_name}")
+    expect(closed[:worktree]).to eq("kept")
     expect(run.reload).to be_kept_worktree
   end
 
@@ -189,9 +188,9 @@ RSpec.describe "a run's lifecycle", type: :request do
       git(workspace.repository_path, "fetch", "-q", ".", "#{run.branch_name}:feature/payments")
       expect(system("git", "-C", workspace.repository_path, "merge-base", "--is-ancestor", run.branch_name, "main")).to be(false)
 
-      post close_session_workspace_run_path(workspace, run)
+      closed = Orchestrator::SessionClose.call(run)
 
-      expect(flash[:notice]).to include("removed #{run.worktree_name}")
+      expect(closed[:worktree]).to eq("removed")
       expect(File.directory?(run.target_root)).to be(false)
       expect(git(workspace.repository_path, "branch", "--list", run.branch_name)).to include(run.branch_name)
       expect(fake_herdr.requests_for("worktree.remove").size).to eq(1)
@@ -203,9 +202,9 @@ RSpec.describe "a run's lifecycle", type: :request do
       commit_in(run.target_root, "fix.txt", "Fix payments")
       git(workspace.repository_path, "merge", "-q", "--ff-only", run.branch_name)
 
-      post close_session_workspace_run_path(workspace, run)
+      closed = Orchestrator::SessionClose.call(run)
 
-      expect(flash[:notice]).to include("Kept #{run.worktree_name}")
+      expect(closed[:worktree]).to eq("kept")
       expect(run.reload).to be_kept_worktree
     end
 
@@ -214,7 +213,7 @@ RSpec.describe "a run's lifecycle", type: :request do
       mcp_call("/mcp/run", "report_idle", token: session_token(run), outcome: "done", summary: "Done")
       operators = File.join(File.dirname(workspace.repository_path), "operators-own")
       git(workspace.repository_path, "worktree", "add", "-q", "-b", "operator/own", operators, "main")
-      post close_session_workspace_run_path(workspace, run)
+      Orchestrator::SessionClose.call(run)
 
       expect(Orchestrator::WorktreeJanitor.sweep(workspace)).to eq(0)
 

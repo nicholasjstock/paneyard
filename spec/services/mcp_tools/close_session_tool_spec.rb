@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe McpTools::CloseSessionTool do
-  it "closes the run's live session the way the run screen does" do
+  it "closes the run's live session for operator clients" do
     run, session = create_run_and_session(prefix: "close-tool")
     session.update!(status: "done", outcome: "done", result: "Finished.")
     allow(Orchestrator::RunSessionRunner).to receive(:finish!) do |s, **|

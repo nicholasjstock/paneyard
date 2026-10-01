@@ -104,7 +104,7 @@ For the cleanup side, `Orchestrator::WorktreeJanitor` removes a run's worktree (
 - `git status --porcelain` is empty in the worktree;
 - `HEAD` is either an ancestor of the run's own base branch (`git merge-base --is-ancestor HEAD refs/heads/<base>`) or contained in some remote-tracking branch (`git branch --remotes --contains HEAD`).
 
-Removal goes through herdr (`worktree.remove`, which needs the worktree's herdr workspace open, so the janitor reopens it first when it was closed). Anything else stays on disk indefinitely and is flagged as a **kept worktree** on the runs list and run screen, where **Remove worktree** removes it by hand. Worktrees you make yourself, and your repository's own checkout, are never touched.
+Removal goes through herdr (`worktree.remove`, which needs the worktree's herdr workspace open, so the janitor reopens it first when it was closed). Anything else stays on disk indefinitely and is reported as a **kept worktree** by the runs action and MCP tools. Worktrees you make yourself, and your repository's own checkout, are never touched.
 
 ### 3. What a run starts with inside the repo
 
@@ -144,16 +144,16 @@ Registration checks everything first (`Orchestrator::WorkspaceRegistration`, whi
 
 From the workspace's runs page, choose **Queue a task**, give it a task, a base branch if not the default, and a driver (and optionally a model). Or queue it from herdr with the plugin's **queue** action, or over MCP (below). Within a few seconds `RunDispatchJob` claims it, and herdr opens a workspace for the run's new worktree with the agent on the left and `nvim` on the right, or with whatever tabs and panes that workspace's layout defines.
 
-It worked when the session calls `report_idle` and the run screen shows its checkpoint. Ask it to commit and push, and `git -C ~/code/my-app ls-remote origin 'paneyard/*'` then lists the branch.
+It worked when the session calls `report_idle` and the report action shows its checkpoint. Ask it to commit and push, and `git -C ~/code/my-app ls-remote origin 'paneyard/*'` then lists the branch.
 
-If the launch fails, the run screen shows the error. The common ones:
+If the launch fails, the runs action shows the error. The common ones:
 
 | Error | Cause |
 | --- | --- |
 | "Base branch `x`: there is no local branch `x`" | The base branch was deleted or renamed after the run was queued ([step 2](#2-branches-and-git-requirements)). |
 | "herdr could not create the worktree" | herdr refused `worktree.create`, for example because something already exists at the path it chose for the branch. |
 | herdr unreachable | herdr isn't running, or `HERDR_SOCKET_PATH` points at the wrong socket. |
-| "never became ready" | The agent CLI is missing from your login shell's `PATH`, isn't signed in, or rejected the model. The run screen keeps the agent pane's last screen. |
+| "never became ready" | The agent CLI is missing from your login shell's `PATH`, isn't signed in, or rejected the model. Paneyard keeps the agent pane's last screen in the run record. |
 | "claude stopped at its folder-trust prompt" | Open `claude` once in the repository and trust it; its worktrees count as the same project. |
 
 ## Workspace layouts
@@ -183,8 +183,8 @@ Have as many tabs as you like, each with as many splits as you like. The agent p
 
 1. **Queue it.** Creating a run starts nothing. It waits for a slot. The cap is global across every workspace: `PANEYARD_MAX_CONCURRENT_RUNS`, default 4.
 2. **Dispatch.** `RunDispatchJob` claims the oldest queued run. `StartRunSessionJob` has herdr create its worktree from the run's base branch and open it as a herdr workspace, and starts one interactive session in it, with the task as its first prompt.
-3. **Work.** The session owns the job. It explores, edits, and runs the repository's own commands, then leaves its changes uncommitted for you to try. Ask it to commit, push, or merge back into its base branch when you're happy; each is a separate request, and it does only the one you ask for. Watch it in your herdr client, or send it a message from the run screen.
-4. **Report.** The session calls the `report_idle` MCP tool (`done`, `blocked`, or `failed`) each time it stops working. This does not end the run: the pane stays open and the slot stays held. Each report is a checkpoint covering the interval since the last one, written as a full Markdown report, and the run screen lists them in order.
+3. **Work.** The session owns the job. It explores, edits, and runs the repository's own commands, then leaves its changes uncommitted for you to try. Ask it to commit, push, or merge back into its base branch when you're happy; each is a separate request, and it does only the one you ask for. Watch and steer it in your herdr client.
+4. **Report.** The session calls the `report_idle` MCP tool (`done`, `blocked`, or `failed`) each time it stops working. This does not end the run: the pane stays open and the slot stays held. Each report is a checkpoint covering the interval since the last one, written as a full Markdown report, and the runs/report actions list them in order.
 5. **Decide.** Read the reports, then either send more work or **Close session**, which quits the CLI, closes the herdr workspace, and frees the slot. An unreviewed run keeps holding its slot, so it blocks the queue. Pull requests are yours to open from a pushed branch.
 6. **Clean up.** `WorktreeJanitor` has herdr remove the worktree on Close session if its work is saved (in its base branch, or pushed; see [Branches and git requirements](#2-branches-and-git-requirements)), and otherwise keeps it and flags it until you push, merge, or remove it.
 
@@ -195,7 +195,7 @@ There is no cost or token accounting for sessions: they are real interactive ter
 ## MCP endpoints
 
 - **`/mcp/run`** is what each session talks to, authenticated by a per-session bearer token that dies with the session. It has `report_idle` and the shared tools below. The orchestrator wires it into each CLI automatically, so you don't configure anything.
-- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs without the web UI. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, `workspace` name, optional `baseBranch` and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, repository path, default base branch, layout, active-run count, and which one `list_runs` and `get_run` default to when `workspace` is omitted), `register_workspace` (`path`, optional `name` and `defaultBaseBranch`; checks everything first and creates nothing if anything is wrong, see [step 5](#5-register-the-workspace)), `update_workspace_layout` (`workspace`, complete layout YAML; empty resets it to the default), `close_session` (`runId`, `workspace`; the run screen's **Close session**, which the herdr plugin's close action uses), and `ping_tool`. The plugin's `paneyard.layout` action builds and validates the layout inside a Herdr popup. Its `paneyard.setup` action detects Claude Code and Codex, asks before changing their user configuration, and registers the plugin's own URL. The older `paneyard.mcp` action is an alias. Manual equivalents are:
+- **`/mcp/admin`** is **unauthenticated** and lets your own MCP clients queue and inspect runs. Keep it on loopback (see [SECURITY.md](../SECURITY.md)). Its tools are `queue_run` (task, `workspace` name, optional `baseBranch` and `driver`), `list_runs`, `get_run`, `list_workspaces` (each workspace's name, repository path, default base branch, layout, active-run count, and which one `list_runs` and `get_run` default to when `workspace` is omitted), `register_workspace` (`path`, optional `name` and `defaultBaseBranch`; checks everything first and creates nothing if anything is wrong, see [step 5](#5-register-the-workspace)), `update_workspace_layout` (`workspace`, complete layout YAML; empty resets it to the default), `close_session` (`runId`, `workspace`; the herdr plugin's close action uses it), and `ping_tool`. The plugin's `paneyard.layout` action builds and validates the layout inside a Herdr popup. Its `paneyard.setup` action detects Claude Code and Codex, asks before changing their user configuration, and registers the plugin's own URL. The older `paneyard.mcp` action is an alias. Manual equivalents are:
 
   ```sh
   claude mcp add --transport http -s user paneyard http://127.0.0.1:7263/mcp/admin

@@ -80,14 +80,13 @@ It is a Rails 8 app organised around `Workspace` as the top-level boundary: runs
 
 | Path | What lives there |
 | --- | --- |
-| `app/controllers`, `app/views` | The web UI. |
+| `app/controllers` | The JSON health endpoint. |
 | `app/models` | Persistence: `Workspace`, `Run`, `RunSession`, `RunCheckpoint`, … |
 | `app/jobs` | Solid Queue jobs: dispatch, starting a session, reconcile, worktree cleanup, Telegram polling. |
 | `app/services/orchestrator` | Orchestration logic: run and session state, base branches, prompts, concurrency, layouts, and the two MCP endpoints (mounted in `config/routes.rb`). |
 | `app/services/orchestrator/runner` | Everything that touches the machine: herdr, agent CLIs, git worktrees, processes (see [the runner boundary](#design-rules)). |
 | `app/services/mcp_tools` | The MCP tools behind `/mcp/run` and `/mcp/admin`. |
 | `app/services/remote_control` | Telegram remote control and its adapter interface. |
-| `app/javascript` | importmap + Stimulus controllers. |
 | `db/` | Schema and migrations. |
 | `lib/fake_herdr`, `lib/fake_telegram`, `script/fake_agent` | Test doubles that speak the real protocols. |
 | `lib/paneyard_sandbox`, `bin/sandbox`, `bin/preflight` | The isolated sandbox instance and the production boot smoke test. |
@@ -109,7 +108,7 @@ bin/verify
 | `git diff --check` | Whitespace errors. |
 | `bin/preflight` | Boots this checkout as production would, on a scratch database and a free port: eager loading, routes, `config/queue.yml`, the recurring schedule, migrations, and Puma plus Solid Queue actually serving requests. |
 | `bin/sandbox verify` | Boots a fresh isolated instance and drives a whole run lifecycle through it over real HTTP. |
-| `bin/bundler-audit`, `bin/importmap audit`, `bin/brakeman` | Known-vulnerable gems and JavaScript pins, and Rails static security analysis. |
+| `bin/bundler-audit`, `bin/brakeman` | Known-vulnerable gems and Rails static security analysis. |
 
 The test layers, and where a change belongs (details in AGENTS.md, ["Testing Guidelines"](./AGENTS.md#testing-guidelines)):
 
@@ -130,7 +129,6 @@ Don't consume live model capacity to test dispatch or argument building.
 ## Style
 
 - Run `bin/rubocop` (Rails Omakase). Two-space indentation, `CamelCase` classes, `snake_case` files, Rails naming (`*_controller.rb`, `*_job.rb`, service objects under `app/services/...`).
-- Frontend is importmap + Stimulus: controllers in `app/javascript/controllers`, named like `hello_controller.js`. There is no Node build.
 - Match the comment density and idiom of the surrounding code. Comments here tend to explain *why*, including what was verified live against herdr or an agent CLI.
 
 ## Design rules

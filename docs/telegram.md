@@ -40,7 +40,7 @@ The app registers these with Telegram, so tapping **/** or **Menu** in the chat 
 | `/pane <run>` | Where that session stands. If it has reported (`report_idle`) and hasn't gone back to work since, you get that recap. Otherwise you get its live pane, and the message updates itself every few seconds for 3 minutes. If the session reports during that time, the message says so and the recap follows. |
 | `/screen <run> [lines]` | The raw newest lines of the pane, once (default 200, up to 1000). A long read is split over up to 5 messages, oldest first; whatever still doesn't fit is dropped from the top, and the first message says how many lines that was. Give a smaller number for just the bottom of the screen. |
 | `/report <run>` | That run's newest recap, rendered as Markdown. This also works after the session is closed. |
-| `/send <run> <text>` | Types `<text>` into the session as live input, exactly like the run screen's message box. |
+| `/send <run> <text>` | Types `<text>` into the session as live input, exactly like typing in its Herdr pane. |
 | `/send <text>`, or just type | The same, to the run you last looked at or wrote to (`/pane`, `/screen`, `/report`, `/send <run>` or a reply), for up to 12 hours. Starting with another run's four-character ref or full id still sends there. |
 
 `<run>` is the run id's last four characters (the lists print tappable commands such as `/pane_33bd` and `/screen_33bd`), a prefix of the worktree name, or the full run id. Leave it out (`/screen 120`, `/pane`, `/report`) to mean the run you last looked at or wrote to. Every message the bot sends about a run starts with `run <id> ·`, and **replying to one of those messages sends your reply to that run**.

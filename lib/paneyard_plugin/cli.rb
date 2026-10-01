@@ -1,7 +1,6 @@
 require "io/console"
 require "json"
 require "open3"
-require "rbconfig"
 require "shellwords"
 require "tempfile"
 require "yaml"
@@ -20,9 +19,8 @@ module PaneyardPlugin
 
         startup      start Paneyard if it is not running ([[startup]])
         start | restart | stop | status
-        url          print the web UI's URL
+        url          print the daemon's base URL
         mcp-url      print /mcp/admin's URL (and show it as a herdr notification)
-        open         open the web UI (this run's page, inside a run's herdr workspace)
         menu-ui | queue-ui | runs-ui | report-ui | close-ui | layout-ui | setup-ui | mcp-ui
                      the interactive popups behind the plugin's actions
     TEXT
@@ -47,7 +45,6 @@ module PaneyardPlugin
       when "status" then status
       when "url" then puts(running!.url)
       when "mcp-url" then mcp_url
-      when "open" then open
       when "menu-ui" then interactive { menu_ui }
       when "queue-ui" then interactive { queue_ui }
       when "runs-ui" then interactive { runs_ui }
@@ -108,11 +105,6 @@ module PaneyardPlugin
       url = "#{running!.url}/mcp/admin"
       puts url
       notify("Paneyard MCP", url)
-    end
-
-    def open
-      result = running!
-      browse(this_run_url(result.url) || result.url)
     end
 
     def layout_ui
@@ -322,7 +314,6 @@ module PaneyardPlugin
       say "x  Close this run's session"
       say "l  Edit this workspace's layout"
       say "s  Configure coding-agent MCP"
-      say "o  Open Paneyard in the browser"
       say ""
 
       case ask("Choose an action (Enter cancels): ")&.downcase
@@ -332,7 +323,6 @@ module PaneyardPlugin
       when "x" then this_run_ui(:close)
       when "l" then layout_ui
       when "s" then mcp_ui
-      when "o" then open
       else say "Cancelled."
       end
     end
@@ -388,10 +378,9 @@ module PaneyardPlugin
           entries.each_with_index { |(workspace, run), index| say run_line(index + 1, workspace, run) }
         end
         say ""
-        choice = ask("Number for a run, o to open Paneyard, Enter to refresh, q to quit: ")
+        choice = ask("Number for a run, Enter to refresh, q to quit: ")
         case choice
         when nil, "q" then return
-        when "o" then browse(@url)
         when /\A\d+\z/
           workspace, run = entries[choice.to_i - 1]
           next say("No run #{choice}.") unless run
@@ -548,11 +537,10 @@ module PaneyardPlugin
         options = []
         options << "f to go to its herdr workspace" if live && session["herdrWorkspace"]
         options << "c to close its session" if live
-        options += [ "o to open it in the browser", "r to re-read", "b back", "q quit" ]
+        options += [ "r to re-read", "b back", "q quit" ]
         case ask("#{options.join(', ')}: ")
         when nil, "q" then return :quit
         when "b" then return :back
-        when "o" then browse(run_url(workspace, run))
         when "f"
           next unless live && session["herdrWorkspace"]
 
@@ -664,7 +652,7 @@ module PaneyardPlugin
       end
     end
 
-    # --- daemon, herdr and the browser -----------------------------------
+    # --- daemon and herdr -------------------------------------------------
 
     def daemon
       @daemon ||= Daemon.new(paths:, env: @env)
@@ -698,23 +686,6 @@ module PaneyardPlugin
 
       notify("Paneyard moved to port #{result.port}",
         "Port #{result.previous_port} was taken. Re-register MCP: #{result.url}/mcp/admin (action: Connect Claude Code)")
-    end
-
-    def this_run_url(base)
-      client = Client.new(base)
-      workspace, run = WorkspaceMatch.run_in_herdr_workspace(client.runs, herdr_workspace_id)
-      run && run_url(workspace, run, base)
-    rescue Client::Error
-      nil
-    end
-
-    def run_url(workspace, run, base = @url)
-      "#{base}/workspaces/#{workspace.fetch('id')}/runs/#{run.fetch('runId')}"
-    end
-
-    def browse(url)
-      opener = RbConfig::CONFIG["host_os"].include?("darwin") ? "open" : "xdg-open"
-      system(opener, url, out: File::NULL, err: File::NULL) || puts(url)
     end
 
     def notify(title, body)

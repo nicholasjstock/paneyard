@@ -5,8 +5,7 @@ module Orchestrator
   # a pane down but the operator. The worktree goes too if its work is
   # already pushed or merged; otherwise it stays for the operator to deal with.
   #
-  # One place for the run screen's Close session button and the admin MCP
-  # close_session tool, so the two can never disagree about what closing does.
+  # One place for the Herdr close action and the admin MCP close_session tool.
   module SessionClose
     class NoLiveSession < StandardError; end
 

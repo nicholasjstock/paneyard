@@ -37,7 +37,6 @@ class RunSession < ApplicationRecord
 
   scope :live, -> { where(ended_at: nil) }
 
-  after_commit :broadcast_refresh
 
   def self.issue_capability
     token = SecureRandom.hex(32)
@@ -63,11 +62,5 @@ class RunSession < ApplicationRecord
   # herdr server restarted.
   def pane_gone?
     herdr_pane_id.blank?
-  end
-
-  private
-
-  def broadcast_refresh
-    Turbo::StreamsChannel.broadcast_refresh_to("run_#{run.run_id}") if run
   end
 end

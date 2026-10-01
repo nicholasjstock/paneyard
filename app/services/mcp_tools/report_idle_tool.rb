@@ -10,7 +10,7 @@ module McpTools
   # happens next -- send more work, close the session -- is the operator's
   # decision.
   #
-  # The summary is the substance, not a status line: the run screen shows the
+  # The summary is the substance, not a status line: operator clients show the
   # checkpoints and not the pane, so each one has to stand on its own as a
   # report of what was done.
   #

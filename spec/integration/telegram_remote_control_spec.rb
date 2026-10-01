@@ -113,7 +113,7 @@ RSpec.describe "Telegram remote control", :fake_herdr, :fake_telegram, type: :re
 
     operator("/pane_#{ref(run)}")
     again = fake_telegram.messages.last
-    post close_session_workspace_run_path(workspace, run)
+    Orchestrator::SessionClose.call(run)
     expect(tick_stream).to be(false)
     expect(again.text).to include("Session ended.")
   end
@@ -170,7 +170,7 @@ RSpec.describe "Telegram remote control", :fake_herdr, :fake_telegram, type: :re
   it "still gives the recap once the session is closed" do
     run = queue_and_launch("Close me")
     report(run, "done", "Closed out.")
-    post close_session_workspace_run_path(workspace, run)
+    Orchestrator::SessionClose.call(run)
 
     operator("/report #{ref(run)}")
 

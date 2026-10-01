@@ -202,7 +202,7 @@ module Orchestrator
       # pane.process_info's "process_info" which this client reads directly. A
       # missing key is raised as a Herdr::Error rather than a KeyError so callers
       # that already rescue Herdr::Error -- Runner::Local#snapshot, whose
-      # whole job is to degrade to nil rather than take the run screen down --
+      # whole job is to degrade to nil rather than break a run-status read --
       # keep working.
       def pane_read(pane_id, source: "recent", lines: nil, strip_ansi: true)
         params = { pane_id:, source:, strip_ansi: }

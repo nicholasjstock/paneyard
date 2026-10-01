@@ -44,7 +44,7 @@ module Orchestrator
       runs.where.not(status: Run::SESSION_ACTIVE_STATUSES).where.not(id: RunSession.live.select(:run_id))
     end
 
-    # The explicit per-run removal behind the run screen's button. `force`
+    # Explicit per-run removal for operator clients. `force`
     # here is the operator's own decision about their own uncommitted work.
     def remove_for_run!(run, force: false)
       raise Error, "Run #{run.run_id} has no managed worktree" if run.worktree_name.blank? || run.target_root.blank?
@@ -54,7 +54,7 @@ module Orchestrator
     end
 
     # Closing a session is the operator saying they are done with it --
-    # whether by Close session on the run screen or by closing the run's herdr
+    # whether by the close action or by closing the run's herdr
     # workspace by hand, which RunSessionReconcileJob picks up. Both call this.
     # Removes the worktree when nothing in it would be lost, and returns
     # whether it did.

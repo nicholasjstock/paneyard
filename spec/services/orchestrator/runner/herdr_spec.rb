@@ -103,7 +103,7 @@ RSpec.describe Orchestrator::Runner::Herdr do
     end
 
     # A Herdr::Error, not a KeyError: RunSessionRunner.snapshot rescues the
-    # former to degrade to nil instead of taking the run screen down with a 500.
+    # former to degrade to nil instead of breaking a run-status read.
     it "raises a Herdr::Error when the response carries no text at all" do
       allow(described_class).to receive(:request!).and_return("type" => "pane_read", "read" => {})
 

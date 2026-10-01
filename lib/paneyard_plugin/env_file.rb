@@ -34,7 +34,7 @@ module PaneyardPlugin
       # TELEGRAM_BOT_TOKEN=
       # TELEGRAM_ALLOWED_USER_IDS=123456789
 
-      # A fixed port for the web UI and /mcp/admin. By default Paneyard picks a
+      # A fixed port for /mcp/admin and /mcp/run. By default Paneyard picks a
       # free one the first time and keeps it.
       # PORT=
 

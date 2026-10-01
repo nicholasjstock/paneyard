@@ -1,7 +1,7 @@
 module Orchestrator
   # The MCP surface a local, non-run MCP client gets -- principally an
   # operator's own everyday Claude Code session, registered as a remote MCP
-  # server so they can queue and inspect runs without opening the web UI.
+  # server so they can queue and inspect runs from their coding agent.
   # Reuses the exact tool classes RunMcpServer also carries: queuing a run
   # or asking what's running is the same operation regardless of who is
   # asking, and McpTools::WorkspaceResolution is what lets the same tool
