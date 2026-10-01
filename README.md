@@ -6,6 +6,25 @@ Paneyard is a local, single-operator queue and supervisor for interactive AI cod
 
 *A live take with real Claude Code (Sonnet), sped up where the agents work: recorded in Docker with `demo/bin/record`, see [docs/demo-recording-plan.md](./docs/demo-recording-plan.md).*
 
+## Deterministic or agentic
+
+One of the hardest parts of figuring out what an agent factory should be is deciding which parts are deterministic and belong in code, and which are agentic and belong to the agent.
+
+Paneyard draws the line like this:
+
+| Code owns | The agent owns |
+| --- | --- |
+| Queue order, admission and slot ownership | How to do the task |
+| Worktree and herdr workspace lifecycle | What to read, change and test |
+| Run and session state | When it is done, blocked or failed, and what to report |
+| The rules for safe worktree cleanup | How to carry out a commit, push or merge when you ask |
+
+If something must be true for Paneyard to stay correct, code owns it. If it requires judgment about the work, the agent owns it. Paneyard keeps the first category as small, explicit state in SQLite and deterministic code; none of those invariants depend on a model remembering or correctly interpreting an instruction.
+
+An earlier version drew the line elsewhere. An LLM planner split tasks into steps, handed them to one-shot workers and tried to recover when they failed. Making that reliable kept adding machinery around the planner: step queues, a chaperone, acceptance criteria, recovery paths and capacity failover. Replacing that loop with one live interactive session per run removed most of that machinery; the rewrite cut the app from about 12.7k lines to 4.6k and the MCP surface from 30 tools to 9.
+
+If you want a planner, bring your own: connect the Claude or Codex session you already work in to Paneyard's MCP endpoint and let it queue runs. Paneyard does not need another model between you and the sessions doing the work.
+
 It installs as a herdr plugin and is used from one menu inside herdr: queue a task for the repository you are in, read a run's report, close its session, or change its layout. Underneath it is a Rails 8 app running on your own machine, which the plugin starts and looks after for you. Rails decides *which* task runs, *where*, and what happens to the worktree afterwards; the agent session decides everything else. There is no planner, no step queue and no pull-request automation.
 
 > [!WARNING]
@@ -13,6 +32,7 @@ It installs as a herdr plugin and is used from one menu inside herdr: queue a ta
 
 ## Contents
 
+- [Deterministic or agentic](#deterministic-or-agentic)
 - [Security model](#security-model)
 - [Requirements](#requirements)
 - [Getting started](#getting-started)
