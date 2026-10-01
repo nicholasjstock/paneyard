@@ -57,7 +57,7 @@ PATH="$(dirname "$verify_ruby"):$PATH" BUNDLE_GEMFILE="$root/Gemfile" BUNDLE_PAT
   "$verify_ruby" -S bundle check
 PATH="$(dirname "$verify_ruby"):$PATH" BUNDLE_GEMFILE="$root/Gemfile" BUNDLE_PATH="$verify/vendor/bundle" \
   BUNDLE_WITHOUT="development:test" \
-  "$verify_ruby" -rbundler/setup -e 'require "rails"; require "sqlite3"; require "puma"; require "bootsnap"; require "commonmarker"'
+  "$verify_ruby" -rbundler/setup -e 'require "rails"; require "sqlite3"; require "puma"; require "bootsnap"'
 if command -v sha256sum >/dev/null 2>&1; then
   sha256sum "$archive" > "$archive.sha256"
 else
