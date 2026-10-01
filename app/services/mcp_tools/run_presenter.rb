@@ -44,6 +44,9 @@ module McpTools
         outcome: session.outcome,
         result: session.result,
         pane: session.herdr_pane_id,
+        # The run's own herdr workspace, which is how the herdr plugin tells
+        # that an action was invoked from inside this run.
+        herdr_workspace: session.herdr_workspace_id,
         last_seen_at: session.last_seen_at&.iso8601
       }.compact
     end

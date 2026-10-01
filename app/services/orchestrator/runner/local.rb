@@ -15,8 +15,10 @@ module Orchestrator
       attr_reader :runtime_root
 
       # runtime_root is where each session's runtime files (the CLI's MCP
-      # config, its prompt) are written.
-      def initialize(runtime_root: Rails.root.join("tmp", "run_sessions"))
+      # config, its prompt) are written. PANEYARD_RUNTIME_DIR moves it out of
+      # the app's tmp/: the herdr plugin keeps it in its state directory,
+      # since a reinstall replaces the plugin's checkout under live sessions.
+      def initialize(runtime_root: ENV["PANEYARD_RUNTIME_DIR"].presence || Rails.root.join("tmp", "run_sessions"))
         @runtime_root = runtime_root.to_s
       end
 

@@ -59,6 +59,8 @@ To change repo access later (add/remove repos), go to `https://github.com/settin
 
 ## Configuring the Orchestrator
 
+With the herdr plugin, put the three variables below (without `export`) in `$(herdr plugin config-dir paneyard)/.env`, the private key in double quotes across its lines, then run `herdr plugin action invoke paneyard.restart --plugin paneyard`. The rest of this section is for running from a clone.
+
 ### Option 1: Environment variables
 
 Set these in the environment the orchestrator starts from (the shell you run `bin/dev` or `bin/service start`/`restart` in):
@@ -75,7 +77,7 @@ export GITHUB_APP_INSTALLATION_ID=98765       # Optional -- see note below befor
 
 ### Option 2: Rails credentials
 
-Store them in the encrypted credentials file, which needs your own `config/master.key` (see the README's [Run it day to day](./README.md#2-run-it-day-to-day); `config/*.key` is gitignored, so never commit it):
+Store them in the encrypted credentials file, which needs your own `config/master.key` (see the README's [Running without the plugin](./README.md#running-without-the-plugin); `config/*.key` is gitignored, so never commit it):
 
 ```bash
 bin/rails credentials:edit

@@ -6,7 +6,7 @@ Paneyard is a local, single-operator queue and supervisor for interactive AI cod
 
 *A live take with real Claude Code (Sonnet), sped up where the agents work: recorded in Docker with `demo/bin/record`, see [docs/demo-recording-plan.md](./docs/demo-recording-plan.md).*
 
-It is a Rails 8 app that runs on your own machine. Rails decides *which* task runs, *where*, and what happens to the worktree afterwards; the agent session decides everything else. There is no planner, no step queue and no pull-request automation.
+It installs as a herdr plugin and is used from inside herdr: keys to queue a task for the repository you are in, read a run's report, or close its session. Underneath it is a Rails 8 app running on your own machine, which the plugin starts and looks after for you. Rails decides *which* task runs, *where*, and what happens to the worktree afterwards; the agent session decides everything else. There is no planner, no step queue and no pull-request automation.
 
 > [!WARNING]
 > **Read the [security model](#security-model) before you run this.** It has no authentication, and it hands AI agents unrestricted access to the repositories you register and to your user account.
@@ -16,11 +16,13 @@ It is a Rails 8 app that runs on your own machine. Rails decides *which* task ru
 - [Security model](#security-model)
 - [Requirements](#requirements)
 - [Getting started](#getting-started)
-  1. [Install](#1-install)
-  2. [Run it day to day](#2-run-it-day-to-day)
-  3. [Register a workspace](#3-register-a-workspace)
-  4. [Queue a run](#4-queue-a-run)
+  1. [Install the plugin](#1-install-the-plugin)
+  2. [Bind keys](#2-bind-keys)
+  3. [Queue a task](#3-queue-a-task)
+  4. [Read reports and close sessions](#4-read-reports-and-close-sessions)
   5. [Queue runs from your own agent](#5-queue-runs-from-your-own-agent)
+  - [Settings, updates and removal](#settings-updates-and-removal)
+  - [Running without the plugin](#running-without-the-plugin)
 - [How a run works](#how-a-run-works)
 - [Workspace layouts](#workspace-layouts)
 - [Configuration](#configuration)
@@ -33,75 +35,118 @@ It is a Rails 8 app that runs on your own machine. Rails decides *which* task ru
 This is a tool for one trusted person on their own machine. Treat anything that can reach it as having a shell on that machine. [SECURITY.md](./SECURITY.md) has the full threat model and how to report a vulnerability.
 
 - **No authentication.** Every web page, every form, and the `/mcp/admin` MCP endpoint are open to whoever can connect. There are no user accounts; the operator is whoever is at the keyboard.
-- **Loopback only.** `bin/service` / `bin/production` bind to `127.0.0.1` and `bin/dev` to `localhost`, so nothing else on your network can connect. In production the app also answers only loopback `Host` names (`localhost`, `127.0.0.1`, `[::1]`), which stops DNS-rebinding attacks from web pages you visit. `BINDING` and `PANEYARD_ALLOWED_HOSTS` widen this; if you set either, whatever sits in front of the app must provide the authentication it lacks.
+- **Loopback only.** The plugin, `bin/service` and `bin/production` bind to `127.0.0.1` and `bin/dev` to `localhost`, so nothing else on your network can connect. In production the app also answers only loopback `Host` names (`localhost`, `127.0.0.1`, `[::1]`), which stops DNS-rebinding attacks from web pages you visit. `BINDING` and `PANEYARD_ALLOWED_HOSTS` widen this; if you set either, whatever sits in front of the app must provide the authentication it lacks.
 - **Agents run with approvals bypassed.** Each session is launched with full access and no confirmation prompts: `claude --permission-mode bypassPermissions`, `codex -s danger-full-access`, `opencode --auto`. It works in its own worktree but is not sandboxed: it can read and write anything your user account can, run any command, and use your network. The only review gate is you, reading its report and trying its changes before asking it to commit.
 - **Registered repositories are fully exposed to their sessions**, including any secrets you keep in them, and a session's environment includes a GitHub token when one is available (below).
 - **It can edit itself.** If you register this repository as one of its own workspaces, a session can change the orchestrator's code, and the running instance hot-reloads application code (`PANEYARD_HOT_RELOAD`). Nothing stops a session from merging into `main` when asked to.
 - **Telegram remote control** (optional, off unless configured) lets the Telegram user IDs on an allow-list list sessions, read their panes and reports, and type into them from a private chat. That is equivalent to shell access. Pane text and reports also pass through Telegram's servers, and bot chats are not end-to-end encrypted.
 - **GitHub credentials.** Rails itself makes no GitHub calls except, if you configure a [GitHub App](./GITHUB_APP_SETUP.md), minting an installation token. The session receives that token (or, without an App, the output of your own `gh auth token`) as `GH_TOKEN`, and can do anything that token allows on the repositories it covers. Scope the App to the repositories you register.
-- **Plaintext state.** Runs, reports and recorded workspace environment variables are stored unencrypted in SQLite under `storage/`.
+- **Plaintext state.** Runs, reports and recorded workspace environment variables are stored unencrypted in SQLite: in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard/storage`), or under `storage/` for `bin/service`. The plugin's `.env` holds any Telegram or GitHub App secrets you give it, readable by your user only.
+- **The plugin is code herdr runs as you.** herdr does not sandbox plugins. Its startup hook starts Paneyard whenever herdr starts; review `herdr-plugin.toml` and `bin/herdr-plugin` before installing, as herdr's install preview suggests.
 
 ## Requirements
 
+- **[herdr](https://herdr.dev) 0.7.0 or newer, running.** herdr owns every terminal pane and agent process, and Paneyard installs into it as a plugin.
 - **macOS.** This is where it is developed and tested. Linux is untested; nothing in the code is knowingly macOS-only, but expect rough edges. Windows is not supported.
-- **Ruby** at the version in [`.ruby-version`](./.ruby-version) (currently 4.0.1), with Bundler, and **SQLite 3**.
-- **git**, with each target repository checked out as described in [Preparing a repository](./docs/operating.md#preparing-a-repository).
-- **[herdr](https://herdr.dev), running.** Required. herdr owns every terminal pane and agent process; Rails talks to its socket at `~/.config/herdr/herdr.sock` (override with `HERDR_SOCKET_PATH`). Without it a run fails at launch.
-- **At least one agent CLI, already signed in:** `claude`, `codex` and/or `opencode`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow. Unless you choose otherwise, a session uses a sensible default for its driver (`Orchestrator::DefaultModels`; for some drivers that means the CLI's own configured model). Override it per driver with `PANEYARD_CLAUDE_MODEL`, `PANEYARD_CODEX_MODEL` or `PANEYARD_OPENCODE_MODEL`, or pick a model per run in the UI.
+- **Ruby 4.0** (the version in [`.ruby-version`](./.ruby-version)) somewhere on the machine, and a C compiler for a few gems' native extensions (Xcode command-line tools on macOS). It does not have to be your default Ruby: the plugin finds one installed with asdf, mise, rbenv, chruby or Homebrew, or you point it at one. You never run Rails or Bundler yourself.
+- **git**, with each repository you want to queue tasks for checked out as described in [Preparing a repository](./docs/operating.md#preparing-a-repository).
+- **At least one agent CLI, already signed in:** `claude`, `codex` and/or `opencode`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow, or Claude Code's folder-trust prompt: open `claude` once in a new repository's `main` checkout and trust it. Unless you choose otherwise, a session uses a sensible default model for its driver (`Orchestrator::DefaultModels`).
 - **Optional:** `nvim` (the default pane layout opens it beside the agent), `gh` signed in (for pushing over HTTPS without a GitHub App), `curl` (only for a GitHub App).
 
 ## Getting started
 
-### 1. Install
+### 1. Install the plugin
 
 ```sh
-git clone <this repository's URL> paneyard
-cd paneyard
-bin/setup
+herdr plugin install nicholasjstock/paneyard
 ```
 
-`bin/setup` installs gems. It does not start anything, and you don't need to set up a database: `bin/service` does that when it starts (next step).
+herdr shows what the plugin will run, then installs its gems (about a minute the first time). That is the whole installation: Paneyard starts on its own the next time herdr starts, or the first time you use any of its actions. Its database, logs and generated secrets live in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard`), and it picks a free local port for itself and keeps it.
 
-### 2. Run it day to day
+### 2. Bind keys
 
-Paneyard is meant to stay up all day. `bin/service` runs it in production mode, detached from your terminal, on port 7263 by default, logging to `log/production_service.log`. Its database is `storage/production.sqlite3`, created on first start and migrated on every start, so a restart after pulling an update applies any new migrations.
+Plugins can't bind keys themselves. Add these to herdr's `config.toml` (or pick your own keys), then `herdr server reload-config`:
 
-```sh
-bin/rails credentials:edit   # once: see the note below
-bin/service start            # also: stop | restart | status
+```toml
+[[keys.command]]
+key = "prefix+q"
+type = "plugin_action"
+command = "paneyard.queue"
+description = "paneyard: queue a task here"
+
+[[keys.command]]
+key = "prefix+r"
+type = "plugin_action"
+command = "paneyard.runs"
+description = "paneyard: runs and reports"
+
+[[keys.command]]
+key = "prefix+x"
+type = "plugin_action"
+command = "paneyard.close"
+description = "paneyard: close this run's session"
 ```
 
-Then open <http://127.0.0.1:7263>. `start` waits for the app to answer and fails after two minutes, naming the log. After changing credentials or other boot-time configuration, run `bin/service restart`; [Long-running: `bin/service`](./docs/operating.md#long-running-binservice) has the details.
+Every action is also available without a key: `herdr plugin action list --plugin paneyard`, and `herdr plugin action invoke paneyard.<id> --plugin paneyard`.
 
-> [!NOTE]
-> Production mode needs a `secret_key_base`, which lives in Rails' encrypted credentials. A fresh clone has neither `config/master.key` nor `config/credentials.yml.enc` (both are gitignored), so run `bin/rails credentials:edit`, which creates a new key and credentials file containing a `secret_key_base`. That file is also where optional Telegram and GitHub App settings go. Alternatively, export `SECRET_KEY_BASE` (for example from `bin/rails secret`) before `bin/service start`.
+| Action | What it does |
+| --- | --- |
+| `paneyard.queue` | In a pane inside a repository: queue a task for it. The first time, it registers the repository as a workspace (and tells you what to fix if its layout is wrong). |
+| `paneyard.runs` | Every run, newest first. Pick one to read its newest report, jump to its herdr workspace, close its session, or open it in the browser. |
+| `paneyard.report` | Inside a run's herdr workspace: that run's newest report. |
+| `paneyard.close` | Inside a run's herdr workspace: close its session (asks first). |
+| `paneyard.open` | Open the web UI, at the run's page when invoked in a run's workspace. |
+| `paneyard.mcp` | Connect Claude Code to Paneyard ([step 5](#5-queue-runs-from-your-own-agent)). |
+| `paneyard.mcp-url` | Show the `/mcp/admin` URL as a notification. |
+| `paneyard.restart`, `paneyard.stop` | Apply a settings change; stop Paneyard (any action starts it again). Running sessions are not affected by either. |
 
-There is also `bin/dev`, which runs the app in the foreground in development mode, and `bin/sandbox`, an isolated instance with a fake herdr and fake agent. Both are for working on Paneyard itself; see [CONTRIBUTING.md](./CONTRIBUTING.md#running-it-in-development).
+### 3. Queue a task
 
-### 3. Register a workspace
-
-A **workspace** is a directory that holds a repository's `main` checkout; run worktrees are created beside it:
+Paneyard works on repositories laid out as a **workspace**: a directory holding the repository's `main` checkout, with each run's worktree created beside it.
 
 ```sh
 mkdir -p ~/code/my-app
 git clone git@github.com:you/my-app.git ~/code/my-app/main   # must be on branch main, with an origin remote
 ```
 
-Open Paneyard's URL, choose **Add workspace**, and enter a name and the **workspace root** (`~/code/my-app`; giving `.../main` also works). Registration checks that layout and lists anything to fix before it saves. You can also register it from your own agent with the `register_workspace` tool over `/mcp/admin` ([step 5](#5-queue-runs-from-your-own-agent)). [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
+Open a herdr pane anywhere in `~/code/my-app/main` and press your **queue** key. Describe the task (a blank line submits), pick a driver (`claude`, `codex` or `opencode`; Enter for `claude`), and it is queued. When a slot frees, a herdr workspace named after the run's worktree opens with the agent in it. [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
 
-### 4. Queue a run
+### 4. Read reports and close sessions
 
-On the workspace's runs page, choose **Queue a task**, describe the task, pick a driver (`claude`, `codex` or `opencode`) and optionally a model, then **Queue**. Within a few seconds a herdr workspace named after the run's worktree opens with the agent in it. When the agent stops, it posts a report to the run screen. Read it, send it more instructions from the message box if needed, ask it to commit, push or merge when you are happy, and choose **Close session** to free the slot.
+When the agent stops, it posts a report. Read it with the **runs** key (or **report** inside the run's workspace). Type into the agent's pane to give it more work, and ask it to commit, push or merge when you are happy. When you are done with it, the **close** key ends the session and frees its slot. The web UI (`paneyard.open`) has the same, plus workspace settings and the [layout editor](#workspace-layouts).
 
 ### 5. Queue runs from your own agent
 
-Optionally, Paneyard's `/mcp/admin` endpoint lets an MCP client, such as your everyday Claude Code session, queue and inspect runs without opening the web UI. Register it once, at user scope so it is available from every project:
+Paneyard's `/mcp/admin` endpoint lets an MCP client, such as your everyday Claude Code session, queue and inspect runs. The `paneyard.mcp` action shows its URL and registers it for you at user scope, so it is available from every project. By hand:
 
 ```sh
-claude mcp add --transport http -s user paneyard-admin http://127.0.0.1:7263/mcp/admin
+claude mcp add --transport http -s user paneyard "$(cat ~/.local/state/herdr/plugins/paneyard/url)/mcp/admin"
 ```
 
-Use the port your instance listens on (7263 for `bin/service`). Then ask your agent to queue a task in a workspace, list runs, or check on one. The endpoint is unauthenticated, like the rest of the app, so keep it on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
+The port stays the same across restarts; if it ever has to change (something else took it), Paneyard shows a notification, and `paneyard.mcp` re-registers in one key. Then ask your agent to queue a task, list runs, or check on one. The endpoint is unauthenticated, like the rest of the app, so it only listens on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
+
+### Settings, updates and removal
+
+- **Settings** live in `$(herdr plugin config-dir paneyard)/.env`, written on first start with every option commented out: concurrency, default models, [Telegram](./docs/telegram.md), a [GitHub App](./GITHUB_APP_SETUP.md), a fixed port, and which Ruby to use. Run `paneyard.restart` after editing it (the next action notices the edit and restarts too).
+- **Updating:** `herdr plugin install nicholasjstock/paneyard` again (`--ref <tag-or-commit>` to pin a version). The next action or herdr start restarts Paneyard on the new code and migrates its database; state and settings are kept.
+- **Removing:** `herdr plugin action invoke paneyard.stop --plugin paneyard`, then `herdr plugin uninstall paneyard`. herdr leaves the state and config directories in place; delete them to remove your run history too.
+- **Logs:** `~/.local/state/herdr/plugins/paneyard/log/paneyard.log`, and `herdr plugin log list --plugin paneyard` for the actions themselves.
+
+### Running without the plugin
+
+Paneyard is an ordinary Rails app, and the plugin only packages it. To run it from a clone instead (as its contributors do):
+
+```sh
+git clone https://github.com/nicholasjstock/paneyard.git && cd paneyard
+bin/setup                    # install gems
+bin/rails credentials:edit   # once: creates a key and a secret_key_base (or export SECRET_KEY_BASE)
+bin/service start            # also: stop | restart | status; http://127.0.0.1:7263
+```
+
+`bin/service` keeps its state in the clone's `storage/` and logs to `log/production_service.log`; [Long-running: `bin/service`](./docs/operating.md#long-running-binservice) has the details, and [CONTRIBUTING.md](./CONTRIBUTING.md) covers `bin/dev` and the sandbox.
+
+> [!IMPORTANT]
+> **Run one Paneyard per machine.** Two instances that manage the same repository remove each other's fresh worktrees: each one's cleanup treats a worktree its own database doesn't know as abandoned. To move from `bin/service` to the plugin, stop `bin/service`, run `paneyard.stop`, copy `storage/production*.sqlite3` from the clone into `~/.local/state/herdr/plugins/paneyard/storage/`, and invoke any action. Copy `TELEGRAM_*`/`GITHUB_APP_*` settings from your credentials into the plugin's `.env`.
 
 ## How a run works
 
@@ -138,24 +183,26 @@ Every pane opens in the run's worktree with the same environment as the agent. A
 
 ## Configuration
 
-Everything is optional except herdr and an agent CLI.
+Everything is optional except herdr and an agent CLI. With the plugin, put these in `$(herdr plugin config-dir paneyard)/.env`; the plugin sets `PORT` (unless you pin one there), `BINDING`, `PANEYARD_RAILS_URL` and `HERDR_SOCKET_PATH` itself. Running from a clone, they are environment variables.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `PORT` | random (`bin/dev`), `7263` (`bin/service`) | HTTP port. |
+| `PORT` | chosen once and kept (plugin), random (`bin/dev`), `7263` (`bin/service`) | HTTP port. |
 | `BINDING` | `localhost` (dev), `127.0.0.1` (`bin/service`) | Interface Rails listens on. Widening it exposes an unauthenticated app; see [SECURITY.md](./SECURITY.md). |
 | `PANEYARD_ALLOWED_HOSTS` | unset | Extra `Host` names production answers to (comma-separated), for example behind a reverse proxy. |
 | `PANEYARD_RAILS_URL` | `http://127.0.0.1:$PORT` | URL sessions use to reach the orchestrator's MCP endpoint. Keep it in step with `PORT`. |
 | `PANEYARD_MAX_CONCURRENT_RUNS` | `4` | Global cap on live sessions. |
 | `PANEYARD_CLAUDE_MODEL`, `PANEYARD_CODEX_MODEL`, `PANEYARD_OPENCODE_MODEL` | per driver | Default model per driver; a model picked per run wins. |
-| `HERDR_SOCKET_PATH` | `~/.config/herdr/herdr.sock` | herdr's socket. |
-| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` | unset | GitHub App for session push credentials; see [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md). Also settable in credentials. |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` | unset | Telegram remote control; see [docs/telegram.md](./docs/telegram.md). Also settable in credentials. |
+| `HERDR_SOCKET_PATH` | the socket herdr gives the plugin, else `~/.config/herdr/herdr.sock` | herdr's socket. |
+| `PANEYARD_RUBY` | found automatically | Plugin only: the Ruby to run Paneyard with. |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` | unset | GitHub App for session push credentials; see [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md). Also settable in credentials when running from a clone. In the `.env`, quote a multi-line private key in double quotes. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` | unset | Telegram remote control; see [docs/telegram.md](./docs/telegram.md). Also settable in credentials when running from a clone. |
 
 Pane layouts are set per workspace ([above](#workspace-layouts)). So are environment variables, which sessions record for later runs; see [What a run starts with](./docs/operating.md#3-what-a-run-starts-with-inside-the-repo).
 
 ## Documentation
 
+- [docs/herdr-plugin-plan.md](./docs/herdr-plugin-plan.md) — how the herdr plugin is put together, and why.
 - [docs/operating.md](./docs/operating.md) — running the orchestrator day to day: preparing repositories, git and cleanup rules, GitHub access, workspace layouts and env vars, MCP endpoints, troubleshooting a failed launch.
 - [docs/telegram.md](./docs/telegram.md) — Telegram remote control, and adding another chat platform.
 - [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md) — optional GitHub App for session push credentials.

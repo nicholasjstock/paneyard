@@ -18,8 +18,8 @@ The optional Telegram bot lets you check on and steer your live run sessions fro
        - "<your numeric Telegram user id>"
    ```
 
-   or set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` (comma-separated) in the orchestrator's environment (`RemoteControl::Adapters::Telegram::Configuration`).
-4. Restart the orchestrator (`bin/service restart`) so the running instance sees the new credentials.
+   or set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` (comma-separated) in the orchestrator's environment (`RemoteControl::Adapters::Telegram::Configuration`). With the herdr plugin, the environment is `$(herdr plugin config-dir paneyard)/.env`, which has both lines ready to uncomment.
+4. Restart the orchestrator (`bin/service restart`, or the plugin's `paneyard.restart` action) so the running instance sees the new settings.
 
 The app polls Telegram every five seconds (`PollTelegramUpdatesJob`, `config/recurring.yml`), so it only needs outbound internet access; it does not need a public URL. Telegram's [`getUpdates`](https://core.telegram.org/bots/api#getupdates) polling API doesn't work while a webhook is configured, so if this bot ever had one, clear it once:
 

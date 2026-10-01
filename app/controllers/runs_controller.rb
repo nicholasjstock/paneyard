@@ -69,34 +69,22 @@ class RunsController < ApplicationController
     redirect_to workspace_run_path(current_workspace, @run), alert: error.message
   end
 
-  # Ends a session the operator is finished looking at: kills the CLI, closes
-  # the herdr pane, and releases the concurrency slot. Until this is called an
-  # idle session keeps both, which is deliberate -- nothing tears a pane down
-  # but the operator. The worktree goes too if its work is already pushed or
-  # merged; otherwise it stays for the operator to deal with.
+  # Ends a session the operator is finished looking at (Orchestrator::SessionClose).
   def close_session
-    session = @run.live_session
-    if session.nil?
-      redirect_to workspace_run_path(current_workspace, @run), alert: "This run has no live session."
-      return
-    end
-
-    outcome = session.outcome.presence || "failed"
-    Orchestrator::RunSessionRunner.finish!(session, outcome:, result: session.result)
-    Orchestrator::RunCompletion.call(run: @run, outcome:, summary: session.result)
-    redirect_to workspace_run_path(current_workspace, @run), notice: close_session_notice
+    closed = Orchestrator::SessionClose.call(@run)
+    redirect_to workspace_run_path(current_workspace, @run), notice: close_session_notice(closed)
+  rescue Orchestrator::SessionClose::NoLiveSession
+    redirect_to workspace_run_path(current_workspace, @run), alert: "This run has no live session."
   end
 
   private
 
-  def close_session_notice
-    if Orchestrator::WorktreeJanitor.release!(@run)
-      "Closed the session and removed #{@run.worktree_name}."
-    else
-      "Closed the session. Kept #{@run.worktree_name}: it has uncommitted or unpushed work."
+  def close_session_notice(closed)
+    case closed.fetch(:worktree)
+    when "removed" then "Closed the session and removed #{@run.worktree_name}."
+    when "kept" then "Closed the session. Kept #{@run.worktree_name}: it has uncommitted or unpushed work."
+    else "Closed the session, but could not remove its worktree: #{closed[:error]}"
     end
-  rescue Orchestrator::Runner::Error => error
-    "Closed the session, but could not remove its worktree: #{error.message}"
   end
 
   def model_catalog

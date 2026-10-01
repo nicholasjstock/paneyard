@@ -8,7 +8,7 @@ For security vulnerabilities, follow [SECURITY.md](./SECURITY.md) instead of ope
 
 ## Setting up
 
-You need the [requirements in the README](./README.md#requirements), except that herdr and the agent CLIs are **not** needed to run the test suite: the suite uses a fake herdr and a fake agent. The JavaScript system specs (`js: true`) drive headless Chrome through Selenium, so they need Google Chrome installed.
+You need the [requirements in the README](./README.md#requirements) and a clone of this repository (the README's [Running without the plugin](./README.md#running-without-the-plugin)), except that herdr and the agent CLIs are **not** needed to run the test suite: the suite uses a fake herdr and a fake agent. The JavaScript system specs (`js: true`) drive headless Chrome through Selenium, so they need Google Chrome installed.
 
 ```sh
 bin/setup                 # install gems, prepare the development database (--reset to recreate it)
@@ -51,6 +51,29 @@ It starts Puma and the Solid Queue worker together (the worker is what launches 
 
 `bin/dev` is not isolated: it runs the full recurring schedule (dispatch, reconcile, Telegram polling if configured, the worktree janitor) against whatever herdr socket your shell has. A run session working on this repository must use `bin/sandbox` instead.
 
+## Working on the herdr plugin
+
+The plugin (`herdr-plugin.toml`, `bin/herdr-plugin`, `lib/paneyard_plugin/`) packages this app; [docs/herdr-plugin-plan.md](./docs/herdr-plugin-plan.md) has the design. Its Ruby is standard library only and runs without Bundler or Rails. Specs are under `spec/lib/paneyard_plugin/`; the daemon spec starts real processes standing in for `bin/production`.
+
+To try it in your own herdr, link your checkout:
+
+```sh
+herdr plugin link .                        # no build step: it uses the bundle bin/setup installed
+herdr plugin action list --plugin paneyard
+herdr plugin action invoke paneyard.runs --plugin paneyard
+herdr plugin log list --plugin paneyard    # each action's stdout/stderr
+herdr plugin action invoke paneyard.stop --plugin paneyard && herdr plugin unlink paneyard
+```
+
+A linked checkout runs your working tree's code (hot-reloaded, as under `bin/service`), but its state is the real plugin state directory, `~/.local/state/herdr/plugins/paneyard`, and its sessions open in your real herdr. If you also run `bin/service`, don't register the same repositories in both (see the README's "one Paneyard per machine"). To exercise the daemon without herdr, point it at scratch directories and a herdr socket that does not exist:
+
+```sh
+HERDR_PLUGIN_STATE_DIR=tmp/plugin/state HERDR_PLUGIN_CONFIG_DIR=tmp/plugin/config \
+  HERDR_SOCKET_PATH=/tmp/no-herdr.sock bin/herdr-plugin start   # also: status, stop, queue-ui, runs-ui
+```
+
+`herdr plugin install` runs `bin/herdr-plugin build`, which writes `.bundle/config` (gems in `vendor/bundle`, without the development and test groups). Never run it in a development checkout; try it on a copy.
+
 ## Code layout
 
 It is a Rails 8 app organised around `Workspace` as the top-level boundary: runs, sessions and their reports are nested under a workspace in code and in the UI. See AGENTS.md's ["Project Structure"](./AGENTS.md#project-structure--module-organization) for more.
@@ -68,6 +91,7 @@ It is a Rails 8 app organised around `Workspace` as the top-level boundary: runs
 | `db/` | Schema and migrations. |
 | `lib/fake_herdr`, `lib/fake_telegram`, `script/fake_agent` | Test doubles that speak the real protocols. |
 | `lib/paneyard_sandbox`, `bin/sandbox`, `bin/preflight` | The isolated sandbox instance and the production boot smoke test. |
+| `herdr-plugin.toml`, `bin/herdr-plugin`, `lib/paneyard_plugin` | The herdr plugin: its manifest, entry point, daemon and popups. |
 | `demo/` | The Docker-recorded demo behind the README GIF; see [docs/demo-recording-plan.md](./docs/demo-recording-plan.md). |
 
 ## Verifying a change

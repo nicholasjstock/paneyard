@@ -15,6 +15,7 @@ module McpTools
       ToolResponse.structured(
         workspaces: Workspace.order(:created_at).map do |workspace|
           {
+            id: workspace.id,
             name: workspace.name,
             source_root: workspace.source_root,
             is_default: workspace == default,

@@ -10,7 +10,7 @@ Paneyard is a single-operator tool that runs on your own machine and starts codi
 
 **Loopback only.** What keeps other people out is where the app listens and which names it answers to:
 
-- `bin/production` (and so `bin/service`) binds Puma to `127.0.0.1`. `bin/dev` binds to `localhost`. Nothing else on your network can connect.
+- `bin/production` (and so `bin/service` and the herdr plugin's daemon, which run it) binds Puma to `127.0.0.1`. `bin/dev` binds to `localhost`. Nothing else on your network can connect.
 - In production the app answers only requests whose `Host` is `localhost`, `127.0.0.1` or `[::1]` (any port). Any other name gets a `403`, and that includes `/up`. This is Rails' host authorization (`config.hosts`, built by `lib/paneyard_allowed_hosts.rb`). It stops **DNS rebinding**, where a web page you visit points its own hostname at `127.0.0.1` so that it becomes same-origin with this UI and can read pages and submit forms. The MCP endpoints run the same check again through the `mcp` gem's `dns_rebinding_protection`, which also rejects a foreign `Origin`.
 - Forms are protected by Rails' CSRF tokens, with an `Origin` check (on by default). Action Cable accepts same-origin connections only.
 
@@ -29,7 +29,7 @@ If you do either, whatever sits in front of the app has to provide the authentic
 
 **GitHub credentials.** Sessions push with a GitHub App installation token when one is configured (`GITHUB_APP_SETUP.md`). The token is short-lived (about an hour) and limited to the permissions you gave the App (Contents, plus Pull requests if you allowed it). It covers every repository the installation was granted, not only the run's repository, so install the App on the repositories you manage with this tool and no others. Without a GitHub App, a session falls back to your own `gh auth token`, which carries everything your GitHub account can do.
 
-**Secrets on disk.** `config/master.key`, `config/credentials.yml.enc`, the SQLite databases under `storage/` and the logs under `log/` hold credentials and run content (prompts, reports, pane text). They are only as private as your user account.
+**Secrets on disk.** `config/master.key`, `config/credentials.yml.enc`, the SQLite databases under `storage/` and the logs under `log/` hold credentials and run content (prompts, reports, pane text). Installed as a herdr plugin, the same live in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard`: databases, log, a generated `secret_key_base`) and its config directory (`.env`, with any Telegram or GitHub App secrets). They are only as private as your user account.
 
 ## In scope
 

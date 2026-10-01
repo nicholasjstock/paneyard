@@ -10,11 +10,23 @@ module PaneyardSandbox
   class McpClient
     class Error < StandardError; end
 
+    # A tool that ran and reported an error; `payload` is its JSON body
+    # (`error`, `message`, and any details such as `problems`), when it had one.
+    class ToolError < Error
+      attr_reader :payload
+
+      def initialize(message, payload = {})
+        super(message)
+        @payload = payload
+      end
+    end
+
     PROTOCOL_VERSION = "2025-06-18".freeze
 
-    def initialize(url, token: nil, timeout: 30)
+    def initialize(url, token: nil, timeout: 30, client_name: "paneyard-sandbox")
       @uri = URI(url)
       @token = token
+      @client_name = client_name
       @timeout = timeout
       @next_id = 0
     end
@@ -30,7 +42,7 @@ module PaneyardSandbox
       initialize_session!
       result = rpc("tools/call", name:, arguments:)
       text = Array(result["content"]).filter_map { |part| part["text"] }.join("\n")
-      raise Error, "#{name} failed: #{text}" if result["isError"]
+      raise ToolError.new("#{name} failed: #{text}", result["structuredContent"] || (JSON.parse(text) rescue {})) if result["isError"]
 
       result["structuredContent"] || (JSON.parse(text) rescue { "text" => text })
     end
@@ -41,7 +53,7 @@ module PaneyardSandbox
       return if @session_id
 
       rpc("initialize", protocolVersion: PROTOCOL_VERSION, capabilities: {},
-        clientInfo: { name: "paneyard-sandbox", version: "1" })
+        clientInfo: { name: @client_name, version: "1" })
       notify("notifications/initialized")
     end
 

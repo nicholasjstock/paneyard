@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 The first public version. It includes:
 
+### herdr plugin
+
+- `herdr plugin install nicholasjstock/paneyard` installs Paneyard as a herdr plugin: its build installs gems into the managed checkout, and a daemon it owns runs `bin/production` with the databases, logs, a generated `secret_key_base` and a port chosen once and kept in herdr's plugin state directory. No `bin/setup`, `bin/service` or credentials to manage.
+- Actions and popups for queueing a task for the repository the focused pane is in (registering it as a workspace when needed), listing runs, reading a run's report, jumping to its herdr workspace, closing its session, opening the web UI, and registering `/mcp/admin` with Claude Code.
+- Settings from `$(herdr plugin config-dir paneyard)/.env`, written as a commented sample on first start.
+- `close_session` on `/mcp/admin`, `PANEYARD_RUNTIME_DIR`, and each run's herdr workspace id in `list_runs`/`get_run`.
+
 ### Runs and sessions
 
 - Workspaces: register a repository's parent directory, whose `main` checkout every run branches from. Runs, sessions, reports and worktrees are scoped to their workspace.
