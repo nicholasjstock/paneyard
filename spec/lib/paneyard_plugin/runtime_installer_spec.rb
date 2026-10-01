@@ -70,7 +70,7 @@ RSpec.describe "the plugin runtime installer" do
     expect(status).to be_success
     expect(stderr).to eq("")
     expect(stdout).to include("downloading Ruby and production gems", "ready (ruby 4.0.1 (bundled))",
-      "herdr plugin action invoke paneyard.setup")
+      "herdr plugin action invoke setup --plugin paneyard")
     expect(File.read(File.join(root, ".paneyard/runtime-key"))).to eq("#{runtime_key}\n")
     expect(File).to be_executable(File.join(root, ".paneyard/runtime/bin/ruby"))
   end

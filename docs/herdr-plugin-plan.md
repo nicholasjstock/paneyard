@@ -254,7 +254,7 @@ install build cannot safely prompt (Herdr has no post-install hook and build std
 contract), so its final output immediately points to the `setup` action. That popup detects installed
 Claude Code and Codex CLIs, asks once before making changes, recognizes current registrations, and
 updates stale ones independently with rollback on an add failure. Other ways to get the URL are
-`herdr plugin action invoke paneyard.mcp-url --plugin paneyard` (notification + plugin log), and `state/url` for scripts. If the port
+`herdr plugin action invoke mcp-url --plugin paneyard` (notification + plugin log), and `state/url` for scripts. If the port
 ever has to change, the startup log and a notification say so.
 
 ## 6. Upgrade story

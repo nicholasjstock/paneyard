@@ -89,7 +89,7 @@ herdr shows what the plugin will run, then downloads the matching bundled Ruby a
 The installer prints this as its final step:
 
 ```sh
-herdr plugin action invoke paneyard.setup --plugin paneyard
+herdr plugin action invoke setup --plugin paneyard
 ```
 
 Run it once. The setup pane starts Paneyard, detects installed Claude Code and Codex CLIs, shows what it found, and asks for approval before changing either client's user-level MCP configuration. It configures each approved client independently, reports registrations that are already current, and leaves missing clients alone. You can safely run it again after an update or port change.
@@ -108,7 +108,7 @@ command = "paneyard.menu"
 description = "paneyard menu"
 ```
 
-The menu offers queue, runs and reports, close session, edit layout, and configure MCP. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke paneyard.<id> --plugin paneyard`.
+The menu offers queue, runs and reports, close session, edit layout, and configure MCP. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke <id> --plugin paneyard`.
 
 | Action | What it does |
 | --- | --- |
@@ -146,7 +146,7 @@ The port stays the same across restarts; if it ever has to change (something els
 
 - **Settings** live in `$(herdr plugin config-dir paneyard)/.env`, written on first start with every option commented out: concurrency, default models, [Telegram](./docs/telegram.md), and a fixed port. Run `paneyard.restart` after editing it (the next action notices the edit and restarts too).
 - **Updating:** `herdr plugin install nicholasjstock/paneyard` again (`--ref <tag-or-commit>` to pin a version). The next action or herdr start restarts Paneyard on the new code and migrates its database; state and settings are kept.
-- **Removing:** `herdr plugin action invoke paneyard.stop --plugin paneyard`, then `herdr plugin uninstall paneyard`. herdr leaves the state and config directories in place; delete them to remove your run history too.
+- **Removing:** `herdr plugin action invoke stop --plugin paneyard`, then `herdr plugin uninstall paneyard`. herdr leaves the state and config directories in place; delete them to remove your run history too.
 - **Logs:** `~/.local/state/herdr/plugins/paneyard/log/paneyard.log`, and `herdr plugin log list --plugin paneyard` for the actions themselves.
 
 ### Running without the plugin

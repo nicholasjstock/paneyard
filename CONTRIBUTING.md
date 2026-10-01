@@ -60,9 +60,9 @@ To try it in your own herdr, link your checkout:
 ```sh
 herdr plugin link .                        # no build step: it uses the bundle bin/setup installed
 herdr plugin action list --plugin paneyard
-herdr plugin action invoke paneyard.runs --plugin paneyard
+herdr plugin action invoke runs --plugin paneyard
 herdr plugin log list --plugin paneyard    # each action's stdout/stderr
-herdr plugin action invoke paneyard.stop --plugin paneyard && herdr plugin unlink paneyard
+herdr plugin action invoke stop --plugin paneyard && herdr plugin unlink paneyard
 ```
 
 A linked checkout runs your working tree's code (hot-reloaded, as under `bin/service`), but its state is the real plugin state directory, `~/.local/state/herdr/plugins/paneyard`, and its sessions open in your real herdr. If you also run `bin/service`, don't register the same repositories in both (see the README's "one Paneyard per machine"). To exercise the daemon without herdr, point it at scratch directories and a herdr socket that does not exist:
