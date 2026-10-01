@@ -11,10 +11,10 @@ Someone who already uses herdr runs
 herdr plugin install <owner>/paneyard
 ```
 
-and from then on uses Paneyard from inside herdr: a keybinding queues a task for the repository they are
-looking at, another lists runs and shows reports, a third closes a run's session. They never see `bin/setup`,
-`bin/service`, `bin/rails credentials:edit`, a port number, or an SQLite path. The web UI is still there, one
-action away, for the things a terminal is bad at (the layout editor, workspace settings).
+and from then on uses Paneyard from inside herdr: one keybinding opens a menu for queueing a task for the
+repository they are looking at, listing runs and reports, closing sessions, and editing layouts. They never see `bin/setup`,
+`bin/service`, `bin/rails credentials:edit`, a port number, or an SQLite path. The web UI remains available one
+action away, while the layout editor is also a first-class Herdr popup.
 
 The manual Rails route (`bin/setup`, `bin/service`) keeps working unchanged for contributors and for anyone
 who prefers it.
@@ -188,11 +188,13 @@ time), then does its one thing. Interactive ones open a popup pane, because acti
 
 | Action (`paneyard.<id>`) | Context | What it does |
 | --- | --- | --- |
+| `menu` — Paneyard menu | workspace | Opens the single popup recommended for key binding, then dispatches to any interactive Paneyard action without consuming more global shortcuts. |
 | `queue` — Queue a task here | workspace | Opens the **queue** popup for the focused pane's directory. |
 | `runs` — Runs | workspace | Opens the **runs** popup: every run across workspaces, newest first. Select one to read its newest report, jump to its herdr workspace, close its session, or open it in the browser. |
 | `report` — Show this run's report | workspace | In a run's herdr workspace: opens the runs popup on that run's report. |
 | `close` — Close this run's session | workspace | In a run's herdr workspace: asks for confirmation in a popup, then closes the session (kills the CLI, closes the herdr workspace, frees the slot, removes the worktree if its work is saved) — the run screen's **Close session**. |
 | `open` — Open Paneyard in the browser | workspace | Opens the web UI (the run's page when invoked in a run's workspace). |
+| `layout` — Edit this workspace's layout | workspace | Resolves the focused pane to a Paneyard workspace and opens an interactive tab/pane builder with a live tree preview; raw YAML is an advanced option. It validates before saving through `/mcp/admin`. |
 | `setup` — Configure coding agents | workspace | Opens a popup, detects Claude Code and Codex, asks before changing anything, and idempotently adds or updates their user-level `paneyard` registrations. `mcp` remains an alias for existing key bindings. |
 | `mcp-url` — Print the MCP URL | — | Prints the URL to the plugin log and shows it as a herdr notification, for scripts and for the user. |
 | `restart` — Restart Paneyard | — | Applies a `.env` change or a reinstall. |
@@ -217,17 +219,15 @@ newest checkpoint report, through `less` when it is longer than the popup. From 
 workspace, `c` close its session (with confirmation), `o` open its page, `b` back, `q` quit. A thin client
 over `/mcp/admin` (the existing `PaneyardSandbox::McpClient`), stdlib Ruby, no new gems.
 
-Suggested keybindings (README):
+Suggested keybinding (README):
 
 ```toml
 [[keys.command]]
-key = "prefix+q"
+key = "prefix+comma"
 type = "plugin_action"
-command = "paneyard.queue"
-description = "paneyard: queue a task here"
+command = "paneyard.menu"
+description = "paneyard menu"
 ```
-
-…and the same for `paneyard.runs` and `paneyard.close`.
 
 ### Considered and left out
 
@@ -247,7 +247,8 @@ description = "paneyard: queue a task here"
   operator's decision, so it is not on `/mcp/run`. The controller's logic moves into
   `Orchestrator::SessionClose` so the button and the tool cannot drift.
 - The MCP run summary gains the session's `herdr_workspace` id (what the plugin matches on), and
-  `list_workspaces` gains each workspace's `id` (the web UI's URLs use it, for "open this run's page").
+  `list_workspaces` gains each workspace's `id` and layout YAML. The admin-only `update_workspace_layout`
+  validates and saves a replacement (or resets it), so the Herdr plugin never reaches into Rails state directly.
 - `PANEYARD_RUNTIME_DIR` for `Runner::Local`'s runtime root (default unchanged).
 
 ## 5. MCP registration

@@ -20,6 +20,8 @@ module McpTools
             name: workspace.name,
             repository_path: workspace.repository_path,
             default_base_branch: workspace.default_base_branch,
+            layout_yaml: workspace.layout,
+            default_layout_yaml: Orchestrator::WorkspaceLayout::DEFAULT_YAML,
             is_default: workspace == default,
             active_runs: active_counts.fetch(workspace.id, 0)
           }

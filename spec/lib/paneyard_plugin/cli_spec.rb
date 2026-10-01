@@ -35,6 +35,25 @@ RSpec.describe PaneyardPlugin::Cli do
 
   after { FileUtils.rm_rf(state) }
 
+  describe "menu-ui" do
+    it "routes one menu choice without requiring separate global key bindings" do
+      run_cli("menu-ui", input: "l\n") do |cli|
+        expect(cli).to receive(:layout_ui)
+      end
+
+      expect(out.string).to include("Queue a task here", "Browse runs and reports", "Edit this workspace's layout")
+    end
+
+    it "closes without doing anything when no choice is made" do
+      run_cli("menu-ui") do |cli|
+        expect(cli).not_to receive(:queue_ui)
+        expect(cli).not_to receive(:runs_ui)
+      end
+
+      expect(out.string).to include("Cancelled.")
+    end
+  end
+
   describe "queue-ui" do
     let(:workspace) { { "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main" } }
 
@@ -260,6 +279,48 @@ RSpec.describe PaneyardPlugin::Cli do
 
     expect(out.string).to eq("http://127.0.0.1:7999/mcp/admin\n")
     expect(herdr_calls).to eq([ [ "notification", "show", "Paneyard MCP", "--body", "http://127.0.0.1:7999/mcp/admin" ] ])
+  end
+
+  describe "layout-ui" do
+    let(:default_layout) { "tabs:\n  - panes:\n      - agent\n" }
+    let(:workspace) do
+      {
+        "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main",
+        "layoutYaml" => nil, "defaultLayoutYaml" => default_layout
+      }
+    end
+
+    it "builds, previews and saves the matching workspace's layout from one of its worktrees" do
+      allow(client).to receive(:workspaces).and_return([ workspace ])
+      allow(client).to receive(:update_layout).and_return("usingDefault" => false)
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of)
+        .with("/herdr/worktrees/app/fix").and_return([ "/code/app", "paneyard/fix" ])
+
+      run_cli("layout-ui", input: "a\nshell\n\n1\nright\n\ns\n\n",
+        context: { "focused_pane_cwd" => "/herdr/worktrees/app/fix" })
+
+      expect(client).to have_received(:update_layout).with(workspace: "app", layout: include("name: shell"))
+      expect(out.string).to include("app layout", "1.1 └─ agent [root]", "1.2 └─ shell [right of agent]", "Saved the layout.")
+    end
+
+    it "resets to the default when the edited file matches the default" do
+      allow(client).to receive(:workspaces).and_return([ workspace.merge("layoutYaml" => "tabs:\n  - panes: [agent]\n") ])
+      allow(client).to receive(:update_layout).with(workspace: "app", layout: "").and_return("usingDefault" => true)
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "main" ])
+
+      run_cli("layout-ui", input: "r\ns\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(out.string).to include("Reset to the default layout.")
+    end
+
+    it "explains when the pane is not registered" do
+      allow(client).to receive(:workspaces).and_return([])
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/other", "main" ])
+
+      run_cli("layout-ui", input: "\n", context: { "focused_pane_cwd" => "/code/other" })
+
+      expect(out.string).to include("not inside a registered Paneyard workspace")
+    end
   end
 
   it "tells the operator when Paneyard had to move to another port" do

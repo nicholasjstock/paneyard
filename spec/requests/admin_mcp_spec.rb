@@ -16,7 +16,8 @@ RSpec.describe "the admin MCP endpoint", type: :request do
   it "exposes exactly the external tool set" do
     names = Orchestrator::AdminMcpServer::TOOLS.map(&:tool_name)
 
-    expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces", "register_workspace", "close_session")
+    expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces", "register_workspace",
+      "update_workspace_layout", "close_session")
   end
 
   it "tells clients how to find or register the workspace before queuing" do
@@ -29,8 +30,10 @@ RSpec.describe "the admin MCP endpoint", type: :request do
     expect(JSON.parse(body).dig("result", "instructions")).to include("list_workspaces", "register_workspace", "queue_run")
   end
 
-  it "keeps register_workspace and close_session off the run endpoint" do
-    expect(Orchestrator::RunMcpServer::TOOLS).not_to include(McpTools::RegisterWorkspaceTool, McpTools::CloseSessionTool)
+  it "keeps the admin mutations off the run endpoint" do
+    expect(Orchestrator::RunMcpServer::TOOLS).not_to include(
+      McpTools::RegisterWorkspaceTool, McpTools::UpdateWorkspaceLayoutTool, McpTools::CloseSessionTool
+    )
   end
 
   describe "register_workspace" do

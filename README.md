@@ -6,7 +6,7 @@ Paneyard is a local, single-operator queue and supervisor for interactive AI cod
 
 *A live take with real Claude Code (Sonnet), sped up where the agents work: recorded in Docker with `demo/bin/record`, see [docs/demo-recording-plan.md](./docs/demo-recording-plan.md).*
 
-It installs as a herdr plugin and is used from inside herdr: keys to queue a task for the repository you are in, read a run's report, or close its session. Underneath it is a Rails 8 app running on your own machine, which the plugin starts and looks after for you. Rails decides *which* task runs, *where*, and what happens to the worktree afterwards; the agent session decides everything else. There is no planner, no step queue and no pull-request automation.
+It installs as a herdr plugin and is used from one menu inside herdr: queue a task for the repository you are in, read a run's report, close its session, or change its layout. Underneath it is a Rails 8 app running on your own machine, which the plugin starts and looks after for you. Rails decides *which* task runs, *where*, and what happens to the worktree afterwards; the agent session decides everything else. There is no planner, no step queue and no pull-request automation.
 
 > [!WARNING]
 > **Read the [security model](#security-model) before you run this.** It has no authentication, and it hands AI agents unrestricted access to the repositories you register and to your user account.
@@ -17,10 +17,11 @@ It installs as a herdr plugin and is used from inside herdr: keys to queue a tas
 - [Requirements](#requirements)
 - [Getting started](#getting-started)
   1. [Install the plugin](#1-install-the-plugin)
-  2. [Bind keys](#2-bind-keys)
-  3. [Queue a task](#3-queue-a-task)
-  4. [Read reports and close sessions](#4-read-reports-and-close-sessions)
-  5. [Queue runs from your own agent](#5-queue-runs-from-your-own-agent)
+  2. [Connect your coding agents](#2-connect-your-coding-agents)
+  3. [Bind one menu key](#3-bind-one-menu-key)
+  4. [Queue a task](#4-queue-a-task)
+  5. [Read reports and close sessions](#5-read-reports-and-close-sessions)
+  6. [Queue runs from your own agent](#6-queue-runs-from-your-own-agent)
   - [Settings, updates and removal](#settings-updates-and-removal)
   - [Running without the plugin](#running-without-the-plugin)
 - [How a run works](#how-a-run-works)
@@ -75,39 +76,29 @@ Run it once. The setup pane starts Paneyard, detects installed Claude Code and C
 
 Herdr plugin builds do not have a reliable interactive-input contract, so this explicit action is the safe equivalent of an installer prompt. If you skip it, Paneyard still works through its Herdr actions and web UI; [manual MCP commands](#6-queue-runs-from-your-own-agent) remain available.
 
-### 3. Bind keys
+### 3. Bind one menu key
 
-Plugins can't bind keys themselves. Add these to herdr's `config.toml` (or pick your own keys), then `herdr server reload-config`:
+Plugins can't bind keys themselves. Add one Paneyard menu key to Herdr's `config.toml` (choose any unused key), then run `herdr server reload-config`:
 
 ```toml
 [[keys.command]]
-key = "prefix+q"
+key = "prefix+comma"
 type = "plugin_action"
-command = "paneyard.queue"
-description = "paneyard: queue a task here"
-
-[[keys.command]]
-key = "prefix+r"
-type = "plugin_action"
-command = "paneyard.runs"
-description = "paneyard: runs and reports"
-
-[[keys.command]]
-key = "prefix+x"
-type = "plugin_action"
-command = "paneyard.close"
-description = "paneyard: close this run's session"
+command = "paneyard.menu"
+description = "paneyard menu"
 ```
 
-Every action is also available without a key: `herdr plugin action list --plugin paneyard`, and `herdr plugin action invoke paneyard.<id> --plugin paneyard`.
+The menu offers queue, runs and reports, close session, edit layout, configure MCP, and open the web UI. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke paneyard.<id> --plugin paneyard`.
 
 | Action | What it does |
 | --- | --- |
+| `paneyard.menu` | Open the single Paneyard menu recommended for key binding. |
 | `paneyard.queue` | Queue a task for the repository containing the current pane. |
 | `paneyard.runs` | Every run, newest first. Pick one to read its newest report, jump to its herdr workspace, close its session, or open it in the browser. |
 | `paneyard.report` | Inside a run's herdr workspace: that run's newest report. |
 | `paneyard.close` | Inside a run's herdr workspace: close its session (asks first). |
 | `paneyard.open` | Open the web UI, at the run's page when invoked in a run's workspace. |
+| `paneyard.layout` | Visually build and validate the current repository's tabs and panes in a Herdr popup, including from one of its run worktrees. |
 | `paneyard.setup` | Detect Claude Code and Codex, then offer to connect them to Paneyard. |
 | `paneyard.mcp` | Alias for `paneyard.setup` (kept for existing key bindings). |
 | `paneyard.mcp-url` | Show the `/mcp/admin` URL as a notification. |
@@ -115,11 +106,11 @@ Every action is also available without a key: `herdr plugin action list --plugin
 
 ### 4. Queue a task
 
-Any git checkout you already have will do, with any branch checked out, as long as it has an `origin` remote. Open a herdr pane anywhere in it and press your **queue** key. Paneyard resolves the checkout to a workspace, registering it through the same repository checks as the web UI when needed. Describe the task (a blank line submits), choose the **base branch** to start from (Enter for the default; it offers the branch your pane is on), pick a driver (`claude` or `codex`; Enter for `claude`), and it is queued. When a slot frees, herdr creates the run's worktree from that branch, wherever your herdr config puts worktrees, and opens it as a herdr workspace with the agent in it. Your own checkout is never touched. [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
+Any git checkout you already have will do, with any branch checked out, as long as it has an `origin` remote. Open a herdr pane anywhere in it, open the **Paneyard menu**, and choose **Queue**. Paneyard resolves the checkout to a workspace, registering it through the same repository checks as the web UI when needed. Describe the task (a blank line submits), choose the **base branch** to start from (Enter for the default; it offers the branch your pane is on), pick a driver (`claude` or `codex`; Enter for `claude`), and it is queued. When a slot frees, herdr creates the run's worktree from that branch, wherever your herdr config puts worktrees, and opens it as a herdr workspace with the agent in it. Your own checkout is never touched. [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
 
 ### 5. Read reports and close sessions
 
-When the agent stops, it posts a report. Read it with the **runs** key (or **report** inside the run's workspace). Type into the agent's pane to give it more work, and ask it to commit, push or merge when you are happy; it merges back into the branch it started from. When you are done with it, the **close** key ends the session and frees its slot. The web UI (`paneyard.open`) has the same, plus workspace settings and the [layout editor](#workspace-layouts).
+When the agent stops, it posts a report. Open **Runs** from the Paneyard menu (or choose **Report** inside the run's workspace). Type into the agent's pane to give it more work, and ask it to commit, push or merge when you are happy; it merges back into the branch it started from. When you are done with it, choose **Close** to end the session and free its slot. The web UI (`paneyard.open`) has the same, plus workspace settings and the [layout editor](#workspace-layouts).
 
 ### 6. Queue runs from your own agent
 
@@ -169,7 +160,7 @@ If a session dies without reporting, the orchestrator notices within about 30 se
 
 Each run opens in its own herdr workspace. A workspace's **layout** decides which tabs and panes that herdr workspace has: the agent, plus anything you want running beside it, such as an editor, a dev server or a log tail. By default a run gets the agent with `nvim .` split to its right, or just the agent when `nvim` isn't installed.
 
-To change it, edit the workspace (or set it when you add one) and use its **Layout** editor. Name each tab, add panes, give each a command, and choose which earlier pane it splits off, to the right or below, and how much space that pane keeps. A live sketch shows the result, and **Reset to default** goes back to the default. The layout is saved as YAML:
+To change it from Herdr, invoke `paneyard.layout` in any pane belonging to the repository. Its interactive builder redraws a tree preview as you add tabs and panes, edit commands, choose split targets, directions and ratios, or delete leaf panes. Save validates the complete result before changing anything; Reset restores the default. Raw YAML remains available under the builder's advanced `y` option:
 
 ```yaml
 tabs:

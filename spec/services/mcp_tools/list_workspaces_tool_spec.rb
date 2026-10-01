@@ -11,6 +11,7 @@ RSpec.describe McpTools::ListWorkspacesTool do
 
     expect(workspaces[busy.name]).to include(repositoryPath: busy.repository_path, defaultBaseBranch: "main", activeRuns: 1)
     expect(workspaces[idle.name]).to include(repositoryPath: idle.repository_path, defaultBaseBranch: "main", activeRuns: 0)
+    expect(workspaces[busy.name]).to include(layoutYaml: nil, defaultLayoutYaml: Orchestrator::WorkspaceLayout::DEFAULT_YAML)
     expect(workspaces.values.count { |w| w[:isDefault] }).to eq(1)
     expect(workspaces.values.find { |w| w[:isDefault] }[:name]).to eq(Workspace.default.name)
   end

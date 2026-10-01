@@ -2,7 +2,9 @@ require "io/console"
 require "json"
 require "open3"
 require "rbconfig"
+require "shellwords"
 require "tempfile"
+require "yaml"
 require_relative "../paneyard_plugin"
 
 module PaneyardPlugin
@@ -21,7 +23,7 @@ module PaneyardPlugin
         url          print the web UI's URL
         mcp-url      print /mcp/admin's URL (and show it as a herdr notification)
         open         open the web UI (this run's page, inside a run's herdr workspace)
-        queue-ui | runs-ui | report-ui | close-ui | setup-ui | mcp-ui
+        menu-ui | queue-ui | runs-ui | report-ui | close-ui | layout-ui | setup-ui | mcp-ui
                      the interactive popups behind the plugin's actions
     TEXT
 
@@ -46,10 +48,12 @@ module PaneyardPlugin
       when "url" then puts(running!.url)
       when "mcp-url" then mcp_url
       when "open" then open
+      when "menu-ui" then interactive { menu_ui }
       when "queue-ui" then interactive { queue_ui }
       when "runs-ui" then interactive { runs_ui }
       when "report-ui" then interactive { this_run_ui(:report) }
       when "close-ui" then interactive { this_run_ui(:close) }
+      when "layout-ui" then interactive { layout_ui }
       when "setup-ui", "mcp-ui" then interactive { mcp_ui }
       else
         @out.puts USAGE
@@ -111,7 +115,227 @@ module PaneyardPlugin
       browse(this_run_url(result.url) || result.url)
     end
 
+    def layout_ui
+      client = connect!
+      dir = context_dir
+      raise Error, "herdr did not say which directory this pane is in." unless dir
+
+      repository, = WorkspaceMatch.repository_of(dir)
+      workspace = WorkspaceMatch.workspace_for(client.workspaces, dir, repository:)
+      unless workspace
+        say "This pane is not inside a registered Paneyard workspace."
+        return pause
+      end
+
+      default = workspace.fetch("defaultLayoutYaml")
+      data = YAML.safe_load(workspace["layoutYaml"] || default)
+      loop do
+        render_layout(workspace.fetch("name"), data)
+        choice = ask("[a] add pane  [t] add tab  [e] edit  [d] delete pane  [k] delete tab  [r] reset  [y] YAML  [s] save  [q] cancel: ")&.downcase
+        case choice
+        when "a" then add_layout_pane(data)
+        when "t" then add_layout_tab(data)
+        when "e" then edit_layout_pane(data)
+        when "d" then delete_layout_pane(data)
+        when "k" then delete_layout_tab(data)
+        when "r" then data = YAML.safe_load(default)
+        when "y" then data = edit_layout_yaml(data)
+        when "s"
+          layout = YAML.dump(data).delete_prefix("---\n")
+          layout = "" if data == YAML.safe_load(default)
+          saved = client.update_layout(workspace: workspace.fetch("name"), layout:)
+          say bold(saved.fetch("usingDefault") ? "Reset to the default layout." : "Saved the layout.")
+          return pause
+        when nil, "", "q" then return say("Nothing changed.")
+        else say "Unknown choice."
+        end
+      rescue PaneyardSandbox::McpClient::ToolError => error
+        say ""
+        say "The layout was not saved:"
+        Array(error.payload["problems"]).each { |problem| say "- #{problem}" }
+        say(error.payload["message"] || error.message) if Array(error.payload["problems"]).empty?
+      end
+    end
+
+    def render_layout(name, data)
+      heading "#{name} layout"
+      Array(data["tabs"]).each_with_index do |tab, tab_index|
+        say bold("Tab #{tab_index + 1}: #{tab['name'].to_s.empty? ? '(unnamed)' : tab['name']}")
+        Array(tab["panes"]).each_with_index do |entry, pane_index|
+          pane = layout_pane(entry)
+          split = pane["split"]
+          branch = pane_index == Array(tab["panes"]).length - 1 ? "└─" : "├─"
+          detail = if split
+            "#{split.fetch('direction', 'right')} of #{split['of']}#{split['ratio'] ? " @ #{split['ratio']}" : ''}"
+          else
+            "root"
+          end
+          command = pane["command"].to_s.empty? ? "" : " · #{pane['command']}"
+          say "  #{tab_index + 1}.#{pane_index + 1} #{branch} #{pane['name']} [#{detail}]#{command}"
+        end
+      end
+      say ""
+    end
+
+    def add_layout_pane(data)
+      tabs = Array(data["tabs"])
+      tab = choose_layout_tab(tabs)
+      return unless tab
+
+      panes = Array(tab["panes"])
+      name = ask("Pane name: ")
+      return say("A pane needs a name.") if name.to_s.empty?
+
+      pane = { "name" => name, "command" => ask("Command (blank for a shell): ").to_s }
+      unless panes.empty?
+        say "Split from: #{panes.map.with_index(1) { |entry, index| "#{index}=#{layout_pane(entry)['name']}" }.join(', ')}"
+        source_number = ask("Pane number: ").to_i
+        source = panes[source_number - 1] if source_number.positive?
+        return say("No such pane.") unless source
+
+        direction = ask("Direction [right/down] (right): ")
+        ratio = ask("Ratio 0.1–0.9 (blank for automatic): ")
+        split = { "of" => layout_pane(source)["name"], "direction" => direction.to_s.empty? ? "right" : direction }
+        split["ratio"] = ratio.to_f unless ratio.to_s.empty?
+        pane["split"] = split
+      end
+      pane.delete("command") if pane["command"].empty?
+      panes << pane
+      tab["panes"] = panes
+    end
+
+    def add_layout_tab(data)
+      name = ask("Tab name (blank for unnamed): ")
+      pane_name = ask("Root pane name: ")
+      return say("A root pane needs a name.") if pane_name.to_s.empty?
+
+      pane = { "name" => pane_name, "command" => ask("Command (blank for a shell): ").to_s }
+      pane.delete("command") if pane["command"].empty?
+      tab = { "panes" => [ pane ] }
+      tab["name"] = name unless name.to_s.empty?
+      data["tabs"] << tab
+    end
+
+    def edit_layout_pane(data)
+      tab, index, pane = choose_layout_pane(data)
+      return unless pane
+      return say("The agent pane is fixed.") if pane["name"] == "agent"
+
+      old_name = pane["name"]
+      name = ask("Name (#{old_name}): ")
+      pane["name"] = name unless name.to_s.empty?
+      command = ask("Command (#{pane['command'] || 'shell'}; '-' clears): ")
+      pane["command"] = command == "-" ? nil : command unless command.to_s.empty?
+      pane.delete("command") if pane["command"].to_s.empty?
+      if index.positive?
+        earlier = Array(tab["panes"])[0...index]
+        split = pane["split"] ||= { "of" => layout_pane(earlier.first)["name"], "direction" => "right" }
+        say "Split from: #{earlier.map.with_index(1) { |entry, position| "#{position}=#{layout_pane(entry)['name']}" }.join(', ')}"
+        source = ask("Pane number (#{split['of']}): ")
+        split["of"] = layout_pane(earlier[source.to_i - 1])["name"] if source.to_i.positive? && earlier[source.to_i - 1]
+        direction = ask("Direction right/down (#{split.fetch('direction', 'right')}): ")
+        split["direction"] = direction unless direction.to_s.empty?
+        ratio = ask("Ratio 0.1–0.9 (#{split['ratio'] || 'automatic'}; '-' clears): ")
+        split["ratio"] = ratio.to_f unless ratio.to_s.empty? || ratio == "-"
+        split.delete("ratio") if ratio == "-"
+      end
+      Array(tab["panes"])[(index + 1)..]&.each do |entry|
+        split = layout_pane(entry)["split"]
+        split["of"] = pane["name"] if split && split["of"] == old_name
+      end
+    end
+
+    def delete_layout_pane(data)
+      tab, index, pane = choose_layout_pane(data)
+      return unless pane
+      return say("The agent pane cannot be deleted.") if pane["name"] == "agent"
+      return say("A tab's root pane cannot be deleted; delete the tab with [k] instead.") if index.zero?
+      if Array(tab["panes"]).any? { |entry| layout_pane(entry).dig("split", "of") == pane["name"] }
+        return say("Another pane splits from #{pane['name']}; move or delete that pane first.")
+      end
+
+      tab["panes"].delete_at(index)
+    end
+
+    def delete_layout_tab(data)
+      tabs = Array(data["tabs"])
+      return say("The first tab contains the agent and cannot be deleted.") if tabs.one?
+
+      number = ask("Tab number to delete (2-#{tabs.length}): ").to_i
+      return say("The first tab contains the agent and cannot be deleted.") if number == 1
+      return say("No such tab.") unless number.between?(2, tabs.length)
+
+      tabs.delete_at(number - 1)
+    end
+
+    def choose_layout_tab(tabs)
+      return tabs.first if tabs.one?
+
+      number = ask("Tab number (1-#{tabs.length}): ").to_i
+      tab = tabs[number - 1] if number.positive?
+      say("No such tab.") unless tab
+      tab
+    end
+
+    def choose_layout_pane(data)
+      reference = ask("Pane number (for example 1.2): ").to_s
+      tab_number, pane_number = reference.split(".", 2).map(&:to_i)
+      tab = Array(data["tabs"])[tab_number - 1] if tab_number.positive?
+      entry = Array(tab&.fetch("panes", nil))[pane_number - 1] if tab && pane_number.positive?
+      say("No such pane.") unless entry
+      [ tab, pane_number - 1, entry && layout_pane(entry) ]
+    end
+
+    def layout_pane(entry) = entry == "agent" ? { "name" => "agent" } : entry
+
+    def edit_layout_yaml(data)
+      Tempfile.create([ "paneyard-layout", ".yml" ]) do |file|
+        file.write(YAML.dump(data).delete_prefix("---\n"))
+        file.flush
+        return data unless system(*editor_command, file.path)
+
+        parsed = YAML.safe_load(File.read(file.path))
+        unless parsed.is_a?(Hash) && parsed["tabs"].is_a?(Array)
+          say "YAML was not applied: layout must have a `tabs:` list."
+          return data
+        end
+
+        parsed
+      rescue Psych::Exception => error
+        say "YAML was not applied: #{error.message}"
+        data
+      end
+    end
+
+    def editor_command
+      command = [ @env["VISUAL"], @env["EDITOR"] ].find { |candidate| !candidate.to_s.empty? } || "vi"
+      Shellwords.split(command)
+    end
+
     # --- popups -------------------------------------------------------------
+
+    def menu_ui
+      heading "Paneyard"
+      say "q  Queue a task here"
+      say "r  Browse runs and reports"
+      say "p  Show this run's report"
+      say "x  Close this run's session"
+      say "l  Edit this workspace's layout"
+      say "s  Configure coding-agent MCP"
+      say "o  Open Paneyard in the browser"
+      say ""
+
+      case ask("Choose an action (Enter cancels): ")&.downcase
+      when "q" then queue_ui
+      when "r" then runs_ui
+      when "p" then this_run_ui(:report)
+      when "x" then this_run_ui(:close)
+      when "l" then layout_ui
+      when "s" then mcp_ui
+      when "o" then open
+      else say "Cancelled."
+      end
+    end
 
     def queue_ui
       client = connect!

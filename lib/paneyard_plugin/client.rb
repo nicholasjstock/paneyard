@@ -36,6 +36,10 @@ module PaneyardPlugin
       @mcp.call_tool("register_workspace", path:)
     end
 
+    def update_layout(workspace:, layout:)
+      @mcp.call_tool("update_workspace_layout", workspace:, layout:)
+    end
+
     def close(run_id, workspace:)
       @mcp.call_tool("close_session", runId: run_id, workspace:)
     end

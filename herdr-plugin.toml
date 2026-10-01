@@ -27,6 +27,13 @@ command = ["/bin/sh", "bin/herdr-plugin", "startup"]
 # --- actions: bind keys to these in herdr's config.toml (README) -------------
 
 [[actions]]
+id = "menu"
+title = "Paneyard: menu"
+description = "Open one Paneyard menu for queueing, runs, reports, sessions, layouts, setup and the web UI."
+contexts = ["workspace"]
+command = ["/bin/sh", "bin/herdr-plugin", "pane", "menu"]
+
+[[actions]]
 id = "queue"
 title = "Paneyard: queue a task here"
 description = "Queue a task for an agent in this pane's repository, registering it as a workspace if needed."
@@ -62,6 +69,13 @@ contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "open"]
 
 [[actions]]
+id = "layout"
+title = "Paneyard: edit this workspace's layout"
+description = "Build and validate the current Paneyard workspace's tabs and panes in a Herdr popup."
+contexts = ["workspace"]
+command = ["/bin/sh", "bin/herdr-plugin", "pane", "layout"]
+
+[[actions]]
 id = "setup"
 title = "Paneyard: configure coding agents"
 description = "Detect installed coding agents and offer to connect them to Paneyard's MCP endpoint."
@@ -94,6 +108,14 @@ description = "Stop Paneyard. Running sessions keep running; any action starts i
 command = ["/bin/sh", "bin/herdr-plugin", "stop"]
 
 # --- popups behind the actions ----------------------------------------------
+
+[[panes]]
+id = "menu"
+title = "Paneyard"
+placement = "popup"
+width = 54
+height = 18
+command = ["/bin/sh", "bin/herdr-plugin", "menu-ui"]
 
 [[panes]]
 id = "queue"
@@ -134,3 +156,11 @@ placement = "popup"
 width = "80%"
 height = 20
 command = ["/bin/sh", "bin/herdr-plugin", "mcp-ui"]
+
+[[panes]]
+id = "layout"
+title = "Paneyard: edit workspace layout"
+placement = "popup"
+width = "90%"
+height = "85%"
+command = ["/bin/sh", "bin/herdr-plugin", "layout-ui"]
