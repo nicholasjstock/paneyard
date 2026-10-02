@@ -90,24 +90,11 @@ RSpec.describe Orchestrator::Sandbox do
     Process.wait(pid) rescue nil
   end
 
-  it "has no Telegram bot" do
-    ENV["TELEGRAM_BOT_TOKEN"] = "123:real"
-    ENV["TELEGRAM_ALLOWED_USER_IDS"] = "42"
-    sandbox_on!
-
-    expect(RemoteControl::Adapters::Telegram::Configuration.configured?).to be(false)
-    expect(RemoteControl::Adapters.enabled).to be_empty
-  ensure
-    ENV.delete("TELEGRAM_BOT_TOKEN")
-    ENV.delete("TELEGRAM_ALLOWED_USER_IDS")
-  end
-
-  describe "with integrations opted back in (bin/sandbox start --real-herdr --telegram)" do
+  describe "with real herdr opted back in (bin/sandbox start --real-herdr)" do
     around do |example|
       example.run
     ensure
-      %w[PANEYARD_SANDBOX_REAL_HERDR PANEYARD_SANDBOX_TELEGRAM TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_IDS]
-        .each { |key| ENV.delete(key) }
+      ENV.delete("PANEYARD_SANDBOX_REAL_HERDR")
     end
 
     it "uses the herdr socket it was given, and labels what it shows there as the sandbox's" do
@@ -145,30 +132,9 @@ RSpec.describe Orchestrator::Sandbox do
       Process.kill("KILL", -pid) rescue nil
     end
 
-    it "uses the Telegram bot it was started with" do
-      sandbox_on!
-      ENV["PANEYARD_SANDBOX_TELEGRAM"] = "1"
-      ENV["TELEGRAM_BOT_TOKEN"] = "999:sandbox-bot"
-      ENV["TELEGRAM_ALLOWED_USER_IDS"] = "42"
-
-      expect(RemoteControl::Adapters::Telegram::Configuration.bot_token).to eq("999:sandbox-bot")
-      expect(RemoteControl::Adapters::Telegram::Configuration.configured?).to be(true)
-    end
-
-    it "opts in only the adapter it was started with, so a new one is off by default" do
-      sandbox_on!
-      ENV["PANEYARD_SANDBOX_TELEGRAM"] = "1"
-
-      expect(described_class.allows_remote_control?("telegram")).to be(true)
-      expect(described_class.allows_remote_control?("discord")).to be(false)
-      expect(Class.new(FakeRemoteControlAdapter) { def name = "discord" }.new.enabled?).to be(false)
-    end
-
     it "keeps worktrees confined either way" do
       sandbox_on!
       ENV["PANEYARD_SANDBOX_REAL_HERDR"] = "1"
-      ENV["PANEYARD_SANDBOX_TELEGRAM"] = "1"
-
       expect(described_class.allows_path?(Dir.mktmpdir("real-project"))).to be(false)
     end
   end

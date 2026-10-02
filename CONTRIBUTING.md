@@ -37,7 +37,7 @@ claude mcp add --transport http paneyard-sandbox http://127.0.0.1:<port>/mcp/adm
 
 Without `-s user` this registers it for the current project only. The sandbox picks a new port each time it starts, so update the URL after a restart (`claude mcp remove paneyard-sandbox`, then add it again).
 
-`bin/dev`, by contrast, runs the real recurring schedule against your real herdr socket and any configured Telegram bot. The sandbox refuses everything outside itself; [The sandbox](./docs/operating.md#the-sandbox) in operating.md covers its guards, `bin/sandbox status` and `verify`, and its opt-ins for real herdr (`--real-herdr`) and Telegram (`--telegram`).
+`bin/dev`, by contrast, runs the real recurring schedule against your real herdr socket. The sandbox refuses everything outside itself; [The sandbox](./docs/operating.md#the-sandbox) in operating.md covers its guards, `bin/sandbox status` and `verify`, and its opt-in for real herdr (`--real-herdr`).
 
 ## Running it in development
 
@@ -49,7 +49,7 @@ PORT=3000 bin/dev
 
 It starts Puma and the Solid Queue worker together (the worker is what launches sessions), listening on `localhost` only. Before starting either, it checks the bundle and pending migrations and exits with a recovery command if something is missing. Without `PORT` it picks a free port and prints it. Sessions reach the app's MCP endpoint at `PANEYARD_RAILS_URL`, falling back to `http://127.0.0.1:$PORT`; if you set it, keep it in step with `PORT`. An MCP client registered against `/mcp/admin` needs the port `bin/dev` printed, not `bin/service`'s 7263. More in [operating.md](./docs/operating.md#development-bindev).
 
-`bin/dev` is not isolated: it runs the full recurring schedule (dispatch, reconcile, Telegram polling if configured, the worktree janitor) against whatever herdr socket your shell has. A run session working on this repository must use `bin/sandbox` instead.
+`bin/dev` is not isolated: it runs the full recurring schedule (dispatch, reconcile and the worktree janitor) against whatever herdr socket your shell has. A run session working on this repository must use `bin/sandbox` instead.
 
 ## Working on the herdr plugin
 
@@ -82,13 +82,12 @@ It is a Rails 8 app organised around `Workspace` as the top-level boundary: runs
 | --- | --- |
 | `app/controllers` | The JSON health endpoint. |
 | `app/models` | Persistence: `Workspace`, `Run`, `RunSession`, `RunCheckpoint`, … |
-| `app/jobs` | Solid Queue jobs: dispatch, starting a session, reconcile, worktree cleanup, Telegram polling. |
+| `app/jobs` | Solid Queue jobs: dispatch, starting a session, reconcile and worktree cleanup. |
 | `app/services/orchestrator` | Orchestration logic: run and session state, base branches, prompts, concurrency, layouts, and the two MCP endpoints (mounted in `config/routes.rb`). |
 | `app/services/orchestrator/runner` | Everything that touches the machine: herdr, agent CLIs, git worktrees, processes (see [the runner boundary](#design-rules)). |
 | `app/services/mcp_tools` | The MCP tools behind `/mcp/run` and `/mcp/admin`. |
-| `app/services/remote_control` | Telegram remote control and its adapter interface. |
 | `db/` | Schema and migrations. |
-| `lib/fake_herdr`, `lib/fake_telegram`, `script/fake_agent` | Test doubles that speak the real protocols. |
+| `lib/fake_herdr`, `script/fake_agent` | Test doubles that speak the real protocols. |
 | `lib/paneyard_sandbox`, `bin/sandbox`, `bin/preflight` | The isolated sandbox instance and the production boot smoke test. |
 | `herdr-plugin.toml`, `bin/herdr-plugin`, `lib/paneyard_plugin` | The herdr plugin: its manifest, entry point, daemon and popups. |
 | `demo/` | The Docker-recorded demo behind the README GIF; see [docs/demo-recording-plan.md](./docs/demo-recording-plan.md). |
@@ -115,7 +114,7 @@ The test layers, and where a change belongs (details in AGENTS.md, ["Testing Gui
 - **Boundary** (`spec/boundary_spec.rb`): fails if anything outside `Orchestrator::Runner` runs commands, shells out to git, signals processes, touches the filesystem or talks to herdr.
 - **Unit, service, job and request specs** (`spec/services`, `spec/jobs`, `spec/requests`): one behaviour each, with `Orchestrator::Runner::Herdr` stubbed call by call. Never open a live herdr socket from a spec; `spec/spec_helper.rb` points `HERDR_SOCKET_PATH` at a socket that doesn't exist so a forgotten stub fails loudly.
 - **Real git** where git behaviour is what's under test (see `spec/services/orchestrator/worktree_janitor_spec.rb`).
-- **Fake herdr** (`lib/fake_herdr/`, tag an example `:fake_herdr`) and **fake Telegram** (`lib/fake_telegram/`, tag `:fake_telegram`): real sockets and processes, no model usage. If you teach `Orchestrator::Runner::Herdr` a new call, extend the fake and its spec together.
+- **Fake herdr** (`lib/fake_herdr/`, tag an example `:fake_herdr`): real sockets and processes, no model usage. If you teach `Orchestrator::Runner::Herdr` a new call, extend the fake and its spec together.
 - **Lifecycle** (`spec/integration/run_lifecycle_spec.rb`): a run end to end in process. Changes to run or session state belong here as well as in a unit spec.
 - **Live agent specs** (tagged `live_agent`): drive the real CLIs with real model usage. They are excluded unless you set `LIVE_AGENT_SPECS=1`.
 
@@ -123,7 +122,7 @@ Don't consume live model capacity to test dispatch or argument building.
 
 ### CI
 
-[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs `bin/verify` on every push and on pull requests from forks, on both `ubuntu-latest` and `macos-latest` (the app has only been used on macOS; Linux keeps it honest). Nothing in CI reaches a real herdr, a model, Telegram or GitHub's API, and no secrets are passed in. It does not run `bin/verify --prod-copy`, `bin/preflight`'s credentials check (it needs `config/master.key`, so it is skipped and a throwaway `SECRET_KEY_BASE` used), or the live agent specs. On failure it uploads the logs as an artifact.
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs `bin/verify` on every push and on pull requests from forks, on both `ubuntu-latest` and `macos-latest` (the app has only been used on macOS; Linux keeps it honest). Nothing in CI reaches a real herdr, a model or GitHub's API, and no secrets are passed in. It does not run `bin/verify --prod-copy`, `bin/preflight`'s credentials check (it needs `config/master.key`, so it is skipped and a throwaway `SECRET_KEY_BASE` used), or the live agent specs. On failure it uploads the logs as an artifact.
 
 ## Style
 

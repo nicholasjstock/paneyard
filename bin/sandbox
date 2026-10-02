@@ -4,12 +4,12 @@
 # loopback port, against its own sqlite files under tmp/, beside a fake herdr
 # whose "agents" are scripted processes that never touch a model. Safe to run
 # from a run session's worktree: PANEYARD_SANDBOX=1 (Orchestrator::Sandbox)
-# refuses the operator's herdr socket, Telegram, GitHub tokens, and any git
+# refuses the operator's herdr socket, GitHub tokens, and any git
 # worktree or process outside the sandbox. It never touches
 # storage/production*.sqlite3, tmp/pids/production.pid or the production port.
 #
 # Usage:
-#   bin/sandbox start [--real-herdr] [--telegram]
+#   bin/sandbox start [--real-herdr]
 #                        boot tmp/sandbox, seed a scratch workspace, print its URL
 #   bin/sandbox status
 #   bin/sandbox stop
@@ -22,49 +22,24 @@
 # Queue a run with a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]`
 # directive in its task to choose what the fake agent does (default: done).
 #
-# To try the real thing, opt integrations back in, one at a time:
+# To try the real thing, opt Herdr back in:
 #
 #   --real-herdr  runs open in YOUR herdr (workspaces labelled "[sandbox] ..."),
 #                 running the real claude/codex CLI -- real model
 #                 usage -- on throwaway tasks in the sandbox's scratch repo.
 #                 Their MCP reports go to this sandbox, not production.
-#   --telegram    the sandbox polls and answers Telegram for real, as a SECOND
-#                 bot: getUpdates hands each message to one poller, so sharing
-#                 production's bot would take messages away from it. Create
-#                 one with @BotFather and put its token and your user id in
-#                 the environment or in ~/.config/paneyard/sandbox.env:
-#                   SANDBOX_TELEGRAM_BOT_TOKEN=123456:ABC...
-#                   SANDBOX_TELEGRAM_ALLOWED_USER_IDS=11111111
-#
 # Everything else stays isolated either way: its own database, port and
 # scratch repos, and no GitHub tokens.
 
 require "fileutils"
 require "json"
-require "net/http"
 require_relative "../lib/paneyard_sandbox/instance"
 require_relative "../lib/paneyard_sandbox/verify"
 
 APP_ROOT = File.expand_path("..", __dir__)
 
-SANDBOX_ENV_FILE = File.expand_path("~/.config/paneyard/sandbox.env")
-
 def instance(name, env: {}, fake_herdr: true)
   PaneyardSandbox::Instance.new(app_root: APP_ROOT, root: File.join(APP_ROOT, "tmp", name), env:, fake_herdr:)
-end
-
-def sandbox_setting(key)
-  return ENV[key] if ENV[key].to_s.strip != ""
-  return nil unless File.exist?(SANDBOX_ENV_FILE)
-
-  File.readlines(SANDBOX_ENV_FILE, chomp: true).each do |line|
-    name, value = line.strip.delete_prefix("export ").split("=", 2)
-    next unless name&.strip == key && value
-
-    value = value.strip.delete_prefix('"').delete_suffix('"')
-    return value unless value.empty? || value == "REPLACE_ME"
-  end
-  nil
 end
 
 def real_herdr_env
@@ -72,27 +47,6 @@ def real_herdr_env
   abort "bin/sandbox: --real-herdr, but there is no herdr socket at #{socket}" unless File.socket?(socket)
 
   { "PANEYARD_SANDBOX_REAL_HERDR" => "1", "HERDR_SOCKET_PATH" => socket }
-end
-
-# Asks Telegram which bot the token belongs to (getMe reads nothing from the
-# update queue), so the operator can see it is not production's.
-def telegram_env
-  token = sandbox_setting("SANDBOX_TELEGRAM_BOT_TOKEN")
-  users = sandbox_setting("SANDBOX_TELEGRAM_ALLOWED_USER_IDS")
-  if token.nil? || users.nil?
-    abort "bin/sandbox: --telegram needs SANDBOX_TELEGRAM_BOT_TOKEN and SANDBOX_TELEGRAM_ALLOWED_USER_IDS, in the " \
-          "environment or in #{SANDBOX_ENV_FILE}. Use a bot of its own (@BotFather), never production's: getUpdates " \
-          "hands each message to one poller, so sharing it would take messages away from production."
-  end
-
-  api = ENV.fetch("TELEGRAM_BOT_API_URL", "https://api.telegram.org").delete_suffix("/")
-  me = JSON.parse(Net::HTTP.get(URI("#{api}/bot#{token}/getMe")))
-  abort "bin/sandbox: Telegram rejected SANDBOX_TELEGRAM_BOT_TOKEN: #{me['description']}" unless me["ok"]
-
-  @telegram_bot = "@#{me.dig('result', 'username')}"
-  { "PANEYARD_SANDBOX_TELEGRAM" => "1", "TELEGRAM_BOT_TOKEN" => token, "TELEGRAM_ALLOWED_USER_IDS" => users }
-rescue SocketError, SystemCallError, JSON::ParserError => error
-  abort "bin/sandbox: could not reach Telegram to check the sandbox bot: #{error.message}"
 end
 
 # A sandbox database remembers herdr pane and workspace ids ("w1:p1") and
@@ -145,7 +99,6 @@ def boot(instance, modes: [])
   name, id, repository = seed!(instance)
   puts "bin/sandbox: up at #{instance.url} in #{(Time.now - started).round(1)}s"
   puts "  herdr      #{modes.include?('real-herdr') ? 'YOUR herdr: runs launch real CLIs, labelled [sandbox]' : 'fake (scripted agents, no model)'}"
-  puts "  telegram   #{modes.include?('telegram') ? "live, as #{@telegram_bot}" : 'off'}"
   puts "  workspace  #{name} (scratch repo #{repository}, branches main and feature/sandbox)"
   puts "  mcp admin  #{instance.url}/mcp/admin"
   puts "  database   #{instance.storage_dir}"
@@ -160,13 +113,12 @@ case ARGV.first
 when "start"
   sandbox = instance("sandbox")
   if sandbox.running?
-    puts "bin/sandbox: already running at #{sandbox.url} (#{sandbox.modes.join(', ').then { |m| m.empty? ? 'fake herdr, no telegram' : m }}); " \
+    puts "bin/sandbox: already running at #{sandbox.url} (#{sandbox.modes.join(', ').then { |m| m.empty? ? 'fake herdr' : m }}); " \
          "bin/sandbox stop first to change modes"
   else
     modes = []
     env = {}
     env.merge!(real_herdr_env) && modes << "real-herdr" if ARGV.include?("--real-herdr")
-    env.merge!(telegram_env) && modes << "telegram" if ARGV.include?("--telegram")
     guard_herdr_kind!(sandbox, modes.include?("real-herdr") ? "real" : "fake")
     boot(instance("sandbox", env:, fake_herdr: !modes.include?("real-herdr")), modes:)
     puts "Stop it with bin/sandbox stop."

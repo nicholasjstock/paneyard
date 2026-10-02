@@ -115,10 +115,7 @@ module PaneyardSandbox
         "PANEYARD_SANDBOX_ROOT" => root,
         "PANEYARD_STORAGE_DIR" => storage_dir,
         "PANEYARD_RAILS_URL" => port && "http://127.0.0.1:#{port}",
-        # Belt and braces: Orchestrator::Sandbox already ignores these.
         "HERDR_SOCKET_PATH" => herdr_socket_path,
-        "TELEGRAM_BOT_TOKEN" => nil,
-        "TELEGRAM_ALLOWED_USER_IDS" => nil,
         "PANEYARD_RUN_TOKEN" => nil,
         "PANEYARD_RUN_ID" => nil,
         "PIDFILE" => File.join(root, "puma.pid")

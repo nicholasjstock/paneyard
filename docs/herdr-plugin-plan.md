@@ -3,6 +3,9 @@
 Status: implemented on `paneyard/goal-turn-paneyard-into-a-herdr-plugin-someone-w-df91`. This is the plan the
 implementation followed, with the facts it rests on. Where the build changed the plan, the plan was updated.
 
+This is a historical design record. Its Telegram configuration references describe the implementation at
+the time and are intentionally not current: Paneyard no longer includes Telegram or in-app remote control.
+
 ## Goal
 
 Someone who already uses herdr runs

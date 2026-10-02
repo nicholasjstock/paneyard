@@ -46,7 +46,7 @@ PORT=3000 bin/dev
 PORT=3300 PANEYARD_RAILS_URL=http://127.0.0.1:3300 bin/dev
 ```
 
-`bin/dev` is not isolated: it runs the full recurring schedule (dispatch, reconcile, Telegram polling if configured, the worktree janitor) against your real herdr. To try things without that, use [the sandbox](#the-sandbox).
+`bin/dev` is not isolated: it runs the full recurring schedule (dispatch, reconcile and the worktree janitor) against your real herdr. To try things without that, use [the sandbox](#the-sandbox).
 
 ### Long-running: `bin/service`
 
@@ -206,25 +206,18 @@ There is no cost or token accounting for sessions: they are real interactive ter
 
 See AGENTS.md's "MCP Boundary" for the design rules behind both.
 
-## Remote control
-
-The optional Telegram bot lets you check on and steer live sessions from your phone. It is experimental and largely untested outside the test suite. See [telegram.md](./telegram.md).
-
 ## The sandbox
 
 `bin/sandbox` runs this checkout's code as a complete, isolated instance, useful both for trying the orchestrator out and for testing changes to it:
 
 ```sh
-bin/sandbox start [--real-herdr] [--telegram]   # boot tmp/sandbox, seed a scratch workspace, print its URL
+bin/sandbox start [--real-herdr]                # boot tmp/sandbox, seed a scratch workspace, print its URL
 bin/sandbox status
 bin/sandbox stop
 bin/sandbox reset                               # stop and delete tmp/sandbox
 bin/sandbox verify [--keep]                     # boot a fresh instance and drive a run through it end to end
 ```
 
-It runs real Puma and Solid Queue with the real recurring schedule on a free `127.0.0.1` port, with its own SQLite files, pid and log under `tmp/sandbox/`, beside a **fake herdr** whose "agents" are scripted processes that never call a model. Put a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]` directive in a task to choose what the fake agent does (default `done`). While `PANEYARD_SANDBOX=1`, `Orchestrator::Sandbox` refuses your real herdr socket, remote-control credentials, and any repository or process outside the sandbox. Its scratch repository has a second branch, `feature/sandbox`, to queue a run from something other than `main`. It never touches `storage/production*.sqlite3`, `tmp/pids/production.pid` or the production port.
-
-Two opt-ins bring real integrations back, one at a time:
+It runs real Puma and Solid Queue with the real recurring schedule on a free `127.0.0.1` port, with its own SQLite files, pid and log under `tmp/sandbox/`, beside a **fake herdr** whose "agents" are scripted processes that never call a model. Put a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]` directive in a task to choose what the fake agent does (default `done`). While `PANEYARD_SANDBOX=1`, `Orchestrator::Sandbox` refuses your real herdr socket and any repository or process outside the sandbox. Its scratch repository has a second branch, `feature/sandbox`, to queue a run from something other than `main`. It never touches `storage/production*.sqlite3`, `tmp/pids/production.pid` or the production port.
 
 - `--real-herdr` opens the sandbox's runs in your own herdr (workspaces labelled `[sandbox] ...`) running the real agent CLI, which **spends real model usage**, on throwaway tasks in the scratch repository.
-- `--telegram` makes the sandbox poll and answer Telegram as a **second bot**. Give it its own token and your user id in `SANDBOX_TELEGRAM_BOT_TOKEN` / `SANDBOX_TELEGRAM_ALLOWED_USER_IDS` (in the environment or `~/.config/paneyard/sandbox.env`). Never reuse your main instance's bot: Telegram hands each message to one poller, so two instances sharing a bot split your messages.

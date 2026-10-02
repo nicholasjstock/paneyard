@@ -3,7 +3,7 @@ module Orchestrator
   # on.
   #
   # The orchestrator (everything else in this app: the database, the UI, the
-  # MCP endpoints, Telegram, the queue and concurrency, run and session state)
+  # MCP endpoints, the queue and concurrency, run and session state)
   # decides which job runs, where, and what becomes of it. A runner is what
   # carries that out on the machine that hosts herdr, the agent CLIs, the git
   # checkouts and their worktrees: it opens and drives sessions, provisions and

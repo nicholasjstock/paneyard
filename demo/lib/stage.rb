@@ -184,7 +184,7 @@ module Stage
   # --- Paneyard ------------------------------------------------------------------
 
   # This checkout's bin/production. Not a sandbox: the container is the
-  # isolation (its own herdr, filesystem and database, no GitHub or Telegram
+  # isolation (its own herdr, filesystem and database, no GitHub
   # credentials, and the source mounted read-only), and a sandbox would label
   # every run "[sandbox]" in herdr's sidebar.
   def start_app!(model:)

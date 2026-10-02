@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_01_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_02_100000) do
   create_table "run_checkpoints", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "outcome", null: false
@@ -72,14 +72,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_01_130000) do
     t.index ["status"], name: "index_runs_on_status"
     t.index ["workspace_id"], name: "index_runs_on_workspace_id"
     t.index ["worktree_name"], name: "index_runs_on_worktree_name"
-  end
-
-  create_table "telegram_update_cursors", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.integer "last_update_id", default: -1, null: false
-    t.string "name", null: false
-    t.datetime "updated_at", null: false
-    t.index ["name"], name: "index_telegram_update_cursors_on_name", unique: true
   end
 
   create_table "workspaces", force: :cascade do |t|

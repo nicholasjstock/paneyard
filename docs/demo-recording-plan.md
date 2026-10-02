@@ -42,7 +42,7 @@ demo/bin/record cut NAME   # re-cut rehearsal|take from its .mkv and NAME-timing
 **Changed from the plan while building:**
 - **kitty, not xterm.** xterm crops any fallback glyph wider than a cell, which cut Claude's `⏺` in half. kitty scales symbols into the cell, and runs on Xvfb with Mesa's software OpenGL.
 - **Canvas 1920×1080 at 15 pt**, not 2560×1440. Scaled down to a README GIF, 2560-wide text becomes unreadable. `DEMO_CANVAS`/`DEMO_FONT_SIZE` go bigger for a talk.
-- **The takes don't run as a Paneyard sandbox.** The container is the isolation: its own herdr, filesystem and database, no GitHub or Telegram credentials, and the source read-only. A sandbox would label every run `[sandbox] …` in herdr's sidebar. `compat` still runs as a sandbox, because that is the path `bin/sandbox --real-herdr` uses on the host.
+- **The takes don't run as a Paneyard sandbox.** The container is the isolation: its own herdr, filesystem and database, no GitHub credentials, and the source read-only. A sandbox would label every run `[sandbox] …` in herdr's sidebar. `compat` still runs as a sandbox, because that is the path `bin/sandbox --real-herdr` uses on the host.
 - **The model is `sonnet`** (`DEMO_MODEL`), not Paneyard's default `opus`, to go easier on Pro quota.
 
 **Found along the way:**
@@ -61,7 +61,7 @@ demo/bin/record cut NAME   # re-cut rehearsal|take from its .mkv and NAME-timing
 | Auth | The operator has a **Claude Pro subscription, not an API key.** `claude setup-token` ("Set up a long-lived authentication token (requires Claude subscription)", *verified* in `--help`) makes a token, which is passed into the container at run time only (§6). |
 | Capture | **One Xvfb display** with a full-screen xterm running the herdr client, recorded by **one `ffmpeg -f x11grab`** at 2560×1440@30. *Verified* at 300 of 300 frames. |
 | Driver | A small **director** script that types with visible keystrokes (`xdotool`), clicks in herdr, waits on real state (herdr agent status, git, `/mcp/admin` `get_run`) and writes `timings.json`. |
-| Out of scope for now | The web UI, voiceover and captions, Telegram, Codex/opencode, and registering the workspace on camera (the reset pre-registers it). |
+| Out of scope for now | The web UI, voiceover and captions, Codex/opencode, and registering the workspace on camera (the reset pre-registers it). |
 
 ## 2. What the plan relies on in Paneyard
 

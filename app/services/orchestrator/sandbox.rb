@@ -13,20 +13,14 @@ module Orchestrator
   #     sandbox root (herdr picks where the worktree itself goes: the fake herdr
   #     beside the repository, so inside the root too);
   #   - processes: a session pid is only signalled if it is a fake agent;
-  #   - remote control (Telegram, and any other RemoteControl adapter): no
-  #     credentials, so no polling or sending.
   #
-  # Two of those can be opted back in, for an operator who wants to see the
-  # real thing (`bin/sandbox start --real-herdr --telegram`), never by
+  # Herdr can be opted back in for an operator who wants to see the real
+  # thing (`bin/sandbox start --real-herdr`), never by
   # bin/preflight, whose database may be a production copy:
   #
   #   - PANEYARD_SANDBOX_REAL_HERDR=1: runs open real sessions (the real CLI,
   #     real model usage) in the operator's own herdr, labelled [sandbox];
   #     signals are then allowed to pids this sandbox's own sessions recorded.
-  #   - PANEYARD_SANDBOX_TELEGRAM=1: the TELEGRAM_* env it was started with
-  #     (bin/sandbox insists on a bot of its own) is used for real. Any other
-  #     remote-control adapter opts in the same way, by its own name
-  #     (allows_remote_control?).
   module Sandbox
     module_function
 
@@ -40,16 +34,6 @@ module Orchestrator
 
     def real_herdr?
       enabled? && ENV["PANEYARD_SANDBOX_REAL_HERDR"] == "1"
-    end
-
-    # Whether a remote-control adapter (RemoteControl::Adapter) may reach its
-    # platform. Outside a sandbox, always. Inside one, only an adapter
-    # bin/sandbox opted in by name (PANEYARD_SANDBOX_<NAME>=1, e.g. --telegram):
-    # an adapter that polls would otherwise take the operator's messages from
-    # production, and any adapter would answer from a sandbox as if it were
-    # the real thing. A new adapter is therefore off in a sandbox by default.
-    def allows_remote_control?(adapter_name)
-      !enabled? || ENV["PANEYARD_SANDBOX_#{adapter_name.to_s.upcase}"] == "1"
     end
 
     # What a sandbox shows in the operator's herdr (workspace names,

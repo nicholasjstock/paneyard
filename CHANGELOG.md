@@ -27,6 +27,7 @@ The first public version. It includes:
 
 ### Removed
 
+- Telegram remote control was removed in favor of external Herdr-native control surfaces. This includes its adapter, polling and pane-streaming jobs, configuration, persistence, sandbox mode, test server and platform-neutral remote-control layer.
 - Session environment: no pane gets env from Paneyard. claude's MCP capability is in its config file, codex's in a `-c` header override. With it went workspace environment variables (`record_workspace_env_var`), GitHub App token minting (`GITHUB_APP_*`), and the opencode driver, whose MCP config could only travel through env.
 
 ### Runs and sessions
@@ -57,7 +58,6 @@ The first public version. It includes:
 - `/mcp/admin`, an unauthenticated loopback MCP endpoint for the operator's own MCP clients and the herdr plugin: `queue_run`, `list_runs`, `get_run`, `list_workspaces`, `register_workspace`, `update_workspace_layout`, `close_session`, `reopen_session`, `list_models`, and `ping`.
 - `register_workspace` on `/mcp/admin`: registers a workspace from your own agent or the plugin, given the repository's path (or a directory or linked worktree in it). It checks everything first, creates nothing if anything is wrong, and returns every problem with how to fix it.
 - `queue_run` over `/mcp/admin` now requires `workspace` instead of falling back to the oldest workspace, and `/mcp/admin` has server instructions for the flow: find the workspace for this repository, register it if missing, then queue. From inside a run it still defaults to the run's own workspace.
-- Telegram remote control: list sessions, read panes and reports, and type into sessions from an allow-listed private chat, behind a platform-neutral adapter interface. Configured with `TELEGRAM_BOT_TOKEN`/`TELEGRAM_ALLOWED_USER_IDS` in the plugin's `.env` (or `bin/service`'s environment); Rails credentials are no longer read.
 
 ### Security
 
@@ -66,6 +66,6 @@ The first public version. It includes:
 ### Operations and development
 
 - `bin/dev` for development and `bin/service` for a daemonized long-running instance, whose `restart` refuses to replace a working instance with code that fails a production boot check (`bin/preflight`).
-- `bin/sandbox`: an isolated instance with a fake herdr and fake agent that spends no model usage, with opt-in real herdr and Telegram.
+- `bin/sandbox`: an isolated instance with a fake herdr and fake agent that spends no model usage, with opt-in real herdr.
 - `bin/verify`: specs, RuboCop, boot smoke test, an end-to-end sandbox run, and security audits in one command.
 - Released under the MIT License.

@@ -26,9 +26,6 @@ production: &recurring_jobs
   cleanup_worktrees:
     class: WorktreeCleanupJob
     schedule: every 10 minutes
-  poll_telegram_updates:
-    class: PollTelegramUpdatesJob
-    schedule: every 5 seconds
 
 development:
   <<: *recurring_jobs

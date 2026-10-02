@@ -3,8 +3,7 @@ default: &default
     - polling_interval: 1
       batch_size: 500
   workers:
-    # RunDispatchJob, the reconcilers and the Telegram poller: all short,
-    # frequent jobs.
+    # RunDispatchJob and the reconcilers are all short, frequent jobs.
     - queues: default
       threads: 3
       processes: <%= ENV.fetch("JOB_CONCURRENCY", 1) %>

@@ -24,11 +24,9 @@ If you do either, whatever sits in front of the app has to provide the authentic
 
 **The app can edit itself.** Its own repository can be registered as a workspace. A run can then change the orchestrator's code, and a session can merge into `main` when asked, with no separate review step. `main` is what `bin/service` runs. A bad or malicious change to this repository reaches the running instance the next time it restarts. `bin/service restart` boots the change with `bin/preflight` first and keeps the old instance if that fails; the herdr plugin's restart has no such check.
 
-**Remote control (Telegram).** If you configure a bot token, the app long-polls Telegram and accepts commands (list sessions, read their panes, type into them) only from the numeric user IDs in `TELEGRAM_ALLOWED_USER_IDS`. It stays off unless both a token and an allow-list are set. Anyone on that list, and anyone who controls one of those Telegram accounts, can drive your sessions, so keep the list short. The bot token is a credential: whoever holds it can read the messages you send the bot.
-
 **GitHub credentials.** Paneyard hands sessions no credentials and sets no environment in their panes. A session's panes are your own login shell, so it pushes (when asked to) with whatever that shell can use: your SSH agent, your `gh` login. That carries everything your GitHub account can do.
 
-**Secrets on disk.** `config/master.key`, `config/credentials.yml.enc`, the SQLite databases under `storage/` and the logs under `log/` hold credentials and run content (prompts, reports, pane text). Installed as a herdr plugin, the same live in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard`: databases, log, a generated `secret_key_base`) and its config directory (`.env`, with any Telegram token). They are only as private as your user account.
+**Secrets on disk.** `config/master.key`, `config/credentials.yml.enc`, the SQLite databases under `storage/` and the logs under `log/` hold credentials and run content (prompts, reports, pane text). Installed as a herdr plugin, the same live in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard`: databases, log, a generated `secret_key_base`). They are only as private as your user account.
 
 ## In scope
 
@@ -36,9 +34,8 @@ Reports are welcome for anything that lets someone **other than the operator** a
 
 - reaching `/mcp/admin` or `/mcp/run` from another origin or host while the default loopback-only configuration is in place (DNS rebinding, a `Host`/`Origin` check bypass);
 - using a run session's `/mcp/run` capability after its session has ended, or to act as a different session;
-- a Telegram user who is not on the allow-list getting the bot to do anything;
 - an MCP tool that exposes more than it is documented to (arbitrary SQL, file reads, command execution);
-- a sandbox instance (`bin/sandbox`, `PANEYARD_SANDBOX=1`) reaching outside itself: the operator's herdr, Telegram, or paths outside its root;
+- a sandbox instance (`bin/sandbox`, `PANEYARD_SANDBOX=1`) reaching outside itself: the operator's herdr or paths outside its root;
 - credentials or tokens leaking into logs, prompts or anywhere else they don't belong.
 
 ## Out of scope
@@ -48,7 +45,7 @@ These are how the tool is meant to work, not vulnerabilities:
 - An agent session doing something harmful with the access it is deliberately given, including after reading a malicious issue, web page or dependency. You choose which repositories to register and which tasks to run.
 - Anything done by someone who can already run code as your user on the machine, or who can reach the app because you set `BINDING` or `PANEYARD_ALLOWED_HOSTS` without putting authentication in front of it.
 - The absence of authentication, multi-user support or per-user permissions.
-- Issues in the agent CLIs (`claude`, `codex`), herdr, Telegram or GitHub themselves. Please report those to their maintainers.
+- Issues in the agent CLIs (`claude`, `codex`), herdr or GitHub themselves. Please report those to their maintainers.
 - Denial of service against a local, single-user process.
 
 ## Reporting a vulnerability
