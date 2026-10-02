@@ -136,8 +136,11 @@ on every start (migrations), and the recurring schedule all behave exactly as un
   socket and leaves it alone with a log line: restarting it there would make reconcile treat every live
   session on the first server as lost. One Paneyard per user, following the herdr server that started it;
   `restart` moves it deliberately.
-- **Upgrades.** `daemon.json` records a fingerprint of the code it runs (manifest `version`, plugin root,
-  `Gemfile.lock` digest). An action that finds a running daemon with a different fingerprint restarts it.
+- **Upgrades.** `daemon.json` records a fingerprint of the code it runs (manifest `version`, the plugin
+  root's checked-out commit, read from `.git` without running git, plugin root, `Gemfile.lock` and `.env`
+  digests). An action that finds a running daemon with a different fingerprint restarts it, so a reinstall
+  at the same version (`--ref <branch>`) still lands. A linked checkout restarts on a commit, not on every
+  uncommitted edit; `paneyard.restart` applies those.
   `herdr plugin install <owner>/paneyard` again (optionally `--ref`) replaces the managed checkout and
   rebuilds its gems; the next action, or the next herdr start, restarts the daemon on the new code, and
   `bin/production` migrates the database on that start. A restart is harmless to running sessions: herdr

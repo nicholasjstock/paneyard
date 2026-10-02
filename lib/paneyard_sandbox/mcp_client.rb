@@ -5,7 +5,8 @@ require "uri"
 module PaneyardSandbox
   # Just enough of an MCP Streamable HTTP client to call this app's own
   # /mcp/run and /mcp/admin tools the way a real CLI does: the initialize
-  # handshake, the Mcp-Session-Id it hands back, then tools/call. Responses
+  # handshake, the Mcp-Session-Id it hands back (if any: this app's own
+  # endpoints are stateless and issue none), then tools/call. Responses
   # may come back as JSON or as a one-event SSE stream; both are handled.
   class McpClient
     class Error < StandardError; end
@@ -54,11 +55,12 @@ module PaneyardSandbox
     private
 
     def initialize_session!
-      return if @session_id
+      return if @initialized
 
       rpc("initialize", protocolVersion: PROTOCOL_VERSION, capabilities: {},
         clientInfo: { name: @client_name, version: "1" })
       notify("notifications/initialized")
+      @initialized = true
     end
 
     # A session the server has forgotten is renewed once, transparently: a
@@ -69,9 +71,10 @@ module PaneyardSandbox
       response = begin
         post(jsonrpc: "2.0", id: @next_id, method:, params:)
       rescue SessionExpired
-        raise unless renew && @session_id && method != "initialize"
+        raise unless renew && @initialized && method != "initialize"
 
         @session_id = nil
+        @initialized = false
         initialize_session!
         return rpc(method, renew: false, **params)
       end
@@ -91,10 +94,8 @@ module PaneyardSandbox
       request["Content-Type"] = "application/json"
       request["Accept"] = "application/json, text/event-stream"
       request["Authorization"] = "Bearer #{@token}" if @token
-      if @session_id
-        request["Mcp-Session-Id"] = @session_id
-        request["MCP-Protocol-Version"] = PROTOCOL_VERSION
-      end
+      request["Mcp-Session-Id"] = @session_id if @session_id
+      request["MCP-Protocol-Version"] = PROTOCOL_VERSION if @initialized
       request.body = JSON.generate(body)
       response = Net::HTTP.start(@uri.host, @uri.port, read_timeout: @timeout, open_timeout: @timeout) do |http|
         http.request(request)

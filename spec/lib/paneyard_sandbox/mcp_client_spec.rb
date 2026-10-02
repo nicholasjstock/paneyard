@@ -66,4 +66,18 @@ RSpec.describe PaneyardSandbox::McpClient do
       expect(sent.count { |method, _| method == "initialize" }).to eq(2)
     end
   end
+
+  # This app's own endpoints are stateless: no Mcp-Session-Id comes back,
+  # and the client must not mistake that for "not initialized yet".
+  context "against a stateless server" do
+    let(:issue) { [ nil ] }
+
+    before { known << nil }
+
+    it "initializes once and then just calls" do
+      2.times { client.call_tool("list_workspaces") }
+
+      expect(sent.map(&:first)).to eq(%w[initialize notifications/initialized tools/call tools/call])
+    end
+  end
 end

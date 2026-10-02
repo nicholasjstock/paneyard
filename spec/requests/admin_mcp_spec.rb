@@ -30,6 +30,26 @@ RSpec.describe "the admin MCP endpoint", type: :request do
     expect(JSON.parse(body).dig("result", "instructions")).to include("list_workspaces", "register_workspace", "queue_run")
   end
 
+  # An operator's own client may sit idle for hours, and stays connected
+  # while Paneyard restarts; neither may make it 404 (the mcp gem's stateful
+  # default forgot a session after 30 idle minutes, and all of them on a restart).
+  it "keeps answering a client long idle, or connected before a restart" do
+    host! "127.0.0.1"
+    post_mcp(jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "spec", version: "1" } })
+    expect(response).to have_http_status(:ok)
+    later = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 6.hours
+    allow(Process).to receive(:clock_gettime).and_call_original
+    allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).and_return(later)
+
+    post "/mcp/admin", params: JSON.generate(jsonrpc: "2.0", id: 2, method: "tools/list"),
+      headers: { "CONTENT_TYPE" => "application/json", "ACCEPT" => "application/json, text/event-stream",
+                 "HTTP_MCP_SESSION_ID" => SecureRandom.uuid }
+
+    expect(response).to have_http_status(:ok)
+    expect(JSON.parse(response.body).dig("result", "tools")).to be_present
+  end
+
   it "keeps the admin mutations off the run endpoint" do
     expect(Orchestrator::RunMcpServer::TOOLS).not_to include(
       McpTools::RegisterWorkspaceTool, McpTools::UpdateWorkspaceLayoutTool, McpTools::CloseSessionTool,

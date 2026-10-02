@@ -9,16 +9,13 @@ module Orchestrator
   # is this app's accepted trust boundary everywhere else too
   # (ApplicationController#current_operator).
   #
-  # One shared transport is enough here (unlike RunMcpEndpoint's
-  # per-session cache): every caller gets the same tool set and the same
-  # (empty) server_context, so there is nothing to key a cache on. The
-  # transport itself still tracks each connecting MCP client's own
-  # session/stream internally.
+  # One shared transport is enough here: every caller gets the same tool set
+  # and the same (empty) server_context. It is stateless (McpTransport), so
+  # it keeps no per-client sessions either: an operator's client stays
+  # connected across idle hours and Paneyard restarts.
   class AdminMcpEndpoint
     def initialize
-      @transport = MCP::Server::Transports::StreamableHTTPTransport.new(
-        AdminMcpServer.build, allowed_hosts: PaneyardAllowedHosts.extra
-      )
+      @transport = McpTransport.build(AdminMcpServer.build)
     end
 
     def call(env)

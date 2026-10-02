@@ -2,6 +2,7 @@ require "spec_helper"
 require "tmpdir"
 require "fileutils"
 require "socket"
+require "open3"
 require_relative "../../../lib/paneyard_plugin"
 
 # Real processes, standing in for bin/production: a tiny server that answers
@@ -146,6 +147,86 @@ RSpec.describe PaneyardPlugin::Daemon do
     expect(second.pid).not_to eq(first.pid)
     expect(alive?(first.pid)).to be(false)
     expect(started_envs.map { |env| env["PANEYARD_MAX_CONCURRENT_RUNS"] }).to include("7")
+  end
+
+  describe "the checked-out commit" do
+    let(:root) { File.join(dir, "plugin").tap { |path| FileUtils.mkdir_p(path) } }
+    let(:paths) do
+      PaneyardPlugin::Paths.new(env: {
+        "HERDR_PLUGIN_STATE_DIR" => File.join(dir, "state"), "HERDR_PLUGIN_CONFIG_DIR" => File.join(dir, "config"),
+        "HERDR_PLUGIN_ROOT" => root
+      })
+    end
+
+    def git(*args, chdir: root)
+      out, status = Open3.capture2e("git", "-c", "user.name=Spec", "-c", "user.email=spec@example.test",
+        "-c", "commit.gpgsign=false", *args, chdir:)
+      raise "git #{args.join(' ')}: #{out}" unless status.success?
+
+      out.strip
+    end
+
+    def commit(message)
+      File.write(File.join(root, "herdr-plugin.toml"), "version = \"1.0.0\"\n# #{message}\n")
+      File.write(File.join(root, "Gemfile.lock"), "unchanged\n")
+      git("add", ".")
+      git("commit", "-q", "-m", message)
+      git("rev-parse", "HEAD")
+    end
+
+    before { git("init", "-q", "-b", "main") }
+
+    # `herdr plugin install <owner>/paneyard --ref <branch>` again: same
+    # manifest version, same lockfile, new code.
+    it "restarts the daemon on a reinstall at a new commit, as a fresh start of the same command" do
+      commit("first")
+      first = daemon.ensure_running
+      expect(daemon.ensure_running.outcome).to eq(:running)
+
+      commit("second")
+      second = daemon.ensure_running
+
+      expect(second).to have_attributes(outcome: :restarted, port: first.port)
+      expect(alive?(first.pid)).to be(false)
+      # The same command as any start, so bin/production's db:prepare runs.
+      expect(started_envs.size).to eq(2)
+    end
+
+    it "does not restart a linked checkout for an uncommitted edit" do
+      commit("first")
+      first = daemon.ensure_running
+
+      File.write(File.join(root, "app.rb"), "edited\n")
+
+      expect(daemon.ensure_running).to have_attributes(outcome: :running, pid: first.pid)
+    end
+
+    it "reads it from a detached HEAD, a branch, packed refs and a linked worktree" do
+      sha = commit("first")
+      expect(daemon.code_revision).to eq(sha)
+
+      git("checkout", "-q", "--detach")
+      expect(daemon.code_revision).to eq(sha)
+      git("checkout", "-q", "main")
+
+      git("pack-refs", "--all", "--prune")
+      expect(File.exist?(File.join(root, ".git", "refs", "heads", "main"))).to be(false)
+      expect(daemon.code_revision).to eq(sha)
+
+      linked = File.join(dir, "linked")
+      git("worktree", "add", "-q", "-b", "elsewhere", linked)
+      File.write(File.join(linked, "herdr-plugin.toml"), "version = \"1.0.0\"\n# linked\n")
+      git("commit", "-q", "-am", "linked", chdir: linked)
+      linked_paths = PaneyardPlugin::Paths.new(env: { "HERDR_PLUGIN_STATE_DIR" => File.join(dir, "state"), "HERDR_PLUGIN_ROOT" => linked })
+      expect(described_class.new(paths: linked_paths).code_revision).to eq(git("rev-parse", "HEAD", chdir: linked))
+    end
+
+    it "falls back to the version and lockfile outside a git checkout" do
+      FileUtils.rm_rf(File.join(root, ".git"))
+
+      expect(daemon.code_revision).to be_nil
+      expect { daemon.fingerprint }.not_to raise_error
+    end
   end
 
   it "leaves a daemon started for another herdr server alone" do

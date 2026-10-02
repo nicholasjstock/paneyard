@@ -98,10 +98,12 @@ module PaneyardPlugin
     end
 
     # What the daemon would run, so a change to any of it (a reinstall, a new
-    # bundle, an edited .env) restarts it on the next action.
+    # bundle, an edited .env) restarts it on the next action. The commit is
+    # what catches a reinstall of the same version and lockfile (`--ref
+    # <branch>`); the manifest version alone would leave the old code running.
     def fingerprint
       Digest::SHA256.hexdigest(JSON.generate([
-        manifest_version, paths.app_root, @ruby, @command,
+        manifest_version, code_revision, paths.app_root, @ruby, @command,
         read_if_exists(File.join(paths.app_root, "Gemfile.lock")),
         read_if_exists(paths.env_file)
       ]))
@@ -109,6 +111,38 @@ module PaneyardPlugin
 
     def manifest_version
       read_if_exists(paths.manifest_file).to_s[/^version\s*=\s*"([^"]+)"/, 1]
+    end
+
+    # The commit the plugin root has checked out, read from .git without
+    # running git, since every action pays for it: herdr's managed checkout is
+    # a shallow clone on a detached HEAD, a linked one (`herdr plugin link`)
+    # is usually on a branch, and may be a linked worktree whose .git is a
+    # file. nil when it is not a git checkout at all, which leaves the
+    # fingerprint to the version and lockfile.
+    #
+    # Only commits count, not uncommitted edits: a linked checkout restarting
+    # under its developer on every save would interrupt the very sessions the
+    # edit is being tried with, and hashing the tracked tree on every action
+    # is not cheap. `paneyard.restart` applies an edit on demand.
+    def code_revision
+      git_dir = git_dir(File.join(paths.app_root, ".git"))
+      head = git_dir && read_if_exists(File.join(git_dir, "HEAD")).to_s.strip
+      return nil if head.nil? || head.empty?
+
+      ref = head[/\Aref:\s*(\S+)\z/, 1]
+      return head unless ref
+
+      common_dir = File.expand_path(read_if_exists(File.join(git_dir, "commondir")).to_s.strip, git_dir)
+      [ git_dir, common_dir ].uniq.each do |dir|
+        loose = read_if_exists(File.join(dir, ref)).to_s.strip
+        return loose unless loose.empty?
+
+        packed = read_if_exists(File.join(dir, "packed-refs")).to_s[/^(\h{40,64}) #{Regexp.escape(ref)}$/, 1]
+        return packed if packed
+      end
+      head # an unborn branch: still names what is checked out
+    rescue SystemCallError
+      nil
     end
 
     # The whole environment bin/production runs with: the caller's (herdr's
@@ -308,7 +342,15 @@ module PaneyardPlugin
     end
 
     def read_if_exists(path)
-      File.exist?(path) ? File.read(path) : nil
+      File.file?(path) ? File.read(path) : nil
+    end
+
+    # A checkout's .git directory, or where a linked worktree's .git file points.
+    def git_dir(dot_git)
+      return dot_git if File.directory?(dot_git)
+
+      pointer = read_if_exists(dot_git).to_s[/\Agitdir:\s*(.+)$/, 1]
+      pointer && File.expand_path(pointer.strip, File.dirname(dot_git))
     end
   end
 end
