@@ -10,6 +10,10 @@ module PaneyardSandbox
   class McpClient
     class Error < StandardError; end
 
+    # The server no longer knows this client's session: it restarted since the
+    # handshake (sessions live in its memory), or reaped the session as idle.
+    class SessionExpired < Error; end
+
     # A tool that ran and reported an error; `payload` is its JSON body
     # (`error`, `message`, and any details such as `problems`), when it had one.
     class ToolError < Error
@@ -57,9 +61,20 @@ module PaneyardSandbox
       notify("notifications/initialized")
     end
 
-    def rpc(method, **params)
+    # A session the server has forgotten is renewed once, transparently: a
+    # popup left open across a Paneyard restart would otherwise fail on its
+    # next call.
+    def rpc(method, renew: true, **params)
       @next_id += 1
-      response = post(jsonrpc: "2.0", id: @next_id, method:, params:)
+      response = begin
+        post(jsonrpc: "2.0", id: @next_id, method:, params:)
+      rescue SessionExpired
+        raise unless renew && @session_id && method != "initialize"
+
+        @session_id = nil
+        initialize_session!
+        return rpc(method, renew: false, **params)
+      end
       @session_id ||= response["mcp-session-id"]
       message = parse(response)
       raise Error, "#{method}: #{message['error']['message']}" if message["error"]
@@ -83,6 +98,9 @@ module PaneyardSandbox
       request.body = JSON.generate(body)
       response = Net::HTTP.start(@uri.host, @uri.port, read_timeout: @timeout, open_timeout: @timeout) do |http|
         http.request(request)
+      end
+      if response.code == "404" && @session_id
+        raise SessionExpired, "POST #{@uri} (#{body[:method]}): session #{@session_id} is gone"
       end
       unless response.is_a?(Net::HTTPSuccess)
         raise Error, "POST #{@uri} (#{body[:method]}) returned #{response.code}: #{response.body.to_s[0, 500]}"

@@ -380,6 +380,18 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(out.string).to include("Reset to the default layout.")
     end
 
+    it "refuses `agent` or a taken name for another pane as soon as it is typed" do
+      allow(client).to receive(:workspaces).and_return([ workspace ])
+      allow(client).to receive(:update_layout).and_return("usingDefault" => false)
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "main" ])
+
+      run_cli("layout-ui", input: "t\nhook\nagent\nt\nhook\ndiff\nhunk diff --watch\na\n2\ndiff\ns\n\n",
+        context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(out.string).to include("`agent` is the agent's own pane", "There is already a pane named diff.")
+      expect(client).to have_received(:update_layout).with(workspace: "app", layout: include("name: diff", "command: hunk diff --watch"))
+    end
+
     it "rejects edited YAML whose tabs or panes the builder could not work on" do
       allow(client).to receive(:workspaces).and_return([ workspace ])
       allow(client).to receive(:update_layout)

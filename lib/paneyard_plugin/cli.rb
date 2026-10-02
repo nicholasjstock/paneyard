@@ -176,7 +176,8 @@ module PaneyardPlugin
 
       panes = Array(tab["panes"])
       name = ask("Pane name: ")
-      return say("A pane needs a name.") if name.to_s.empty?
+      problem = layout_name_problem(data, name)
+      return say(problem) if problem
 
       pane = { "name" => name, "command" => ask("Command (blank for a shell): ").to_s }
       unless panes.empty?
@@ -199,7 +200,8 @@ module PaneyardPlugin
     def add_layout_tab(data)
       name = ask("Tab name (blank for unnamed): ")
       pane_name = ask("Root pane name: ")
-      return say("A root pane needs a name.") if pane_name.to_s.empty?
+      problem = layout_name_problem(data, pane_name)
+      return say(problem) if problem
 
       pane = { "name" => pane_name, "command" => ask("Command (blank for a shell): ").to_s }
       pane.delete("command") if pane["command"].empty?
@@ -215,7 +217,12 @@ module PaneyardPlugin
 
       old_name = pane["name"]
       name = ask("Name (#{old_name}): ")
-      pane["name"] = name unless name.to_s.empty?
+      unless name.to_s.empty? || name == old_name
+        problem = layout_name_problem(data, name)
+        return say(problem) if problem
+
+        pane["name"] = name
+      end
       command = ask("Command (#{pane['command'] || 'shell'}; '-' clears): ")
       pane["command"] = command == "-" ? nil : command unless command.to_s.empty?
       pane.delete("command") if pane["command"].to_s.empty?
@@ -279,6 +286,16 @@ module PaneyardPlugin
     end
 
     def layout_pane(entry) = entry == "agent" ? { "name" => "agent" } : entry
+
+    # Caught as the name is typed, rather than on save, so nothing else typed
+    # for the pane is wasted.
+    def layout_name_problem(data, name)
+      return "A pane needs a name." if name.to_s.empty?
+      return "`agent` is the agent's own pane; give this one another name." if name == "agent"
+
+      taken = Array(data["tabs"]).flat_map { |tab| Array(tab["panes"]).map { |entry| layout_pane(entry)["name"] } }
+      "There is already a pane named #{name}." if taken.include?(name)
+    end
 
     def edit_layout_yaml(data)
       Tempfile.create([ "paneyard-layout", ".yml" ]) do |file|
