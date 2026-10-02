@@ -42,7 +42,7 @@ RSpec.describe PaneyardPlugin::Cli do
         expect(cli).to receive(:layout_ui)
       end
 
-      expect(out.string).to include("Queue a task here", "Browse runs and reports", "Edit this workspace's layout")
+      expect(out.string).to include("Hand off a task", "Jobs and reports", "Job layout for this repository")
     end
 
     it "closes without doing anything when no choice is made" do
@@ -297,7 +297,7 @@ RSpec.describe PaneyardPlugin::Cli do
 
       run_cli("close-ui", input: "\n", context: { "workspace_id" => "w1" })
 
-      expect(out.string).to include("not a Paneyard run's")
+      expect(out.string).to include("not a Paneyard job's")
       expect(client).not_to have_received(:close)
     end
   end
