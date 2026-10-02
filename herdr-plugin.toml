@@ -15,7 +15,7 @@ id = "paneyard"
 name = "Paneyard"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
-description = "Queue tasks for Claude Code or Codex; each runs in its own git worktree and herdr workspace."
+description = "A job queue for your coding agents. Hand off tasks to Claude Code or Codex from herdr, or from the agent you're already talking to. Each waits for a slot, works in its own worktree and reports back. Nothing is committed, pushed or merged until you say so."
 platforms = ["macos", "linux"]
 
 [[build]]
@@ -29,75 +29,68 @@ command = ["/bin/sh", "bin/herdr-plugin", "startup"]
 [[actions]]
 id = "menu"
 title = "Paneyard: menu"
-description = "Open one Paneyard menu for queueing, runs, reports, sessions, layouts and setup."
+description = "Everything Paneyard does, in one menu: hand off a task, read reports, close a job, set its layout, connect your agents."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "menu"]
 
 [[actions]]
 id = "queue"
-title = "Paneyard: queue a task here"
-description = "Queue a task for an agent in this pane's repository, registering it as a workspace if needed."
+title = "Paneyard: hand off a task"
+description = "Hand off a task from this pane's repository and branch. It waits for a free slot, then opens in its own herdr workspace."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "queue"]
 
 [[actions]]
 id = "runs"
-title = "Paneyard: runs"
-description = "List runs; read a run's report, jump to its herdr workspace, close its session, or reopen a closed one."
+title = "Paneyard: jobs"
+description = "Your jobs, newest first, with their reports. Jump into one, close it when you're done, or reopen one you closed."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "runs"]
 
 [[actions]]
 id = "report"
-title = "Paneyard: this run's report"
-description = "Inside a run's herdr workspace: its newest report."
+title = "Paneyard: this job's report"
+description = "Inside a job's herdr workspace: what it reported last."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "report"]
 
 [[actions]]
 id = "close"
-title = "Paneyard: close this run's session"
-description = "Inside a run's herdr workspace: quit its agent, close the workspace and free its slot (asks first)."
+title = "Paneyard: close this job"
+description = "Inside a job's herdr workspace: you're done with it. Quits the agent, frees its slot, keeps unsaved work. Asks first."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "close"]
 
 [[actions]]
 id = "layout"
-title = "Paneyard: edit this workspace's layout"
-description = "Build and validate the current Paneyard workspace's tabs and panes in a Herdr popup."
+title = "Paneyard: job layout for this repository"
+description = "What opens beside the agent in each job's herdr workspace for this repository (default: nothing)."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "layout"]
 
 [[actions]]
 id = "setup"
-title = "Paneyard: configure coding agents"
-description = "Detect installed coding agents and offer to connect them to Paneyard's MCP endpoint."
-contexts = ["workspace"]
-command = ["/bin/sh", "bin/herdr-plugin", "pane", "setup"]
-
-[[actions]]
-id = "mcp"
-title = "Paneyard: configure coding agents"
-description = "Alias for the setup action."
+title = "Paneyard: let your agents queue jobs"
+description = "Connect your own Claude Code / Codex to Paneyard, so they can hand off tasks and check on them. Asks first."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "setup"]
 
 [[actions]]
 id = "mcp-url"
-title = "Paneyard: print the MCP URL"
-description = "Print /mcp/admin's URL to the plugin log and show it as a notification."
+title = "Paneyard: show the MCP URL"
+description = "Show the MCP URL your agents use to reach Paneyard."
 command = ["/bin/sh", "bin/herdr-plugin", "mcp-url"]
 
 [[actions]]
 id = "restart"
 title = "Paneyard: restart"
-description = "Restart Paneyard, to apply a change to its .env or a reinstall. Running sessions are not affected."
+description = "Restart Paneyard, e.g. after editing its .env. Running agents keep working."
 command = ["/bin/sh", "bin/herdr-plugin", "restart"]
 
 [[actions]]
 id = "stop"
 title = "Paneyard: stop"
-description = "Stop Paneyard. Running sessions keep running; any action starts it again."
+description = "Stop Paneyard. Running agents keep working; any action starts it again."
 command = ["/bin/sh", "bin/herdr-plugin", "stop"]
 
 # --- popups behind the actions ----------------------------------------------
@@ -114,7 +107,7 @@ command = ["/bin/sh", "bin/herdr-plugin", "menu-ui"]
 
 [[panes]]
 id = "queue"
-title = "Paneyard: queue a task"
+title = "Paneyard: hand off a task"
 placement = "popup"
 width = "80%"
 height = "60%"
@@ -122,7 +115,7 @@ command = ["/bin/sh", "bin/herdr-plugin", "queue-ui"]
 
 [[panes]]
 id = "runs"
-title = "Paneyard: runs"
+title = "Paneyard: jobs"
 placement = "popup"
 width = "90%"
 height = "80%"
@@ -138,7 +131,7 @@ command = ["/bin/sh", "bin/herdr-plugin", "report-ui"]
 
 [[panes]]
 id = "close"
-title = "Paneyard: close session"
+title = "Paneyard: close this job"
 placement = "popup"
 width = "80%"
 height = 16
@@ -146,7 +139,7 @@ command = ["/bin/sh", "bin/herdr-plugin", "close-ui"]
 
 [[panes]]
 id = "setup"
-title = "Paneyard: configure coding agents"
+title = "Paneyard: let your agents queue jobs"
 placement = "popup"
 width = "80%"
 height = 20
@@ -154,7 +147,7 @@ command = ["/bin/sh", "bin/herdr-plugin", "mcp-ui"]
 
 [[panes]]
 id = "layout"
-title = "Paneyard: edit workspace layout"
+title = "Paneyard: job layout"
 placement = "popup"
 width = "90%"
 height = "85%"
