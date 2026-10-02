@@ -3,8 +3,8 @@ require "fileutils"
 module PaneyardPlugin
   # The operator's settings: HERDR_PLUGIN_CONFIG_DIR/.env, in dotenv format.
   # Every key reaches the daemon as an environment variable -- the app
-  # already reads all of its settings from ENV (credentials are only a
-  # fallback), so this is the whole configuration surface -- except the ones
+  # reads all of its settings from ENV, so this is the whole configuration
+  # surface -- except the ones
   # the plugin itself decides, which are ignored with a warning.
   #
   # Format: KEY=value, an optional leading `export`, `#` comments (also after

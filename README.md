@@ -62,7 +62,7 @@ This is a tool for one trusted person on their own machine. Treat anything that 
 - **It can edit itself.** If you register this repository as one of its own workspaces, a session can change the orchestrator's code, and the change reaches the running instance when it is next restarted. Nothing stops a session from merging into its base branch when asked to.
 - **Telegram remote control** (optional, off unless configured) lets the Telegram user IDs on an allow-list list sessions, read their panes and reports, and type into them from a private chat. That is equivalent to shell access. Pane text and reports also pass through Telegram's servers, and bot chats are not end-to-end encrypted.
 - **GitHub credentials.** Paneyard makes no GitHub calls and hands sessions no tokens. A session pushes, when asked to, with whatever your login shell can push with (your SSH key, your `gh` login), so it can do anything you can on those repositories.
-- **Plaintext state.** Runs and reports are stored unencrypted in SQLite: in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard/storage`), or under `storage/` for `bin/service`. The plugin's `.env` holds any Telegram token you give it, readable by your user only.
+- **Plaintext state.** Runs and reports are stored unencrypted in SQLite: in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard/storage`), or under `storage/` for `bin/service`.
 - **The plugin is code herdr runs as you.** herdr does not sandbox plugins. Its startup hook starts Paneyard whenever herdr starts; review `herdr-plugin.toml` and `bin/herdr-plugin` before installing, as herdr's install preview suggests.
 
 ## Requirements
@@ -144,7 +144,7 @@ The port stays the same across restarts; if it ever has to change (something els
 
 ### Settings, updates and removal
 
-- **Settings** live in `$(herdr plugin config-dir paneyard)/.env`, written on first start with every option commented out: concurrency, default models, [Telegram](./docs/telegram.md), and a fixed port. Run `paneyard.restart` after editing it (the next action notices the edit and restarts too).
+- **Settings** live in `$(herdr plugin config-dir paneyard)/.env`, written on first start with every option commented out: concurrency, default models, and a fixed port. Run `paneyard.restart` after editing it (the next action notices the edit and restarts too).
 - **Updating:** `herdr plugin install nicholasjstock/paneyard` again (`--ref <tag-or-commit>` to pin a version). The next action or herdr start restarts Paneyard on the new code and migrates its database; state and settings are kept.
 - **Removing:** `herdr plugin action invoke stop --plugin paneyard`, then `herdr plugin uninstall paneyard`. herdr leaves the state and config directories in place; delete them to remove your run history too.
 - **Logs:** `~/.local/state/herdr/plugins/paneyard/log/paneyard.log`, and `herdr plugin log list --plugin paneyard` for the actions themselves.
@@ -162,7 +162,7 @@ bin/service start            # also: stop | restart | status; http://127.0.0.1:7
 
 `bin/service` keeps its state in the clone's `storage/` and logs to `log/production_service.log`; [Long-running: `bin/service`](./docs/operating.md#long-running-binservice) has the details, and [CONTRIBUTING.md](./CONTRIBUTING.md) covers `bin/dev` and the sandbox.
 
-To move from `bin/service` to the plugin with your history, stop `bin/service`, run `paneyard.stop`, copy `storage/production*.sqlite3` from the clone into `~/.local/state/herdr/plugins/paneyard/storage/`, and invoke any action. Copy any `TELEGRAM_*` settings from your credentials into the plugin's `.env`. (Two instances side by side are safe for your worktrees, since each only ever cleans up its own runs', but they share no queue and no concurrency cap.)
+To move from `bin/service` to the plugin with your history, stop `bin/service`, run `paneyard.stop`, copy `storage/production*.sqlite3` from the clone into `~/.local/state/herdr/plugins/paneyard/storage/`, and invoke any action. (Two instances side by side are safe for your worktrees, since each only ever cleans up its own runs', but they share no queue and no concurrency cap.)
 
 ## How a run works
 
@@ -211,7 +211,6 @@ Everything is optional except herdr and an agent CLI. With the plugin, put these
 | `PANEYARD_CLAUDE_MODEL`, `PANEYARD_CODEX_MODEL` | per driver | Default model per driver; a model picked per run wins. |
 | `HERDR_SOCKET_PATH` | the socket herdr gives the plugin, else `~/.config/herdr/herdr.sock` | herdr's socket. |
 | `PANEYARD_RUBY` | bundled runtime | Development links only: fallback Ruby when `[[build]]` has not installed the bundle. |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` | unset | Telegram remote control; see [docs/telegram.md](./docs/telegram.md). Also settable in credentials when running from a clone. |
 
 Pane layouts are set per workspace ([above](#workspace-layouts)). So are environment variables, which sessions record for later runs; see [What a run starts with](./docs/operating.md#3-what-a-run-starts-with-inside-the-repo).
 
@@ -219,7 +218,6 @@ Pane layouts are set per workspace ([above](#workspace-layouts)). So are environ
 
 - [docs/herdr-plugin-plan.md](./docs/herdr-plugin-plan.md) — how the herdr plugin is put together, and why.
 - [docs/operating.md](./docs/operating.md) — running the orchestrator day to day: preparing repositories, base branches, git and cleanup rules, workspace layouts, MCP endpoints, troubleshooting a failed launch.
-- [docs/telegram.md](./docs/telegram.md) — Telegram remote control, and adding another chat platform.
 - [docs/README.md](./docs/README.md) — index of the design records behind the current architecture.
 - [AGENTS.md](./AGENTS.md) — the architecture and conventions guide for anyone (human or agent) changing this codebase.
 - [CHANGELOG.md](./CHANGELOG.md) — what has changed.

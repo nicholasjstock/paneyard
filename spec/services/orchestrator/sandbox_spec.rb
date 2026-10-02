@@ -164,15 +164,6 @@ RSpec.describe Orchestrator::Sandbox do
       expect(Class.new(FakeRemoteControlAdapter) { def name = "discord" }.new.enabled?).to be(false)
     end
 
-    it "never falls back to production's bot in credentials" do
-      sandbox_on!
-      ENV["PANEYARD_SANDBOX_TELEGRAM"] = "1"
-      allow(Rails.application.credentials).to receive(:dig).with(:telegram, anything).and_return("123:production-bot")
-
-      expect(RemoteControl::Adapters::Telegram::Configuration.bot_token).to be_nil
-      expect(RemoteControl::Adapters::Telegram::Configuration.allowed_user_ids).to eq([])
-    end
-
     it "keeps worktrees confined either way" do
       sandbox_on!
       ENV["PANEYARD_SANDBOX_REAL_HERDR"] = "1"

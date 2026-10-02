@@ -31,6 +31,12 @@ Rails.application.configure do
   # Disable request forgery protection in test environment.
   config.action_controller.allow_forgery_protection = false
 
+  # Never read the operator's real credentials (config/credentials.yml.enc,
+  # which a checkout with config/master.key can decrypt), so a spec behaves the
+  # same in every checkout. This file never exists, so credentials are empty in every checkout; a spec
+  # that needs a credential stubs it. spec/hermetic_environment_spec.rb.
+  config.credentials.content_path = Rails.root.join("config/credentials/none-in-tests.yml.enc")
+
   config.hosts << "www.example.com"
   config.hosts << "example.com"
   config.hosts << "127.0.0.1"

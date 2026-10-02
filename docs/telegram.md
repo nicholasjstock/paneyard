@@ -1,5 +1,8 @@
 # Telegram remote control
 
+> [!NOTE]
+> Experimental. Telegram remote control has had little real use and is largely untested beyond the automated specs (which drive a fake Bot API), so expect rough edges and don't rely on it.
+
 The optional Telegram bot lets you check on and steer your live run sessions from your phone. It is off unless configured. It answers only the Telegram user IDs you allow-list, and only in a private chat with the bot, never in a group.
 
 > [!WARNING]
@@ -9,16 +12,14 @@ The optional Telegram bot lets you check on and steer your live run sessions fro
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
 2. Find your numeric Telegram user ID (for example by messaging [@userinfobot](https://t.me/userinfobot)).
-3. Add both to Rails credentials (`bin/rails credentials:edit`):
+3. Put both in the plugin's settings, `$(herdr plugin config-dir paneyard)/.env`, which has the lines ready to uncomment:
 
-   ```yaml
-   telegram:
-     bot_token: "<BotFather token>"
-     allowed_user_ids:
-       - "<your numeric Telegram user id>"
+   ```sh
+   TELEGRAM_BOT_TOKEN=<BotFather token>
+   TELEGRAM_ALLOWED_USER_IDS=<your numeric Telegram user id>   # comma-separated for several
    ```
 
-   or set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` (comma-separated) in the orchestrator's environment (`RemoteControl::Adapters::Telegram::Configuration`). With the herdr plugin, the environment is `$(herdr plugin config-dir paneyard)/.env`, which has both lines ready to uncomment.
+   Running from a clone with `bin/service` instead, export the same two variables in the shell that starts it. They are read from the environment only (`RemoteControl::Adapters::Telegram::Configuration`), never from Rails credentials.
 4. Restart the orchestrator (`bin/service restart`, or the plugin's `paneyard.restart` action) so the running instance sees the new settings.
 
 The app polls Telegram every five seconds (`PollTelegramUpdatesJob`, `config/recurring.yml`), so it only needs outbound internet access; it does not need a public URL. Telegram's [`getUpdates`](https://core.telegram.org/bots/api#getupdates) polling API doesn't work while a webhook is configured, so if this bot ever had one, clear it once:

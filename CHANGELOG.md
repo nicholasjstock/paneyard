@@ -55,7 +55,7 @@ The first public version. It includes:
 - `/mcp/admin`, an unauthenticated loopback MCP endpoint for the operator's own MCP clients: `queue_run`, `list_runs`, `get_run`, `list_workspaces`, `register_workspace`.
 - `register_workspace` on `/mcp/admin`: registers a workspace from your own agent, given the repository's path (or a directory or linked worktree in it). It checks everything first, creates nothing if anything is wrong, and returns every problem with how to fix it. The web UI's Add workspace form runs the same checks.
 - `queue_run` over `/mcp/admin` now requires `workspace` instead of falling back to the oldest workspace, and `/mcp/admin` has server instructions for the flow: find the workspace for this repository, register it if missing, then queue. From inside a run it still defaults to the run's own workspace.
-- Telegram remote control: list sessions, read panes and reports, and type into sessions from an allow-listed private chat, behind a platform-neutral adapter interface.
+- Telegram remote control: list sessions, read panes and reports, and type into sessions from an allow-listed private chat, behind a platform-neutral adapter interface. Configured with `TELEGRAM_BOT_TOKEN`/`TELEGRAM_ALLOWED_USER_IDS` in the plugin's `.env` (or `bin/service`'s environment); Rails credentials are no longer read.
 
 ### Security
 

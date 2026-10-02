@@ -122,9 +122,8 @@ on every start (migrations), and the recurring schedule all behave exactly as un
 
   Rails' `tmp/` (bootsnap cache) stays in the plugin root: it is a cache, safe to lose on reinstall.
 - **Secrets.** `SECRET_KEY_BASE` comes from `state/secret_key_base`, generated with
-  `SecureRandom.hex(64)` the first time and reused after. Nothing else in the app needs credentials: every
-  credentials lookup (Telegram) already prefers an environment variable, so the `.env` covers
-  it. A `SECRET_KEY_BASE` in the `.env` wins, for someone moving an existing instance over.
+  `SecureRandom.hex(64)` the first time and reused after. Nothing else in the app needs credentials: Telegram reads
+  only environment variables, so the `.env` covers it. A `SECRET_KEY_BASE` in the `.env` wins, for someone moving an existing instance over.
 - **Port.** The first start picks a free loopback port and writes it to `state/port`; later starts reuse it,
   so a URL registered with Claude Code keeps working. If something else has taken it by then, a new free one
   is picked, written back, and a herdr notification says the MCP registration needs updating (the `mcp`

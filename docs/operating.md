@@ -208,7 +208,7 @@ See AGENTS.md's "MCP Boundary" for the design rules behind both.
 
 ## Remote control
 
-The optional Telegram bot lets you check on and steer live sessions from your phone. See [telegram.md](./telegram.md).
+The optional Telegram bot lets you check on and steer live sessions from your phone. It is experimental and largely untested outside the test suite. See [telegram.md](./telegram.md).
 
 ## The sandbox
 
