@@ -15,7 +15,7 @@ id = "paneyard"
 name = "Paneyard"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
-description = "A job queue for your coding agents. Hand off tasks to Claude Code or Codex from herdr, or from the agent you're already talking to. Each waits for a slot, works in its own worktree and reports back. Nothing is committed, pushed or merged until you say so."
+description = "Paneyard is a job queue for coding agents. Queue up tasks and it launches them as parallel, interactive agent sessions in herdr."
 platforms = ["macos", "linux"]
 
 [[build]]
