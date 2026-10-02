@@ -55,4 +55,26 @@ RSpec.describe Orchestrator::GitWorktree do
     expect(fake_herdr.requests_for("worktree.create").size).to eq(1)
     expect(fake_herdr.requests_for("worktree.open").sole).to include("path" => first)
   end
+
+  # A reopened run whose worktree was removed (SessionReopen).
+  it "makes the worktree again on the run's existing branch, keeping its commits and its base", :fake_herdr do
+    repository = create_source_checkout
+    workspace = create_workspace(repository_path: repository)
+    run, session = create_run_and_session(run: create_run(workspace:, status: "launching", worktree_name: "again-a1b2"))
+    described_class.provision!(run, session:)
+    first = run.reload.target_root
+    base_sha = run.base_sha
+    system("git", "-C", first, "-c", "user.email=a@example.test", "-c", "user.name=A", "commit", "-q", "--allow-empty", "-m", "Work",
+      exception: true)
+    work = `git -C #{Shellwords.escape(first)} rev-parse HEAD`.strip
+    Orchestrator::Runner.local.remove_worktree(repository_path: repository, path: first)
+    # The base branch moving on, or even going, is no concern of the run's own branch.
+    system("git", "-C", repository, "commit", "-q", "--allow-empty", "-m", "Later on main", exception: true)
+
+    described_class.provision!(run, session:)
+
+    expect(run.reload).to have_attributes(target_root: first, base_sha:, branch_name: "paneyard/again-a1b2")
+    expect(`git -C #{Shellwords.escape(first)} rev-parse HEAD`.strip).to eq(work)
+    expect(fake_herdr.requests_for("worktree.create").last).to include("branch" => "paneyard/again-a1b2", "base" => nil)
+  end
 end

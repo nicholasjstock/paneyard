@@ -32,7 +32,13 @@ module Orchestrator
 
     # Provisions the run's worktree, which herdr opens as the session's
     # workspace, builds the layout in it and launches the agent.
-    def start!(run, resume_session_id: nil, prompt: nil)
+    #
+    # `reopening` is the run's previous session when the operator reopened a
+    # closed run (SessionReopen): the new session resumes that one's CLI
+    # conversation where it can, and otherwise starts fresh with a prompt that
+    # says what it is picking up.
+    def start!(run, reopening: nil)
+      previous_root = run.target_root
       capability_token, digest = RunSession.issue_capability
       session = run.run_sessions.create!(
         driver: run.launcher_variant, model: run.model.presence || DefaultModels.for(run.launcher_variant),
@@ -46,7 +52,10 @@ module Orchestrator
         # that dies mid-launch -- still leaves a pane to read, a workspace to
         # close, and a worktree the janitor knows belongs to this run.
         GitWorktree.provision!(run, session:)
-        spec = session_spec(run:, session:, capability_token:, resume_session_id:, prompt:)
+        plan = reopening ? SessionReopen.launch_plan(run, previous: reopening, previous_root:) : {}
+        resume = plan[:resume]
+        spec = session_spec(run:, session:, capability_token:, resume_session_id: resume&.fetch(:session_id),
+          prompt: resume&.fetch(:prompt) || plan[:prompt])
 
         # The workspace's layout: the agent pane plus whatever tabs and splits
         # the workspace is configured with (none, by default). Only the agent
@@ -59,7 +68,7 @@ module Orchestrator
           mcp_config_path: opened.fetch("mcp_config_path"), prompt_path: opened.fetch("prompt_path")
         )
 
-        pid = runner.launch_agent(spec, pane_id: session.herdr_pane_id, mcp_config_path: session.mcp_config_path)
+        pid = launch_agent!(runner, session, spec, fresh_prompt: resume && plan.fetch(:prompt))
         # A quick agent can call report_idle before launch_agent returns; its
         # report (session done/blocked/failed) must not be overwritten here.
         session.with_lock do
@@ -79,6 +88,27 @@ module Orchestrator
         )
         raise
       end
+    end
+
+    # A resumed CLI that cannot find its conversation exits at once -- both
+    # confirmed live: claude's `--resume <id>` and codex's `resume <id>` print
+    # that there is no such session and quit -- which the launch reports as an
+    # error. The session is not lost for that: the same pane is back at its
+    # shell, so start a fresh conversation there instead, with the prompt that
+    # says what it picks up. Any runner error counts, since how a CLI's exit
+    # surfaces depends on how far the launch got; only herdr not answering at
+    # all does not, as a second launch could not get further.
+    def launch_agent!(runner, session, spec, fresh_prompt: nil)
+      runner.launch_agent(spec, pane_id: session.herdr_pane_id, mcp_config_path: session.mcp_config_path)
+    rescue Runner::Unreachable
+      raise
+    rescue Runner::Error => error
+      raise unless spec[:resume_session_id] && fresh_prompt
+
+      Rails.logger.warn("[RunSessionRunner] run #{spec.fetch(:run_id)}: could not resume conversation " \
+                        "#{spec[:resume_session_id]} (#{error.message}); starting a fresh one")
+      runner.launch_agent(spec.merge(resume_session_id: nil, prompt: fresh_prompt),
+        pane_id: session.herdr_pane_id, mcp_config_path: session.mcp_config_path)
     end
 
     # Everything the runner needs to open this session, as plain data (see

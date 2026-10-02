@@ -43,5 +43,9 @@ module PaneyardPlugin
     def close(run_id, workspace:)
       @mcp.call_tool("close_session", runId: run_id, workspace:)
     end
+
+    def reopen(run_id, workspace:)
+      @mcp.call_tool("reopen_session", runId: run_id, workspace:)
+    end
   end
 end

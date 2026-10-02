@@ -128,6 +128,43 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
       .to include("mode manual")
   end
 
+  # Confirmed live on herdr 0.7.5: an existing branch is checked out at its
+  # own commit, with a base or without one, at the path herdr would give it.
+  it "makes a worktree on an existing branch as it is, ignoring the base" do
+    repository = create_source_checkout
+    first = open_worktree(repository)
+    path = first.dig("worktree", "path")
+    commit = git(path, "-c", "user.email=a@example.test", "-c", "user.name=A", "commit", "-q", "--allow-empty", "-m", "Work").then do
+      git(path, "rev-parse", "HEAD")
+    end
+    herdr.worktree_remove("w1")
+
+    again = open_worktree(repository, base: nil)
+
+    expect(again.dig("worktree", "path")).to eq(path)
+    expect(again.dig("worktree", "branch")).to eq("paneyard/run-1")
+    expect(git(path, "rev-parse", "HEAD")).to eq(commit)
+  end
+
+  it "resumes an agent's conversation in the directory it ran in, and exits at once on one it never had" do
+    pane_id = open_worktree.dig("root_pane", "pane_id")
+    herdr.agent_start(name: "run-1", kind: "claude", pane_id:, args: [])
+    conversation = wait_for { herdr.agent_get(pane_id).dig("agent_session", "value") }
+    Process.kill("TERM", -herdr.pane_process_info(pane_id).fetch("foreground_process_group_id"))
+    wait_for { herdr.pane_process_info(pane_id).then { |info| info["foreground_process_group_id"] == info["shell_pid"] } }
+
+    herdr.agent_start(name: "run-1", kind: "claude", pane_id:, args: [ "--resume", conversation ])
+    expect(wait_for { herdr.agent_get(pane_id).then { |info| info if info["interactive_ready"] } }.dig("agent_session", "value"))
+      .to eq(conversation)
+    Process.kill("TERM", -herdr.pane_process_info(pane_id).fetch("foreground_process_group_id"))
+    wait_for { herdr.pane_process_info(pane_id).then { |info| info["foreground_process_group_id"] == info["shell_pid"] } }
+
+    herdr.agent_start(name: "run-1", kind: "codex", pane_id:, args: [ "resume", "fake-unknown" ])
+    expect(wait_for { herdr.pane_read(pane_id).then { |text| text if text.scan("[fake agent exited]").size == 3 } })
+      .to include("No conversation found with session ID: fake-unknown")
+    expect(herdr.agent_get(pane_id)["agent"]).to be_nil
+  end
+
   it "answers agent.get for a pane with no agent the way herdr does" do
     pane_id = open_worktree.dig("root_pane", "pane_id")
 

@@ -8,10 +8,11 @@ module Orchestrator
   # code serve a caller with no run of its own (falls back to the oldest
   # registered workspace, or an explicit `workspace:` argument).
   #
-  # register_workspace, update_workspace_layout and close_session are the tools
-  # only this endpoint has beyond ping: changing what Paneyard manages or what
-  # panes a run starts, or ending a session, is the operator's decision, while
-  # a run session works inside the workspace it was given.
+  # register_workspace, update_workspace_layout, close_session and
+  # reopen_session are the tools only this endpoint has beyond ping: changing
+  # what Paneyard manages or what panes a run starts, or ending a session or
+  # bringing one back, is the operator's decision, while a run session works
+  # inside the workspace it was given.
   module AdminMcpServer
     module_function
 
@@ -23,7 +24,8 @@ module Orchestrator
       ::McpTools::ListWorkspacesTool,
       ::McpTools::RegisterWorkspaceTool,
       ::McpTools::UpdateWorkspaceLayoutTool,
-      ::McpTools::CloseSessionTool
+      ::McpTools::CloseSessionTool,
+      ::McpTools::ReopenSessionTool
     ].freeze
 
     # Clients that surface server instructions (Claude Code does) get the one

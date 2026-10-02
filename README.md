@@ -40,7 +40,7 @@ It installs as a herdr plugin and is used from one menu inside herdr: queue a ta
   2. [Connect your coding agents](#2-connect-your-coding-agents)
   3. [Bind one menu key](#3-bind-one-menu-key)
   4. [Queue a task](#4-queue-a-task)
-  5. [Read reports and close sessions](#5-read-reports-and-close-sessions)
+  5. [Read reports, close and reopen sessions](#5-read-reports-close-and-reopen-sessions)
   6. [Queue runs from your own agent](#6-queue-runs-from-your-own-agent)
   - [Settings, updates and removal](#settings-updates-and-removal)
   - [Running without the plugin](#running-without-the-plugin)
@@ -108,13 +108,13 @@ command = "paneyard.menu"
 description = "paneyard menu"
 ```
 
-The menu offers queue, runs and reports, close session, edit layout, and configure MCP. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke <id> --plugin paneyard`.
+The menu offers queue, runs and reports (where a closed run's session can be reopened), close session, edit layout, and configure MCP. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke <id> --plugin paneyard`.
 
 | Action | What it does |
 | --- | --- |
 | `paneyard.menu` | Open the single Paneyard menu recommended for key binding. |
 | `paneyard.queue` | Queue a task for the repository containing the current pane. |
-| `paneyard.runs` | Every run, newest first. Pick one to read its newest report, jump to its herdr workspace, or close its session. |
+| `paneyard.runs` | Every run, newest first, a follow-up marked with its parent (`22da ↳7efb`). Pick one to read its newest report, jump to its herdr workspace, close its session, or reopen a closed one. |
 | `paneyard.report` | Inside a run's herdr workspace: that run's newest report. |
 | `paneyard.close` | Inside a run's herdr workspace: close its session (asks first). |
 | `paneyard.layout` | Visually build and validate the current repository's tabs and panes in a Herdr popup, including from one of its run worktrees. |
@@ -127,9 +127,13 @@ The menu offers queue, runs and reports, close session, edit layout, and configu
 
 Any git checkout you already have will do, with any branch checked out, as long as it has an `origin` remote. Open a herdr pane anywhere in it, open the **Paneyard menu**, and choose **Queue**. Paneyard resolves the checkout to a workspace, registering it through the same repository checks as the admin MCP tool when needed. Describe the task (Enter submits, Shift-Enter adds a line), choose the **base branch** to start from (Enter for the branch your pane is on, or type another), pick a driver (`claude` or `codex`; Enter for `claude`), and it is queued. When a slot frees, herdr creates the run's worktree from that branch, wherever your herdr config puts worktrees, and opens it as a herdr workspace with the agent in it. Your own checkout is never touched. [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
 
-### 5. Read reports and close sessions
+### 5. Read reports, close and reopen sessions
 
 When the agent stops, it posts a report. Open **Runs** from the Paneyard menu (or choose **Report** inside the run's workspace). Type into the agent's pane to give it more work, and ask it to commit, push or merge when you are happy; it merges back into the branch it started from. When you are done with it, choose **Close** to end the session and free its slot. Workspace settings and layouts are available through the menu and admin MCP tools.
+
+Closed the wrong one? Pick the run in **Runs** and press `o` to **reopen** its session. The run is queued again and gets a new session on its own branch when a slot is free: in its worktree if that was kept, or in one herdr makes again from the branch if it was removed. The agent resumes its conversation where it can, and otherwise starts fresh with the task and the run's newest report. A run whose branch is gone as well cannot be reopened.
+
+A run queued with another run's branch as its base branch is a **follow-up** of it. **Runs** shows the parent's short id after the follow-up's own (`22da ↳7efb`), and a run's screen lists its follow-ups.
 
 ### 6. Queue runs from your own agent
 
@@ -170,7 +174,7 @@ To move from `bin/service` to the plugin with your history, stop `bin/service`, 
 2. **Dispatch.** When a slot frees, herdr creates the oldest queued run's worktree on a `paneyard/<name>` branch, from the current local tip of the run's **base branch** (the workspace's default unless the run named another), and opens it as a herdr workspace, where one interactive agent session starts with the task as its first prompt. Several runs of one repository can start from different branches at once.
 3. **Work.** The session explores, edits and runs the repository's own commands, then leaves its changes uncommitted. Commit, push and merge are separate requests; it does only the one you ask for, and a merge goes back into the run's own base branch.
 4. **Report.** Each time it stops, the session calls the `report_idle` MCP tool (`done`, `blocked` or `failed`) with a Markdown report. The session stays open and keeps its slot; reports accumulate as checkpoints shown by the Herdr actions and MCP tools.
-5. **Close.** **Close session** quits the agent, closes its herdr workspace and frees the slot. A run you haven't closed keeps holding its slot.
+5. **Close.** **Close session** quits the agent, closes its herdr workspace and frees the slot. A run you haven't closed keeps holding its slot. A closed run can be **reopened**: it queues again for a new session on its own branch.
 6. **Clean up.** herdr removes the worktree once its work is saved (clean, and in the run's base branch or pushed). Otherwise it is kept and flagged until you push, merge, or choose **Remove worktree**. Only Paneyard's own run worktrees are ever removed, never yours.
 
 If a session dies without reporting, the orchestrator notices within about 30 seconds and frees the slot. Pull requests are yours to open from a pushed branch; the orchestrator never opens, watches or merges them.

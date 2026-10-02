@@ -2,6 +2,8 @@
 # it, both in RunSessionRunner.start! (herdr makes the worktree and opens it as
 # the session's workspace in one call).
 #
+# A reopened run comes through here too, queued again like any other.
+#
 # Split out of RunDispatchJob because it is slow and failure-prone (git, the
 # herdr socket, a CLI's startup), and because a failure here must free the
 # slot rather than wedge the dispatcher.
@@ -12,7 +14,9 @@ class StartRunSessionJob < ApplicationJob
     run = Run.find(id)
     return unless run.status == "launching"
 
-    Orchestrator::RunSessionRunner.start!(run)
+    # A run with a session already behind it was reopened by the operator
+    # (Orchestrator::SessionReopen): the new one picks up from the last.
+    Orchestrator::RunSessionRunner.start!(run, reopening: run.latest_session)
     # Still launching unless the session already reported (awaiting_review),
     # which must stand.
     run.with_lock do

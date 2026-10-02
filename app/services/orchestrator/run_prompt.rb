@@ -27,6 +27,33 @@ module Orchestrator
       ].compact.join("\n")
     end
 
+    # A reopened run's fresh session (SessionReopen): the usual prompt, with
+    # what it is picking up before the task, since its own conversation is
+    # gone and the newest report is the only account of where the run stands.
+    def compose_reopened(run:, session_driver:)
+      [
+        header_section(run),
+        changes_section(run),
+        reporting_section(session_driver),
+        attachments_section(run),
+        reopened_section(run),
+        task_section(run)
+      ].compact.join("\n")
+    end
+
+    # What a resumed conversation is told: it already knows the task and the
+    # rules, only not that it was closed and has come back.
+    def compose_resumed(run:)
+      <<~PROMPT
+        The operator closed this session and has now reopened run #{run.run_id}, resuming this conversation. Your
+        worktree `#{run.target_root}` on branch `#{run.branch_name}` holds the run's work: kept as it was, or, if it
+        was removed while closed (only ever once its work was saved), made again from the branch. Your `paneyard`
+        MCP connection is a new one; report through `report_idle` as before. Do not start new work on your own:
+        check the worktree is as you left it, call `report_idle` with where the run stands, and wait for the
+        operator.
+      PROMPT
+    end
+
     def header_section(run)
       base = run.base_sha.present? ? " (from `#{run.base_branch}` at #{run.base_sha.first(12)})" : " (from `#{run.base_branch}`)"
 
@@ -75,6 +102,26 @@ module Orchestrator
 
       dir = Runner.for(run.workspace).attachments_dir(run_id: run.run_id)
       "Attached files: #{names.join(', ')}, in `#{dir}`.\n"
+    end
+
+    def reopened_section(run)
+      checkpoint = run.checkpoints.last
+      report =
+        if checkpoint
+          "Its newest report (`#{checkpoint.outcome}`, #{checkpoint.created_at.utc.iso8601}):\n\n#{checkpoint.summary}\n\n"
+        else
+          "It never reported.\n\n"
+        end
+
+      <<~SECTION
+        # Reopened
+
+        This run had a session before, which was closed; the operator has reopened it, and its conversation could
+        not be resumed, so you start fresh. The work so far is in this worktree: commits on `#{run.branch_name}` since
+        `#{run.base_branch}`, and anything left uncommitted. #{report}Do not start new work on your own: check the
+        worktree (`git status`, `git log #{run.base_branch}..HEAD`) against that report and the task below, call
+        `report_idle` with where the run stands, and wait for the operator.
+      SECTION
     end
 
     def task_section(run)

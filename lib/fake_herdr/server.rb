@@ -37,7 +37,10 @@ module FakeHerdr
     def initialize(socket_path:, agent_command: nil, agent_env: {}, log: nil)
       @socket_path = socket_path
       @agent_command = agent_command || [ RbConfig.ruby, File.expand_path("../../script/fake_agent", __dir__) ]
-      @agent_env = agent_env
+      # Where the fake agents keep their conversations (FakeHerdr::Agent), so
+      # one this server launched can be resumed by another it launches later.
+      @agent_env = { "FAKE_AGENT_CONVERSATIONS_DIR" => File.join(File.dirname(socket_path), "fake-agent-conversations") }
+        .merge(agent_env)
       @log = log
       @mutex = Mutex.new
       @requests = []

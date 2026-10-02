@@ -233,6 +233,73 @@ RSpec.describe PaneyardPlugin::Cli do
     end
   end
 
+  describe "runs-ui" do
+    let(:workspace) { { "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main" } }
+    let(:parent) do
+      { "runId" => "run-20261002-0900-7efb", "status" => "completed", "driver" => "claude", "task" => "The original",
+        "branch" => "paneyard/original-7efb", "baseBranch" => "main", "followUpRunIds" => [ "run-20261002-1000-22da" ],
+        "reopenable" => true, "session" => { "live" => false } }
+    end
+    let(:child) do
+      { "runId" => "run-20261002-1000-22da", "status" => "queued", "driver" => "claude", "task" => "A follow-up",
+        "branch" => "paneyard/follow-up-22da", "baseBranch" => "paneyard/original-7efb", "parentRunId" => parent["runId"] }
+    end
+
+    before do
+      allow(client).to receive(:runs).and_return([ [ workspace, { "runs" => [ child, parent ] } ] ])
+      allow(client).to receive(:run).with(parent["runId"], workspace: "app").and_return(parent)
+    end
+
+    it "marks a follow-up with its parent's short id" do
+      run_cli("runs-ui", input: "q\n")
+
+      lines = out.string.lines
+      expect(lines.find { |line| line.include?("A follow-up") }).to match(/22da ↳7efb\s+queued/)
+      expect(lines.find { |line| line.include?("The original") }).to match(/7efb\s+completed/)
+    end
+
+    it "offers to reopen a closed run's session, and reopens it once confirmed" do
+      allow(client).to receive(:reopen).and_return(
+        "status" => "queued", "worktree" => "recreated", "queuedBehind" => 0, "capacity" => { "inFlight" => 4, "limit" => 4 }
+      )
+
+      run_cli("runs-ui", input: "2\no\ny\n\n")
+
+      expect(out.string).to include("Follow-ups: run-20261002-1000-22da", "o to reopen its session")
+      expect(client).to have_received(:reopen).with(parent["runId"], workspace: "app")
+      expect(out.string).to include("Reopened. Run queued, in a worktree made again from its branch.", "4 of 4 sessions in use")
+    end
+
+    it "reopens nothing without a yes" do
+      allow(client).to receive(:reopen)
+
+      run_cli("runs-ui", input: "2\no\n\n\n")
+
+      expect(client).not_to have_received(:reopen)
+      expect(out.string).to include("Left it closed.")
+    end
+
+    it "shows why the server refused to reopen it" do
+      allow(client).to receive(:reopen).and_raise(
+        PaneyardSandbox::McpClient::ToolError.new("refused", { "error" => "not_reopenable", "message" => "Its branch no longer exists." })
+      )
+
+      run_cli("runs-ui", input: "2\no\ny\n\n")
+
+      expect(out.string).to include("Its branch no longer exists.")
+    end
+
+    it "does not offer to reopen a run that cannot be" do
+      allow(client).to receive(:run).with(parent["runId"], workspace: "app").and_return(parent.merge("reopenable" => false))
+      allow(client).to receive(:reopen)
+
+      run_cli("runs-ui", input: "2\no\nq\n")
+
+      expect(out.string).not_to include("o to reopen")
+      expect(client).not_to have_received(:reopen)
+    end
+  end
+
   describe "setup-ui" do
     let(:url) { "http://127.0.0.1:7999/mcp/admin" }
 

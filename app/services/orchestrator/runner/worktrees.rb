@@ -31,12 +31,21 @@ module Orchestrator
       # A worktree of `repository_path` on `branch`, from `base_branch` (a
       # local branch, whatever the repository has checked out), made and
       # opened by herdr. When `current_target_root` already is a worktree of
-      # the repository (a retried launch), herdr reopens it instead.
+      # the repository (a retried launch, or a reopened run whose worktree was
+      # kept), herdr reopens it instead.
+      #
+      # When `branch` already exists (a reopened run whose worktree was
+      # removed), the worktree is made on it as it is, and base_branch plays no
+      # part: herdr's worktree.create checks an existing branch out at its own
+      # commit, ignoring `base` (confirmed live on herdr 0.7.5, with and
+      # without a base), so the run's committed work comes back and a base
+      # branch deleted since does not matter. herdr picks the path from the
+      # branch name, so the worktree normally comes back where it was.
       #
       # Returns { "repository_path", "target_root", "branch", "base_sha",
       # "reused", "workspace_id", "tab_id", "pane_id" }: the herdr workspace
       # and its root pane, which becomes the agent's. base_sha is nil when
-      # reused.
+      # reused, or when the branch already existed.
       def provision!(repository_path:, branch:, base_branch:, label:, current_target_root: nil)
         repository = Pathname(repository_path)
         Sandbox.guard_path!(repository, "provision a worktree in")
@@ -45,6 +54,11 @@ module Orchestrator
         if current_target_root.present? && registered?(repository_path: repository, path: current_target_root)
           opened = Herdr.worktree_open(cwd: repository.to_s, path: current_target_root.to_s, label:, focus: false)
           return provisioned(repository, opened, branch:, base_sha: nil, reused: true)
+        end
+
+        if local_branch?(repository, branch)
+          created = Herdr.worktree_create(cwd: repository.to_s, branch:, base: nil, label:, focus: false)
+          return provisioned(repository, created, branch:, base_sha: nil, reused: false)
         end
 
         problem = base_branch_problem(repository, base_branch)
@@ -95,6 +109,11 @@ module Orchestrator
             "Check the name with git -C #{dir} branch --list, or git -C #{dir} fetch origin first."
           end
         problem("base_branch_missing", "there is no local branch `#{branch}` in #{repository}. #{fix}")
+      end
+
+      # Whether the repository has `branch` as a local branch.
+      def branch_exists?(repository_path:, branch:)
+        GitRef.branch?(branch) && local_branch?(Pathname(repository_path), branch)
       end
 
       def local_branch?(repository, branch)

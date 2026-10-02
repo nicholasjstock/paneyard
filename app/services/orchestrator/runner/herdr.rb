@@ -91,7 +91,9 @@ module Orchestrator
     #     workspace. Returns {workspace, tab, root_pane, worktree: {path,
     #     branch, ...}}. A new branch is created from `base` (any ref; confirmed
     #     live that a branch other than the one checked out at cwd works), an
-    #     existing one is checked out as is. It also opens a primary workspace
+    #     existing one is checked out as is at its own commit, with or without
+    #     a `base` (which it then ignores; confirmed live), at the same path a
+    #     new one of that name would get. It also opens a primary workspace
     #     for the repository itself if none is open. It takes no env, so the
     #     root pane's shell is the operator's login shell and nothing more.
     #   - worktree.open {cwd, path, focus} returns the worktree's open workspace,

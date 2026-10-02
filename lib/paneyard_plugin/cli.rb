@@ -593,6 +593,8 @@ module PaneyardPlugin
         live = session["live"]
         heading "#{run.fetch('runId')} · #{run.fetch('status')}#{" · agent #{session['agentStatus']}" if live && session['agentStatus']}"
         say dim("#{workspace.fetch('name')} · #{run['driver']} · #{run['branch'] || 'no branch yet'} from #{run['baseBranch']}")
+        say dim("Follow-up of #{run['parentRunId']}") if run["parentRunId"]
+        say dim("Follow-ups: #{run['followUpRunIds'].join(', ')}") if Array(run["followUpRunIds"]).any?
         say dim(run["worktree"]) if run["worktree"]
         say "Launch error: #{run['launchError']}" if run["launchError"]
         show_report(run)
@@ -600,6 +602,7 @@ module PaneyardPlugin
         options = []
         options << "f to go to its herdr workspace" if live && session["herdrWorkspace"]
         options << "c to close its session" if live
+        options << "o to reopen its session" if run["reopenable"]
         options += [ "r to re-read", "b back", "q quit" ]
         case ask("#{options.join(', ')}: ")
         when nil, "q" then return :quit
@@ -613,6 +616,12 @@ module PaneyardPlugin
           next unless live
 
           close!(client, workspace, run)
+          pause
+          return :quit
+        when "o"
+          next unless run["reopenable"]
+
+          reopen!(client, workspace, run)
           pause
           return :quit
         end
@@ -658,6 +667,23 @@ module PaneyardPlugin
       end
     end
 
+    def reopen!(client, workspace, run)
+      say ""
+      say "Reopening queues the run again for a new session on #{run['branch'] || 'a new branch'}, resuming its agent's"
+      say "conversation if it can, and otherwise starting fresh with its task and newest report."
+      return say("Left it closed.") unless ask("Reopen #{run.fetch('runId')}'s session? [y/N] ")&.downcase == "y"
+
+      reopened = client.reopen(run.fetch("runId"), workspace: workspace.fetch("name"))
+      worktree = { "kept" => "in its kept worktree", "recreated" => "in a worktree made again from its branch" }
+      say bold("Reopened. Run #{reopened.fetch('status')}#{", #{worktree[reopened['worktree']]}" if worktree[reopened['worktree']]}.")
+      capacity = reopened.fetch("capacity", {})
+      behind = reopened.fetch("queuedBehind", 0)
+      say "#{capacity['inFlight']} of #{capacity['limit']} sessions in use#{behind.positive? ? ", #{behind} queued ahead of it" : ''}. " \
+        "Its herdr workspace opens when it starts."
+    rescue PaneyardSandbox::McpClient::ToolError => error
+      say error.payload["message"] || error.message
+    end
+
     def register!(client, path)
       say "#{path} is not in a Paneyard workspace yet. Registering it…"
       workspace = client.register(path:)
@@ -685,11 +711,14 @@ module PaneyardPlugin
         .sort_by { |_workspace, run| run.fetch("runId") }.reverse.first(40)
     end
 
+    # A follow-up -- a run started from another run's branch -- shows its
+    # parent's short id after its own: `22da ↳7efb`.
     def run_line(number, workspace, run)
       width = IO.console&.winsize&.last || 100
       session = run["session"] || {}
       state = session["live"] && session["agentStatus"] ? "#{run['status']}/#{session['agentStatus']}" : run["status"]
-      line = format("%3d  %-4s  %-18s  %-8s  %-14s  ", number, run.fetch("runId")[-4..], state, run["driver"],
+      parent = run["parentRunId"] ? "↳#{run['parentRunId'][-4..]}" : ""
+      line = format("%3d  %-4s %-5s  %-18s  %-8s  %-14s  ", number, run.fetch("runId")[-4..], parent, state, run["driver"],
         workspace.fetch("name")[0, 14])
       line + run["task"].to_s.lines.first.to_s.strip[0, [ width - line.length - 1, 10 ].max]
     end

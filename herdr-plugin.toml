@@ -43,7 +43,7 @@ command = ["/bin/sh", "bin/herdr-plugin", "pane", "queue"]
 [[actions]]
 id = "runs"
 title = "Paneyard: runs"
-description = "List runs; read a run's report, jump to its herdr workspace, or close its session."
+description = "List runs; read a run's report, jump to its herdr workspace, close its session, or reopen a closed one."
 contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "runs"]
 

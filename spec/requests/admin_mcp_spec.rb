@@ -17,7 +17,7 @@ RSpec.describe "the admin MCP endpoint", type: :request do
     names = Orchestrator::AdminMcpServer::TOOLS.map(&:tool_name)
 
     expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces", "register_workspace",
-      "update_workspace_layout", "close_session")
+      "update_workspace_layout", "close_session", "reopen_session")
   end
 
   it "tells clients how to find or register the workspace before queuing" do
@@ -32,29 +32,65 @@ RSpec.describe "the admin MCP endpoint", type: :request do
 
   it "keeps the admin mutations off the run endpoint" do
     expect(Orchestrator::RunMcpServer::TOOLS).not_to include(
-      McpTools::RegisterWorkspaceTool, McpTools::UpdateWorkspaceLayoutTool, McpTools::CloseSessionTool
+      McpTools::RegisterWorkspaceTool, McpTools::UpdateWorkspaceLayoutTool, McpTools::CloseSessionTool,
+      McpTools::ReopenSessionTool
     )
+  end
+
+  # The full handshake a real client makes, then the call; the raw result,
+  # since a failed call is an error result the caller must read.
+  def call_tool(name, **arguments)
+    headers = { "CONTENT_TYPE" => "application/json", "ACCEPT" => "application/json, text/event-stream" }
+    post "/mcp/admin", headers:, params: JSON.generate(
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "spec", version: "1" } }
+    )
+    headers["HTTP_MCP_SESSION_ID"] = response.headers["mcp-session-id"]
+    post "/mcp/admin", headers:, params: JSON.generate(jsonrpc: "2.0", method: "notifications/initialized")
+    post "/mcp/admin", headers:, params: JSON.generate(
+      jsonrpc: "2.0", id: 2, method: "tools/call", params: { name:, arguments: }
+    )
+    body = response.body
+    body = body.lines.find { |line| line.start_with?("data:") }.delete_prefix("data:") if body.start_with?("event:", "data:")
+    JSON.parse(body).fetch("result")
+  end
+
+  describe "reopen_session" do
+    before { host! "127.0.0.1" }
+
+    let(:workspace) { create_workspace(prefix: "reopen") }
+    let(:run) do
+      create_run(workspace:, prefix: "reopen", status: "completed", worktree_name: "fix-a1b2", branch_name: "paneyard/fix-a1b2",
+        source_root: workspace.repository_path, target_root: "/worktrees/fix-a1b2")
+    end
+
+    it "queues a closed run again and says which worktree it will get" do
+      allow(Orchestrator::Runner.local).to receive(:worktree_registered?).and_return(false)
+      allow(Orchestrator::Runner.local).to receive(:branch_exists?).and_return(true)
+
+      result = call_tool("reopen_session", runId: run.run_id, workspace: workspace.name)
+
+      expect(result["isError"]).to be_falsey
+      expect(result["structuredContent"]).to include("runId" => run.run_id, "status" => "queued", "worktree" => "recreated",
+        "branch" => "paneyard/fix-a1b2", "queuedBehind" => 0, "capacity" => include("limit" => 4))
+      expect(run.reload.status).to eq("queued")
+    end
+
+    it "explains why a run cannot be reopened" do
+      _run, _session = create_run_and_session(run:)
+
+      result = call_tool("reopen_session", runId: run.run_id, workspace: workspace.name)
+
+      expect(result["isError"]).to be(true)
+      expect(result["structuredContent"]).to include("error" => "not_reopenable", "message" => include("still has a live session"))
+    end
   end
 
   describe "register_workspace" do
     before { host! "127.0.0.1" }
 
-    # The full handshake a real client makes, then the call; the raw result,
-    # since a failed registration is an error result the caller must read.
     def register(path)
-      headers = { "CONTENT_TYPE" => "application/json", "ACCEPT" => "application/json, text/event-stream" }
-      post "/mcp/admin", headers:, params: JSON.generate(
-        jsonrpc: "2.0", id: 1, method: "initialize",
-        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "spec", version: "1" } }
-      )
-      headers["HTTP_MCP_SESSION_ID"] = response.headers["mcp-session-id"]
-      post "/mcp/admin", headers:, params: JSON.generate(jsonrpc: "2.0", method: "notifications/initialized")
-      post "/mcp/admin", headers:, params: JSON.generate(
-        jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "register_workspace", arguments: { path: } }
-      )
-      body = response.body
-      body = body.lines.find { |line| line.start_with?("data:") }.delete_prefix("data:") if body.start_with?("event:", "data:")
-      JSON.parse(body).fetch("result")
+      call_tool("register_workspace", path:)
     end
 
     it "registers an existing checkout over the wire from its path alone" do

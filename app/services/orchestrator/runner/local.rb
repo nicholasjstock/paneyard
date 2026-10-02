@@ -34,7 +34,8 @@ module Orchestrator
 
       # A worktree of repository_path on `branch`, from `base_branch`, opened
       # by herdr as the run's workspace; or, when current_target_root already
-      # is one, that worktree reopened. Returns { "repository_path",
+      # is one, that worktree reopened; or, when `branch` already exists, a
+      # worktree on it as it is. Returns { "repository_path",
       # "target_root", "branch", "base_sha", "reused", "workspace_id",
       # "tab_id", "pane_id" }.
       def provision_worktree(repository_path:, branch:, base_branch:, label:, current_target_root: nil)
@@ -44,6 +45,11 @@ module Orchestrator
       # nil when a run can start from `branch`, else { "code", "message" }.
       def base_branch_problem(repository_path:, branch:)
         Worktrees.base_branch_problem(repository_path, branch)
+      end
+
+      # Whether the repository has `branch` as a local branch.
+      def branch_exists?(repository_path:, branch:)
+        Worktrees.branch_exists?(repository_path:, branch:)
       end
 
       # Whether `path` is a linked worktree of the repository that git knows.

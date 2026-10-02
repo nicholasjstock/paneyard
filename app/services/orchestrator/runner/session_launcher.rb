@@ -116,9 +116,20 @@ module Orchestrator
       # state-based signal to poll instead. Harmless on an already-trusted
       # directory: the pane is still at codex's own startup screen, before any
       # prompt text has been sent, so a stray Enter has nothing to submit.
+      #
+      # codex can be detected and then exit inside the grace period -- confirmed
+      # live: `codex resume <id>` for a conversation it does not have prints
+      # "No saved session found with ID ..." and quits -- so herdr answering the
+      # Enter with "agent target ... not found" means codex never started.
       def dismiss_codex_trust_prompt!(pane_id)
         sleep CODEX_TRUST_PROMPT_GRACE_SECONDS
         Herdr.agent_send_keys(pane_id, [ "Enter" ])
+      rescue Herdr::Unreachable
+        raise
+      rescue Herdr::Error => error
+        raise unless error.message.match?(/agent target .* not found/)
+
+        raise LaunchError, "codex exited in pane #{pane_id} before it was ready (herdr: #{error.message})"
       end
 
       # worktree.create returns a pane whose shell exists immediately, but that

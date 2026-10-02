@@ -7,9 +7,19 @@ RSpec.describe StartRunSessionJob do
 
     described_class.perform_now(run.id)
 
-    expect(Orchestrator::RunSessionRunner).to have_received(:start!).with(run)
+    expect(Orchestrator::RunSessionRunner).to have_received(:start!).with(run, reopening: nil)
     expect(run.reload).to have_attributes(status: "running")
     expect(run.started_at).to be_present
+  end
+
+  it "hands a reopened run's previous session to the new one" do
+    run = create_run(prefix: "start-session-reopened", status: "launching")
+    previous = run.run_sessions.create!(driver: "claude", status: "done", outcome: "done", ended_at: 1.minute.ago, cli_session_id: "conv-1")
+    allow(Orchestrator::RunSessionRunner).to receive(:start!)
+
+    described_class.perform_now(run.id)
+
+    expect(Orchestrator::RunSessionRunner).to have_received(:start!).with(run, reopening: previous)
   end
 
   it "keeps a report the session made while it was still launching" do

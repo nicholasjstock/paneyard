@@ -129,6 +129,112 @@ RSpec.describe "a run's lifecycle", type: :request do
     expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
   end
 
+  describe "reopening a closed session" do
+    def reopen(run)
+      result = nil
+      perform_enqueued_jobs(only: [ RunDispatchJob, StartRunSessionJob ]) do
+        result = mcp_call("/mcp/admin", "reopen_session", runId: run.run_id, workspace: workspace.name)
+      end
+      result
+    end
+
+    # Launched, reported, and its conversation id picked up by the reconcile
+    # job, as it would be on any minute the session was live.
+    def launched_and_reported(task)
+      run = queue_and_launch(task)
+      report(run, "done", "## First pass")
+      RunSessionReconcileJob.perform_now
+      run.reload
+    end
+
+    it "queues the run again and resumes its conversation in the worktree it kept, then closes again", :fake_herdr do
+      run = launched_and_reported("Reopen me")
+      first = run.live_session
+      conversation = first.cli_session_id
+      File.write(File.join(run.target_root, "notes.md"), "uncommitted\n")
+      expect(Orchestrator::SessionClose.call(run)).to include(worktree: "kept")
+      expect(run.reload.status).to eq("completed")
+
+      reopened = reopen(run)
+
+      expect(reopened).to include("status" => "queued", "worktree" => "kept", "branch" => run.branch_name)
+      session = run.reload.live_session
+      expect(run.status).to eq("running")
+      expect(session).not_to eq(first)
+      expect(fake_herdr.requests_for("worktree.create").size).to eq(1)
+      expect(fake_herdr.requests_for("worktree.open").last).to include("path" => run.target_root)
+      expect(fake_herdr.requests_for("agent.start").last["args"]).to include("--resume", conversation)
+      expect(fake_herdr.requests_for("agent.prompt").last["text"]).to include("resuming this conversation")
+      expect(wait_for { fake_herdr.pane(session.herdr_pane_id)[:transcript].include?("resumed conversation #{conversation}") }).to be(true)
+      expect(File.read(File.join(run.target_root, "notes.md"))).to eq("uncommitted\n")
+      expect(Orchestrator::RunConcurrency.in_flight).to eq(1)
+
+      report(run, "done", "## Second pass")
+      expect(run.reload.checkpoints.map(&:summary)).to eq([ "## First pass", "## Second pass" ])
+      expect(Orchestrator::SessionClose.call(run)).to include(outcome: "done")
+      expect(run.reload.status).to eq("completed")
+      expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
+    end
+
+    it "makes the worktree again from the branch when it was removed, with the run's commits", :fake_herdr do
+      run = launched_and_reported("Merged then reopened")
+      conversation = run.live_session.cli_session_id
+      commit_in(run.target_root, "fix.txt", "Fix it")
+      work = git(run.target_root, "rev-parse", "HEAD")
+      git(workspace.repository_path, "merge", "-q", "--ff-only", run.branch_name)
+      expect(Orchestrator::SessionClose.call(run)).to include(worktree: "removed")
+      path = run.target_root
+      expect(File.directory?(path)).to be(false)
+
+      expect(reopen(run)).to include("worktree" => "recreated")
+
+      expect(run.reload).to have_attributes(status: "running", target_root: path)
+      expect(git(path, "rev-parse", "HEAD")).to eq(work)
+      expect(fake_herdr.requests_for("worktree.create").last).to include("branch" => run.branch_name, "base" => nil)
+      # herdr put it back at the same path, so the conversation could resume.
+      expect(fake_herdr.requests_for("agent.start").last["args"]).to include("--resume", conversation)
+
+      report(run, "done", "## Back")
+      expect(Orchestrator::SessionClose.call(run)).to include(outcome: "done", worktree: "removed")
+    end
+
+    it "starts a fresh conversation, with the task and the last report, when the old one cannot be resumed", :fake_herdr do
+      run = launched_and_reported("Resume will fail")
+      # The resumed CLI exits before herdr sees it; no need to wait out the full 10 s for that.
+      stub_const("Orchestrator::Runner::SessionLauncher::AGENT_DETECT_POLL_ATTEMPTS", 10)
+      File.write(File.join(run.target_root, "notes.md"), "keep me\n")
+      Orchestrator::SessionClose.call(run)
+      # The CLI no longer has it (its history was cleared, say).
+      run.latest_session.update!(cli_session_id: "fake-forgotten")
+
+      reopen(run)
+
+      session = run.reload.live_session
+      expect(session).to have_attributes(status: "running")
+      starts = fake_herdr.requests_for("agent.start").last(2)
+      expect(starts.map { |start| start["pane_id"] }.uniq).to eq([ session.herdr_pane_id ])
+      expect(starts.first["args"]).to include("--resume", "fake-forgotten")
+      expect(starts.last["args"]).not_to include("--resume")
+      expect(fake_herdr.pane(session.herdr_pane_id)[:transcript]).to include("No conversation found with session ID: fake-forgotten")
+      expect(fake_herdr.requests_for("agent.prompt").last["text"]).to include("# Reopened", "## First pass", "Resume will fail")
+
+      report(run, "done", "## Fresh")
+      expect(Orchestrator::SessionClose.call(run)).to include(outcome: "done")
+    end
+
+    it "refuses once the branch is gone as well as the worktree", :fake_herdr do
+      run = launched_and_reported("Gone for good")
+      Orchestrator::SessionClose.call(run)
+      git(workspace.repository_path, "branch", "-q", "-D", run.branch_name)
+
+      result = McpTools::ReopenSessionTool.call(runId: run.run_id, workspace: workspace.name, server_context: {})
+
+      expect(result.error?).to be(true)
+      expect(result.content.first[:text]).to include("not_reopenable", "no longer exists")
+      expect(run.reload.status).to eq("completed")
+    end
+  end
+
   def git(dir, *args)
     out, status = Open3.capture2e("git", "-C", dir.to_s, *args)
     raise out unless status.success?

@@ -23,9 +23,11 @@ module Orchestrator
       )
       return run if result.fetch("reused")
 
+      # A reopened run's worktree, made again on its existing branch, has no
+      # new base: the one it started from stands.
       run.update!(
         worktree_name: name, source_root: result.fetch("repository_path"), branch_name: result.fetch("branch"),
-        base_sha: result.fetch("base_sha"), target_root: result.fetch("target_root")
+        base_sha: result.fetch("base_sha") || run.base_sha, target_root: result.fetch("target_root")
       )
       run
     end

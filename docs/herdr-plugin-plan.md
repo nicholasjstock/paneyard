@@ -209,10 +209,11 @@ changed. Then it reads the task (Enter submits, Shift-Enter adds a line, Ctrl-C 
 the branch the pane is on; the workspace's default only on a detached HEAD), asks for the driver (Enter for `claude`),
 queues it, and shows the run id, its base branch and the queue position. The run's herdr workspace opens on its own when a slot frees, as today.
 
-**Runs popup.** A numbered list (run id's last four characters, status and herdr's agent state, driver,
-workspace, first line of the task), newest first; Enter refreshes. A number selects a run and shows its
-newest checkpoint report, through `less` when it is longer than the popup. From there: `f` focus its herdr
-workspace, `c` close its session (with confirmation), `b` back, `q` quit. A thin client
+**Runs popup.** A numbered list (run id's last four characters, then `↳` and its parent's for a follow-up,
+status and herdr's agent state, driver, workspace, first line of the task), newest first; Enter refreshes.
+A number selects a run and shows its newest checkpoint report, through `less` when it is longer than the
+popup. From there: `f` focus its herdr workspace, `c` close its session (with confirmation), `o` reopen a
+closed run's session (with confirmation; `reopen_session`), `b` back, `q` quit. A thin client
 over `/mcp/admin` (the existing `PaneyardSandbox::McpClient`), stdlib Ruby, no new gems.
 
 Suggested keybinding (README):

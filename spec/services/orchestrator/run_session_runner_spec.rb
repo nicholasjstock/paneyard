@@ -457,6 +457,22 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(Orchestrator::Runner::Herdr).to have_received(:agent_send_keys).with("w9:p1", [ "Enter" ])
     end
 
+    # codex resuming a conversation it does not have: detected, then gone
+    # before the trust Enter (confirmed live).
+    it "counts codex exiting before its trust Enter as a failed launch" do
+      stub_const("Orchestrator::Runner::SessionLauncher::CODEX_TRUST_PROMPT_GRACE_SECONDS", 0)
+      stub_successful_launch
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_send_keys)
+        .and_raise(Orchestrator::Runner::Herdr::Error, "agent target w9:p1 not found")
+      codex_run = create_run(
+        prefix: "session-runner-codex", launcher_variant: "codex", status: "launching",
+        target_root: Dir.mktmpdir("session-runner-codex"), branch_name: "paneyard/codex", worktree_name: "codex-a1b2"
+      )
+
+      expect { described_class.start!(codex_run) }
+        .to raise_error(Orchestrator::Runner::LaunchError, /codex exited in pane w9:p1 before it was ready/)
+    end
+
     it "launches the model picked for the run and records it on the session" do
       stub_successful_launch
       run.update!(model: "claude-sonnet-5")
@@ -487,13 +503,87 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(Orchestrator::Runner::Herdr).to have_received(:pane_split).with(hash_excluding(:env))
     end
 
-    it "passes a resume id through to the driver args when one is known" do
-      stub_successful_launch
+    describe "reopening a run" do
+      let(:run) do
+        create_run(prefix: "session-runner", status: "launching", worktree_name: "session-runner-a1b2",
+          branch_name: "paneyard/session-runner-a1b2", target_root: worktree, base_sha: "abc123")
+      end
+      let!(:previous) do
+        run.run_sessions.create!(driver: "claude", status: "done", outcome: "done", ended_at: 1.minute.ago, cli_session_id: "sess-77")
+      end
 
-      described_class.start!(run, resume_session_id: "sess-77")
+      it "resumes the previous session's conversation when the worktree is where it ran" do
+        stub_successful_launch
 
-      expect(Orchestrator::Runner::Herdr).to have_received(:agent_start)
-        .with(hash_including(args: array_including("--resume", "sess-77")))
+        session = described_class.start!(run, reopening: previous)
+
+        expect(Orchestrator::Runner::Herdr).to have_received(:agent_start)
+          .with(hash_including(args: array_including("--resume", "sess-77")))
+        expect(Orchestrator::Runner::Herdr).to have_received(:agent_prompt).with("w9:p1", a_string_including("resuming this conversation"))
+        expect(session).to have_attributes(status: "running", pid: 555)
+        expect(session).not_to eq(previous)
+      end
+
+      it "starts a fresh conversation in the same pane when the resumed CLI does not come up" do
+        stub_successful_launch
+        launches = []
+        allow(Orchestrator::Runner.local).to receive(:launch_agent).and_wrap_original do |original, spec, **kwargs|
+          launches << spec
+          raise Orchestrator::Runner::LaunchError, "herdr never detected claude starting" if spec[:resume_session_id]
+
+          original.call(spec, **kwargs)
+        end
+
+        session = described_class.start!(run, reopening: previous)
+
+        expect(launches.map { |spec| spec[:resume_session_id] }).to eq([ "sess-77", nil ])
+        expect(Orchestrator::Runner::Herdr).to have_received(:agent_start).once.with(hash_including(args: array_excluding("--resume")))
+        expect(Orchestrator::Runner::Herdr).to have_received(:agent_prompt).with("w9:p1", a_string_including("# Reopened", run.task))
+        expect(session).to have_attributes(status: "running", pid: 555)
+      end
+
+      it "falls back on any launch error from the resumed CLI" do
+        stub_successful_launch
+        launches = 0
+        allow(Orchestrator::Runner.local).to receive(:launch_agent).and_wrap_original do |original, spec, **kwargs|
+          launches += 1
+          raise Orchestrator::Runner::Error, "agent target w9:p1 not found" if spec[:resume_session_id]
+
+          original.call(spec, **kwargs)
+        end
+
+        expect(described_class.start!(run, reopening: previous)).to have_attributes(status: "running")
+        expect(launches).to eq(2)
+      end
+
+      it "does not fall back when herdr is not answering at all" do
+        stub_successful_launch
+        allow(Orchestrator::Runner.local).to receive(:launch_agent).and_raise(Orchestrator::Runner::Unreachable, "no socket")
+
+        expect { described_class.start!(run, reopening: previous) }.to raise_error(Orchestrator::Runner::Unreachable)
+        expect(Orchestrator::Runner.local).to have_received(:launch_agent).once
+      end
+
+      it "fails the session as any launch would when the fresh conversation does not come up either" do
+        stub_successful_launch
+        allow(Orchestrator::Runner.local).to receive(:launch_agent).and_raise(Orchestrator::Runner::LaunchError, "never became ready")
+
+        expect { described_class.start!(run, reopening: previous) }.to raise_error(Orchestrator::Runner::LaunchError)
+
+        expect(Orchestrator::Runner.local).to have_received(:launch_agent).twice
+        expect(run.latest_session).to have_attributes(status: "failed", outcome: "failed")
+      end
+
+      it "starts fresh when the worktree came back at another path" do
+        stub_successful_launch
+        run.update!(target_root: "/somewhere/else")
+
+        described_class.start!(run, reopening: previous)
+
+        expect(Orchestrator::Runner::Herdr).to have_received(:agent_start).with(hash_including(args: array_excluding("--resume")))
+        expect(Orchestrator::Runner::Herdr).to have_received(:agent_prompt).with("w9:p1", a_string_including("# Reopened"))
+        expect(run.reload.target_root).to eq(worktree)
+      end
     end
   end
 
