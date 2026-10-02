@@ -5,8 +5,8 @@ module Orchestrator
     # are the whole runner interface -- a runner on another machine would
     # answer the same calls with the same plain data -- and the modules beside
     # it (Runner::Herdr, SessionLauncher, SessionLayout, SessionArgs,
-    # Worktrees, Repositories, ModelDiscovery, Attachments) are its internals,
-    # which nothing outside Orchestrator::Runner uses.
+    # Worktrees, Repositories, ClaudeTrust, ModelDiscovery, Attachments) are
+    # its internals, which nothing outside Orchestrator::Runner uses.
     #
     # Errors leave as Runner::Error (or Runner::Unreachable when herdr never
     # answered, Runner::LaunchError when an agent never came up); herdr's and

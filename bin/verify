@@ -2,7 +2,7 @@
 # Everything a change to this repo should pass before it is merged, runnable
 # from the worktree it was made in without touching the production instance:
 #
-#   bundle exec rspec        unit, service, job, request, system and the
+#   bundle exec rspec        unit, service, job, request and the
 #                            in-process run lifecycle (spec/integration)
 #   bin/rubocop
 #   git diff --check

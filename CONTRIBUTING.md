@@ -27,7 +27,7 @@ bin/sandbox start     # prints the sandbox's URL and its /mcp/admin URL
 bin/sandbox stop      # or: bin/sandbox reset, to delete it too
 ```
 
-The sandbox is a complete, isolated instance of this checkout on a free loopback port, with its own database under `tmp/sandbox/`, a **fake herdr** and a **fake agent**: no real panes open, no model usage is spent, and nothing outside the sandbox is touched. It seeds a scratch repository as its only workspace. Open the URL, choose **Queue a task**, and include a directive such as `[fake-agent: done]` (or `blocked`, `failed`, `dirty`, `crash`, `manual`, `working`) in the task to choose what the fake agent does. You get the whole lifecycle — dispatch, a real worktree, a report, **Close session**, cleanup — without herdr or an agent CLI.
+The sandbox is a complete, isolated instance of this checkout on a free loopback port, with its own database under `tmp/sandbox/`, a **fake herdr** and a **fake agent**: no real panes open, no model usage is spent, and nothing outside the sandbox is touched. It seeds a scratch repository as its only workspace. Queue a run into it over `/mcp/admin` (below), and include a directive such as `[fake-agent: done]` (or `blocked`, `failed`, `dirty`, `crash`, `manual`, `working`) in the task to choose what the fake agent does. You get the whole lifecycle — dispatch, a real worktree, a report, **Close session**, cleanup — without herdr or an agent CLI.
 
 To drive it from Claude Code, register the `mcp admin` URL that `bin/sandbox start` printed, under a name that won't clash with your real instance's:
 
@@ -103,7 +103,7 @@ bin/verify
 
 | Step | What it checks |
 | --- | --- |
-| `bundle exec rspec` | Unit, service, job, request, system and in-process integration specs. |
+| `bundle exec rspec` | Unit, service, job, request and in-process integration specs. |
 | `bin/rubocop` | Style (Rails Omakase, `.rubocop.yml`). |
 | `git diff --check` | Whitespace errors. |
 | `bin/preflight` | Boots this checkout as production would, on a scratch database and a free port: eager loading, routes, `config/queue.yml`, the recurring schedule, migrations, and Puma plus Solid Queue actually serving requests. |
@@ -136,7 +136,7 @@ These are deliberate, and a change that breaks one will be asked to change. The 
 
 - **Sessions, not orchestration.** Rails decides which job runs, where, and what happens to its worktree afterwards. Everything else belongs to the one interactive agent session. Don't add a planner, step queue, per-step workers, acceptance criteria, PR publishing or merge polling; these existed once and were removed on purpose. Steering a run means talking to its session (`Orchestrator::RunSessionRunner.prompt!`). See ["Sessions, Not Orchestration"](./AGENTS.md#sessions-not-orchestration).
 - **The runner boundary.** Everything that must happen on the machine hosting herdr, the agent CLIs and the git checkouts lives under `app/services/orchestrator/runner/`, and the rest of the app reaches it only through `Orchestrator::Runner.for(workspace)`. Only plain data crosses (strings, numbers, booleans, hashes and arrays of them); the runner never reads the database. If the orchestrator needs something new from the machine, add a runner method. `spec/boundary_spec.rb` enforces this. See ["Orchestrator and runner"](./AGENTS.md#orchestrator-and-runner).
-- **Workspace-first.** Scope routes, screens, jobs and persistence by workspace first, for example `/workspaces/:workspace_id/runs/:id`. Avoid new top-level flows that bypass workspace selection unless the feature is truly global. See ["Workspace-First Design"](./AGENTS.md#workspace-first-design).
+- **Workspace-first.** Scope MCP tools, plugin actions, jobs and persistence by workspace first, for example a tool that takes a `workspace:` name and then a run within it. Avoid new top-level flows that bypass workspace selection unless the feature is truly global. See ["Workspace-First Design"](./AGENTS.md#workspace-first-design).
 - **A small MCP surface.** Don't add MCP tools for things an agent CLI can already do itself (files, commands, git), and never expose SQL, record lookup, filesystem traversal or command execution. See ["MCP Boundary"](./AGENTS.md#mcp-boundary).
 - **Sandbox guards.** A new way for the app to reach outside itself belongs in the runner, with a guard in `Orchestrator::Sandbox` and `spec/services/orchestrator/sandbox_spec.rb`.
 - **Verified CLI flags.** The per-driver flags in `Orchestrator::Runner::SessionArgs` were established by running each CLI live; several contradict its `--help`. Don't simplify them without re-verifying live.

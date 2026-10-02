@@ -15,7 +15,7 @@
 # status operator clients render, and the CLI's own session id, which is the
 # only way to obtain a --resume id for an interactive session.
 #
-# Closing a run's herdr workspace by hand (agent pane and editor pane together)
+# Closing a run's herdr workspace by hand (the agent pane and any others)
 # is also how the operator says they are done with its worktree, without ever
 # polling a client. So a session this job finds ended gets the same
 # WorktreeJanitor.release! that Close session gives it: the worktree goes only

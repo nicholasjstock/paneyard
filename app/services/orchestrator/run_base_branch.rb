@@ -3,7 +3,6 @@ module Orchestrator
   # named, else the workspace's default. Checked against the repository before
   # the run is queued (the runner's git, the same rule provisioning enforces),
   # so a typo is an error now rather than a failed launch once a slot frees.
-  # Shared by the new-run form and the queue_run tool.
   module RunBaseBranch
     module_function
 

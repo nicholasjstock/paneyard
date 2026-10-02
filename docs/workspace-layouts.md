@@ -7,6 +7,7 @@
 > Paneyard (session env, and `Runner::ProcessEnv` with it, was removed), and the layout is
 > built in the workspace herdr opens for the run's worktree (`worktree.create`), whose root
 > pane is the agent's. Everything below about every pane getting the agent's env is history.
+> The default layout is now the agent alone: nvim is no longer opened unless a layout asks for it.
 
 Status: implemented. This started as a proposal and has been updated to match
 what was built, and what was verified live against herdr during

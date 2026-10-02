@@ -2,7 +2,7 @@ require "yaml"
 
 module Orchestrator
   # The herdr panes a run's workspace opens with, configured per Workspace
-  # (workspaces.layout, YAML text edited on the workspace form). Parsing and
+  # (workspaces.layout, YAML text set by the update_workspace_layout tool). Parsing and
   # validation only -- the runner's Runner::SessionLayout is what builds it,
   # from the plain data #for hands it.
   #
