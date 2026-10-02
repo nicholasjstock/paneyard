@@ -354,7 +354,7 @@ module PaneyardPlugin
         register!(client, repository || dir).tap { |found| registered = !found.nil? }
       return unless workspace
 
-      default = workspace.fetch("defaultBaseBranch")
+      default = current_branch || workspace.fetch("defaultBaseBranch")
       clear_screen
       say accent("PANEYARD  /  NEW RUN")
       say rule
@@ -368,9 +368,9 @@ module PaneyardPlugin
       task = read_task
       return say("Nothing queued.") if task.empty?
 
-      base_branch = ask_base_branch(default, current_branch)
+      base_branch = ask_base_branch(default, workspace.fetch("defaultBaseBranch"))
       driver = ask_driver
-      queued = queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, current_branch:)
+      queued = queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, default:)
       return unless queued
 
       capacity = queued.fetch("capacity", {})
@@ -384,7 +384,7 @@ module PaneyardPlugin
 
     # A mistyped base branch is the one queue error worth another try: asking
     # again keeps the task the operator just wrote.
-    def queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, current_branch:)
+    def queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, default:)
       loop do
         return client.queue(task:, workspace: workspace.fetch("name"), base_branch:, driver:)
       rescue PaneyardSandbox::McpClient::ToolError => error
@@ -392,7 +392,7 @@ module PaneyardPlugin
 
         say ""
         say error.payload["message"]
-        base_branch = ask_base_branch(workspace.fetch("defaultBaseBranch"), current_branch, again: true)
+        base_branch = ask_base_branch(default, workspace.fetch("defaultBaseBranch"), again: true)
         if base_branch == :cancel
           say "Nothing queued."
           return pause
@@ -400,16 +400,17 @@ module PaneyardPlugin
       end
     end
 
-    # The workspace's default, unless the operator names another branch; the
-    # branch this pane is on is offered, since starting from it is the usual
-    # reason not to use the default.
-    def ask_base_branch(default, current_branch, again: false)
-      hint = current_branch && current_branch != default ? "; this pane is on #{current_branch}" : ""
+    # The branch this pane is on, since that is what the operator is working
+    # on (the workspace's default only on a detached HEAD), unless they name
+    # another. Always sent explicitly: the server's own fallback is the
+    # workspace default, not this pane's branch.
+    def ask_base_branch(default, workspace_default, again: false)
+      hint = default == workspace_default ? "" : "; workspace default: #{workspace_default}"
       hint += "; q cancels" if again
       answer = ask("Base branch (Enter for #{default}#{hint}): ")
       return :cancel if again && (answer.nil? || answer == "q")
 
-      answer.nil? || answer.empty? ? nil : answer
+      answer.nil? || answer.empty? ? default : answer
     end
 
     def runs_ui

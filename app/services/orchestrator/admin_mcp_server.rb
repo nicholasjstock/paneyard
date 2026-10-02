@@ -33,8 +33,9 @@ module Orchestrator
       "workspace whose repositoryPath is that repository (its main checkout, if you are in a linked worktree); if " \
       "there is none, call register_workspace with path set to the repository's directory and follow any fixes it " \
       "returns before calling it again; then call queue_run with that workspace. queue_run always needs workspace " \
-      "from here. A job starts from the workspace's defaultBaseBranch; pass baseBranch to start from another local " \
-      "branch, such as the one you are on.".freeze
+      "from here. Pass baseBranch as the branch you have checked out (git branch --show-current) unless the " \
+      "operator names another: the job starts from it and merges back into it. Leave it out only on a detached " \
+      "HEAD, and the job starts from the workspace's defaultBaseBranch.".freeze
 
     def build
       MCP::Server.new(

@@ -59,7 +59,7 @@ RSpec.describe PaneyardPlugin::Cli do
 
     before { allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ nil, nil ]) }
 
-    it "queues a multi-line task in the workspace the pane is in, from its default base branch" do
+    it "queues a multi-line task in the workspace the pane is in, from its default base branch off any branch" do
       allow(client).to receive(:workspaces).and_return([ workspace ])
       allow(client).to receive(:queue).and_return("runId" => "run-1", "baseBranch" => "main", "queuedBehind" => 0,
         "capacity" => { "inFlight" => 1, "limit" => 4 })
@@ -69,20 +69,30 @@ RSpec.describe PaneyardPlugin::Cli do
 
       expect(status).to eq(0)
       expect(client).to have_received(:queue)
-        .with(task: "Fix the flaky spec.\nRun it ten times.", workspace: "app", base_branch: nil, driver: "codex")
+        .with(task: "Fix the flaky spec.\nRun it ten times.", workspace: "app", base_branch: "main", driver: "codex")
       expect(out.string).to include("PANEYARD  /  NEW RUN", "Base branch (Enter for main)", "Queued run-1 from main.")
     end
 
-    it "offers the branch the pane is on, and queues from the one the operator types" do
+    it "starts from the branch the pane is on when Enter is pressed" do
       allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "feature/payments" ])
       allow(client).to receive(:workspaces).and_return([ workspace ])
       allow(client).to receive(:queue).and_return("runId" => "run-3", "baseBranch" => "feature/payments", "capacity" => {})
 
       # A pane in a herdr worktree of the repository, wherever herdr put it.
-      run_cli("queue-ui", input: "Task\n\nfeature/payments\n\n\n", context: { "focused_pane_cwd" => "/Users/me/.herdr/worktrees/app/x" })
+      run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/Users/me/.herdr/worktrees/app/x" })
 
-      expect(out.string).to include("Base branch (Enter for main; this pane is on feature/payments)")
+      expect(out.string).to include("Base branch (Enter for feature/payments; workspace default: main)")
       expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "feature/payments", driver: nil)
+    end
+
+    it "queues from the branch the operator types instead" do
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "feature/payments" ])
+      allow(client).to receive(:workspaces).and_return([ workspace ])
+      allow(client).to receive(:queue).and_return("runId" => "run-5", "baseBranch" => "main", "capacity" => {})
+
+      run_cli("queue-ui", input: "Task\n\nmain\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil)
     end
 
     it "registers the pane's repository first when it is not a workspace yet" do
@@ -94,7 +104,7 @@ RSpec.describe PaneyardPlugin::Cli do
       run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/code/other/lib" })
 
       expect(client).to have_received(:register).with(path: "/code/other")
-      expect(client).to have_received(:queue).with(task: "Task", workspace: "other", base_branch: nil, driver: nil)
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "other", base_branch: "main", driver: nil)
     end
 
     it "asks for the base branch again, keeping the task, when the one typed does not exist" do

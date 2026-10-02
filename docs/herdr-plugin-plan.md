@@ -208,7 +208,7 @@ herdr put that). If none matches, it registers the repository through the existi
 tool (using `Orchestrator::WorkspaceRegistration`; the server names it and works
 out its default branch), and shows the problems and their fixes if anything is wrong — nothing on disk is
 changed. Then it reads the task (Enter submits, Shift-Enter adds a line, Ctrl-C cancels), asks for the base branch (Enter for
-the workspace's default; it mentions the branch the pane is on), asks for the driver (Enter for `claude`),
+the branch the pane is on; the workspace's default only on a detached HEAD), asks for the driver (Enter for `claude`),
 queues it, and shows the run id, its base branch and the queue position. The run's herdr workspace opens on its own when a slot frees, as today.
 
 **Runs popup.** A numbered list (run id's last four characters, status and herdr's agent state, driver,

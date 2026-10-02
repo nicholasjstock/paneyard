@@ -83,7 +83,7 @@ Each run gets its own **linked worktree** of the repository, on a branch `paneya
 
 ### 2. Branches and git requirements
 
-Each run has a **base branch**: the workspace's default unless the run names another when it is queued (`base_branch` on the run, `baseBranch` on `queue_run`, **Base branch** on the new-run form). It is fixed on the run when it is queued, so changing the workspace's default later doesn't move it, and two runs of one workspace can start from different branches at the same time. The run's branch starts from the base branch's current **local** tip (`git worktree add -b paneyard/<name> <path> <base>`, done by herdr), whatever your checkout has checked out, and the run merges back into that same branch when asked to merge (`Orchestrator::RunPrompt`):
+Each run has a **base branch**: the workspace's default unless the run names another when it is queued (`base_branch` on the run, `baseBranch` on `queue_run`, **Base branch** on the new-run form). The plugin's queue popup names the branch your pane is on unless you type another, and `/mcp/admin`'s instructions tell an agent to pass the branch it has checked out, so in practice a run starts from whatever you are working on. It is fixed on the run when it is queued, so changing the workspace's default later doesn't move it, and two runs of one workspace can start from different branches at the same time. The run's branch starts from the base branch's current **local** tip (`git worktree add -b paneyard/<name> <path> <base>`, done by herdr), whatever your checkout has checked out, and the run merges back into that same branch when asked to merge (`Orchestrator::RunPrompt`):
 
 ```
 feature/payments -> paneyard/fix-tax-9f3c -> merged back into feature/payments

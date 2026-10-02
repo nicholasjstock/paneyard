@@ -7,7 +7,8 @@ module McpTools
       "starts when a concurrency slot frees, and shares none of your context -- write the task as a complete " \
       "brief: goal, constraints, relevant files, and how to tell it worked. Its branch starts from baseBranch (any " \
       "local branch of the workspace's repository, checked out or not; default: the workspace's defaultBaseBranch) " \
-      "and the job merges back into that branch when asked to merge. From inside a run, use it only for follow-up " \
+      "and the job merges back into that branch when asked to merge. From outside a run, pass the branch you have " \
+      "checked out unless the operator names another. From inside a run, use it only for follow-up " \
       "work the operator asked for, never to hand off your own task. From inside a run, workspace defaults to your " \
       "own. From outside one it is required: call list_workspaces and pass the workspace whose repositoryPath is " \
       "the repository you mean, or, if none is, register it with register_workspace first."
