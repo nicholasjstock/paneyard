@@ -3,13 +3,15 @@ require "active_support/core_ext/integer/time"
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
 
-  # Deployed production stays eager-loaded. `bin/production` is the local
-  # long-running process against the real database, so it opts into reloads
-  # to pick up source fixes between requests and recurring jobs without a
-  # manual restart.
-  local_hot_reload = ENV["PANEYARD_HOT_RELOAD"] == "1"
-  config.enable_reloading = local_hot_reload
-  config.eager_load = !local_hot_reload
+  # Code is not reloaded; a change takes effect on a restart. A reload
+  # would apply new code without its migrations (bin/production runs
+  # db:prepare only at start) or bin/service's preflight, and would redraw
+  # the routes, rebuilding both mounted MCP endpoints and so dropping every
+  # MCP client's session.
+  config.enable_reloading = false
+
+  # Eager load code on boot, so a constant that cannot load fails the start.
+  config.eager_load = true
 
   # Full error reports are disabled.
   config.consider_all_requests_local = false

@@ -672,7 +672,7 @@ serve the new commands.
    final pass for README/AGENTS.md.
 
 Because this repo is one of its own workspaces, phases 4 and 5 change code the
-running instance hot-reloads (`PANEYARD_HOT_RELOAD=1`). A session doing phase
+running instance runs (it hot-reloaded code then; it no longer does). A session doing phase
 5 should merge and restart in one step, not leave `main` ahead of the running
 process's config.
 

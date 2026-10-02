@@ -175,8 +175,7 @@ configurable: `PANEYARD_MAX_CONCURRENT_RUNS`, `PANEYARD_CLAUDE_MODEL`/`CODEX`, `
 `PORT`, `PANEYARD_RUBY`. The format is dotenv: `KEY=value`, optional `export`, `#` comments,
 single or double quotes, and double-quoted values may span lines. Every key is
 passed to the daemon except the few the plugin owns (`RAILS_ENV`, `HERDR_SOCKET_PATH`, `PIDFILE`,
-`PANEYARD_STORAGE_DIR`, `PANEYARD_RUNTIME_DIR`, `PANEYARD_RAILS_URL`, `BINDING`, `PANEYARD_SANDBOX*`,
-`PANEYARD_HOT_RELOAD`), which are ignored with a log line. The `.env` is read at daemon start; the
+`PANEYARD_STORAGE_DIR`, `PANEYARD_RUNTIME_DIR`, `PANEYARD_RAILS_URL`, `BINDING`, `PANEYARD_SANDBOX*`), which are ignored with a log line. The `.env` is read at daemon start; the
 **Restart** action applies a change (the fingerprint includes the `.env`'s digest, so the next action after
 an edit also restarts).
 

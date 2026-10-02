@@ -65,7 +65,7 @@ herdr plugin log list --plugin paneyard    # each action's stdout/stderr
 herdr plugin action invoke stop --plugin paneyard && herdr plugin unlink paneyard
 ```
 
-A linked checkout runs your working tree's code (hot-reloaded, as under `bin/service`), but its state is the real plugin state directory, `~/.local/state/herdr/plugins/paneyard`, and its sessions open in your real herdr. If you also run `bin/service`, don't register the same repositories in both (see the README's "one Paneyard per machine"). To exercise the daemon without herdr, point it at scratch directories and a herdr socket that does not exist:
+A linked checkout runs your working tree's code as of the daemon's last start (run the plugin's `restart` action to pick up a change, or iterate with `bin/dev` or `bin/sandbox`), but its state is the real plugin state directory, `~/.local/state/herdr/plugins/paneyard`, and its sessions open in your real herdr. If you also run `bin/service`, don't register the same repositories in both (see the README's "one Paneyard per machine"). To exercise the daemon without herdr, point it at scratch directories and a herdr socket that does not exist:
 
 ```sh
 HERDR_PLUGIN_STATE_DIR=tmp/plugin/state HERDR_PLUGIN_CONFIG_DIR=tmp/plugin/config \
