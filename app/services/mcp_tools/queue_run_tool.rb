@@ -17,12 +17,13 @@ module McpTools
         task: { type: "string" },
         workspace: { type: "string", description: "Workspace name to queue the run in. Required from outside a run." },
         baseBranch: { type: "string", description: "Local branch to start from and merge back into (default: the workspace's defaultBaseBranch)." },
-        driver: { type: "string", enum: Run::LAUNCHER_VARIANTS, description: "Which agent runs it (default claude)." }
+        driver: { type: "string", enum: Run::LAUNCHER_VARIANTS, description: "Which agent runs it (default claude)." },
+        model: { type: "string", description: "Model id for that agent's CLI (default: the driver's default model; list_models, where offered, lists them)." }
       },
       required: %w[task]
     )
 
-    def self.call(task:, server_context:, workspace: nil, baseBranch: nil, driver: nil)
+    def self.call(task:, server_context:, workspace: nil, baseBranch: nil, driver: nil, model: nil)
       raise ArgumentError, "task is required" if task.blank?
 
       target = WorkspaceResolution.resolve!(server_context:, workspace:, explicit: true)
@@ -32,7 +33,7 @@ module McpTools
 
       run = target.runs.new(
         run_id: "run-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}",
-        task:, base_branch:, launcher_variant: driver.presence || "claude",
+        task:, base_branch:, launcher_variant: driver.presence || "claude", model: model.to_s.strip.presence,
         target_root: target.repository_path, status: "queued", launched_by: "mcp"
       )
       run.worktree_name = Orchestrator::GitWorktree.name_for(run)
@@ -43,6 +44,8 @@ module McpTools
         run_id: run.run_id,
         workspace: target.name,
         base_branch: run.base_branch,
+        driver: run.launcher_variant,
+        model: run.model,
         status: run.status,
         queued_behind: target.runs.queued.where("created_at < ?", run.created_at).count,
         capacity: { limit: Orchestrator::RunConcurrency.limit, in_flight: Orchestrator::RunConcurrency.in_flight }

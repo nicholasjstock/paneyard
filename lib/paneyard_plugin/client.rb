@@ -27,8 +27,13 @@ module PaneyardPlugin
       @mcp.call_tool("get_run", runId: run_id, workspace:)
     end
 
-    def queue(task:, workspace:, base_branch: nil, driver: nil)
-      @mcp.call_tool("queue_run", task:, workspace:, **{ baseBranch: base_branch, driver: }.compact)
+    def queue(task:, workspace:, base_branch: nil, driver: nil, model: nil)
+      @mcp.call_tool("queue_run", task:, workspace:, **{ baseBranch: base_branch, driver:, model: }.compact)
+    end
+
+    # {"driver", "defaultModel", "models" => [{"id", "label"}]}
+    def models(driver, workspace:)
+      @mcp.call_tool("list_models", driver:, workspace:)
     end
 
     # The server names it after the repository and works out its default branch.

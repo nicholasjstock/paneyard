@@ -39,8 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         # The app has only ever been used on macOS; ubuntu keeps it honest on
-        # Linux. Both have Chrome for the js: true system specs (Selenium
-        # Manager fetches the matching chromedriver).
+        # Linux.
         os: [ ubuntu-latest, macos-latest ]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30

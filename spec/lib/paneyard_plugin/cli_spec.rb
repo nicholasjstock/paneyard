@@ -24,6 +24,7 @@ RSpec.describe PaneyardPlugin::Cli do
     }
     cli = described_class.new(env:, out:, input: StringIO.new(input))
     allow(cli).to receive(:herdr) { |*args| herdr_calls << args }
+    allow(cli).to receive(:herdr_json).and_return(nil)
     yield cli if block_given?
     cli.call([ command ])
   end
@@ -57,19 +58,22 @@ RSpec.describe PaneyardPlugin::Cli do
   describe "queue-ui" do
     let(:workspace) { { "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main" } }
 
-    before { allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ nil, nil ]) }
+    before do
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ nil, nil ])
+      allow(client).to receive(:models).and_return({})
+    end
 
     it "queues a multi-line task in the workspace the pane is in, from its default base branch off any branch" do
       allow(client).to receive(:workspaces).and_return([ workspace ])
       allow(client).to receive(:queue).and_return("runId" => "run-1", "baseBranch" => "main", "queuedBehind" => 0,
         "capacity" => { "inFlight" => 1, "limit" => 4 })
 
-      status = run_cli("queue-ui", input: "Fix the flaky spec.\nRun it ten times.\n\n\ncodex\n\n",
+      status = run_cli("queue-ui", input: "Fix the flaky spec.\nRun it ten times.\n\n\ncodex\n\n\n",
         context: { "focused_pane_cwd" => "/code/app/spec" })
 
       expect(status).to eq(0)
       expect(client).to have_received(:queue)
-        .with(task: "Fix the flaky spec.\nRun it ten times.", workspace: "app", base_branch: "main", driver: "codex")
+        .with(task: "Fix the flaky spec.\nRun it ten times.", workspace: "app", base_branch: "main", driver: "codex", model: nil)
       expect(out.string).to include("PANEYARD  /  NEW RUN", "Base branch (Enter for main)", "Queued run-1 from main.")
     end
 
@@ -82,7 +86,7 @@ RSpec.describe PaneyardPlugin::Cli do
       run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/Users/me/.herdr/worktrees/app/x" })
 
       expect(out.string).to include("Base branch (Enter for feature/payments; workspace default: main)")
-      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "feature/payments", driver: nil)
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "feature/payments", driver: nil, model: nil)
     end
 
     it "queues from the branch the operator types instead" do
@@ -92,7 +96,7 @@ RSpec.describe PaneyardPlugin::Cli do
 
       run_cli("queue-ui", input: "Task\n\nmain\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
 
-      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil)
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil)
     end
 
     it "registers the pane's repository first when it is not a workspace yet" do
@@ -104,7 +108,72 @@ RSpec.describe PaneyardPlugin::Cli do
       run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/code/other/lib" })
 
       expect(client).to have_received(:register).with(path: "/code/other")
-      expect(client).to have_received(:queue).with(task: "Task", workspace: "other", base_branch: "main", driver: nil)
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "other", base_branch: "main", driver: nil, model: nil)
+    end
+
+    context "from a pane running an agent" do
+      let(:pane_context) do
+        { "focused_pane_cwd" => "/code/app", "focused_pane_id" => "w1:p1", "focused_pane_agent" => "codex" }
+      end
+      let(:process_info) do
+        { "result" => { "process_info" => { "foreground_processes" => [
+          { "argv" => [ "caffeinate", "-i" ] },
+          { "argv" => [ "node", "/opt/bin/codex", "-c", 'model="gpt-5.5"', "--search" ] }
+        ] } } }
+      end
+
+      before do
+        allow(client).to receive(:workspaces).and_return([ workspace ])
+        allow(client).to receive(:queue).and_return("runId" => "run-6", "baseBranch" => "main", "driver" => "codex",
+          "model" => "gpt-5.5", "capacity" => {})
+        allow(client).to receive(:models).with("codex", workspace: "app")
+          .and_return("defaultModel" => nil, "models" => [ { "id" => "gpt-5.5", "label" => "GPT-5.5" }, { "id" => "gpt-5.4-mini" } ])
+        allow(client).to receive(:models).with("claude", workspace: "app")
+          .and_return("defaultModel" => "opus", "models" => [ { "id" => "sonnet", "label" => "Sonnet" } ])
+      end
+
+      it "defaults to that pane's agent and the model on its command line" do
+        run_cli("queue-ui", input: "Task\n\n\n\n\n\n", context: pane_context) do |cli|
+          allow(cli).to receive(:herdr_json).with("pane", "process-info", "--pane", "w1:p1").and_return(process_info)
+        end
+
+        expect(out.string).to include("Agent: claude, codex (Enter for codex, this pane's)",
+          "Model (Enter for gpt-5.5, this pane's; or a number; or a model id)", "Queued run-6 from main (codex, gpt-5.5).")
+        expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: "codex", model: "gpt-5.5")
+      end
+
+      it "prefers the model the session log says it is on now, resolving a /model switch's display name" do
+        allow(PaneyardPlugin::SessionModel).to receive(:for).and_return(
+          PaneyardPlugin::SessionModel::Result.new(id: "gpt-5.5", switched_to: "GPT-5.4 Mini"))
+        allow(client).to receive(:models).with("codex", workspace: "app")
+          .and_return("models" => [ { "id" => "gpt-5.5", "label" => "GPT-5.5" }, { "id" => "gpt-5.4-mini", "label" => "GPT-5.4 Mini — gpt-5.4-mini" } ])
+
+        run_cli("queue-ui", input: "Task\n\n\n\n\n\n", context: pane_context) do |cli|
+          allow(cli).to receive(:herdr_json).with("agent", "get", "w1:p1")
+            .and_return("result" => { "agent" => { "agent_session" => { "agent" => "codex", "kind" => "id", "value" => "019f-abc" } } })
+        end
+
+        expect(PaneyardPlugin::SessionModel).to have_received(:for).with("codex", "019f-abc", env: anything)
+        expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: "codex", model: "gpt-5.4-mini")
+      end
+
+      it "takes another agent, and a model picked by number from that agent's list" do
+        run_cli("queue-ui", input: "Task\n\n\nclaude\n1\n\n", context: pane_context) do |cli|
+          allow(cli).to receive(:herdr_json).and_return(process_info)
+        end
+
+        expect(out.string).to include("Model (Enter for opus, the default; or a number; or a model id)")
+        expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: "claude", model: "sonnet")
+      end
+
+      it "takes a model id typed in, and leaves the model to the server when the pane's command line names none" do
+        run_cli("queue-ui", input: "Task\n\n\n\ngpt-5.4-mini\n\n", context: pane_context)
+        run_cli("queue-ui", input: "Task\n\n\n\n\n\n", context: pane_context)
+
+        expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: "codex", model: "gpt-5.4-mini")
+        expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: "codex", model: nil)
+        expect(out.string).to include("Model (Enter for codex's own default; or a number; or a model id)")
+      end
     end
 
     it "asks for the base branch again, keeping the task, when the one typed does not exist" do
@@ -119,10 +188,10 @@ RSpec.describe PaneyardPlugin::Cli do
         { "runId" => "run-4", "baseBranch" => args[:base_branch], "capacity" => {} }
       end
 
-      run_cli("queue-ui", input: "Task\n\nnope\n\nmain\n\n", context: { "focused_pane_cwd" => "/code/app" })
+      run_cli("queue-ui", input: "Task\n\nnope\n\n\nmain\n\n", context: { "focused_pane_cwd" => "/code/app" })
 
-      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "nope", driver: nil)
-      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil)
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "nope", driver: nil, model: nil)
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil)
       expect(out.string).to include("no local branch `nope`", "Queued run-4 from main.")
     end
 

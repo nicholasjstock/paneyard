@@ -19,7 +19,7 @@ A run's herdr workspace opens with two panes, hardcoded in
 
 1. `Herdr.workspace_create` gives the **agent pane** (its root pane). That pane
    gets the full session env (`SessionEnv.for_session`) and runs the
-   claude/codex/opencode CLI. Its id is `RunSession#herdr_pane_id`.
+   claude/codex CLI. Its id is `RunSession#herdr_pane_id`.
 2. `open_editor_pane` splits it `right` and types `nvim .` into the new shell,
    provided `nvim` is on Rails' PATH. Rails never records this pane.
 

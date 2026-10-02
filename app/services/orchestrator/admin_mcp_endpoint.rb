@@ -6,8 +6,7 @@ module Orchestrator
   # every registered workspace. It carries no more auth than the rest of
   # this app: Puma binds 127.0.0.1 only, production answers loopback Host
   # names only (SECURITY.md), and "no auth in v1 (single-user local tool)"
-  # is this app's accepted trust boundary everywhere else too
-  # (ApplicationController#current_operator).
+  # is this app's accepted trust boundary everywhere else too.
   #
   # One shared transport is enough here: every caller gets the same tool set
   # and the same (empty) server_context. It is stateless (McpTransport), so

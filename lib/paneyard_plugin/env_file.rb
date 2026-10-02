@@ -26,7 +26,8 @@ module PaneyardPlugin
       # Live agent sessions at once, across every workspace (default 4).
       # PANEYARD_MAX_CONCURRENT_RUNS=4
 
-      # Default model per agent CLI. A model picked for a run wins.
+      # Default model per agent CLI (claude: opus; codex: its own default).
+      # A model picked when queueing wins.
       # PANEYARD_CLAUDE_MODEL=opus
       # PANEYARD_CODEX_MODEL=
 

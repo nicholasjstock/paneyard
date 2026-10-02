@@ -1,7 +1,8 @@
 module Orchestrator
-  # The models the new-run form offers for each driver: what the workspace's
-  # runner reports its installed CLIs can run (Runner::ModelDiscovery),
-  # cached briefly so rendering the form does not run three CLIs every time.
+  # The models list_models offers for each driver (the herdr plugin's queue
+  # popup shows them): what the workspace's runner reports its installed CLIs
+  # can run (Runner::ModelDiscovery), cached briefly so opening the popup
+  # does not run the CLIs every time.
   module ModelCatalog
     module_function
 

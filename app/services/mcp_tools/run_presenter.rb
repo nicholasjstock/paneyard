@@ -15,6 +15,8 @@ module McpTools
         status: run.status,
         task: run.task.to_s.squish.truncate(160),
         driver: run.launcher_variant,
+        # Blank: the driver's default when the session starts.
+        model: run.model.presence,
         branch: run.branch_name,
         # What it started from, and merges back into.
         base_branch: run.base_branch,

@@ -1,6 +1,6 @@
 module McpTools
-  # Registers a workspace from an MCP client, as Add workspace does in the web
-  # UI: Orchestrator::WorkspaceRegistration checks the repository and the name
+  # Registers a workspace from an MCP client (the herdr plugin's queue action
+  # uses it too): Orchestrator::WorkspaceRegistration checks the repository and the name
   # first, and creates the row only when nothing is wrong. It never touches
   # the filesystem or the repository; a problem comes back with the commands
   # to fix it, for the caller to run.

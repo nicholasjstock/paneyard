@@ -15,7 +15,7 @@ id = "paneyard"
 name = "Paneyard"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
-description = "Queue tasks for Claude Code, Codex or opencode; each runs in its own git worktree and herdr workspace."
+description = "Queue tasks for Claude Code or Codex; each runs in its own git worktree and herdr workspace."
 platforms = ["macos", "linux"]
 
 [[build]]

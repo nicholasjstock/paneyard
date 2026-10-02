@@ -22,6 +22,7 @@ module Orchestrator
       ::McpTools::ListRunsTool,
       ::McpTools::GetRunTool,
       ::McpTools::ListWorkspacesTool,
+      ::McpTools::ListModelsTool,
       ::McpTools::RegisterWorkspaceTool,
       ::McpTools::UpdateWorkspaceLayoutTool,
       ::McpTools::CloseSessionTool,
@@ -37,7 +38,9 @@ module Orchestrator
       "returns before calling it again; then call queue_run with that workspace. queue_run always needs workspace " \
       "from here. Pass baseBranch as the branch you have checked out (git branch --show-current) unless the " \
       "operator names another: the job starts from it and merges back into it. Leave it out only on a detached " \
-      "HEAD, and the job starts from the workspace's defaultBaseBranch.".freeze
+      "HEAD, and the job starts from the workspace's defaultBaseBranch. Likewise pass driver as the agent CLI you are " \
+      "(claude or codex), and model as the model id you are running on if you know it, unless the operator names " \
+      "others.".freeze
 
     def build
       MCP::Server.new(

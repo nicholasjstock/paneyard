@@ -14,7 +14,7 @@
 
 ## Verification
 
-<!-- How you verified it: which test layers you added or ran, and any manual steps (for example in bin/sandbox). Include screenshots for UI changes. -->
+<!-- How you verified it: which test layers you added or ran, and any manual steps (for example in bin/sandbox). -->
 
 - [ ] `bin/verify` passes
 - [ ] Added or updated specs at the right layer (unit/service/job, lifecycle for run or session state, system for UI)

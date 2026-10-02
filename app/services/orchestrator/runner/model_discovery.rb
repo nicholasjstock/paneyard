@@ -3,9 +3,9 @@ require "open3"
 module Orchestrator
   module Runner
     # The models each session driver can actually run on this machine, asked
-    # of the installed CLI itself rather than hardcoded here, so the new-run
-    # form's model dropdown (Orchestrator::ModelCatalog, which caches this)
-    # tracks whatever the operator's own claude/codex offers.
+    # of the installed CLI itself rather than hardcoded here, so
+    # Orchestrator::ModelCatalog (which caches this) tracks whatever the
+    # operator's own claude/codex offers.
     #
     # Neither has one uniform "list models" command, so each is read
     # from wherever that CLI keeps its own list:

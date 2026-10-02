@@ -1,6 +1,6 @@
 module Orchestrator
-  # Registering a workspace, as the register_workspace MCP tool and the web
-  # UI's Add workspace / edit forms both do it: every problem with the
+  # Registering a workspace, as the register_workspace MCP tool does it:
+  # every problem with the
   # proposed repository is found first -- whether it is a git checkout, with a
   # local default branch and an origin, which the runner checks
   # (Runner::Local#check_repository, the same branch rule a queued run is held

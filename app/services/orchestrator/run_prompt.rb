@@ -94,8 +94,8 @@ module Orchestrator
       section
     end
 
-    # Launch uploads are stored (RunsController#uploaded_artifacts) before the
-    # run has a worktree, beside its runtime files on the runner.
+    # Launch uploads are stored before the run has a worktree, beside its
+    # runtime files on the runner.
     def attachments_section(run)
       names = Array(run.launch_artifacts).filter_map { |artifact| artifact["name"] || artifact[:name] }
       return if names.empty?

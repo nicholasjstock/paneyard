@@ -4,15 +4,14 @@ Paneyard is a single-operator tool that runs on your own machine and starts codi
 
 ## Threat model
 
-**What it does.** It runs one Rails app, the web UI plus two MCP endpoints, on your machine. From it you queue *runs*. Each run opens an interactive `claude` or `codex` session in a git worktree (made by herdr) of one of your registered repositories. Anyone who can queue a run can get code of their choosing executed on your machine, as you. Everything below follows from that.
+**What it does.** It runs one Rails app, two MCP endpoints with no web UI, on your machine; the herdr plugin's actions talk to it through `/mcp/admin`. Through it you queue *runs*. Each run opens an interactive `claude` or `codex` session in a git worktree (made by herdr) of one of your registered repositories. Anyone who can queue a run can get code of their choosing executed on your machine, as you. Everything below follows from that.
 
-**No authentication.** The web UI and `/mcp/admin` have no login, no API key and no user accounts. That is deliberate: the only intended user is the person at the keyboard. `/mcp/run` is the one authenticated surface. Each session gets its own bearer capability, which stops working when the session ends.
+**No authentication.** `/mcp/admin` has no login, no API key and no user accounts. That is deliberate: the only intended user is the person at the keyboard. `/mcp/run` is the one authenticated surface. Each session gets its own bearer capability, which stops working when the session ends.
 
 **Loopback only.** What keeps other people out is where the app listens and which names it answers to:
 
 - `bin/production` (and so `bin/service` and the herdr plugin's daemon, which run it) binds Puma to `127.0.0.1`. `bin/dev` binds to `localhost`. Nothing else on your network can connect.
-- In production the app answers only requests whose `Host` is `localhost`, `127.0.0.1` or `[::1]` (any port). Any other name gets a `403`, and that includes `/up`. This is Rails' host authorization (`config.hosts`, built by `lib/paneyard_allowed_hosts.rb`). It stops **DNS rebinding**, where a web page you visit points its own hostname at `127.0.0.1` so that it becomes same-origin with this UI and can read pages and submit forms. The MCP endpoints run the same check again through the `mcp` gem's `dns_rebinding_protection`, which also rejects a foreign `Origin`.
-- Forms are protected by Rails' CSRF tokens, with an `Origin` check (on by default). Action Cable accepts same-origin connections only.
+- In production the app answers only requests whose `Host` is `localhost`, `127.0.0.1` or `[::1]` (any port). Any other name gets a `403`, and that includes `/up`. This is Rails' host authorization (`config.hosts`, built by `lib/paneyard_allowed_hosts.rb`). It stops **DNS rebinding**, where a web page you visit points its own hostname at `127.0.0.1` so that it becomes same-origin with the app and can call its endpoints. The MCP endpoints run the same check again through the `mcp` gem's `dns_rebinding_protection`, which also rejects a foreign `Origin`.
 
 Two settings widen this. Use them only if you really mean to reach the app from somewhere else:
 
@@ -35,12 +34,12 @@ If you do either, whatever sits in front of the app has to provide the authentic
 
 Reports are welcome for anything that lets someone **other than the operator** act through the app, or that breaks one of the guarantees above. For example:
 
-- reaching the UI, `/mcp/admin`, `/mcp/run` or `/cable` from another origin or host while the default loopback-only configuration is in place (DNS rebinding, CSRF, cross-site WebSocket, a `Host`/`Origin` check bypass);
+- reaching `/mcp/admin` or `/mcp/run` from another origin or host while the default loopback-only configuration is in place (DNS rebinding, a `Host`/`Origin` check bypass);
 - using a run session's `/mcp/run` capability after its session has ended, or to act as a different session;
 - a Telegram user who is not on the allow-list getting the bot to do anything;
 - an MCP tool that exposes more than it is documented to (arbitrary SQL, file reads, command execution);
-- a sandbox instance (`bin/sandbox`, `PANEYARD_SANDBOX=1`) reaching outside itself: the operator's herdr, Telegram, GitHub tokens, or paths outside its root;
-- credentials or tokens leaking into logs, pages, prompts or anywhere else they don't belong.
+- a sandbox instance (`bin/sandbox`, `PANEYARD_SANDBOX=1`) reaching outside itself: the operator's herdr, Telegram, or paths outside its root;
+- credentials or tokens leaking into logs, prompts or anywhere else they don't belong.
 
 ## Out of scope
 

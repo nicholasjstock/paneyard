@@ -209,8 +209,11 @@ herdr put that). If none matches, it registers the repository through the existi
 tool (using `Orchestrator::WorkspaceRegistration`; the server names it and works
 out its default branch), and shows the problems and their fixes if anything is wrong — nothing on disk is
 changed. Then it reads the task (Enter submits, Shift-Enter adds a line, Ctrl-C cancels), asks for the base branch (Enter for
-the branch the pane is on; the workspace's default only on a detached HEAD), asks for the driver (Enter for `claude`),
-queues it, and shows the run id, its base branch and the queue position. The run's herdr workspace opens on its own when a slot frees, as today.
+the branch the pane is on; the workspace's default only on a detached HEAD), asks for the driver and model (Enter for
+the agent herdr reports in the focused pane, `focused_pane_agent`, and the model its session is on now: from the
+CLI's own session log, which herdr's `agent_session` id names (`PaneyardPlugin::SessionModel`, so a `/model`
+switch counts: codex logs the new id at once, claude only a display name until its next reply), else the `--model`/`-m`/`-c model=` on its command line from `herdr pane process-info`; otherwise `claude` and the driver's default; `list_models` offers
+the others), queues it, and shows the run id, its base branch and the queue position. The run's herdr workspace opens on its own when a slot frees, as today.
 
 **Runs popup.** A numbered list (run id's last four characters, then `↳` and its parent's for a follow-up,
 status and herdr's agent state, driver, workspace, first line of the task), newest first; Enter refreshes.

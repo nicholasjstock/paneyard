@@ -13,6 +13,11 @@ module PaneyardPlugin
   # `herdr plugin log list`.
   class Cli
     DRIVERS = %w[claude codex].freeze
+    # How each driver's command line names its model (codex also takes
+    # `-c model=...`): the fallback when its session log can't be read, since
+    # it misses a /model switch.
+    MODEL_FLAGS = { "claude" => %w[--model], "codex" => %w[-m --model] }.freeze
+    MODEL_CHOICES_SHOWN = 15
 
     USAGE = <<~TEXT.freeze
       Usage: bin/herdr-plugin <command>
@@ -340,12 +345,12 @@ module PaneyardPlugin
 
     def menu_ui
       heading "Paneyard"
-      say "q  Queue a task here"
-      say "r  Browse runs and reports"
-      say "p  Show this run's report"
-      say "x  Close this run's session"
-      say "l  Edit this workspace's layout"
-      say "s  Configure coding-agent MCP"
+      say "q  Hand off a task"
+      say "r  Jobs and reports"
+      say "p  This job's report"
+      say "x  Close this job"
+      say "l  Job layout for this repository"
+      say "s  Let your agents queue jobs"
       say ""
 
       case ask("Choose an action (Enter cancels): ")&.downcase
@@ -365,6 +370,7 @@ module PaneyardPlugin
       raise Error, "herdr did not say which directory this pane is in." unless dir
 
       repository, current_branch = WorkspaceMatch.repository_of(dir)
+      pane_driver, pane_model, pane_switch = pane_agent
       workspaces = client.workspaces
       registered = false
       workspace = WorkspaceMatch.workspace_for(workspaces, dir, repository:) ||
@@ -386,13 +392,16 @@ module PaneyardPlugin
       return say("Nothing queued.") if task.empty?
 
       base_branch = ask_base_branch(default, workspace.fetch("defaultBaseBranch"))
-      driver = ask_driver
-      queued = queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, default:)
+      driver = ask_driver(pane_driver)
+      same_agent = driver == pane_driver
+      model = ask_model(client, workspace, driver || "claude", same_agent ? pane_model : nil, same_agent ? pane_switch : nil)
+      queued = queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, model:, default:)
       return unless queued
 
       capacity = queued.fetch("capacity", {})
+      agent = [ queued["driver"], queued["model"] ].compact.join(", ")
       say ""
-      say bold("Queued #{queued.fetch('runId')} from #{queued.fetch('baseBranch', base_branch || default)}.")
+      say bold("Queued #{queued.fetch('runId')} from #{queued.fetch('baseBranch', base_branch || default)}#{" (#{agent})" unless agent.empty?}.")
       behind = queued.fetch("queuedBehind", 0)
       say "#{capacity['inFlight']} of #{capacity['limit']} sessions in use#{behind.positive? ? ", #{behind} queued ahead of it" : ''}. " \
         "Its herdr workspace opens when it starts."
@@ -401,9 +410,9 @@ module PaneyardPlugin
 
     # A mistyped base branch is the one queue error worth another try: asking
     # again keeps the task the operator just wrote.
-    def queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, default:)
+    def queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, model:, default:)
       loop do
-        return client.queue(task:, workspace: workspace.fetch("name"), base_branch:, driver:)
+        return client.queue(task:, workspace: workspace.fetch("name"), base_branch:, driver:, model:)
       rescue PaneyardSandbox::McpClient::ToolError => error
         raise unless error.payload["error"] == "base_branch_invalid"
 
@@ -434,14 +443,14 @@ module PaneyardPlugin
       client = connect!
       loop do
         entries = run_entries(client)
-        heading "Paneyard runs"
+        heading "Paneyard jobs"
         if entries.empty?
-          say "No runs yet. Use \"Queue a task here\" in a repository's pane."
+          say "No jobs yet. Use \"Hand off a task\" in a repository's pane."
         else
           entries.each_with_index { |(workspace, run), index| say run_line(index + 1, workspace, run) }
         end
         say ""
-        choice = ask("Number for a run, Enter to refresh, q to quit: ")
+        choice = ask("Number for a job, Enter to refresh, q to quit: ")
         case choice
         when nil, "q" then return
         when /\A\d+\z/
@@ -458,7 +467,7 @@ module PaneyardPlugin
       client = connect!
       workspace, run = WorkspaceMatch.run_in_herdr_workspace(client.runs, herdr_workspace_id)
       unless run
-        say "This herdr workspace is not a Paneyard run's."
+        say "This herdr workspace is not a Paneyard job's."
         return mode == :report ? runs_ui : pause
       end
 
@@ -592,7 +601,7 @@ module PaneyardPlugin
         session = run["session"] || {}
         live = session["live"]
         heading "#{run.fetch('runId')} · #{run.fetch('status')}#{" · agent #{session['agentStatus']}" if live && session['agentStatus']}"
-        say dim("#{workspace.fetch('name')} · #{run['driver']} · #{run['branch'] || 'no branch yet'} from #{run['baseBranch']}")
+        say dim("#{workspace.fetch('name')} · #{[ run['driver'], run['model'] ].compact.join(' ')} · #{run['branch'] || 'no branch yet'} from #{run['baseBranch']}")
         say dim("Follow-up of #{run['parentRunId']}") if run["parentRunId"]
         say dim("Follow-ups: #{run['followUpRunIds'].join(', ')}") if Array(run["followUpRunIds"]).any?
         say dim(run["worktree"]) if run["worktree"]
@@ -803,14 +812,102 @@ module PaneyardPlugin
       lines.join("\n").strip
     end
 
-    def ask_driver
+    # Enter keeps the agent the operator is using in this pane; with none
+    # there, the server's default (claude).
+    def ask_driver(pane_driver)
       loop do
-        answer = ask("Agent: #{DRIVERS.join(', ')} (Enter for claude): ")
-        return nil if answer.nil? || answer.empty?
+        answer = ask("Agent: #{DRIVERS.join(', ')} (Enter for #{pane_driver ? "#{pane_driver}, this pane's" : 'claude'}): ")
+        return pane_driver if answer.nil? || answer.empty?
         return answer if DRIVERS.include?(answer)
 
         say "Not one of #{DRIVERS.join(', ')}."
       end
+    end
+
+    # Enter keeps this pane's model when the run uses this pane's agent, and
+    # otherwise leaves it to the server (the driver's default model). A number
+    # picks from what the CLI offers; anything else is taken as a model id.
+    def ask_model(client, workspace, driver, pane_model, pane_switch = nil)
+      listed = begin
+        client.models(driver, workspace: workspace.fetch("name"))
+      rescue Client::Error
+        {}
+      end
+      models = Array(listed["models"])
+      pane_model = switched_model(models, pane_switch) || pane_model
+      choices = models.first(MODEL_CHOICES_SHOWN)
+      choices.each_with_index { |choice, index| say dim(format("%3d  %s", index + 1, choice["label"] || choice["id"])) }
+      default = if pane_model
+        "#{pane_model}, this pane's"
+      else
+        listed["defaultModel"] ? "#{listed['defaultModel']}, the default" : "#{driver}'s own default"
+      end
+      loop do
+        answer = ask("Model (Enter for #{default}#{'; or a number' if choices.any?}; or a model id): ")
+        return pane_model if answer.nil? || answer.empty?
+        return answer unless answer.match?(/\A\d+\z/)
+
+        choice = choices[answer.to_i - 1] if answer.to_i.positive?
+        return choice["id"] if choice
+
+        say "No model #{answer}."
+      end
+    end
+
+    # A /model switch is logged by display name ("Opus 5"); the id is the one
+    # whose label is that name (ModelDiscovery labels are "Name — id").
+    def switched_model(models, name)
+      return unless name
+
+      models.find { |model| [ model["id"], model["label"], model["label"].to_s.split(" — ").first ].include?(name) }&.fetch("id")
+    end
+
+    # The agent herdr sees in the focused pane and the model it is on: what
+    # the operator is working with there, so what a run queued from it
+    # defaults to. [driver, model id, display name of a /model switch not
+    # yet answered on].
+    def pane_agent
+      driver = context["focused_pane_agent"]
+      return [ nil, nil, nil ] unless DRIVERS.include?(driver)
+
+      logged = SessionModel.for(driver, pane_session_id(driver), env: @env)
+      [ driver, logged&.id || command_line_model(driver), logged&.switched_to ]
+    end
+
+    # The CLI's own session id, which herdr reports for the pane's agent.
+    def pane_session_id(driver)
+      pane = context["focused_pane_id"]
+      return unless pane.is_a?(String) && !pane.empty?
+
+      session = herdr_json("agent", "get", pane)&.dig("result", "agent", "agent_session")
+      session["value"] if session.is_a?(Hash) && session["agent"] == driver && session["kind"] == "id"
+    end
+
+    def command_line_model(driver)
+      pane = context["focused_pane_id"]
+      return unless pane.is_a?(String) && !pane.empty?
+
+      info = herdr_json("pane", "process-info", "--pane", pane)&.dig("result", "process_info") || {}
+      Array(info["foreground_processes"]).each do |process|
+        argv = Array(process["argv"]).map(&:to_s)
+        # `claude ...`, or an interpreter running it (`node .../codex ...`).
+        start = argv.first(2).index { |arg| File.basename(arg) == driver }
+        return model_flag(driver, argv.drop(start + 1)) if start
+      end
+      nil
+    end
+
+    def model_flag(driver, args)
+      args.each_with_index do |arg, index|
+        MODEL_FLAGS.fetch(driver).each do |flag|
+          return args[index + 1] if arg == flag
+          return arg.delete_prefix("#{flag}=") if arg.start_with?("#{flag}=")
+        end
+        if driver == "codex" && %w[-c --config].include?(arg) && args[index + 1].to_s.start_with?("model=")
+          return args[index + 1].delete_prefix("model=").delete(%("'))
+        end
+      end
+      nil
     end
 
     # --- daemon and herdr -------------------------------------------------
@@ -846,7 +943,7 @@ module PaneyardPlugin
       return unless result.port_changed?
 
       notify("Paneyard moved to port #{result.port}",
-        "Port #{result.previous_port} was taken. Re-register MCP: #{result.url}/mcp/admin (action: Connect Claude Code)")
+        "Port #{result.previous_port} was taken. Re-register MCP: #{result.url}/mcp/admin (action: paneyard.setup)")
     end
 
     def notify(title, body)
@@ -854,10 +951,20 @@ module PaneyardPlugin
     end
 
     def herdr(*args)
-      system(@env["HERDR_BIN_PATH"].to_s.empty? ? "herdr" : @env["HERDR_BIN_PATH"], *args, out: File::NULL, err: File::NULL)
+      system(herdr_bin, *args, out: File::NULL, err: File::NULL)
     rescue SystemCallError
       false
     end
+
+    # A read-only herdr CLI call's JSON, or nil.
+    def herdr_json(*args)
+      output, status = Open3.capture2(herdr_bin, *args, err: File::NULL)
+      status.success? ? JSON.parse(output) : nil
+    rescue SystemCallError, JSON::ParserError
+      nil
+    end
+
+    def herdr_bin = @env["HERDR_BIN_PATH"].to_s.empty? ? "herdr" : @env["HERDR_BIN_PATH"]
 
     def context
       @context ||= JSON.parse(@env["HERDR_PLUGIN_CONTEXT_JSON"].to_s.empty? ? "{}" : @env["HERDR_PLUGIN_CONTEXT_JSON"])
