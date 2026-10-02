@@ -2,7 +2,7 @@
 # Boots THIS checkout's code the way `bin/service restart` would, but on a
 # scratch database and a free port, and fails fast on the class of bug that
 # otherwise only shows up after a restart: config read once at boot
-# (queue.yml, recurring.yml, credentials), code that only breaks when eager
+# (queue.yml and recurring.yml), code that only breaks when eager
 # loaded, migrations, and Puma plus Solid Queue actually coming up.
 #
 #   bin/preflight               against a fresh, empty database

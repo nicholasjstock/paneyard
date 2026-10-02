@@ -4,8 +4,8 @@
 # TERM cascades to both, and it correctly waits for both to exit. What it
 # doesn't have is a way to run detached from a terminal, or a stable
 # command an agent (this one, or any future Claude Code / worker session)
-# can invoke directly to apply a config change (recurring.yml, queue.yml,
-# credentials) without asking a human to manage a foreground pane.
+# can invoke directly to apply a config change (recurring.yml or queue.yml)
+# without asking a human to manage a foreground pane.
 #
 # `restart` runs `bin/preflight --prod-copy` first -- this checkout's code
 # booted on a scratch port against a copy of the production database -- and

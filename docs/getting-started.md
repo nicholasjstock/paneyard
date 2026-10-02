@@ -1,79 +1,9 @@
-# Paneyard
+# Getting started
 
-## Keep coding while your agents take the next tasks
+Everything you need to install Paneyard as a herdr plugin, hand off your first job, and run it day to day. Read the README's [security model](../README.md#security-model) first: Paneyard has no authentication, and its agents run with approvals bypassed.
 
-Paneyard is a local job queue for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://github.com/openai/codex) in [herdr](https://herdr.dev). Hand off a well-defined task from the repository you are already in. Paneyard gives it a separate branch, worktree and live agent session, then brings back a report when the work is ready for you.
-
-Brief each task once, where its boundaries are clearest. Paneyard handles the waiting, isolation and session lifecycle—not the judgment about what the agent should do. You can watch every session, talk to it directly and decide exactly when its changes are committed, pushed or merged.
-
-_Free and MIT licensed · Runs on your machine · macOS and Linux · Herdr 0.7.0+_
-
-![Claude Code queues two jobs over Paneyard's MCP endpoint; each opens in its own herdr workspace, its diff grows in Hunk, and each is told to merge to main and closed](docs/images/demo.gif)
-
-*A live take with real Claude Code (Sonnet), sped up where the agents work: recorded in Docker with `demo/bin/record`, see [docs/demo-recording-plan.md](./docs/demo-recording-plan.md).*
-
-## Hand off the task. Keep control of the work.
-
-- **Stay in your flow.** Queue work from one Herdr menu or ask the Claude or Codex session you are already using to hand it off.
-- **Run several jobs safely side by side.** Every job gets its own branch, worktree and Herdr workspace; your checkout is never switched or reset.
-- **Keep the conversation alive.** These are interactive sessions, not one-shot workers. Open one, inspect its work and change direction in the same conversation.
-- **Review before anything moves.** Agents report and leave changes uncommitted. Commit, push and merge happen only when you ask for that specific action.
-- **Recover without losing the work.** Close a session to free its slot, then reopen it on the same branch later. Dirty or unpushed worktrees are kept.
-
-## One task, one accountable session
-
-Choose a task worth handing off and give its session the context it needs. Paneyard takes care of where and when it runs, keeps the work isolated, and makes the result easy to pick up.
-
-Your brief goes straight to the agent doing the work. When the task needs judgment, you continue that same conversation—with the agent, repository and working tree still in place.
-
-|  | Paneyard | Opening agents by hand | Headless agent queue |
-| --- | --- | --- | --- |
-| Parallel work on isolated branches | Yes | Yes | Yes |
-| Queue and concurrency limit | Yes | No | Yes |
-| Live session you can watch and steer | Yes | Yes | No |
-| Agent receives your brief directly | Yes | Yes | Yes |
-| Changes wait for your commit, push or merge request | Yes | Up to you | Varies |
-| Runs locally in the CLI you already use | Yes | Yes | Varies |
-
-## A small deterministic core
-
-One of the hardest parts of figuring out what an agent factory should be is deciding which parts are deterministic and belong in code, and which are agentic and belong to the agent.
-
-Paneyard draws the line like this:
-
-| Code owns | The agent owns |
-| --- | --- |
-| Queue order, admission and slot ownership | How to do the task |
-| Worktree and herdr workspace lifecycle | What to read, change and test |
-| Job and session state | When it is done, blocked or failed, and what to report |
-| The rules for safe worktree cleanup | How to carry out a commit, push or merge when you ask |
-
-If something must be true for Paneyard to stay correct, code owns it. If it requires judgment about the work, the agent owns it. Paneyard keeps the first category as small, explicit state in SQLite and deterministic code; none of those invariants depend on a model remembering or correctly interpreting an instruction.
-
-An earlier version drew the line elsewhere. An LLM planner split tasks into steps, handed them to one-shot workers and tried to recover when they failed. Making that reliable kept adding machinery around the planner: step queues, a chaperone, acceptance criteria, recovery paths and capacity failover. Replacing that loop with one live interactive session per run removed most of that machinery; the rewrite cut the app from about 12.7k lines to 4.6k and the MCP surface from 30 tools to 9.
-
-The Claude or Codex session you already work in can also queue jobs through Paneyard's MCP endpoint. Paneyard stays focused on running those jobs reliably and keeping each session available to you.
-
-It installs as a herdr plugin and is used from one menu inside herdr: hand off a task from the repository you are in, read a job's report, close it, or change its layout. Underneath it is a Rails 8 app running on your own machine, which the plugin starts and looks after for you. Rails decides *which* task runs, *where*, and what happens to the worktree afterwards; the agent session decides everything else. There is no planner, no step queue and no pull-request automation.
-
-> [!WARNING]
-> **Read the [security model](#security-model) before you run this.** It has no authentication, and it hands AI agents unrestricted access to the repositories you register and to your user account.
-
-Ready to try it? The complete walkthrough is below; the install starts with:
-
-```sh
-herdr plugin install nicholasjstock/paneyard
-herdr plugin action invoke setup --plugin paneyard
-```
-
-## Contents
-
-- [Hand off the task. Keep control of the work.](#hand-off-the-task-keep-control-of-the-work)
-- [One task, one accountable session](#one-task-one-accountable-session)
-- [A small deterministic core](#a-small-deterministic-core)
-- [Security model](#security-model)
 - [Requirements](#requirements)
-- [Getting started](#getting-started)
+- [Getting started](#getting-started-1)
   1. [Install the plugin](#1-install-the-plugin)
   2. [Connect your coding agents](#2-connect-your-coding-agents)
   3. [Bind one menu key](#3-bind-one-menu-key)
@@ -85,29 +15,13 @@ herdr plugin action invoke setup --plugin paneyard
 - [How a job works](#how-a-job-works)
 - [Workspace layouts](#workspace-layouts)
 - [Configuration](#configuration)
-- [Documentation](#documentation)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Security model
-
-This is a tool for one trusted person on their own machine. Treat anything that can reach it as having a shell on that machine. [SECURITY.md](./SECURITY.md) has the full threat model and how to report a vulnerability.
-
-- **No authentication.** The `/mcp/admin` MCP endpoint is open to whoever can connect. There are no user accounts; the operator is whoever is at the keyboard.
-- **Loopback only.** The plugin, `bin/service` and `bin/production` bind to `127.0.0.1` and `bin/dev` to `localhost`, so nothing else on your network can connect. In production the app also answers only loopback `Host` names (`localhost`, `127.0.0.1`, `[::1]`), which stops DNS-rebinding attacks from web pages you visit. `BINDING` and `PANEYARD_ALLOWED_HOSTS` widen this; if you set either, whatever sits in front of the app must provide the authentication it lacks.
-- **Agents run with approvals bypassed.** Each session is launched with full access and no confirmation prompts: `claude --permission-mode bypassPermissions`, `codex -s danger-full-access`. It works in its own worktree but is not sandboxed: it can read and write anything your user account can, run any command, and use your network. The only review gate is you, reading its report and trying its changes before asking it to commit.
-- **Registered repositories are fully exposed to their sessions**, including any secrets you keep in them. A session's panes are your own login shell, with whatever credentials it has (your SSH agent, your `gh` login).
-- **It can edit itself.** If you register this repository as one of its own workspaces, a session can change the orchestrator's code, and the change reaches the running instance when it is next restarted. Nothing stops a session from merging into its base branch when asked to.
-- **GitHub credentials.** Paneyard makes no GitHub calls and hands sessions no tokens. A session pushes, when asked to, with whatever your login shell can push with (your SSH key, your `gh` login), so it can do anything you can on those repositories.
-- **Plaintext state.** Jobs and reports are stored unencrypted in SQLite: in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard/storage`), or under `storage/` for `bin/service`.
-- **The plugin is code herdr runs as you.** herdr does not sandbox plugins. Its startup hook starts Paneyard whenever herdr starts; review `herdr-plugin.toml` and `bin/herdr-plugin` before installing, as herdr's install preview suggests.
 
 ## Requirements
 
 - **[herdr](https://herdr.dev) 0.7.0 or newer, running.** herdr owns every terminal pane and agent process, and Paneyard installs into it as a plugin.
 - **macOS or Linux**, on Intel or ARM64. Windows is not supported.
 - **`curl`, `tar`, and a SHA-256 utility** (`shasum` on macOS, `sha256sum` on Linux). The plugin downloads a verified, platform-specific Ruby and production gem bundle; it does not need a system Ruby, Bundler, compiler, or development headers.
-- **git**, with each repository you want to queue tasks for checked out as described in [Preparing a repository](./docs/operating.md#preparing-a-repository).
+- **git**, with each repository you want to queue tasks for checked out as described in [Preparing a repository](./operating.md#preparing-a-repository).
 - **At least one agent CLI, already signed in:** `claude` and/or `codex`, on the `PATH` of your login shell (the shell a herdr pane opens). Sessions start non-interactively and cannot complete a login flow, or Claude Code's folder-trust prompt: open `claude` once in a new repository's `main` checkout and trust it. Unless you pick one when queueing, a session uses its driver's default model: `opus` for `claude`, and whatever `codex` is itself configured with (see [Configuration](#configuration)).
 - **Optional:** `gh` signed in (for sessions pushing over HTTPS).
 
@@ -161,7 +75,7 @@ The menu offers: hand off a task, jobs and reports (where a closed job can be re
 
 ### 4. Queue a task
 
-Any git checkout you already have will do, with any branch checked out, as long as it has an `origin` remote. Open a herdr pane anywhere in it, open the **Paneyard menu**, and choose **Hand off a task**. Paneyard resolves the checkout to a workspace, registering it through the same repository checks as the admin MCP tool when needed. Describe the task (Enter submits, Shift-Enter adds a line, Ctrl-C cancels), choose the **base branch** to start from (Enter for the branch your pane is on, or the workspace's default on a detached HEAD; or type another), pick a driver and model (Enter keeps the agent running in your pane, and the model it is on now, `/model` switches included; with no agent there, `claude` on its default model; or pick another from the list), and it is queued. When a slot frees, herdr creates the job's worktree from that branch, wherever your herdr config puts worktrees, and opens it as a herdr workspace with the agent in it. Your own checkout is never touched. [Preparing a repository](./docs/operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
+Any git checkout you already have will do, with any branch checked out, as long as it has an `origin` remote. Open a herdr pane anywhere in it, open the **Paneyard menu**, and choose **Hand off a task**. Paneyard resolves the checkout to a workspace, registering it through the same repository checks as the admin MCP tool when needed. Describe the task (Enter submits, Shift-Enter adds a line, Ctrl-C cancels), choose the **base branch** to start from (Enter for the branch your pane is on, or the workspace's default on a detached HEAD; or type another), pick a driver and model (Enter keeps the agent running in your pane, and the model it is on now, `/model` switches included; with no agent there, `claude` on its default model; or pick another from the list), and it is queued. When a slot frees, herdr creates the job's worktree from that branch, wherever your herdr config puts worktrees, and opens it as a herdr workspace with the agent in it. Your own checkout is never touched. [Preparing a repository](./operating.md#preparing-a-repository) has every rule the launch checks, and how to tell a session to set up and test your repository.
 
 ### 5. Read reports, close and reopen jobs
 
@@ -180,7 +94,7 @@ claude mcp add --transport http -s user paneyard "$(cat ~/.local/state/herdr/plu
 codex mcp add paneyard --url "$(cat ~/.local/state/herdr/plugins/paneyard/url)/mcp/admin"
 ```
 
-The port stays the same across restarts; if it ever has to change (something else took it), Paneyard shows a notification, and `paneyard.setup` updates the registrations in one action. Then ask your agent to hand off a task, list jobs, or check on one. The endpoint is unauthenticated, like the rest of the app, so it only listens on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
+The port stays the same across restarts; if it ever has to change (something else took it), Paneyard shows a notification, and `paneyard.setup` updates the registrations in one action. Then ask your agent to hand off a task, list jobs, or check on one. The endpoint is unauthenticated, like the rest of the app, so it only listens on loopback. [MCP endpoints](./operating.md#mcp-endpoints) lists its tools.
 
 ### Settings, updates and removal
 
@@ -199,7 +113,7 @@ bin/setup                    # install gems
 bin/service start            # also: stop | restart | status; http://127.0.0.1:7263
 ```
 
-`bin/service` keeps its state in the clone's `storage/` and logs to `log/production_service.log`; [Long-running: `bin/service`](./docs/operating.md#long-running-binservice) has the details, and [CONTRIBUTING.md](./CONTRIBUTING.md) covers `bin/dev` and the sandbox.
+`bin/service` keeps its state in the clone's `storage/` and logs to `log/production_service.log`; [Long-running: `bin/service`](./operating.md#long-running-binservice) has the details, and [CONTRIBUTING.md](../CONTRIBUTING.md) covers `bin/dev` and the sandbox.
 
 To move from `bin/service` to the plugin with your history, stop `bin/service`, run `paneyard.stop`, copy `storage/production*.sqlite3` from the clone into `~/.local/state/herdr/plugins/paneyard/storage/`, and invoke any action. (Two instances side by side are safe for your worktrees, since each only ever cleans up its own runs', but they share no queue and no concurrency cap.)
 
@@ -236,7 +150,7 @@ tabs:
         command: tail -f log/development.log
 ```
 
-Every pane opens in the job's worktree as your normal login shell; Paneyard sets no environment in any of them. A pane with no command is a plain shell. Panes are set up once, when the session starts: Paneyard never watches or restarts them, and **Close session** closes them all. [Workspace layouts](./docs/operating.md#workspace-layouts) in operating.md has the full rules.
+Every pane opens in the job's worktree as your normal login shell; Paneyard sets no environment in any of them. A pane with no command is a plain shell. Panes are set up once, when the session starts: Paneyard never watches or restarts them, and **Close session** closes them all. [Workspace layouts](./operating.md#workspace-layouts) in operating.md has the full rules.
 
 ## Configuration
 
@@ -245,7 +159,7 @@ Everything is optional except herdr and an agent CLI. With the plugin, put these
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | chosen once and kept (plugin), random (`bin/dev`), `7263` (`bin/service`) | HTTP port. |
-| `BINDING` | `localhost` (dev), `127.0.0.1` (`bin/service`) | Interface Rails listens on. Widening it exposes an unauthenticated app; see [SECURITY.md](./SECURITY.md). |
+| `BINDING` | `localhost` (dev), `127.0.0.1` (`bin/service`) | Interface Rails listens on. Widening it exposes an unauthenticated app; see [SECURITY.md](../SECURITY.md). |
 | `PANEYARD_ALLOWED_HOSTS` | unset | Extra `Host` names production answers to (comma-separated), for example behind a reverse proxy. |
 | `PANEYARD_RAILS_URL` | `http://127.0.0.1:$PORT` | URL sessions use to reach the orchestrator's MCP endpoint. Keep it in step with `PORT`. |
 | `PANEYARD_MAX_CONCURRENT_RUNS` | `4` | Global cap on live sessions. |
@@ -253,20 +167,4 @@ Everything is optional except herdr and an agent CLI. With the plugin, put these
 | `HERDR_SOCKET_PATH` | the socket herdr gives the plugin, else `~/.config/herdr/herdr.sock` | herdr's socket. |
 | `PANEYARD_RUBY` | bundled runtime | Development links only: fallback Ruby when `[[build]]` has not installed the bundle. |
 
-Pane layouts are set per workspace ([above](#workspace-layouts)). Paneyard sets no environment variables in a session's panes; see [What a job starts with](./docs/operating.md#3-what-a-run-starts-with-inside-the-repo).
-
-## Documentation
-
-- [docs/herdr-plugin-plan.md](./docs/herdr-plugin-plan.md) — how the herdr plugin is put together, and why.
-- [docs/operating.md](./docs/operating.md) — running the orchestrator day to day: preparing repositories, base branches, git and cleanup rules, workspace layouts, MCP endpoints, troubleshooting a failed launch.
-- [docs/README.md](./docs/README.md) — index of the design records behind the current architecture.
-- [AGENTS.md](./AGENTS.md) — the architecture and conventions guide for anyone (human or agent) changing this codebase.
-- [CHANGELOG.md](./CHANGELOG.md) — what has changed.
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for setting up to develop Paneyard, running it with `bin/dev` or in the sandbox, the tests and CI, the code layout, and the design rules a change has to follow; [AGENTS.md](./AGENTS.md) is the detailed architecture guide behind it. In short: `bin/setup`, make your change, and run `bin/verify` (specs, RuboCop, a production boot smoke test, an end-to-end run through the sandbox, and security audits) before opening a pull request.
-
-## License
-
-Released under the [MIT License](./LICENSE). Copyright (c) 2026 Nicholas Stock.
+Pane layouts are set per workspace ([above](#workspace-layouts)). Paneyard sets no environment variables in a session's panes; see [What a job starts with](./operating.md#3-what-a-run-starts-with-inside-the-repo).

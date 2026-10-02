@@ -10,7 +10,7 @@
 
 <!-- Migrations, changes to config/queue.yml or config/recurring.yml, new or changed jobs. Write "None" if there are none. -->
 
-- [ ] Needs a running instance restarted (`bin/service restart`) to take effect: queue.yml, recurring.yml, credentials, `bin/production`/`bin/service`, or an initializer
+- [ ] Needs a running instance restarted (`bin/service restart`) to take effect: queue.yml, recurring.yml, `bin/production`/`bin/service`, or an initializer
 
 ## Verification
 

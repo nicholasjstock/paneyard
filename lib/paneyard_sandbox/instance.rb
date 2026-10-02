@@ -142,12 +142,9 @@ module PaneyardSandbox
 
     private
 
-    # Production credentials need config/master.key, which a worktree does not
-    # have (it is gitignored). Without one, give the instance a throwaway
-    # secret_key_base; with one, leave it alone so credentials are exercised.
+    # Every isolated instance gets a throwaway key instead of reading or
+    # creating persistent state outside its sandbox.
     def secret_env
-      return {} if ENV["RAILS_MASTER_KEY"] || File.exist?(File.join(app_root, "config/master.key"))
-
       { "SECRET_KEY_BASE" => SecureRandom.hex(64) }
     end
 

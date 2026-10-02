@@ -2,6 +2,7 @@
 
 ## Guides
 
+- [getting-started.md](./getting-started.md) — installing the herdr plugin, handing off your first job, menu actions, settings and configuration.
 - [operating.md](./operating.md) — running the orchestrator: `bin/dev` and `bin/service`, preparing a repository, git and worktree-cleanup rules, GitHub access, workspace layouts and env vars, MCP endpoints, the sandbox.
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) and [../AGENTS.md](../AGENTS.md) — changing the orchestrator itself.
 

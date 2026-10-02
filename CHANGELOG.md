@@ -27,6 +27,7 @@ The first public version. It includes:
 
 ### Removed
 
+- Rails credentials setup. Production now generates its only required secret, `secret_key_base`, beside the instance's databases on first start.
 - Telegram remote control was removed in favor of external Herdr-native control surfaces. This includes its adapter, polling and pane-streaming jobs, configuration, persistence, sandbox mode, test server and platform-neutral remote-control layer.
 - Session environment: no pane gets env from Paneyard. claude's MCP capability is in its config file, codex's in a `-c` header override. With it went workspace environment variables (`record_workspace_env_var`), GitHub App token minting (`GITHUB_APP_*`), and the opencode driver, whose MCP config could only travel through env.
 

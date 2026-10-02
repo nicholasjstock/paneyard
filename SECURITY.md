@@ -26,7 +26,7 @@ If you do either, whatever sits in front of the app has to provide the authentic
 
 **GitHub credentials.** Paneyard hands sessions no credentials and sets no environment in their panes. A session's panes are your own login shell, so it pushes (when asked to) with whatever that shell can use: your SSH agent, your `gh` login. That carries everything your GitHub account can do.
 
-**Secrets on disk.** `config/master.key`, `config/credentials.yml.enc`, the SQLite databases under `storage/` and the logs under `log/` hold credentials and run content (prompts, reports, pane text). Installed as a herdr plugin, the same live in the plugin's state directory (`~/.local/state/herdr/plugins/paneyard`: databases, log, a generated `secret_key_base`). They are only as private as your user account.
+**Secrets on disk.** The SQLite databases under `storage/`, logs under `log/` and generated `secret_key_base` hold run content or private state. Installed as a herdr plugin, the same live in its state directory (`~/.local/state/herdr/plugins/paneyard`). They are only as private as your user account.
 
 ## In scope
 

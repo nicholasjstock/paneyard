@@ -27,8 +27,6 @@ RSpec.describe "Orchestrator/runner boundary" do
   # Orchestrator-side code that shells out for reasons of its own, not the
   # runner's machine.
   ALLOWED = {
-    # curl to the GitHub API, to mint installation tokens.
-    "app/services/orchestrator/github_app_auth.rb" => [ "running a command" ],
     # The sandbox's own guards, which both sides consult: `ps` to confirm a
     # pid is a fake agent before the runner signals it.
     "app/services/orchestrator/sandbox.rb" => [ "running a command" ]

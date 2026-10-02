@@ -43,17 +43,4 @@ check.call("config/queue.yml and config/recurring.yml (#{Rails.env})") do
   "#{processes.join(', ')}; recurring: #{tasks.map(&:key).join(', ')}"
 end
 
-check.call("credentials decrypt") do
-  key_file = Rails.root.join("config/master.key")
-  if ENV["RAILS_MASTER_KEY"].blank? && !key_file.exist?
-    next "skipped: no config/master.key in this checkout (it is gitignored; bin/service restart runs this from main, which has one)"
-  end
-
-  config = Rails.application.credentials.config
-  raise "config/credentials.yml.enc decrypted to nothing" if config.blank?
-  raise "no secret_key_base in credentials" if Rails.application.credentials.secret_key_base.blank?
-
-  "#{config.keys.size} top-level keys"
-end
-
 exit(failures.empty? ? 0 : 1)

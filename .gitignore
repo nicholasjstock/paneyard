@@ -41,11 +41,5 @@
 .DS_Store
 /.paneyard/
 
-# Ignore key files for decrypting credentials and more. Credentials are per
-# machine: each install makes its own with `bin/rails credentials:edit`.
-/config/*.key
-/config/credentials.yml.enc
-/config/credentials/*.yml.enc
-
 # The Ruby the herdr plugin build installed its gems with (bin/herdr-plugin).
 /.paneyard-ruby

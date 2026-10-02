@@ -4,11 +4,20 @@
 # is the one long-running instance that holds this machine's real state --
 # see bin/dev for the disposable counterpart.
 
+require_relative "../lib/paneyard_plugin"
+
 ENV["RAILS_ENV"] = "production"
 # Loopback only: there is no auth (see SECURITY.md). Outside development
 # `rails server` otherwise listens on 0.0.0.0 whenever PORT is set, whatever
 # config/puma.rb says. `-b` or BINDING widens it deliberately.
 ENV["BINDING"] ||= "127.0.0.1"
+
+# Rails requires a secret_key_base in production even though Paneyard has no
+# accounts or browser sessions. Keep a private, durable one beside this
+# instance's databases. The plugin supplies its own value in the same way;
+# an explicit environment setting still wins.
+storage_dir = ENV.fetch("PANEYARD_STORAGE_DIR", File.expand_path("../storage", __dir__))
+ENV["SECRET_KEY_BASE"] ||= PaneyardPlugin::Secrets.secret_key_base(File.join(storage_dir, "secret_key_base"))
 
 require "socket"
 

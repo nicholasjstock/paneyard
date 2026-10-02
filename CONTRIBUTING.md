@@ -8,7 +8,7 @@ For security vulnerabilities, follow [SECURITY.md](./SECURITY.md) instead of ope
 
 ## Setting up
 
-You need the [requirements in the README](./README.md#requirements) and a clone of this repository (the README's [Running without the plugin](./README.md#running-without-the-plugin)), except that herdr and the agent CLIs are **not** needed to run the test suite: the suite uses a fake herdr and a fake agent.
+You need the [requirements](./docs/getting-started.md#requirements) and a clone of this repository ([Running without the plugin](./docs/getting-started.md#running-without-the-plugin)), except that herdr and the agent CLIs are **not** needed to run the test suite: the suite uses a fake herdr and a fake agent.
 
 ```sh
 bin/setup                 # install gems, prepare the development database (--reset to recreate it)
@@ -122,7 +122,7 @@ Don't consume live model capacity to test dispatch or argument building.
 
 ### CI
 
-[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs `bin/verify` on every push and on pull requests from forks, on both `ubuntu-latest` and `macos-latest` (the app has only been used on macOS; Linux keeps it honest). Nothing in CI reaches a real herdr, a model or GitHub's API, and no secrets are passed in. It does not run `bin/verify --prod-copy`, `bin/preflight`'s credentials check (it needs `config/master.key`, so it is skipped and a throwaway `SECRET_KEY_BASE` used), or the live agent specs. On failure it uploads the logs as an artifact.
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs `bin/verify` on every push and on pull requests from forks, on both `ubuntu-latest` and `macos-latest` (the app has only been used on macOS; Linux keeps it honest). Nothing in CI reaches a real herdr, a model or GitHub's API, and no secrets are passed in. It does not run `bin/verify --prod-copy` or the live agent specs. On failure it uploads the logs as an artifact.
 
 ## Style
 
@@ -144,9 +144,9 @@ These are deliberate, and a change that breaks one will be asked to change. The 
 
 - Keep commits focused, with short, imperative summaries, for example `Flatten ops/ into the repo root` or `Retry the unsent-prompt Enter with backoff before giving up`.
 - A pull request should state the problem, the approach, any schema or job-queue impact (migrations, `config/queue.yml`, `config/recurring.yml`), and how you verified it, including whether `bin/verify` passed. The [pull request template](./.github/pull_request_template.md) asks for exactly that. Link related issues.
-- Say if the change needs a running instance restarted to take effect (anything in `config/queue.yml`, `config/recurring.yml`, credentials, `bin/production`/`bin/service`, or an initializer).
+- Say if the change needs a running instance restarted to take effect (anything in `config/queue.yml`, `config/recurring.yml`, `bin/production`/`bin/service`, or an initializer).
 - Add an entry under "Unreleased" in [CHANGELOG.md](./CHANGELOG.md) for user-visible changes.
-- Never commit decrypted credentials, `config/master.key`, database files or logs containing run data.
+- Never commit secrets, database files or logs containing run data.
 
 ## License
 

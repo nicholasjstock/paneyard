@@ -1,21 +1,18 @@
 name: CI
 
 # Runs bin/verify, the same one command a change is checked with locally:
-# rspec (unit, service, job, request, system, and the :fake_herdr /
-# :fake_telegram integration specs), rubocop, git diff --check, bin/preflight,
+# rspec (unit, service, job, request, system, and the :fake_herdr integration
+# specs), rubocop, git diff --check, bin/preflight,
 # bin/sandbox verify, bundler-audit and brakeman.
 #
-# Nothing here reaches a real herdr, a model, Telegram or GitHub's API:
+# Nothing here reaches a real herdr, a model or GitHub's API:
 # spec_helper points HERDR_SOCKET_PATH at a socket that does not exist, the
-# integration specs bring their own fake herdr and fake Telegram, and
-# bin/preflight / bin/sandbox verify boot with WORKFLOW_SANDBOX=1. No secrets
-# are passed in, so the GitHub App reads as unconfigured, as the specs expect.
+# integration specs bring their own fake herdr, and bin/preflight / bin/sandbox
+# verify boot with PANEYARD_SANDBOX=1. No secrets are passed in.
 #
 # Not run here: `bin/verify --prod-copy` (needs the operator's production
-# database), bin/preflight's credentials check (needs config/master.key, which
-# is gitignored; preflight reports it as skipped and boots on a throwaway
-# SECRET_KEY_BASE), and the LIVE_AGENT_SPECS=1 specs (real CLIs, real model
-# usage; excluded by default everywhere).
+# database), and the LIVE_AGENT_SPECS=1 specs (real CLIs, real model usage;
+# excluded by default everywhere).
 
 on:
   push:
