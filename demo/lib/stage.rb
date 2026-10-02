@@ -1,5 +1,6 @@
 require "fileutils"
 require "json"
+require "shellwords"
 require "open3"
 require "yaml"
 require_relative "../../lib/paneyard_sandbox/instance"
@@ -24,8 +25,8 @@ module Stage
   CANVAS = ENV.fetch("DEMO_CANVAS", "1920x1080").split("x").map { Integer(_1) }.freeze
   FONT_SIZE = Float(ENV.fetch("DEMO_FONT_SIZE", "15"))
   FPS = 30
-  # The todo repo: a workspace root holding its main checkout, the runs'
-  # worktrees beside it, and a bare origin.
+  # The todo repo: its checkout, which is what the workspace registers, and a
+  # bare origin beside it. herdr puts the runs' worktrees under ~/.herdr.
   TODO_ROOT = File.join(DEMO_ROOT, "todo")
   TODO_MAIN = File.join(TODO_ROOT, "main")
   SCENARIO = File.join(APP_ROOT, "demo", "scenario", "todo")
@@ -218,13 +219,22 @@ module Stage
     sh!("git", "rev-parse", "HEAD", chdir: TODO_MAIN).strip
   end
 
-  # git identity for the agents' own commits, and what the real claude would
-  # otherwise stop at on its first start: onboarding, trusting the todo repo
-  # (a worktree counts as its main checkout), and the bypass-permissions
-  # warning Paneyard's --permission-mode brings up.
+  # git identity for the agents' own commits, what the real claude would
+  # otherwise stop at on its first start (onboarding, trusting the todo repo
+  # -- a worktree counts as its repository -- and the bypass-permissions
+  # warning Paneyard's --permission-mode brings up), and the pane env in the
+  # shell's own startup files: Paneyard sets no env in a run's panes, which
+  # are the user's login shell, as on any machine.
   def configure_user!
     sh!("git", "config", "--global", "user.name", "Paneyard Demo")
     sh!("git", "config", "--global", "user.email", "demo@example.test")
+    exports = pane_env.map { |name, value| "export #{name}=#{Shellwords.escape(value)}\n" }.join
+    File.write(File.expand_path("~/.paneyard-demo-env"), exports)
+    %w[~/.bashrc ~/.bash_profile].each do |rc|
+      path = File.expand_path(rc)
+      line = "[ -f ~/.paneyard-demo-env ] && . ~/.paneyard-demo-env\n"
+      File.write(path, line, mode: "a") unless File.exist?(path) && File.read(path).include?(line)
+    end
     claude_json = File.expand_path("~/.claude.json")
     config = File.exist?(claude_json) ? JSON.parse(File.read(claude_json)) : {}
     config.merge!(
@@ -237,8 +247,8 @@ module Stage
     File.write(claude_json, JSON.pretty_generate(config))
   end
 
-  # The env every pane in the story gets beyond what Paneyard sets itself:
-  # herdr panes inherit nothing from the image.
+  # The env every pane in the story needs: herdr panes inherit nothing from
+  # the image, so configure_user! puts it in the shell's startup files.
   def pane_env
     env = { "DISABLE_AUTOUPDATER" => "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" => "1" }
     token = ENV["CLAUDE_CODE_OAUTH_TOKEN"].to_s.strip
@@ -246,18 +256,15 @@ module Stage
     env
   end
 
-  # Registers the todo repo as a workspace, with the operator's layout and the
-  # pane env as recorded env vars (so the runs' panes get them).
+  # Registers the todo repo as a workspace, with the operator's layout.
   def register_todo!(instance)
     script = <<~RUBY
-      workspace = Workspace.create!(name: "todo", root_path: ENV.fetch("DEMO_TODO_ROOT"), layout: ENV.fetch("DEMO_LAYOUT"))
-      JSON.parse(ENV.fetch("DEMO_PANE_ENV")).each do |name, value|
-        workspace.workspace_env_vars.create!(name:, value:, evidence_ref: "demo/lib/stage.rb", recorded_by: "demo")
-      end
+      workspace = Workspace.create!(name: "todo", repository_path: ENV.fetch("DEMO_TODO_REPOSITORY"),
+        default_base_branch: "main", layout: ENV.fetch("DEMO_LAYOUT"))
       puts workspace.id
     RUBY
     output, ok = Open3.capture2e(
-      instance.env.merge("DEMO_TODO_ROOT" => TODO_ROOT, "DEMO_LAYOUT" => LAYOUT, "DEMO_PANE_ENV" => JSON.generate(pane_env)),
+      instance.env.merge("DEMO_TODO_REPOSITORY" => TODO_MAIN, "DEMO_LAYOUT" => LAYOUT),
       "bin/rails", "runner", script, chdir: APP_ROOT
     )
     raise "registering the todo workspace failed:\n#{output}" unless ok.success?

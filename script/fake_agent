@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-# Stands in for claude/codex/opencode under FakeHerdr::Server. See
+# Stands in for claude or codex under FakeHerdr::Server. See
 # lib/fake_herdr/agent.rb. Plain Ruby: it never loads Rails or Bundler.
 require_relative "../lib/fake_herdr/agent"
 

@@ -6,7 +6,7 @@ require "uri"
 #
 # There is no auth (single-operator local tool), and Puma binding 127.0.0.1
 # does not stop DNS rebinding: a page the operator visits can re-point its
-# own name at 127.0.0.1 and become same-origin with the UI. Its requests
+# own name at 127.0.0.1 and become same-origin with the app. Its requests
 # still carry its own name in `Host`, so answering loopback names only is
 # what closes that.
 #

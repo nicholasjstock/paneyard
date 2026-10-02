@@ -14,7 +14,7 @@ RSpec.shared_context "launched runs" do
     stub_const("Orchestrator::Runner::SessionLauncher::PROMPT_SUBMIT_POLL_INTERVAL_SECONDS", 0.05)
   end
 
-  let(:workspace) { create_workspace(root_path: create_source_checkout) }
+  let(:workspace) { create_workspace(repository_path: create_source_checkout) }
 
   # The Streamable HTTP handshake a real MCP client performs, then one call.
   def mcp_call(path, tool, token: nil, **arguments)
@@ -43,10 +43,11 @@ RSpec.shared_context "launched runs" do
     Run.find_by!(run_id:)
   end
 
+  # Sessions get no env: the capability is in the MCP config the session's
+  # claude was pointed at, as the CLI itself reads it.
   def session_token(run = nil)
-    creates = fake_herdr.requests_for("workspace.create")
-    create = run ? creates.find { |request| request.dig("env", "PANEYARD_RUN_ID") == run.run_id } : creates.last
-    create.dig("env", "PANEYARD_RUN_TOKEN")
+    session = (run || Run.order(:created_at).last).run_sessions.order(:created_at).last
+    JSON.parse(File.read(session.mcp_config_path)).dig("mcpServers", "paneyard", "headers", "Authorization").delete_prefix("Bearer ")
   end
 
   # The session's own report_idle, over /mcp/run with its capability.

@@ -17,7 +17,6 @@ module Orchestrator
 
     TOOLS = [
       ::McpTools::ReportIdleTool,
-      ::McpTools::RecordWorkspaceEnvVarTool,
       ::McpTools::QueueRunTool,
       ::McpTools::ListRunsTool,
       ::McpTools::GetRunTool,
@@ -28,9 +27,8 @@ module Orchestrator
     # does) get a one-paragraph map. The lifecycle itself lives in RunPrompt,
     # because not every driver is known to show these.
     INSTRUCTIONS = "Orchestrator tools for an agent session. Call report_idle every time you stop working; the " \
-      "others are optional, e.g. queue_run / list_runs / get_run / list_workspaces for other jobs, and " \
-      "record_workspace_env_var to save an env fix for future jobs in this workspace. Files, shell and git are " \
-      "yours to do directly; there are no tools for them.".freeze
+      "others are optional, e.g. queue_run / list_runs / get_run / list_workspaces for other jobs. Files, shell " \
+      "and git are yours to do directly; there are no tools for them.".freeze
 
     def build(server_context:)
       MCP::Server.new(

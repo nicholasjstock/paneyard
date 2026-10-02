@@ -12,7 +12,7 @@ body:
     id: what-happened
     attributes:
       label: "What happened"
-      description: "What you did, what you expected, and what happened instead. Include exact error text (for example the launch error on the run screen)."
+      description: "What you did, what you expected, and what happened instead. Include exact error text (for example the launch error the runs action shows)."
     validations:
       required: true
   - type: textarea
@@ -47,7 +47,6 @@ body:
       options:
         - claude
         - codex
-        - opencode
         - Not run-specific
   - type: textarea
     id: environment

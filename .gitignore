@@ -46,3 +46,6 @@
 /config/*.key
 /config/credentials.yml.enc
 /config/credentials/*.yml.enc
+
+# The Ruby the herdr plugin build installed its gems with (bin/herdr-plugin).
+/.paneyard-ruby

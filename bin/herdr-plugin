@@ -1,0 +1,70 @@
+#!/bin/sh
+# The entry point for every command in herdr-plugin.toml.
+#
+#   bin/herdr-plugin pane <entrypoint>   open one of the plugin's popups (no Ruby needed)
+#   bin/herdr-plugin <command>           anything else: see lib/paneyard_plugin/cli.rb
+#
+# An installed plugin carries its own Ruby and production bundle. `plugin link`
+# deliberately skips [[build]], so linked development checkouts retain the
+# system-Ruby discovery fallback below.
+set -u
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root" || exit 1
+
+if [ "${1:-}" = "pane" ]; then
+  exec "${HERDR_BIN_PATH:-herdr}" plugin pane open --plugin "${HERDR_PLUGIN_ID:-paneyard}" --entrypoint "${2:?entrypoint}"
+fi
+
+# Plugin code is standard library only; nothing here should load a bundle.
+unset RUBYOPT RUBYLIB BUNDLE_GEMFILE BUNDLE_BIN_PATH BUNDLER_SETUP
+
+want=$(sed -E 's/^ruby-//; s/^([0-9]+\.[0-9]+).*/\1/' "$root/.ruby-version")
+
+suitable() {
+  [ -n "$1" ] && [ -x "$1" ] &&
+    "$1" -e "exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('$want') ? 0 : 1)" >/dev/null 2>&1
+}
+
+config_dir=${HERDR_PLUGIN_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr/plugins/config/${HERDR_PLUGIN_ID:-paneyard}}
+configured=${PANEYARD_RUBY:-}
+if [ -z "$configured" ] && [ -f "$config_dir/.env" ]; then
+  configured=$(sed -nE "s/^(export[[:space:]]+)?PANEYARD_RUBY=[\"']?([^\"'#]*)[\"']?.*/\\2/p" "$config_dir/.env" | tail -n 1 | sed 's/[[:space:]]*$//')
+fi
+
+ruby=""
+for candidate in \
+  "$root/.paneyard/runtime/bin/ruby" \
+  "$configured" \
+  "$( [ -f "$root/.paneyard-ruby" ] && cat "$root/.paneyard-ruby" )" \
+  "$(command -v ruby 2>/dev/null)" \
+  $(ls -1d "${ASDF_DATA_DIR:-$HOME/.asdf}"/installs/ruby/*/bin/ruby \
+      "$HOME"/.local/share/mise/installs/ruby/*/bin/ruby \
+      "$HOME"/.rbenv/versions/*/bin/ruby \
+      "$HOME"/.rubies/*/bin/ruby 2>/dev/null | sort -r) \
+  /opt/homebrew/opt/ruby/bin/ruby \
+  /usr/local/opt/ruby/bin/ruby \
+  /usr/bin/ruby
+do
+  if suitable "$candidate"; then
+    ruby=$candidate
+    break
+  fi
+  if [ -n "$configured" ] && [ "$candidate" = "$configured" ]; then
+    echo "paneyard: PANEYARD_RUBY=$configured is not Ruby $want or newer; looking for another." >&2
+    configured=""
+  fi
+done
+
+if [ -z "$ruby" ]; then
+  echo "paneyard: its bundled Ruby is missing, and no Ruby $want or newer was found." >&2
+  echo "Reinstall the plugin, or (for a linked development checkout) set" >&2
+  echo "PANEYARD_RUBY=/path/to/ruby in $config_dir/.env." >&2
+  if [ -t 0 ]; then
+    printf 'Press Enter to close.'
+    read -r _
+  fi
+  exit 1
+fi
+
+exec "$ruby" "$root/lib/paneyard_plugin/cli.rb" "$@"

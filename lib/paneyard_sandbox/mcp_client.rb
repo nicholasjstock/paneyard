@@ -5,16 +5,33 @@ require "uri"
 module PaneyardSandbox
   # Just enough of an MCP Streamable HTTP client to call this app's own
   # /mcp/run and /mcp/admin tools the way a real CLI does: the initialize
-  # handshake, the Mcp-Session-Id it hands back, then tools/call. Responses
+  # handshake, the Mcp-Session-Id it hands back (if any: this app's own
+  # endpoints are stateless and issue none), then tools/call. Responses
   # may come back as JSON or as a one-event SSE stream; both are handled.
   class McpClient
     class Error < StandardError; end
 
+    # The server no longer knows this client's session: it restarted since the
+    # handshake (sessions live in its memory), or reaped the session as idle.
+    class SessionExpired < Error; end
+
+    # A tool that ran and reported an error; `payload` is its JSON body
+    # (`error`, `message`, and any details such as `problems`), when it had one.
+    class ToolError < Error
+      attr_reader :payload
+
+      def initialize(message, payload = {})
+        super(message)
+        @payload = payload
+      end
+    end
+
     PROTOCOL_VERSION = "2025-06-18".freeze
 
-    def initialize(url, token: nil, timeout: 30)
+    def initialize(url, token: nil, timeout: 30, client_name: "paneyard-sandbox")
       @uri = URI(url)
       @token = token
+      @client_name = client_name
       @timeout = timeout
       @next_id = 0
     end
@@ -30,7 +47,7 @@ module PaneyardSandbox
       initialize_session!
       result = rpc("tools/call", name:, arguments:)
       text = Array(result["content"]).filter_map { |part| part["text"] }.join("\n")
-      raise Error, "#{name} failed: #{text}" if result["isError"]
+      raise ToolError.new("#{name} failed: #{text}", result["structuredContent"] || (JSON.parse(text) rescue {})) if result["isError"]
 
       result["structuredContent"] || (JSON.parse(text) rescue { "text" => text })
     end
@@ -38,16 +55,29 @@ module PaneyardSandbox
     private
 
     def initialize_session!
-      return if @session_id
+      return if @initialized
 
       rpc("initialize", protocolVersion: PROTOCOL_VERSION, capabilities: {},
-        clientInfo: { name: "paneyard-sandbox", version: "1" })
+        clientInfo: { name: @client_name, version: "1" })
       notify("notifications/initialized")
+      @initialized = true
     end
 
-    def rpc(method, **params)
+    # A session the server has forgotten is renewed once, transparently: a
+    # popup left open across a Paneyard restart would otherwise fail on its
+    # next call.
+    def rpc(method, renew: true, **params)
       @next_id += 1
-      response = post(jsonrpc: "2.0", id: @next_id, method:, params:)
+      response = begin
+        post(jsonrpc: "2.0", id: @next_id, method:, params:)
+      rescue SessionExpired
+        raise unless renew && @initialized && method != "initialize"
+
+        @session_id = nil
+        @initialized = false
+        initialize_session!
+        return rpc(method, renew: false, **params)
+      end
       @session_id ||= response["mcp-session-id"]
       message = parse(response)
       raise Error, "#{method}: #{message['error']['message']}" if message["error"]
@@ -64,13 +94,14 @@ module PaneyardSandbox
       request["Content-Type"] = "application/json"
       request["Accept"] = "application/json, text/event-stream"
       request["Authorization"] = "Bearer #{@token}" if @token
-      if @session_id
-        request["Mcp-Session-Id"] = @session_id
-        request["MCP-Protocol-Version"] = PROTOCOL_VERSION
-      end
+      request["Mcp-Session-Id"] = @session_id if @session_id
+      request["MCP-Protocol-Version"] = PROTOCOL_VERSION if @initialized
       request.body = JSON.generate(body)
       response = Net::HTTP.start(@uri.host, @uri.port, read_timeout: @timeout, open_timeout: @timeout) do |http|
         http.request(request)
+      end
+      if response.code == "404" && @session_id
+        raise SessionExpired, "POST #{@uri} (#{body[:method]}): session #{@session_id} is gone"
       end
       unless response.is_a?(Net::HTTPSuccess)
         raise Error, "POST #{@uri} (#{body[:method]}) returned #{response.code}: #{response.body.to_s[0, 500]}"

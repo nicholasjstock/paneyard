@@ -101,36 +101,29 @@ RSpec.describe Orchestrator::WorkspaceLayout do
   end
 
   describe ".for" do
-    let(:workspace) { Workspace.new(name: "layout-for", root_path: "/tmp/layout-for") }
+    let(:workspace) { Workspace.new(name: "layout-for", repository_path: "/tmp/layout-for") }
 
     def pane_names(tabs)
       tabs.map { |tab| tab["panes"].map { |pane| pane["name"] } }
     end
 
-    it "gives a workspace with no layout the agent with nvim split beside it, the editor only where nvim is" do
-      tabs = described_class.for(workspace)
-
-      expect(pane_names(tabs)).to eq([ %w[agent editor] ])
-      expect(tabs.first["panes"].last).to include(
-        "command" => "nvim .", "split_of" => "agent", "direction" => "right", "requires" => "nvim"
-      )
-      expect(tabs.first["panes"].first["requires"]).to be_nil
+    it "gives a workspace with no layout just the agent" do
+      expect(pane_names(described_class.for(workspace))).to eq([ %w[agent] ])
     end
 
-    it "uses the workspace's own layout when it has one, requiring nothing of the runner's machine" do
+    it "uses the workspace's own layout when it has one" do
       workspace.layout = "tabs:\n  - panes: [agent, { name: ed, command: nvim ., split: { of: agent } }]\n" \
                          "  - panes: [{ name: logs, command: tail -f x }]\n"
 
       tabs = described_class.for(workspace)
 
       expect(pane_names(tabs)).to eq([ %w[agent ed], %w[logs] ])
-      expect(tabs.flat_map { |tab| tab["panes"] }.pluck("requires")).to all(be_nil)
     end
 
     it "falls back to the default rather than stopping runs when a stored layout no longer validates" do
       workspace.layout = "tabs:\n  - panes: [{ name: logs }]\n"
 
-      expect(pane_names(described_class.for(workspace))).to eq([ %w[agent editor] ])
+      expect(pane_names(described_class.for(workspace))).to eq([ %w[agent] ])
     end
   end
 
@@ -150,11 +143,7 @@ RSpec.describe Orchestrator::WorkspaceLayout do
 
   describe ".editor_data" do
     it "gives the editor the default layout when there is none" do
-      expect(described_class.editor_data(nil)).to eq([
-        { "name" => nil, "panes" => [ { "name" => "agent" },
-                                       { "name" => "editor", "command" => "nvim .",
-                                         "split" => { "of" => "agent", "direction" => "right" } } ] }
-      ])
+      expect(described_class.editor_data(nil)).to eq([ { "name" => nil, "panes" => [ { "name" => "agent" } ] } ])
     end
 
     # A submitted layout with a mistake must come back as the operator left

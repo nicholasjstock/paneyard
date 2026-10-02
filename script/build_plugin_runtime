@@ -1,0 +1,65 @@
+#!/bin/sh
+# Build one release archive on its target OS/architecture. CI supplies a C
+# toolchain here so plugin users never need one.
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+platform=${1:?usage: script/build_plugin_runtime PLATFORM OUTPUT_DIR}
+output_dir=${2:?usage: script/build_plugin_runtime PLATFORM OUTPUT_DIR}
+ruby_version=$(sed 's/^ruby-//' "$root/.ruby-version")
+stage=$(mktemp -d "${TMPDIR:-/tmp}/paneyard-runtime-build.XXXXXX")
+trap 'rm -rf "$stage"' EXIT HUP INT TERM
+
+case "$platform" in
+  x86_64-darwin) ruby_asset="ruby-$ruby_version.macos.tar.gz" ;;
+  arm64-darwin) ruby_asset="ruby-$ruby_version.macos.tar.gz" ;;
+  x86_64-linux) ruby_asset="ruby-$ruby_version.x86_64_linux.no_yjit.tar.gz" ;;
+  aarch64-linux) ruby_asset="ruby-$ruby_version.arm64_linux.no_yjit.tar.gz" ;;
+  *) echo "unsupported runtime platform: $platform" >&2; exit 1 ;;
+esac
+
+mkdir -p "$stage/.paneyard/runtime" "$stage/vendor/bundle" "$stage/.bundle" "$output_dir"
+if [ -n "${PANEYARD_PORTABLE_RUBY_ARCHIVE:-}" ]; then
+  cp "$PANEYARD_PORTABLE_RUBY_ARCHIVE" "$stage/ruby.tar.gz"
+elif [ "$platform" = "x86_64-darwin" ]; then
+  # jdx/ruby's published macOS archive is ARM64. Build the same portable
+  # recipe on the Intel release runner instead of mislabelling that binary.
+  git clone --quiet https://github.com/jdx/ruby.git "$stage/ruby-builder"
+  git -C "$stage/ruby-builder" checkout --quiet 346cbf35816bc0fa7ed816dc6600d3305033b661
+  baseruby=$(ruby -rrbconfig -e 'print RbConfig.ruby')
+  JDX_RUBY_BASERUBY="$baseruby" "$stage/ruby-builder/bin/package" "$ruby_version" \
+    --target macos --no-yjit --output "$stage/rubies"
+  cp "$stage/rubies/ruby-$ruby_version.macos.no_yjit.tar.gz" "$stage/ruby.tar.gz"
+else
+  curl -fsSL --retry 3 "https://github.com/jdx/ruby/releases/download/$ruby_version/$ruby_asset" -o "$stage/ruby.tar.gz"
+fi
+tar -xzf "$stage/ruby.tar.gz" -C "$stage/.paneyard/runtime" --strip-components=1
+rm "$stage/ruby.tar.gz"
+
+ruby="$stage/.paneyard/runtime/bin/ruby"
+PATH="$(dirname "$ruby"):$PATH" BUNDLE_GEMFILE="$root/Gemfile" BUNDLE_PATH="$stage/vendor/bundle" \
+  BUNDLE_WITHOUT="development:test" "$ruby" -S bundle install --jobs 4
+cat > "$stage/.bundle/config" <<'YAML'
+---
+BUNDLE_PATH: "vendor/bundle"
+BUNDLE_WITHOUT: "development:test"
+YAML
+
+archive="$output_dir/paneyard-runtime-$platform.tar.gz"
+tar -czf "$archive" -C "$stage" .paneyard .bundle vendor
+verify="$stage/relocation-check"
+mkdir -p "$verify"
+tar -xzf "$archive" -C "$verify"
+verify_ruby="$verify/.paneyard/runtime/bin/ruby"
+PATH="$(dirname "$verify_ruby"):$PATH" BUNDLE_GEMFILE="$root/Gemfile" BUNDLE_PATH="$verify/vendor/bundle" \
+  BUNDLE_WITHOUT="development:test" \
+  "$verify_ruby" -S bundle check
+PATH="$(dirname "$verify_ruby"):$PATH" BUNDLE_GEMFILE="$root/Gemfile" BUNDLE_PATH="$verify/vendor/bundle" \
+  BUNDLE_WITHOUT="development:test" \
+  "$verify_ruby" -rbundler/setup -e 'require "rails"; require "sqlite3"; require "puma"; require "bootsnap"'
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "$archive" > "$archive.sha256"
+else
+  shasum -a 256 "$archive" > "$archive.sha256"
+fi

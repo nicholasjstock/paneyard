@@ -1,9 +1,10 @@
 module RemoteControl
   module Adapters
     module Telegram
-      # The bot token and allow-list: Rails credentials (telegram.bot_token,
-      # telegram.allowed_user_ids) or TELEGRAM_BOT_TOKEN /
-      # TELEGRAM_ALLOWED_USER_IDS.
+      # The bot token and allow-list: TELEGRAM_BOT_TOKEN and
+      # TELEGRAM_ALLOWED_USER_IDS, from the environment only -- the herdr
+      # plugin's .env (PaneyardPlugin::EnvFile), or bin/service's shell. Never
+      # Rails credentials.
       module Configuration
         module_function
 
@@ -11,27 +12,19 @@ module RemoteControl
         # started with a bot of its own (bin/sandbox start --telegram):
         # getUpdates hands each message to one poller only, so a second one
         # sharing the bot would take the operator's messages away from
-        # production. Even then it never falls back to credentials, which hold
-        # production's bot.
+        # production.
         def bot_token
           return nil unless Orchestrator::Sandbox.allows_remote_control?("telegram")
 
-          ENV["TELEGRAM_BOT_TOKEN"].presence || credential(:bot_token)
+          ENV["TELEGRAM_BOT_TOKEN"].presence
         end
 
         def allowed_user_ids
-          raw = ENV["TELEGRAM_ALLOWED_USER_IDS"].presence || credential(:allowed_user_ids)
-          Array(raw.is_a?(String) ? raw.split(",") : raw).map(&:to_s).map(&:strip).reject(&:blank?)
+          ENV["TELEGRAM_ALLOWED_USER_IDS"].to_s.split(",").map(&:strip).reject(&:blank?)
         end
 
         def configured?
           bot_token.present? && allowed_user_ids.any?
-        end
-
-        def credential(key)
-          return nil if Orchestrator::Sandbox.enabled?
-
-          Rails.application.credentials.dig(:telegram, key)
         end
       end
     end

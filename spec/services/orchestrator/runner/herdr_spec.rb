@@ -1,17 +1,31 @@
 require "rails_helper"
 
 RSpec.describe Orchestrator::Runner::Herdr do
-  describe ".workspace_create" do
-    it "passes label/cwd/focus through and stringifies the env, dropping nil-valued entries" do
+  describe ".worktree_create" do
+    # herdr chooses where the worktree goes: no path is ever sent.
+    it "asks herdr for a worktree of the repository on a branch from a base, unfocused" do
       expect(described_class).to receive(:request!).with(
-        "workspace.create", label: "run-1", cwd: "/tmp/run-1", env: { "FOO" => "bar baz" }, focus: false
-      ).and_return("root_pane" => { "pane_id" => "w9:p1", "tab_id" => "w9:t1", "workspace_id" => "w9" })
+        "worktree.create", cwd: "/code/app", branch: "paneyard/fix-1", base: "feature/payments", label: "fix-1", focus: false
+      ).and_return("workspace" => { "workspace_id" => "w9" }, "worktree" => { "path" => "/wt/fix-1" })
 
-      result = described_class.workspace_create(
-        label: "run-1", cwd: "/tmp/run-1", env: { "FOO" => "bar baz", "DROP_ME" => nil }
-      )
+      result = described_class.worktree_create(cwd: "/code/app", branch: "paneyard/fix-1", base: "feature/payments", label: "fix-1")
 
-      expect(result.fetch("root_pane").fetch("pane_id")).to eq("w9:p1")
+      expect(result.dig("worktree", "path")).to eq("/wt/fix-1")
+    end
+  end
+
+  describe ".worktree_open / .worktree_remove / .tab_close / .pane_list" do
+    it "sends what herdr's schema takes" do
+      expect(described_class).to receive(:request!).with("worktree.open", cwd: "/code/app", path: "/wt/fix-1", focus: false)
+        .and_return("workspace" => { "workspace_id" => "w9" })
+      expect(described_class).to receive(:request!).with("worktree.remove", workspace_id: "w9", force: false)
+      expect(described_class).to receive(:request!).with("tab.close", tab_id: "w9:t1")
+      expect(described_class).to receive(:request!).with("pane.list", workspace_id: "w9").and_return("panes" => [ { "pane_id" => "w9:p1" } ])
+
+      described_class.worktree_open(cwd: "/code/app", path: "/wt/fix-1")
+      described_class.worktree_remove("w9")
+      described_class.tab_close("w9:t1")
+      expect(described_class.pane_list(workspace_id: "w9")).to eq([ { "pane_id" => "w9:p1" } ])
     end
   end
 
@@ -36,27 +50,22 @@ RSpec.describe Orchestrator::Runner::Herdr do
       expect(pane.fetch("pane_id")).to eq("w1:p2")
     end
 
-    # A split inherits nothing from the workspace's root pane (confirmed live),
-    # so a layout pane's env has to travel on the split itself.
-    it "passes a ratio and a compacted env when given" do
+    it "passes a ratio when given, and never an env" do
       expect(described_class).to receive(:request!).with(
-        "pane.split", target_pane_id: "w1:p1", direction: "down", cwd: "/tmp/run-1", focus: false,
-        ratio: 0.3, env: { "FOO" => "1" }
+        "pane.split", target_pane_id: "w1:p1", direction: "down", cwd: "/tmp/run-1", focus: false, ratio: 0.3
       ).and_return("pane" => { "pane_id" => "w1:p2" })
 
-      described_class.pane_split(
-        target_pane_id: "w1:p1", direction: "down", cwd: "/tmp/run-1", ratio: 0.3, env: { "FOO" => 1, "GONE" => nil }
-      )
+      described_class.pane_split(target_pane_id: "w1:p1", direction: "down", cwd: "/tmp/run-1", ratio: 0.3)
     end
   end
 
   describe ".tab_create" do
-    it "opens an unfocused tab with its own env and returns the tab and its root pane" do
+    it "opens an unfocused tab and returns the tab and its root pane" do
       expect(described_class).to receive(:request!).with(
-        "tab.create", workspace_id: "w1", label: "logs", cwd: "/tmp/run-1", env: { "FOO" => "bar" }, focus: false
+        "tab.create", workspace_id: "w1", label: "logs", cwd: "/tmp/run-1", focus: false
       ).and_return("tab" => { "tab_id" => "w1:t2" }, "root_pane" => { "pane_id" => "w1:p3" })
 
-      result = described_class.tab_create(workspace_id: "w1", label: "logs", cwd: "/tmp/run-1", env: { "FOO" => "bar" })
+      result = described_class.tab_create(workspace_id: "w1", label: "logs", cwd: "/tmp/run-1")
 
       expect(result.dig("root_pane", "pane_id")).to eq("w1:p3")
     end
@@ -94,7 +103,7 @@ RSpec.describe Orchestrator::Runner::Herdr do
     end
 
     # A Herdr::Error, not a KeyError: RunSessionRunner.snapshot rescues the
-    # former to degrade to nil instead of taking the run screen down with a 500.
+    # former to degrade to nil instead of breaking a run-status read.
     it "raises a Herdr::Error when the response carries no text at all" do
       allow(described_class).to receive(:request!).and_return("type" => "pane_read", "read" => {})
 

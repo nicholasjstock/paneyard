@@ -18,7 +18,7 @@ module Orchestrator
   #
   # What crosses the boundary is plain data: strings, integers, booleans, and
   # hashes and arrays of them, never an Active Record object. Paths (a
-  # workspace's source_root, a run's target_root, a session's prompt_path)
+  # workspace's repository_path, a run's target_root, a session's prompt_path)
   # are the runner's, and the orchestrator only stores and hands them back.
   #
   # Today there is one runner, Runner::Local, in this process and on this

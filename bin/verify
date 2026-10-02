@@ -2,14 +2,13 @@
 # Everything a change to this repo should pass before it is merged, runnable
 # from the worktree it was made in without touching the production instance:
 #
-#   bundle exec rspec        unit, service, job, request, system and the
+#   bundle exec rspec        unit, service, job, request and the
 #                            in-process run lifecycle (spec/integration)
 #   bin/rubocop
 #   git diff --check
 #   bin/preflight            this code booted as production on a scratch DB
 #   bin/sandbox verify       a run lifecycle through a live isolated instance
 #   bin/bundler-audit        known-vulnerable gems
-#   bin/importmap audit      known-vulnerable JavaScript pins
 #   bin/brakeman             Rails static security analysis
 #
 # Usage: bin/verify [--prod-copy] [--diff-base REF]
@@ -38,7 +37,6 @@ steps = [
   [ "preflight", preflight ],
   [ "sandbox verify", %w[bin/sandbox verify] ],
   [ "bundler-audit", %w[bin/bundler-audit] ],
-  [ "importmap audit", %w[bin/importmap audit] ],
   [ "brakeman", %w[bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error] ]
 ]
 

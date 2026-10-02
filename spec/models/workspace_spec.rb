@@ -1,25 +1,33 @@
 require "rails_helper"
 
 RSpec.describe Workspace do
-  it "derives the source checkout from the workspace root" do
-    workspace = Workspace.new(root_path: "/home/me/src/example")
+  it "is a repository and the branch its runs start from" do
+    workspace = Workspace.new(name: "example", repository_path: "/home/me/src/example", default_base_branch: "develop")
 
-    expect(workspace.source_root).to eq("/home/me/src/example/main")
+    expect(workspace).to be_valid
   end
 
-  it "does not let an active run's source checkout move" do
-    workspace = Workspace.create!(name: "workspace-active-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir)
+  it "refuses a default base branch git would not take, or that could pass for a flag" do
+    %w[-x a..b feature/ has\ space].each do |branch|
+      workspace = Workspace.new(name: "bad-#{SecureRandom.hex(2)}", repository_path: "/tmp/bad-#{SecureRandom.hex(4)}", default_base_branch: branch)
+
+      expect(workspace).not_to be_valid, branch
+    end
+  end
+
+  it "does not let an active run's repository move" do
+    workspace = Workspace.create!(name: "workspace-active-#{SecureRandom.hex(4)}", repository_path: Dir.mktmpdir)
     workspace.runs.create!(
-      run_id: "workspace-active-#{SecureRandom.hex(4)}", task: "Active task", target_root: workspace.root_path,
+      run_id: "workspace-active-#{SecureRandom.hex(4)}", task: "Active task", target_root: workspace.repository_path,
       launcher_variant: "codex", status: "running"
     )
 
-    expect(workspace.update(root_path: Dir.mktmpdir)).to be(false)
-    expect(workspace.errors[:root_path]).to include("cannot change while a run is active")
+    expect(workspace.update(repository_path: Dir.mktmpdir)).to be(false)
+    expect(workspace.errors[:repository_path]).to include("cannot change while a run is active")
   end
 
   describe "layout" do
-    let(:workspace) { Workspace.create!(name: "workspace-layout-#{SecureRandom.hex(4)}", root_path: Dir.mktmpdir) }
+    let(:workspace) { Workspace.create!(name: "workspace-layout-#{SecureRandom.hex(4)}", repository_path: Dir.mktmpdir) }
 
     it "accepts a valid layout and stores a blank one as the default (nil)" do
       expect(workspace.update(layout: "tabs:\n  - panes: [agent]\n")).to be(true)

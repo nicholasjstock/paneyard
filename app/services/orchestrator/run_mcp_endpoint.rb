@@ -1,12 +1,15 @@
 module Orchestrator
   # Mounted at /mcp/run. Authenticates a run session's private bearer
-  # capability and hands it a transport scoped to that session.
+  # capability and hands the request to a transport scoped to that session.
+  #
+  # Stateless (McpTransport): the capability is the session's identity, so
+  # the MCP layer has nothing of its own to remember. A transport is built
+  # per request and dropped with it -- nothing to cache, reap or leak when the
+  # run session ends, and a report_idle after hours of waiting on the
+  # operator, or after a Paneyard restart, is answered like the first one.
   class RunMcpEndpoint
-    MAX_CACHED_TRANSPORTS = 100
-
     def initialize
-      @transports = {}
-      @mutex = Mutex.new
+      @allowed_hosts = PaneyardAllowedHosts.extra
     end
 
     def call(env)
@@ -14,23 +17,11 @@ module Orchestrator
       session = RunSession.authenticate_capability(token)
       return unauthorized unless session
 
-      transport_for(session).call(env)
+      server = RunMcpServer.build(server_context: { run_session_id: session.id })
+      McpTransport.build(server, allowed_hosts: @allowed_hosts).call(env)
     end
 
     private
-
-    def transport_for(session)
-      @mutex.synchronize do
-        if @transports.size >= MAX_CACHED_TRANSPORTS
-          live_ids = RunSession.live.where(id: @transports.keys).pluck(:id).to_set
-          @transports.delete_if { |id, _| !live_ids.include?(id) }
-        end
-        @transports[session.id] ||= MCP::Server::Transports::StreamableHTTPTransport.new(
-          RunMcpServer.build(server_context: { run_session_id: session.id }),
-          allowed_hosts: PaneyardAllowedHosts.extra
-        )
-      end
-    end
 
     def unauthorized
       [ 401, { "content-type" => "application/json" }, [ '{"error":"invalid run session capability"}' ] ]

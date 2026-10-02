@@ -20,25 +20,14 @@ module Orchestrator
     module SessionArgs
       module_function
 
-      # The env var a session's CLI reads its /mcp/run capability from.
-      TOKEN_ENV_VAR = "PANEYARD_RUN_TOKEN".freeze
-
-      # Claude Code resolves a worktree's auto-memory to its main checkout, so
-      # without this every claude run loads the operator's own per-repo memory
-      # -- notes written for their everyday session, some of which contradict a
-      # run's job (e.g. "queue a run instead of implementing it"). Confirmed in
-      # the 2.1.283 binary: a truthy CLAUDE_CODE_DISABLE_AUTO_MEMORY turns auto
-      # memory off.
-      CLAUDE_ENV = { "CLAUDE_CODE_DISABLE_AUTO_MEMORY" => "1" }.freeze
-
-      # Returns [command, args, extra_env] for the given driver. extra_env is
-      # merged into the pane's environment (opencode carries its whole MCP
-      # config that way; the others point at a file or use -c overrides).
+      # Returns [command, args] for the given driver. Nothing goes in the
+      # environment: a session's pane is the operator's own login shell
+      # (herdr's worktree.create takes no env), so its /mcp/run capability
+      # reaches the CLI in a config file (claude) or a -c override (codex).
       def build(driver:, root_dir:, mcp_config_path:, capability_token:, mcp_url:, model:, resume_session_id: nil)
         case driver
-        when "claude" then [ "claude", claude_args(root_dir:, mcp_config_path:, resume_session_id:, model:), CLAUDE_ENV.dup ]
-        when "codex" then [ "codex", codex_args(root_dir:, mcp_url:, resume_session_id:, model:), {} ]
-        when "opencode" then [ "opencode", *opencode_args(root_dir:, capability_token:, mcp_url:, resume_session_id:, model:) ]
+        when "claude" then [ "claude", claude_args(root_dir:, mcp_config_path:, resume_session_id:, model:) ]
+        when "codex" then [ "codex", codex_args(root_dir:, mcp_url:, capability_token:, resume_session_id:, model:) ]
         else raise ArgumentError, "unsupported driver: #{driver.inspect}"
         end
       end
@@ -99,10 +88,18 @@ module Orchestrator
       # -c key ("`...` is ignored"), and does not flag this one. It is a
       # top-level ConfigToml key, and codex-rs/tui/src/updates.rs
       # (get_upgrade_version) returns early when it is false.
-      def codex_args(root_dir:, mcp_url:, model:, resume_session_id: nil)
+      #
+      # The capability goes in as an http_headers override. Confirmed live on
+      # 0.159.3, with nothing in the environment: codex sent
+      # `Authorization: Bearer <token>` on initialize, the GET stream and
+      # tools/list. (It used to be bearer_token_env_var, read from the pane's
+      # env, which sessions no longer have.) The override is typed into the
+      # pane's shell, so the token can land in the operator's shell history;
+      # it is dead the moment the session ends (RunSession.authenticate_capability).
+      def codex_args(root_dir:, mcp_url:, capability_token:, model:, resume_session_id: nil)
         config_args = [
           %(mcp_servers.paneyard.url=#{"#{mcp_url}/run".to_json}),
-          %(mcp_servers.paneyard.bearer_token_env_var="#{TOKEN_ENV_VAR}"),
+          %(mcp_servers.paneyard.http_headers={Authorization=#{"Bearer #{capability_token}".to_json}}),
           %(mcp_servers.paneyard.default_tools_approval_mode="approve"),
           "check_for_update_on_startup=false"
         ].flat_map { |override| [ "-c", override ] }
@@ -113,37 +110,6 @@ module Orchestrator
         else
           [ *model_args("--model", model), *sandbox_args, *config_args, "-C", root_dir ]
         end
-      end
-
-      # Returns [args, env]. Three corrections here were found only by running
-      # it for real (confirmed against `opencode --help` vs `opencode run
-      # --help`: --variant and --dir are `run`-subcommand-only flags that do not
-      # exist on the bare command):
-      #   - the working directory is a bare positional, not --dir;
-      #   - --auto ("auto-approve permissions that are not explicitly denied")
-      #     IS a top-level flag and is required, or the session sits blocked on
-      #     tool-approval prompts;
-      #   - --mini is required: the full default TUI never actually delivered
-      #     agent.prompt's text into its input at all (confirmed live -- neither
-      #     agent.prompt nor a raw pane.send_text reached it, even after an
-      #     explicit Enter keypress); --mini's simpler renderer receives it
-      #     correctly (the submitted prompt appeared verbatim and the agent
-      #     began working).
-      def opencode_args(root_dir:, capability_token:, mcp_url:, model:, resume_session_id: nil)
-        config = JSON.generate({
-          mcp: {
-            paneyard: {
-              type: "remote",
-              url: "#{mcp_url}/run",
-              headers: { Authorization: "Bearer #{capability_token}" }
-            }
-          }
-        })
-
-        args = [ *model_args("-m", model), "--auto", "--mini" ]
-        args += [ "-s", resume_session_id ] if resume_session_id
-        args << root_dir
-        [ args, { "OPENCODE_CONFIG_CONTENT" => config } ]
       end
 
       # No model means the CLI's own configured default: leave the flag out.

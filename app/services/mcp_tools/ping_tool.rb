@@ -1,7 +1,5 @@
 module McpTools
-  # Health-check tool proving the MCP transport is wired up correctly --
-  # real tools land in this directory as the port from
-  # scripts/workflow-mcp-app.ts proceeds.
+  # Health-check tool proving the MCP transport is wired up correctly.
   class PingTool < MCP::Tool
     description "Health-check tool, proves the MCP transport is wired up."
     input_schema(properties: {}, required: [])

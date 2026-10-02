@@ -2,7 +2,8 @@
 
 > This is a design record, kept for its reasoning (see [the docs index](./README.md#design-records)).
 > For how to use remote control today, see [telegram.md](./telegram.md). The "admin chat" it
-> discusses has been removed, and "the operator" means whoever runs the orchestrator.
+> discusses has been removed, and "the operator" means whoever runs the orchestrator. `StopRunJob`
+> and the stop button it mentions are gone too: **Close session** is the only way to end a run's session.
 
 Status: **partly implemented.** Written 2026-09-27 on
 `paneyard/plan-do-not-implement-replacing-the-workspace-ad-33bd`.
@@ -672,7 +673,7 @@ serve the new commands.
    final pass for README/AGENTS.md.
 
 Because this repo is one of its own workspaces, phases 4 and 5 change code the
-running instance hot-reloads (`PANEYARD_HOT_RELOAD=1`). A session doing phase
+running instance runs (it hot-reloaded code then; it no longer does). A session doing phase
 5 should merge and restart in one step, not leave `main` ahead of the running
 process's config.
 

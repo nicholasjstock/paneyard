@@ -1,4 +1,3 @@
-require "cgi"
 require "json"
 require "net/http"
 require_relative "instance"
@@ -8,15 +7,14 @@ module PaneyardSandbox
   # `bin/sandbox verify`: a run's whole lifecycle against a running sandbox
   # instance, from outside it, the way the operator and a session reach the
   # real one -- /mcp/admin to queue and inspect, the fake agent reporting
-  # through /mcp/run, the run screen's own forms (CSRF token and all) to send
-  # a message and close the session, and Solid Queue's real recurring
+  # through /mcp/run, /mcp/admin closing the session, and Solid Queue's real recurring
   # schedule to notice a crash. Each scenario is one fake-agent directive.
   class Verify
     class Failure < StandardError; end
 
     Scenario = Struct.new(:name, :directive, :run_id, keyword_init: true)
 
-    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces].freeze
+    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session].freeze
 
     def initialize(instance, workspace:, workspace_id:, out: $stdout, timeout: 90)
       @instance = instance
@@ -25,18 +23,17 @@ module PaneyardSandbox
       @out = out
       @timeout = timeout
       @admin = McpClient.new("#{instance.url}/mcp/admin")
-      @cookies = {}
       @failures = []
     end
 
     def call
-      step("the home page renders") { expect(get("/").code == "200", "GET / returned #{get('/').code}") }
+      step("the health endpoint answers") { expect(get("/up").code == "200", "GET /up returned #{get('/up').code}") }
       step("/mcp/admin lists its tools") do
         missing = ADMIN_TOOLS - @admin.tool_names
         expect(missing.empty?, "missing #{missing.join(', ')}")
       end
 
-      done = queue("done: report, take a message, close, worktree reclaimed", "done")
+      done = queue("done: report, close, worktree reclaimed", "done")
       dirty = queue("dirty: close keeps a worktree with uncommitted work", "dirty")
       crash = queue("crash: reconcile fails a run whose CLI died", "crash")
 
@@ -63,13 +60,7 @@ module PaneyardSandbox
       expect(run["checkpoints"].last["outcome"] == "done", "checkpoint #{run['checkpoints'].last}")
       expect(File.directory?(run["worktree"]), "worktree #{run['worktree']} missing while live")
 
-      # The message box reaches the live session (agent.prompt); the agent
-      # takes it as more work and reports again, as a second checkpoint.
-      submit_form(scenario, "send_message", "message" => "One more thing. [fake-agent: done]")
-      run = wait_for_run(scenario) { |detail| detail["checkpoints"].size >= 2 }
-      expect(run["checkpoints"].last["outcome"] == "done", "second checkpoint #{run['checkpoints'].last}")
-
-      submit_form(scenario, "close_session")
+      close(scenario)
       run = wait_for_run(scenario) { |detail| detail["status"] == "completed" }
       expect(run.dig("session", "live") == false, "session still live after Close session")
       expect(!File.directory?(run["worktree"]), "clean worktree #{run['worktree']} was not reclaimed")
@@ -77,7 +68,7 @@ module PaneyardSandbox
 
     def verify_dirty(scenario)
       run = wait_for_run(scenario) { |detail| detail["checkpoints"]&.any? }
-      submit_form(scenario, "close_session")
+      close(scenario)
       run = wait_for_run(scenario) { |detail| detail["status"] == "completed" }
       expect(File.exist?(File.join(run["worktree"], "FAKE_AGENT_CHANGES.md")), "dirty worktree #{run['worktree']} was removed")
     end
@@ -101,46 +92,18 @@ module PaneyardSandbox
       end
     end
 
-    # Posts one of the run screen's own button_to/form_with forms, with the
-    # per-form CSRF token Rails rendered into it.
-    def submit_form(scenario, action, fields = {})
-      page = get(run_path(scenario))
-      path = "#{run_path(scenario)}/#{action}"
-      form = page.body[%r{<form[^>]*action="#{Regexp.escape(path)}".*?</form>}m]
-      raise Failure, "no #{action} form on #{run_path(scenario)}" unless form
-
-      token = form[/name="authenticity_token" value="([^"]+)"/, 1]
-      response = post(path, fields.merge("authenticity_token" => CGI.unescapeHTML(token.to_s)))
-      raise Failure, "POST #{path} returned #{response.code}" unless response.code.start_with?("2", "3")
-
-      flash = get(run_path(scenario)).body[/class="flash[^"]*"[^>]*>(.*?)</m, 1]
-      @out.puts("    #{action}: #{flash.to_s.strip}") if flash
-    end
-
-    def run_path(scenario)
-      "/workspaces/#{@workspace_id}/runs/#{scenario.run_id}"
+    def close(scenario)
+      result = @admin.call_tool("close_session", runId: scenario.run_id, workspace: @workspace)
+      @out.puts("    close_session: #{result.fetch('status')}; worktree #{result.fetch('worktree')}")
     end
 
     def get(path)
       request(Net::HTTP::Get.new(path))
     end
 
-    def post(path, fields)
-      http_request = Net::HTTP::Post.new(path)
-      http_request.set_form_data(fields)
-      request(http_request)
-    end
-
     def request(http_request)
-      http_request["Cookie"] = @cookies.map { |key, value| "#{key}=#{value}" }.join("; ") if @cookies.any?
-      http_request["Accept"] = "text/html"
       uri = URI(@instance.url)
-      response = Net::HTTP.start(uri.host, uri.port, read_timeout: 30) { |http| http.request(http_request) }
-      Array(response.get_fields("set-cookie")).each do |cookie|
-        key, value = cookie.split(";").first.split("=", 2)
-        @cookies[key] = value
-      end
-      response
+      Net::HTTP.start(uri.host, uri.port, read_timeout: 30) { |http| http.request(http_request) }
     end
 
     def step(name)

@@ -1,6 +1,7 @@
-# Reclaims worktrees for runs that have been terminal long enough, and for
-# orphans no run owns. See Orchestrator::WorktreeJanitor for the safety rules
-# (never `main`, never work that is not pushed or merged).
+# The janitor's periodic sweep: reclaims the worktrees of runs whose session
+# is over and whose work is saved. See Orchestrator::WorktreeJanitor for the
+# rules (only its own runs' worktrees, never the repository's checkout, never
+# work that is not in the run's base branch or pushed; no age limit).
 class WorktreeCleanupJob < ApplicationJob
   queue_as :default
 

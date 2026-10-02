@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_27_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_01_130000) do
   create_table "run_checkpoints", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "outcome", null: false
@@ -67,6 +67,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_120000) do
     t.datetime "updated_at", null: false
     t.integer "workspace_id", null: false
     t.string "worktree_name"
+    t.string "base_branch", null: false
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
     t.index ["workspace_id"], name: "index_runs_on_workspace_id"
@@ -81,31 +82,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_120000) do
     t.index ["name"], name: "index_telegram_update_cursors_on_name", unique: true
   end
 
-  create_table "workspace_env_vars", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "evidence_ref", null: false
-    t.string "name", null: false
-    t.string "recorded_by", null: false
-    t.datetime "updated_at", null: false
-    t.text "value", null: false
-    t.integer "workspace_id", null: false
-    t.index ["workspace_id", "name"], name: "index_workspace_env_vars_on_workspace_id_and_name", unique: true
-    t.index ["workspace_id"], name: "index_workspace_env_vars_on_workspace_id"
-  end
-
   create_table "workspaces", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.text "layout"
     t.string "name", null: false
-    t.string "root_path", null: false
     t.datetime "updated_at", null: false
+    t.string "repository_path", null: false
+    t.string "default_base_branch", default: "main", null: false
     t.index ["name"], name: "index_workspaces_on_name", unique: true
-    t.index ["root_path"], name: "index_workspaces_on_root_path", unique: true
+    t.index ["repository_path"], name: "index_workspaces_on_repository_path", unique: true
   end
 
   add_foreign_key "run_checkpoints", "run_sessions"
   add_foreign_key "run_checkpoints", "runs"
   add_foreign_key "run_sessions", "runs"
   add_foreign_key "runs", "workspaces"
-  add_foreign_key "workspace_env_vars", "workspaces"
 end

@@ -6,19 +6,15 @@ module Orchestrator
   # every registered workspace. It carries no more auth than the rest of
   # this app: Puma binds 127.0.0.1 only, production answers loopback Host
   # names only (SECURITY.md), and "no auth in v1 (single-user local tool)"
-  # is this app's accepted trust boundary everywhere else too
-  # (ApplicationController#current_operator).
+  # is this app's accepted trust boundary everywhere else too.
   #
-  # One shared transport is enough here (unlike RunMcpEndpoint's
-  # per-session cache): every caller gets the same tool set and the same
-  # (empty) server_context, so there is nothing to key a cache on. The
-  # transport itself still tracks each connecting MCP client's own
-  # session/stream internally.
+  # One shared transport is enough here: every caller gets the same tool set
+  # and the same (empty) server_context. It is stateless (McpTransport), so
+  # it keeps no per-client sessions either: an operator's client stays
+  # connected across idle hours and Paneyard restarts.
   class AdminMcpEndpoint
     def initialize
-      @transport = MCP::Server::Transports::StreamableHTTPTransport.new(
-        AdminMcpServer.build, allowed_hosts: PaneyardAllowedHosts.extra
-      )
+      @transport = McpTransport.build(AdminMcpServer.build)
     end
 
     def call(env)

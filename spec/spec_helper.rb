@@ -26,6 +26,10 @@ ENV["HERDR_SOCKET_PATH"] = File.join(Dir.tmpdir, "paneyard-specs-have-no-herdr.s
 # Specs describe the real instance; sandbox behaviour is opted into per spec.
 ENV.delete("PANEYARD_SANDBOX")
 ENV.delete("PANEYARD_SANDBOX_ROOT")
+# Nor the operator's own Telegram bot from their shell: specs that want one use
+# :fake_telegram (spec/support/fake_telegram.rb), which sets its own. Real
+# credentials are kept out by config/environments/test.rb.
+%w[TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USER_IDS TELEGRAM_BOT_API_URL PANEYARD_SANDBOX_TELEGRAM].each { |key| ENV.delete(key) }
 
 RSpec.configure do |config|
   # rspec-expectations config goes here. You can use an alternate

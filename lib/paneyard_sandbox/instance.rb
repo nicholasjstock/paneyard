@@ -119,8 +119,6 @@ module PaneyardSandbox
         "HERDR_SOCKET_PATH" => herdr_socket_path,
         "TELEGRAM_BOT_TOKEN" => nil,
         "TELEGRAM_ALLOWED_USER_IDS" => nil,
-        "GITHUB_APP_ID" => nil,
-        "GITHUB_APP_PRIVATE_KEY" => nil,
         "PANEYARD_RUN_TOKEN" => nil,
         "PANEYARD_RUN_ID" => nil,
         "PIDFILE" => File.join(root, "puma.pid")

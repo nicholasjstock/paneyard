@@ -1,11 +1,12 @@
 require "rails_helper"
+require "open3"
 
 # A run's whole life, end to end, with nothing stubbed but the model: queue
-# through /mcp/admin, RunDispatchJob, StartRunSessionJob provisioning a real
-# git worktree, RunSessionRunner.start! driving a (fake) herdr over its real
+# through /mcp/admin, RunDispatchJob, StartRunSessionJob having (fake) herdr
+# make a real git worktree, RunSessionRunner.start! driving that herdr over its real
 # socket until a real agent process is running, report_idle through /mcp/run
-# with the capability the session was launched with, the operator's message
-# box, RunSessionReconcileJob, Close session and WorktreeJanitor.
+# with the capability the session was launched with, operator steering,
+# RunSessionReconcileJob, SessionClose and WorktreeJanitor.
 #
 # The agent is FakeHerdr::Agent in "manual" mode: it becomes ready and takes
 # the prompt, and the spec reports on its behalf. bin/sandbox verify runs the
@@ -28,9 +29,13 @@ RSpec.describe "a run's lifecycle", type: :request do
     expect(File.directory?(run.target_root)).to be(true)
     expect(session).to have_attributes(status: "running", herdr_pane_id: "w1:p1")
     expect(process_alive?(session.pid)).to be(true)
-    create = fake_herdr.requests_for("workspace.create").last
-    expect(create).to include("cwd" => run.target_root, "focus" => false)
-    expect(create["env"]).to include("PANEYARD_RUN_ID" => run.run_id)
+    create = fake_herdr.requests_for("worktree.create").last
+    expect(create).to eq("cwd" => workspace.repository_path, "branch" => run.branch_name, "base" => "main",
+                         "label" => run.worktree_name, "focus" => false)
+    expect(run.target_root).not_to start_with(workspace.repository_path)
+    expect(fake_herdr.requests_for("workspace.create")).to be_empty
+    # No pane is given an environment of its own.
+    expect(fake_herdr.requests.map(&:last)).to all(satisfy { |params| !params.key?("env") })
     expect(fake_herdr.requests_for("agent.start").last).to include("kind" => "claude", "pane_id" => "w1:p1")
     expect(fake_herdr.requests_for("agent.prompt").last["text"]).to include("# Task", "Exercise the lifecycle")
 
@@ -43,13 +48,12 @@ RSpec.describe "a run's lifecycle", type: :request do
     expect(session.reload).to be_live
     expect(session.cli_session_id).to start_with("fake-")
 
-    post send_message_workspace_run_path(workspace, run), params: { message: "one more thing" }
+    Orchestrator::RunSessionRunner.prompt!(session, "one more thing")
     expect(fake_herdr.requests_for("agent.prompt").last["text"]).to eq("one more thing")
     expect(wait_for { fake_herdr.pane("w1:p1")[:transcript].scan("received a").size == 2 }).to be(true)
 
-    expect { post close_session_workspace_run_path(workspace, run) }.to have_enqueued_job(RunDispatchJob)
+    expect { Orchestrator::SessionClose.call(run) }.to have_enqueued_job(RunDispatchJob)
 
-    expect(flash[:notice]).to include("removed #{run.worktree_name}")
     expect(run.reload.status).to eq("completed")
     expect(session.reload).to have_attributes(outcome: "done", herdr_pane_id: nil)
     expect(session).to be_ended
@@ -76,9 +80,9 @@ RSpec.describe "a run's lifecycle", type: :request do
     mcp_call("/mcp/run", "report_idle", token: session_token, outcome: "done", summary: "Left a file")
     File.write(File.join(run.target_root, "notes.md"), "uncommitted\n")
 
-    post close_session_workspace_run_path(workspace, run)
+    closed = Orchestrator::SessionClose.call(run)
 
-    expect(flash[:notice]).to include("Kept #{run.worktree_name}")
+    expect(closed[:worktree]).to eq("kept")
     expect(run.reload).to be_kept_worktree
   end
 
@@ -123,5 +127,206 @@ RSpec.describe "a run's lifecycle", type: :request do
     expect(run.latest_session.result).to include("claude: command not found")
     expect(fake_herdr.workspace_ids).to be_empty
     expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
+  end
+
+  describe "reopening a closed session" do
+    def reopen(run)
+      result = nil
+      perform_enqueued_jobs(only: [ RunDispatchJob, StartRunSessionJob ]) do
+        result = mcp_call("/mcp/admin", "reopen_session", runId: run.run_id, workspace: workspace.name)
+      end
+      result
+    end
+
+    # Launched, reported, and its conversation id picked up by the reconcile
+    # job, as it would be on any minute the session was live.
+    def launched_and_reported(task)
+      run = queue_and_launch(task)
+      report(run, "done", "## First pass")
+      RunSessionReconcileJob.perform_now
+      run.reload
+    end
+
+    it "queues the run again and resumes its conversation in the worktree it kept, then closes again", :fake_herdr do
+      run = launched_and_reported("Reopen me")
+      first = run.live_session
+      conversation = first.cli_session_id
+      File.write(File.join(run.target_root, "notes.md"), "uncommitted\n")
+      expect(Orchestrator::SessionClose.call(run)).to include(worktree: "kept")
+      expect(run.reload.status).to eq("completed")
+
+      reopened = reopen(run)
+
+      expect(reopened).to include("status" => "queued", "worktree" => "kept", "branch" => run.branch_name)
+      session = run.reload.live_session
+      expect(run.status).to eq("running")
+      expect(session).not_to eq(first)
+      expect(fake_herdr.requests_for("worktree.create").size).to eq(1)
+      expect(fake_herdr.requests_for("worktree.open").last).to include("path" => run.target_root)
+      expect(fake_herdr.requests_for("agent.start").last["args"]).to include("--resume", conversation)
+      expect(fake_herdr.requests_for("agent.prompt").last["text"]).to include("resuming this conversation")
+      expect(wait_for { fake_herdr.pane(session.herdr_pane_id)[:transcript].include?("resumed conversation #{conversation}") }).to be(true)
+      expect(File.read(File.join(run.target_root, "notes.md"))).to eq("uncommitted\n")
+      expect(Orchestrator::RunConcurrency.in_flight).to eq(1)
+
+      report(run, "done", "## Second pass")
+      expect(run.reload.checkpoints.map(&:summary)).to eq([ "## First pass", "## Second pass" ])
+      expect(Orchestrator::SessionClose.call(run)).to include(outcome: "done")
+      expect(run.reload.status).to eq("completed")
+      expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
+    end
+
+    it "makes the worktree again from the branch when it was removed, with the run's commits", :fake_herdr do
+      run = launched_and_reported("Merged then reopened")
+      conversation = run.live_session.cli_session_id
+      commit_in(run.target_root, "fix.txt", "Fix it")
+      work = git(run.target_root, "rev-parse", "HEAD")
+      git(workspace.repository_path, "merge", "-q", "--ff-only", run.branch_name)
+      expect(Orchestrator::SessionClose.call(run)).to include(worktree: "removed")
+      path = run.target_root
+      expect(File.directory?(path)).to be(false)
+
+      expect(reopen(run)).to include("worktree" => "recreated")
+
+      expect(run.reload).to have_attributes(status: "running", target_root: path)
+      expect(git(path, "rev-parse", "HEAD")).to eq(work)
+      expect(fake_herdr.requests_for("worktree.create").last).to include("branch" => run.branch_name, "base" => nil)
+      # herdr put it back at the same path, so the conversation could resume.
+      expect(fake_herdr.requests_for("agent.start").last["args"]).to include("--resume", conversation)
+
+      report(run, "done", "## Back")
+      expect(Orchestrator::SessionClose.call(run)).to include(outcome: "done", worktree: "removed")
+    end
+
+    it "starts a fresh conversation, with the task and the last report, when the old one cannot be resumed", :fake_herdr do
+      run = launched_and_reported("Resume will fail")
+      # The resumed CLI exits before herdr sees it; no need to wait out the full 10 s for that.
+      stub_const("Orchestrator::Runner::SessionLauncher::AGENT_DETECT_POLL_ATTEMPTS", 10)
+      File.write(File.join(run.target_root, "notes.md"), "keep me\n")
+      Orchestrator::SessionClose.call(run)
+      # The CLI no longer has it (its history was cleared, say).
+      run.latest_session.update!(cli_session_id: "fake-forgotten")
+
+      reopen(run)
+
+      session = run.reload.live_session
+      expect(session).to have_attributes(status: "running")
+      starts = fake_herdr.requests_for("agent.start").last(2)
+      expect(starts.map { |start| start["pane_id"] }.uniq).to eq([ session.herdr_pane_id ])
+      expect(starts.first["args"]).to include("--resume", "fake-forgotten")
+      expect(starts.last["args"]).not_to include("--resume")
+      expect(fake_herdr.pane(session.herdr_pane_id)[:transcript]).to include("No conversation found with session ID: fake-forgotten")
+      expect(fake_herdr.requests_for("agent.prompt").last["text"]).to include("# Reopened", "## First pass", "Resume will fail")
+
+      report(run, "done", "## Fresh")
+      expect(Orchestrator::SessionClose.call(run)).to include(outcome: "done")
+    end
+
+    it "refuses once the branch is gone as well as the worktree", :fake_herdr do
+      run = launched_and_reported("Gone for good")
+      Orchestrator::SessionClose.call(run)
+      git(workspace.repository_path, "branch", "-q", "-D", run.branch_name)
+
+      result = McpTools::ReopenSessionTool.call(runId: run.run_id, workspace: workspace.name, server_context: {})
+
+      expect(result.error?).to be(true)
+      expect(result.content.first[:text]).to include("not_reopenable", "no longer exists")
+      expect(run.reload.status).to eq("completed")
+    end
+  end
+
+  def git(dir, *args)
+    out, status = Open3.capture2e("git", "-C", dir.to_s, *args)
+    raise out unless status.success?
+
+    out.strip
+  end
+
+  def commit_in(dir, file, message)
+    File.write(File.join(dir, file), "#{message}\n")
+    git(dir, "add", file)
+    git(dir, "-c", "user.email=agent@example.test", "-c", "user.name=Agent", "commit", "-qm", message)
+  end
+
+  describe "base branches" do
+    let(:workspace) { create_workspace(repository_path: create_source_checkout(branches: [ "feature/payments" ])) }
+
+    def queue(task, **arguments)
+      run_id = nil
+      perform_enqueued_jobs(only: [ RunDispatchJob, StartRunSessionJob ]) do
+        run_id = mcp_call("/mcp/admin", "queue_run", task:, workspace: workspace.name, **arguments).fetch("runId")
+      end
+      Run.find_by!(run_id:)
+    end
+
+    it "runs two sessions from different base branches of one workspace at once", :fake_herdr do
+      git(workspace.repository_path, "switch", "-q", "-c", "operator-wip")
+
+      from_main = queue("From main")
+      from_payments = queue("From payments", baseBranch: "feature/payments")
+
+      expect([ from_main, from_payments ].map(&:reload).map(&:status)).to eq(%w[running running])
+      expect(from_main.base_branch).to eq("main")
+      expect(from_payments.base_branch).to eq("feature/payments")
+      expect(git(from_main.target_root, "rev-parse", "HEAD")).to eq(git(workspace.repository_path, "rev-parse", "main"))
+      expect(git(from_payments.target_root, "rev-parse", "HEAD")).to eq(git(workspace.repository_path, "rev-parse", "feature/payments"))
+      expect(fake_herdr.requests_for("worktree.create").map { |request| request["base"] }).to eq(%w[main feature/payments])
+      # The operator's checkout is left exactly as it was.
+      expect(git(workspace.repository_path, "branch", "--show-current")).to eq("operator-wip")
+      expect(fake_herdr.requests_for("agent.prompt").last["text"]).to include("from `feature/payments`", "into `feature/payments`")
+    end
+
+    it "refuses a base branch the repository does not have, queueing nothing", :fake_herdr do
+      result = McpTools::QueueRunTool.call(task: "Nope", workspace: workspace.name, baseBranch: "feature/missing", server_context: {})
+
+      expect(result.error?).to be(true)
+      expect(result.content.first[:text]).to include("no local branch `feature/missing`")
+      expect(workspace.runs.count).to eq(0)
+      expect(fake_herdr.requests_for("worktree.create")).to be_empty
+    end
+
+    it "removes the worktree once its work is merged into its own base branch, not main", :fake_herdr do
+      run = queue("Payments fix", baseBranch: "feature/payments")
+      mcp_call("/mcp/run", "report_idle", token: session_token(run), outcome: "done", summary: "Fixed")
+      commit_in(run.target_root, "fix.txt", "Fix payments")
+      # The merge the prompt describes: feature/payments is checked out nowhere,
+      # so it fast-forwards without touching any checkout.
+      git(workspace.repository_path, "fetch", "-q", ".", "#{run.branch_name}:feature/payments")
+      expect(system("git", "-C", workspace.repository_path, "merge-base", "--is-ancestor", run.branch_name, "main")).to be(false)
+
+      closed = Orchestrator::SessionClose.call(run)
+
+      expect(closed[:worktree]).to eq("removed")
+      expect(File.directory?(run.target_root)).to be(false)
+      expect(git(workspace.repository_path, "branch", "--list", run.branch_name)).to include(run.branch_name)
+      expect(fake_herdr.requests_for("worktree.remove").size).to eq(1)
+    end
+
+    it "keeps a worktree whose commits are in main but not in its own base branch", :fake_herdr do
+      run = queue("Payments fix", baseBranch: "feature/payments")
+      mcp_call("/mcp/run", "report_idle", token: session_token(run), outcome: "done", summary: "Fixed")
+      commit_in(run.target_root, "fix.txt", "Fix payments")
+      git(workspace.repository_path, "merge", "-q", "--ff-only", run.branch_name)
+
+      closed = Orchestrator::SessionClose.call(run)
+
+      expect(closed[:worktree]).to eq("kept")
+      expect(run.reload).to be_kept_worktree
+    end
+
+    it "never reclaims worktrees that are not a run's, or the operator's checkout", :fake_herdr do
+      run = queue("A run")
+      mcp_call("/mcp/run", "report_idle", token: session_token(run), outcome: "done", summary: "Done")
+      operators = File.join(File.dirname(workspace.repository_path), "operators-own")
+      git(workspace.repository_path, "worktree", "add", "-q", "-b", "operator/own", operators, "main")
+      Orchestrator::SessionClose.call(run)
+
+      expect(Orchestrator::WorktreeJanitor.sweep(workspace)).to eq(0)
+
+      expect(File.directory?(operators)).to be(true)
+      expect(File.exist?(File.join(workspace.repository_path, "README.md"))).to be(true)
+      expect(git(workspace.repository_path, "worktree", "list")).to include("operators-own")
+      expect(fake_herdr.requests_for("worktree.open").map { |request| request["path"] }).to all(eq(run.target_root))
+    end
   end
 end

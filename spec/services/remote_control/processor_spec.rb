@@ -11,7 +11,7 @@ RSpec.describe RemoteControl::Processor do
   let(:adapter) { FakeRemoteControlAdapter.new(allowed: [ "42", "43" ]) }
   let(:workspace) { create_workspace(prefix: "rc") }
 
-  after { FileUtils.remove_entry(workspace.root_path) if Dir.exist?(workspace.root_path) }
+  after { FileUtils.remove_entry(workspace.repository_path) if Dir.exist?(workspace.repository_path) }
 
   def message(text, from: 42, reply_to: nil)
     RemoteControl::Message.new(chat_id: from, user_id: from, text:, reply_to_text: reply_to)

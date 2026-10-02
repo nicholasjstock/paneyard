@@ -3,43 +3,21 @@ require "active_support/core_ext/integer/time"
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
 
-  # Deployed production stays eager-loaded. `bin/production` is the local
-  # long-running process against the real database, so it opts into reloads
-  # to pick up source fixes between requests and recurring jobs without a
-  # manual restart.
-  local_hot_reload = ENV["PANEYARD_HOT_RELOAD"] == "1"
-  config.enable_reloading = local_hot_reload
-  config.eager_load = !local_hot_reload
+  # Code is not reloaded; a change takes effect on a restart. A reload
+  # would apply new code without its migrations (bin/production runs
+  # db:prepare only at start) or bin/service's preflight, and would redraw
+  # the routes, rebuilding both mounted MCP endpoints and so dropping every
+  # MCP client's session.
+  config.enable_reloading = false
 
-  # This process is the operator's local, continuously running instance --
-  # not a deployed production server. In its hot-reload mode, serve Propshaft
-  # assets directly from app/assets as well. A stale public/assets manifest
-  # otherwise wins asset_path resolution and leaves newly merged CSS/JS
-  # invisible until someone remembers to precompile it.
-  #
-  # The temporary, deliberately absent manifest selects Propshaft's dynamic
-  # resolver; assets:precompile continues to use public/assets/.manifest.json
-  # for normal production deployments.
-  if local_hot_reload
-    config.assets.server = true
-    config.assets.sweep_cache = true
-    config.assets.manifest_path = Rails.root.join("tmp/propshaft-live-manifest.json")
-  end
+  # Eager load code on boot, so a constant that cannot load fails the start.
+  config.eager_load = true
 
   # Full error reports are disabled.
   config.consider_all_requests_local = false
 
   # Turn on fragment caching in view templates.
   config.action_controller.perform_caching = true
-
-  # Cache assets for far-future expiry since they are all digest stamped.
-  config.public_file_server.headers = { "cache-control" => "public, max-age=#{1.year.to_i}" }
-
-  # Enable serving of images, stylesheets, and JavaScripts from an asset server.
-  # config.asset_host = "http://assets.example.com"
-
-  # Store uploaded files on the local file system (see config/storage.yml for options).
-  config.active_storage.service = :local
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   # config.assume_ssl = true
@@ -69,22 +47,6 @@ Rails.application.configure do
   # Replace the default in-process and non-durable queuing backend for Active Job.
   config.active_job.queue_adapter = :solid_queue
   config.solid_queue.connects_to = { database: { writing: :queue } }
-
-  # Ignore bad email addresses and do not raise email delivery errors.
-  # Set this to true and configure the email server for immediate delivery to raise delivery errors.
-  # config.action_mailer.raise_delivery_errors = false
-
-  # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "example.com" }
-
-  # Specify outgoing SMTP server. Remember to add smtp/* credentials via bin/rails credentials:edit.
-  # config.action_mailer.smtp_settings = {
-  #   user_name: Rails.application.credentials.dig(:smtp, :user_name),
-  #   password: Rails.application.credentials.dig(:smtp, :password),
-  #   address: "smtp.example.com",
-  #   port: 587,
-  #   authentication: :plain
-  # }
 
   # Enable locale fallbacks for I18n (makes lookups for any locale fall back to
   # the I18n.default_locale when a translation cannot be found).

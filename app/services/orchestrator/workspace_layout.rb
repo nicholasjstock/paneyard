@@ -2,7 +2,7 @@ require "yaml"
 
 module Orchestrator
   # The herdr panes a run's workspace opens with, configured per Workspace
-  # (workspaces.layout, YAML text edited on the workspace form). Parsing and
+  # (workspaces.layout, YAML text set by the update_workspace_layout tool). Parsing and
   # validation only -- the runner's Runner::SessionLayout is what builds it,
   # from the plain data #for hands it.
   #
@@ -49,47 +49,33 @@ module Orchestrator
     PANE_KEYS = %w[name command split].freeze
     SPLIT_KEYS = %w[of direction ratio].freeze
 
-    EDITOR_COMMAND = "nvim"
-    # `.` opens the worktree itself (LazyVim's explorer on the project root)
-    # rather than an empty buffer on the dashboard.
-    EDITOR_COMMAND_LINE = "#{EDITOR_COMMAND} .".freeze
-
-    # What a workspace with no layout of its own gets: the agent with nvim
-    # split beside it. Shown on the workspace form as the starting point.
+    # What a workspace with no layout of its own gets: the agent alone. The
+    # layout builder starts from it.
     DEFAULT_YAML = <<~YAML.freeze
       tabs:
         - panes:
             - agent
-            - name: editor
-              command: #{EDITOR_COMMAND_LINE}
-              split: { of: agent, direction: right }
     YAML
 
     # The layout a run of this workspace opens with, as the plain data the
     # runner takes:
     #
     #   [{ "name", "panes" => [{ "name", "command", "split_of", "direction",
-    #                            "ratio", "requires" }] }]
+    #                            "ratio" }] }]
     #
-    # The built-in default's editor pane `requires` nvim, so the runner quietly
-    # drops it on a machine without nvim; a layout the operator wrote gets no
-    # such check -- a missing command just shows up as "command not found" in
-    # its own pane.
+    # A missing command just shows up as "command not found" in its own pane.
     #
     # A stored layout is validated when it is saved, so an invalid one here
     # means the rules changed underneath it. That must not stop runs from
     # starting, so it falls back to the default.
     def for(workspace)
-      tabs = custom(workspace)
-      default = tabs.nil?
-      tabs ||= parse(DEFAULT_YAML)
+      tabs = custom(workspace) || parse(DEFAULT_YAML)
 
       tabs.map do |tab|
         panes = tab.panes.map do |pane|
           {
             "name" => pane.name, "command" => pane.command, "split_of" => pane.split_of,
-            "direction" => pane.direction, "ratio" => pane.ratio,
-            "requires" => (EDITOR_COMMAND if default && pane.command == EDITOR_COMMAND_LINE)
+            "direction" => pane.direction, "ratio" => pane.ratio
           }
         end
         { "name" => tab.name, "panes" => panes }

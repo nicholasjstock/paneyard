@@ -1,5 +1,8 @@
 # Telegram remote control
 
+> [!NOTE]
+> Experimental. Telegram remote control has had little real use and is largely untested beyond the automated specs (which drive a fake Bot API), so expect rough edges and don't rely on it.
+
 The optional Telegram bot lets you check on and steer your live run sessions from your phone. It is off unless configured. It answers only the Telegram user IDs you allow-list, and only in a private chat with the bot, never in a group.
 
 > [!WARNING]
@@ -9,17 +12,15 @@ The optional Telegram bot lets you check on and steer your live run sessions fro
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
 2. Find your numeric Telegram user ID (for example by messaging [@userinfobot](https://t.me/userinfobot)).
-3. Add both to Rails credentials (`bin/rails credentials:edit`):
+3. Put both in the plugin's settings, `$(herdr plugin config-dir paneyard)/.env`, which has the lines ready to uncomment:
 
-   ```yaml
-   telegram:
-     bot_token: "<BotFather token>"
-     allowed_user_ids:
-       - "<your numeric Telegram user id>"
+   ```sh
+   TELEGRAM_BOT_TOKEN=<BotFather token>
+   TELEGRAM_ALLOWED_USER_IDS=<your numeric Telegram user id>   # comma-separated for several
    ```
 
-   or set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` (comma-separated) in the orchestrator's environment (`RemoteControl::Adapters::Telegram::Configuration`).
-4. Restart the orchestrator (`bin/service restart`) so the running instance sees the new credentials.
+   Running from a clone with `bin/service` instead, export the same two variables in the shell that starts it. They are read from the environment only (`RemoteControl::Adapters::Telegram::Configuration`), never from Rails credentials.
+4. Restart the orchestrator (`bin/service restart`, or the plugin's `paneyard.restart` action) so the running instance sees the new settings.
 
 The app polls Telegram every five seconds (`PollTelegramUpdatesJob`, `config/recurring.yml`), so it only needs outbound internet access; it does not need a public URL. Telegram's [`getUpdates`](https://core.telegram.org/bots/api#getupdates) polling API doesn't work while a webhook is configured, so if this bot ever had one, clear it once:
 
@@ -40,7 +41,7 @@ The app registers these with Telegram, so tapping **/** or **Menu** in the chat 
 | `/pane <run>` | Where that session stands. If it has reported (`report_idle`) and hasn't gone back to work since, you get that recap. Otherwise you get its live pane, and the message updates itself every few seconds for 3 minutes. If the session reports during that time, the message says so and the recap follows. |
 | `/screen <run> [lines]` | The raw newest lines of the pane, once (default 200, up to 1000). A long read is split over up to 5 messages, oldest first; whatever still doesn't fit is dropped from the top, and the first message says how many lines that was. Give a smaller number for just the bottom of the screen. |
 | `/report <run>` | That run's newest recap, rendered as Markdown. This also works after the session is closed. |
-| `/send <run> <text>` | Types `<text>` into the session as live input, exactly like the run screen's message box. |
+| `/send <run> <text>` | Types `<text>` into the session as live input, exactly like typing in its Herdr pane. |
 | `/send <text>`, or just type | The same, to the run you last looked at or wrote to (`/pane`, `/screen`, `/report`, `/send <run>` or a reply), for up to 12 hours. Starting with another run's four-character ref or full id still sends there. |
 
 `<run>` is the run id's last four characters (the lists print tappable commands such as `/pane_33bd` and `/screen_33bd`), a prefix of the worktree name, or the full run id. Leave it out (`/screen 120`, `/pane`, `/report`) to mean the run you last looked at or wrote to. Every message the bot sends about a run starts with `run <id> ·`, and **replying to one of those messages sends your reply to that run**.

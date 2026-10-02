@@ -1,23 +1,31 @@
-# Orchestrator::GitWorktree.provision! (invoked by LaunchRunJob) requires a
-# real "main" Git checkout with a committed HEAD and an origin remote under
-# a workspace's root_path -- a bare Dir.mktmpdir isn't enough once a spec's
-# run actually launches (as opposed to being created directly via Run.create!
-# with a status that skips LaunchRunJob). Shared here so every spec that
-# needs one uses the same fixture instead of each re-deriving it slightly
-# differently.
+# A real git repository for a workspace: an ordinary checkout (any directory
+# name will do) with a committed HEAD on main and an origin remote, which is
+# what registration and Orchestrator::GitWorktree.provision! need once a
+# spec's run actually launches. Shared so every spec that needs one uses the
+# same fixture instead of each re-deriving it slightly differently.
+#
+# `branches` adds local branches, each one commit ahead of main, so a run can
+# start from something other than the default.
 module SourceCheckoutFixture
-  def create_source_checkout
-    parent = Dir.mktmpdir("paneyard-source-checkout")
-    main = File.join(parent, "main")
-    FileUtils.mkdir_p(main)
-    system("git", "-C", main, "init", "-b", "main", out: File::NULL, err: File::NULL) || raise("could not initialize source checkout")
-    system("git", "-C", main, "config", "user.email", "spec@example.test")
-    system("git", "-C", main, "config", "user.name", "Spec Fixture")
-    File.write(File.join(main, "README.md"), "source checkout fixture\n")
-    system("git", "-C", main, "add", "README.md") || raise("could not stage source checkout")
-    system("git", "-C", main, "commit", "-m", "Initialize spec source checkout", out: File::NULL, err: File::NULL) || raise("could not commit source checkout")
-    system("git", "-C", main, "remote", "add", "origin", "https://example.test/paneyard.git") || raise("could not configure source checkout remote")
-    parent
+  def create_source_checkout(branches: [], name: "repo")
+    repository = File.join(Dir.mktmpdir("paneyard-repository"), name)
+    FileUtils.mkdir_p(repository)
+    git = ->(*args) { system("git", "-C", repository, *args, out: File::NULL, err: File::NULL) || raise("git #{args.join(' ')} failed") }
+    git.call("init", "-b", "main")
+    git.call("config", "user.email", "spec@example.test")
+    git.call("config", "user.name", "Spec Fixture")
+    File.write(File.join(repository, "README.md"), "source checkout fixture\n")
+    git.call("add", "README.md")
+    git.call("commit", "-m", "Initialize spec source checkout")
+    git.call("remote", "add", "origin", "https://example.test/paneyard.git")
+    branches.each do |branch|
+      git.call("switch", "-q", "-c", branch)
+      File.write(File.join(repository, "#{branch.tr('/', '-')}.txt"), "#{branch}\n")
+      git.call("add", ".")
+      git.call("commit", "-m", "Work on #{branch}")
+      git.call("switch", "-q", "main")
+    end
+    repository
   end
 end
 

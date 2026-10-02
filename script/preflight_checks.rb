@@ -12,9 +12,8 @@ rescue StandardError, ScriptError => error
   puts "  FAIL #{name}: #{error.class}: #{error.message}"
 end
 
-# PANEYARD_HOT_RELOAD=1 (which bin/production sets) turns eager loading off,
-# so a constant that only fails to load under eager loading is never seen in
-# production until something happens to touch it.
+# Production eager loads on boot, so a constant that cannot load stops the
+# restart. Name it here, before the running instance is touched.
 check.call("eager-load every constant") do
   Rails.application.eager_load!
   "#{ApplicationRecord.descendants.size} models, #{ApplicationJob.descendants.size} jobs"

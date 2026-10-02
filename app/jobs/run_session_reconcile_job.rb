@@ -12,12 +12,12 @@
 # refresh! deciding the pane or process is gone ends anything.
 #
 # It also refreshes what herdr knows about each live session -- the agent
-# status the run screen renders, and the CLI's own session id, which is the
+# status operator clients render, and the CLI's own session id, which is the
 # only way to obtain a --resume id for an interactive session.
 #
-# Closing a run's herdr workspace by hand (agent pane and editor pane together)
+# Closing a run's herdr workspace by hand (the agent pane and any others)
 # is also how the operator says they are done with its worktree, without ever
-# opening the run screen. So a session this job finds ended gets the same
+# polling a client. So a session this job finds ended gets the same
 # WorktreeJanitor.release! that Close session gives it: the worktree goes only
 # when its work is committed and pushed or merged, and is otherwise kept,
 # exactly as Close session would keep it.

@@ -15,8 +15,20 @@ RSpec.describe Orchestrator::RunPrompt do
     expect(prompt).to include(run.run_id)
     expect(prompt).to include(run.target_root)
     expect(prompt).to include("paneyard/run-prompt-a1b2")
-    expect(prompt).to include("0123456789ab")
+    expect(prompt).to include("(from `main` at 0123456789ab)")
     expect(prompt).to include(run.task)
+  end
+
+  # A run from another branch merges back into that branch, wherever it is
+  # checked out, and never by moving the operator's own checkout.
+  it "merges back into the run's own base branch, never by switching the operator's checkout" do
+    run.update!(base_branch: "feature/payments")
+
+    expect(prompt).to include("(from `feature/payments` at 0123456789ab)")
+    expect(prompt).to include("into `feature/payments`, the branch this run started from")
+    expect(prompt).to include("git -C #{run.workspace.repository_path} fetch . paneyard/run-prompt-a1b2:feature/payments")
+    expect(prompt).to include("Never switch, reset or stash the operator's checkout at `#{run.workspace.repository_path}`")
+    expect(prompt).not_to include("into `main`")
   end
 
   # The operator tries a session's changes before anything is kept, so the
@@ -26,8 +38,8 @@ RSpec.describe Orchestrator::RunPrompt do
     expect(prompt).to include("do only the one you are asked for")
     expect(prompt).to include('"Commit" means a local commit on this branch, nothing more')
     expect(prompt).to include("Push only when told to push")
-    expect(prompt).to include("Merge only when told to merge, from the main checkout `#{run.workspace.source_root}`")
-    expect(prompt).to include("needs no push first")
+    expect(prompt).to include("Merge only when told to merge, into `main`")
+    expect(prompt).to include("no push needed first")
   end
 
   # A ready-made push command read as one step of a commit/push/merge recipe,
@@ -53,7 +65,6 @@ RSpec.describe Orchestrator::RunPrompt do
   it "gives the ToolSearch hint only to claude, the one driver that defers MCP tools" do
     expect(prompt).to include("ToolSearch")
     expect(described_class.compose(run:, session_driver: "codex")).not_to include("ToolSearch")
-    expect(described_class.compose(run:, session_driver: "opencode")).not_to include("ToolSearch")
   end
 
   it "does not fence off any paths or mention the planner era" do
@@ -61,11 +72,11 @@ RSpec.describe Orchestrator::RunPrompt do
     expect(prompt).not_to match(/planner|pull request/i)
   end
 
-  # Uploads are stored under the main checkout at queue time, before the
-  # worktree exists, so the prompt must point there rather than at a tool.
+  # Uploads are stored on the runner at queue time, before the worktree
+  # exists, so the prompt must point there rather than at a tool.
   it "points the session at the absolute directory holding files attached at launch" do
     run.update!(launch_artifacts: [ { "name" => "failing-test.log", "source_path" => "failing-test.log" } ])
-    dir = File.join(run.workspace.source_root, ".paneyard", "artifacts", run.run_id)
+    dir = Orchestrator::Runner.for(run.workspace).attachments_dir(run_id: run.run_id)
 
     expect(described_class.compose(run:, session_driver: "claude"))
       .to include("failing-test.log", dir)

@@ -2,8 +2,12 @@
 
 > This is a design record, kept for its reasoning (see [the docs index](./README.md#design-records)).
 > For how to use layouts, see [operating.md](./operating.md#workspace-layouts). Some class names
-> below have since moved behind `Orchestrator::Runner` (for example `SessionEnv` is now
-> `Runner::ProcessEnv` and the pane building is `Runner::SessionLayout`).
+> below have since moved behind `Orchestrator::Runner` (the pane building is
+> `Runner::SessionLayout`). Superseded in part: panes no longer get any environment from
+> Paneyard (session env, and `Runner::ProcessEnv` with it, was removed), and the layout is
+> built in the workspace herdr opens for the run's worktree (`worktree.create`), whose root
+> pane is the agent's. Everything below about every pane getting the agent's env is history.
+> The default layout is now the agent alone: nvim is no longer opened unless a layout asks for it.
 
 Status: implemented. This started as a proposal and has been updated to match
 what was built, and what was verified live against herdr during
@@ -16,7 +20,7 @@ A run's herdr workspace opens with two panes, hardcoded in
 
 1. `Herdr.workspace_create` gives the **agent pane** (its root pane). That pane
    gets the full session env (`SessionEnv.for_session`) and runs the
-   claude/codex/opencode CLI. Its id is `RunSession#herdr_pane_id`.
+   claude/codex CLI. Its id is `RunSession#herdr_pane_id`.
 2. `open_editor_pane` splits it `right` and types `nvim .` into the new shell,
    provided `nvim` is on Rails' PATH. Rails never records this pane.
 
@@ -333,10 +337,10 @@ default.
   extra pane.
 - **herdr owns the processes**: we only create panes and type into them.
   Teardown is herdr's `workspace.close`.
-- **MCP boundary**: no new tools. A session cannot read or change the layout
-  through MCP. If it wants another process it can start one itself.
-- **Workspace-first**: the config is a `Workspace` attribute, edited under
-  `/workspaces/:id/edit`.
+- **MCP boundary**: `update_workspace_layout` is admin-only. A run session
+  cannot change the layout; if it wants another process it can start one itself.
+- **Workspace-first**: the config is a `Workspace` attribute, edited from the
+  repository's `paneyard.layout` Herdr action.
 
 ## Alternatives rejected
 
@@ -377,22 +381,15 @@ default.
   - `start!` builds through `SessionLayout`; the `open_editor_pane` and
     `EDITOR_*` constants moved into the layout default.
   - `mark_pane_lost!` now closes the whole workspace.
-- `app/controllers/workspaces_controller.rb`, `app/views/workspaces/*`,
-  **new** `app/javascript/controllers/layout_editor_controller.js`: a visual
-  layout editor on the new and edit forms, and the form's validation errors.
-  - Each tab is a card: a name field, and a pane list where each pane has a
-    name, a command, the earlier pane it splits off, right or below, and the
-    share that pane keeps.
-  - Tabs after the first can be moved or removed.
-  - Each tab shows a to-scale sketch computed the way herdr splits.
+- `lib/paneyard_plugin/cli.rb`: a Herdr-native visual layout builder, with
+  validation errors returned by the admin MCP tool.
+  - The popup redraws a tree of tabs and panes after every operation; panes
+    carry their command, split parent, direction, and optional ratio.
+  - Tabs after the first and unreferenced leaf panes can be removed.
   - The agent row is fixed.
-  - The editor writes JSON into the hidden `layout` field (JSON is YAML).
-    `Workspace` normalises any valid layout to canonical YAML
-    (`WorkspaceLayout.dump`) and keeps an invalid one as submitted.
-    `WorkspaceLayout.editor_data` hands it back to the editor unvalidated,
-    so the operator's work stays on screen beside the error.
-  - The field stays blank, meaning the default, until something is changed;
-    **Reset to default** blanks it again.
+  - Saving sends YAML to `update_workspace_layout`; `Workspace` normalises a
+    valid layout to canonical YAML and rejects invalid input unchanged.
+  - **Reset to default** stores a blank layout again.
 - `README.md` ("Workspace layouts"), `AGENTS.md`, `CLAUDE.md`.
 
 ## Spec coverage

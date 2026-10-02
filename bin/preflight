@@ -117,7 +117,6 @@ begin
 
   unless @failed
     output, ok = instance.run("bin/rails", "runner", "script/preflight_checks.rb")
-    output = output.lines.grep_v(/GitHub App credentials not configured/).join
     @failed = true unless ok
     if ok || output.match?(/^\s+(ok|FAIL) /)
       puts output
@@ -146,29 +145,17 @@ begin
       raise "bin/production exited after boot:\n#{instance.log_tail(40)}" unless instance.running?
     end
 
-    step("pages render") do
-      paths = [ "/up", "/" ]
-      if PROD_COPY
-        SQLite3::Database.new(File.join(STORAGE, "production.sqlite3"), readonly: true) do |db|
-          workspace_id = db.get_first_value("SELECT id FROM workspaces ORDER BY id LIMIT 1")
-          paths << "/workspaces/#{workspace_id}" << "/workspaces/#{workspace_id}/runs" if workspace_id
-          workspace_id, run_id = db.get_first_row("SELECT workspace_id, run_id FROM runs ORDER BY id DESC LIMIT 1")
-          paths << "/workspaces/#{workspace_id}/runs/#{run_id}" if run_id
-        end
-      end
-      bad = paths.filter_map do |path|
-        code = instance.get(path).code
-        "#{path} -> #{code}" if code.to_i >= 400
-      end
-      raise bad.join(", ") if bad.any?
+    step("health endpoint answers") do
+      code = instance.get("/up").code
+      raise "/up -> #{code}" if code.to_i >= 400
 
-      paths.join(" ")
+      "/up"
     end
 
     # DNS rebinding: a page re-pointing its own name at 127.0.0.1 still sends
     # that name as Host (config.hosts, PaneyardAllowedHosts).
     step("foreign Host rejected, loopback names answered") do
-      bad = [ "/", "/up", "/mcp/admin" ].filter_map do |path|
+      bad = [ "/up", "/mcp/admin" ].filter_map do |path|
         code = instance.get(path, headers: { "Host" => "rebound.example" }).code
         "#{path} with a foreign Host -> #{code}" unless code == "403"
       end

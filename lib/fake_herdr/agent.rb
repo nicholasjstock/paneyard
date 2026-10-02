@@ -1,9 +1,12 @@
+require "digest"
+require "fileutils"
 require "json"
 require "securerandom"
+require "tmpdir"
 require_relative "../paneyard_sandbox/mcp_client"
 
 module FakeHerdr
-  # The process FakeHerdr::Server launches in place of claude/codex/opencode.
+  # The process FakeHerdr::Server launches in place of claude or codex.
   # No model: it becomes "ready", takes the prompt herdr's agent.prompt hands
   # it, and does what a directive in that prompt says -- by default, report
   # `done` through the real /mcp/run endpoint with the capability the session
@@ -24,6 +27,12 @@ module FakeHerdr
   # input box", and only acts on it once an Enter arrives through
   # agent.send_keys.
   #
+  # Like claude, it keeps each conversation it starts under the directory it
+  # ran in (FAKE_AGENT_CONVERSATIONS_DIR, which FakeHerdr::Server sets), and
+  # resumes one when launched with claude's `--resume <id>` or codex's
+  # `resume <id>`. A resume of a conversation that directory never had exits
+  # at once, before herdr can see it start, as `claude --resume` does.
+  #
   # Its stdout is the fake herdr's control channel: `{"fake_herdr": {...}}`
   # lines update what agent.get says, anything else lands in the pane text.
   class Agent
@@ -41,8 +50,9 @@ module FakeHerdr
 
     def run
       trap("TERM") { exit 0 }
+      session = conversation
       sleep 0.1
-      control(status: "idle", ready: true, session: "fake-#{SecureRandom.hex(4)}")
+      control(status: "idle", ready: true, session:)
       @input.each_line do |line|
         message = JSON.parse(line)
         case message["type"]
@@ -53,6 +63,32 @@ module FakeHerdr
     end
 
     private
+
+    # The conversation id this launch runs: the one it resumes, or a new one.
+    def conversation
+      resume_id = @argv[@argv.index("--resume") + 1] if @argv.include?("--resume")
+      resume_id ||= @argv[1] if @argv.first == "resume"
+      if resume_id
+        unless File.exist?(conversation_path(resume_id))
+          say("No conversation found with session ID: #{resume_id}")
+          exit 1
+        end
+        say("fake agent resumed conversation #{resume_id}")
+        return resume_id
+      end
+
+      "fake-#{SecureRandom.hex(4)}".tap do |id|
+        path = conversation_path(id)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "")
+      end
+    end
+
+    def conversation_path(id)
+      root = @env["FAKE_AGENT_CONVERSATIONS_DIR"].to_s
+      root = File.join(Dir.tmpdir, "fake-agent-conversations") if root.empty?
+      File.join(root, Digest::SHA256.hexdigest(File.realpath(Dir.pwd)), File.basename(id))
+    end
 
     def receive_prompt(text)
       return handle_prompt(text) unless text.match?(UNSUBMITTED)
@@ -109,8 +145,9 @@ module FakeHerdr
       say("report_idle failed: #{error.class}: #{error.message}")
     end
 
-    # Claude's launch args carry the MCP config file RunSessionRunner wrote,
-    # so read the URL and bearer from there, as claude would.
+    # Read the URL and bearer from the launch args, as the real CLI would:
+    # claude's point at the MCP config file RunSessionRunner wrote; codex's
+    # carry them as -c overrides. Sessions get nothing in their environment.
     def mcp_endpoint
       config_path = @argv[@argv.index("--mcp-config") + 1] if @argv.include?("--mcp-config")
       if config_path && File.exist?(config_path)
@@ -118,7 +155,12 @@ module FakeHerdr
         return [ server.fetch("url"), server.dig("headers", "Authorization").to_s.delete_prefix("Bearer ") ]
       end
 
-      [ @env.fetch("FAKE_AGENT_MCP_URL"), @env.fetch("PANEYARD_RUN_TOKEN") ]
+      overrides = @argv.each_cons(2).select { |flag, _| flag == "-c" }.map(&:last)
+      url = overrides.find { |value| value.start_with?("mcp_servers.paneyard.url=") }
+      headers = overrides.find { |value| value.start_with?("mcp_servers.paneyard.http_headers=") }
+      raise "no paneyard MCP config in the launch args" unless url && headers
+
+      [ JSON.parse(url.split("=", 2).last), headers[/Bearer ([^"]+)"/, 1] ]
     end
 
     def control(**update)

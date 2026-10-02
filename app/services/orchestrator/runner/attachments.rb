@@ -1,17 +1,20 @@
 module Orchestrator
   module Runner
     # Files the operator attached to a run at launch, kept on the runner's
-    # machine under the workspace's main checkout
-    # (<main>/.paneyard/artifacts/<run>/), since that is where
-    # the session can read them. They are stored before the run's worktree
-    # exists, which is why they live under main rather than the worktree.
+    # machine beside the run's other runtime files
+    # (<runtime root>/<run>/attachments/), where the session is told to read
+    # them. Never inside the repository: that is the operator's own checkout,
+    # and a file left there would show up as untracked work.
+    #
+    # Runs from before kept them in <checkout>/.paneyard/artifacts/<run>/;
+    # list still reads that for them.
     module Attachments
       module_function
 
-      OUTPUT_DIR = File.join(".paneyard", "artifacts")
+      LEGACY_DIR = File.join(".paneyard", "artifacts")
 
-      def dir(source_root, run_id)
-        File.join(source_root, OUTPUT_DIR, sanitize_run_id(run_id))
+      def dir(runtime_root, run_id)
+        File.join(runtime_root.to_s, sanitize_run_id(run_id), "attachments")
       end
 
       def sanitize_run_id(run_id)
@@ -21,24 +24,26 @@ module Orchestrator
         sanitized
       end
 
-      def path(source_root, run_id, name)
+      def path(runtime_root, run_id, name)
         if name.blank? || name == "." || name == ".." || name.include?("/") || name.include?("\\") || name.include?("\0")
           raise ArgumentError, "Unsafe attachment name: #{name}"
         end
 
-        File.join(dir(source_root, run_id), name)
+        File.join(dir(runtime_root, run_id), name)
       end
 
-      def store(source_root, run_id, name, content)
-        path = path(source_root, run_id, name)
+      def store(runtime_root, run_id, name, content)
+        path = path(runtime_root, run_id, name)
         FileUtils.mkdir_p(File.dirname(path))
         File.binwrite(path, content)
         path
       end
 
       # [{ "name", "content" }], by name.
-      def list(source_root, run_id)
-        run_dir = dir(source_root, run_id)
+      def list(runtime_root, run_id, legacy_root: nil)
+        run_dir = dir(runtime_root, run_id)
+        legacy = legacy_root && File.join(legacy_root.to_s, LEGACY_DIR, sanitize_run_id(run_id))
+        run_dir = legacy if !Dir.exist?(run_dir) && legacy && Dir.exist?(legacy)
         return [] unless Dir.exist?(run_dir)
 
         Dir.children(run_dir).sort.filter_map do |name|

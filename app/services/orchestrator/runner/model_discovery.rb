@@ -3,17 +3,16 @@ require "open3"
 module Orchestrator
   module Runner
     # The models each session driver can actually run on this machine, asked
-    # of the installed CLI itself rather than hardcoded here, so the new-run
-    # form's model dropdown (Orchestrator::ModelCatalog, which caches this)
-    # tracks whatever the operator's own claude/codex/opencode offers.
+    # of the installed CLI itself rather than hardcoded here, so
+    # Orchestrator::ModelCatalog (which caches this) tracks whatever the
+    # operator's own claude/codex offers.
     #
-    # None of the three has one uniform "list models" command, so each is read
+    # Neither has one uniform "list models" command, so each is read
     # from wherever that CLI keeps its own list:
     #   - claude has no subcommand for it, but caches the catalog it fetched for
     #     its own /model picker at <config dir>/cache/model-catalog/*-cc.json;
     #   - codex prints its catalog as JSON with `codex debug models`
-    #     (visibility "hide" entries are internal and never shown in its picker);
-    #   - opencode prints one provider/model per line with `opencode models`.
+    #     (visibility "hide" entries are internal and never shown in its picker).
     #
     # A driver whose CLI is missing or whose output cannot be read yields an
     # empty list, never an error: the form then only offers the driver's
@@ -29,7 +28,6 @@ module Orchestrator
         case driver
         when "claude" then claude_models
         when "codex" then codex_models
-        when "opencode" then opencode_models
         else []
         end
       rescue StandardError => error
@@ -65,13 +63,6 @@ module Orchestrator
           .reject { |model| model["slug"].blank? || model["visibility"] == "hide" }
           .sort_by { |model| model["priority"] || Float::INFINITY }
           .map { |model| option(model["slug"], model["display_name"]) }
-      end
-
-      def opencode_models
-        output = capture("opencode", "models")
-        return [] unless output
-
-        output.lines.map(&:strip).grep(%r{\A[^\s/]+/\S+\z}).uniq.map { |id| option(id) }
       end
 
       # The id is what goes on the command line; the label shows it next to the
