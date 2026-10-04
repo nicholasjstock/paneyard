@@ -129,6 +129,47 @@ RSpec.describe "a run's lifecycle", type: :request do
     expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
   end
 
+  # run-20261004-132411-8668: herdr answered agent.prompt after the request
+  # timeout while it was still delivering the text, and the launch was failed.
+  describe "a slow agent.prompt" do
+    before do
+      stub_const("Orchestrator::Runner::Herdr::AGENT_PROMPT_TIMEOUT_SECONDS", 0.3)
+      stub_const("Orchestrator::Runner::SessionLauncher::PROMPT_SUBMIT_POLL_ATTEMPTS", 8)
+      stub_const("Orchestrator::Runner::SessionLauncher::PROMPT_SUBMIT_RETRY_WINDOWS", [ 4, 4 ])
+    end
+
+    it "launches the run when herdr delivers the prompt but answers late, and never sends it twice", :fake_herdr do
+      fake_herdr.slow!("agent.prompt", seconds: 1)
+
+      run = queue_and_launch("Slow to arrive")
+
+      expect(run.reload).to have_attributes(status: "running")
+      expect(run.live_session).to have_attributes(status: "running")
+      expect(fake_herdr.requests_for("agent.prompt").size).to eq(1)
+      transcript = -> { fake_herdr.pane("w1:p1")[:transcript] }
+      expect(wait_for { transcript.call.include?("received a") }).to be(true)
+      expect(transcript.call.scan("received a").size).to eq(1)
+    end
+
+    it "fails the launch, saying what it saw, when the agent never picks anything up", :fake_herdr do
+      fake_herdr.slow!("agent.prompt", seconds: 1, deliver: false)
+
+      run_id = nil
+      perform_enqueued_jobs(only: RunDispatchJob) do
+        run_id = mcp_call("/mcp/admin", "queue_run", task: "Never arrives", workspace: workspace.name).fetch("runId")
+      end
+      run = Run.find_by!(run_id:)
+      expect { StartRunSessionJob.perform_now(run.id) }
+        .to raise_error(Orchestrator::Runner::LaunchError, /agent.prompt gave no reply within [\d.]+s.*never seen busy/)
+
+      expect(run.reload).to have_attributes(status: "failed", launch_error: include("its task most likely never arrived"))
+      expect(fake_herdr.requests_for("agent.prompt").size).to eq(1)
+      expect(fake_herdr.requests_for("agent.send_keys").size).to eq(2)
+      expect(fake_herdr.workspace_ids).to be_empty
+      expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
+    end
+  end
+
   describe "reopening a closed session" do
     def reopen(run)
       result = nil

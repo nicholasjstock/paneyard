@@ -48,6 +48,7 @@ module FakeHerdr
       @panes = {}
       @next_workspace = 0
       @threads = []
+      @slow = {}
     end
 
     def start
@@ -82,6 +83,14 @@ module FakeHerdr
       @mutex.synchronize { @workspaces.keys }
     end
 
+    # herdr answering `method` only after `seconds`, as a busy herdr does an
+    # agent.prompt (run-20261004-132411-8668). With deliver: true the request
+    # takes effect at once and only the reply is late; with false it never
+    # takes effect at all, though the request is still recorded.
+    def slow!(method, seconds:, deliver: true)
+      @mutex.synchronize { @slow[method] = { seconds:, deliver: } }
+    end
+
     # The operator closing a workspace by hand, from outside Rails.
     def close_workspace!(workspace_id)
       handle("workspace.close", "workspace_id" => workspace_id)
@@ -95,7 +104,13 @@ module FakeHerdr
       params = request["params"] || {}
       @mutex.synchronize { @requests << [ method, params ] }
       log("-> #{method} #{params.except('env', 'text').to_json}")
-      { "id" => id, "result" => handle(method, params) }
+      slow = @mutex.synchronize { @slow[method] }
+      begin
+        result = handle(method, params) unless slow && !slow[:deliver]
+      ensure
+        sleep slow[:seconds] if slow
+      end
+      { "id" => id, "result" => result || {} }
     rescue MethodError => error
       { "id" => id, "error" => { "code" => error.code, "message" => error.message } }
     end
