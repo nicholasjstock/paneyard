@@ -51,6 +51,9 @@ class Run < ApplicationRecord
   validates :model, format: { with: %r{\A[A-Za-z0-9][\w.:/\[\]@-]*\z} }, allow_blank: true
   validates :status, inclusion: { in: STATUSES }
   validate :launch_artifacts_are_safe
+  # queue_run's `after` (Orchestrator::RunDependencies): run_ids whose work
+  # must be merged into this run's base branch before it first launches.
+  validate :dependency_run_ids_are_a_list
 
   before_validation :default_base_branch, on: :create
 
@@ -137,6 +140,12 @@ class Run < ApplicationRecord
 
   def default_base_branch
     self.base_branch = workspace&.default_base_branch if base_branch.blank?
+  end
+
+  def dependency_run_ids_are_a_list
+    unless dependency_run_ids.is_a?(Array) && dependency_run_ids.all? { |id| id.is_a?(String) && id.present? }
+      errors.add(:dependency_run_ids, "must be a list of run ids")
+    end
   end
 
   def launch_artifacts_are_safe

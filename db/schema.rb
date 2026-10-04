@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_02_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_04_140000) do
   create_table "run_checkpoints", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "outcome", null: false
@@ -68,6 +68,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_02_100000) do
     t.integer "workspace_id", null: false
     t.string "worktree_name"
     t.string "base_branch", null: false
+    t.json "dependency_run_ids", default: [], null: false
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["status"], name: "index_runs_on_status"
     t.index ["workspace_id"], name: "index_runs_on_workspace_id"

@@ -329,4 +329,68 @@ RSpec.describe "a run's lifecycle", type: :request do
       expect(fake_herdr.requests_for("worktree.open").map { |request| request["path"] }).to all(eq(run.target_root))
     end
   end
+
+  # queue_run's after: the dependent run waits, holding no slot and with no
+  # worktree, until the run it is queued after has its work merged into the
+  # base branch they share; its worktree then starts from that merge.
+  describe "runs queued after other runs" do
+    def queue(task, **arguments)
+      run_id = nil
+      perform_enqueued_jobs(only: [ RunDispatchJob, StartRunSessionJob ]) do
+        run_id = mcp_call("/mcp/admin", "queue_run", task:, workspace: workspace.name, **arguments).fetch("runId")
+      end
+      Run.find_by!(run_id:)
+    end
+
+    def dispatch
+      perform_enqueued_jobs(only: StartRunSessionJob) { RunDispatchJob.perform_now }
+    end
+
+    it "waits until the first run's work is merged, then branches from the base including it", :fake_herdr do
+      first = queue("Lay the groundwork")
+      second = queue("Build on it", after: [ first.run_id ])
+
+      expect(second.reload).to have_attributes(status: "queued", branch_name: nil)
+      expect(fake_herdr.requests_for("worktree.create").size).to eq(1)
+      expect(Orchestrator::RunConcurrency.occupied_run_ids).to eq([ first.id ])
+      listed = mcp_call("/mcp/admin", "list_runs", workspace: workspace.name).fetch("runs").find { |run| run["runId"] == second.run_id }
+      expect(listed).to include("after" => [ first.run_id ])
+      expect(listed.dig("dependencies", "state")).to eq("waiting")
+
+      # Committed but not merged yet: still waiting.
+      commit_in(first.target_root, "groundwork.txt", "Lay the groundwork")
+      report(first, "done", "Groundwork laid")
+      dispatch
+      expect(second.reload.status).to eq("queued")
+
+      # The merge the prompt describes, into main where it is checked out.
+      git(workspace.repository_path, "merge", "-q", "--ff-only", first.branch_name)
+      dispatch
+
+      expect(second.reload).to have_attributes(status: "running", branch_name: start_with("paneyard/"))
+      expect(File.exist?(File.join(second.target_root, "groundwork.txt"))).to be(true)
+      expect(second.base_sha).to eq(git(workspace.repository_path, "rev-parse", "main"))
+      expect(mcp_call("/mcp/admin", "get_run", runId: second.run_id, workspace: workspace.name)).not_to have_key("dependencies")
+    end
+
+    it "stays queued as blocked when the first run fails, and launches once released", :fake_herdr do
+      first = queue("Lay the groundwork")
+      second = queue("Build on it", after: [ first.run_id ])
+      report(first, "failed", "Could not")
+      Orchestrator::SessionClose.call(first)
+      expect(first.reload.status).to eq("failed")
+
+      dispatch
+
+      expect(second.reload.status).to eq("queued")
+      detail = mcp_call("/mcp/admin", "get_run", runId: second.run_id, workspace: workspace.name)
+      expect(detail.fetch("dependencies")).to include("state" => "blocked", "reason" => include("#{first.run_id} failed"))
+
+      perform_enqueued_jobs(only: [ RunDispatchJob, StartRunSessionJob ]) do
+        mcp_call("/mcp/admin", "update_run_dependencies", runId: second.run_id, workspace: workspace.name, after: [])
+      end
+
+      expect(second.reload.status).to eq("running")
+    end
+  end
 end

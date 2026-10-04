@@ -25,6 +25,12 @@ The first public version. It includes:
 - Existing `<root>/main` workspaces migrate to `repository_path = <root>/main`, `default_base_branch = main`; existing runs to `base_branch = main`.
 - Launch attachments are stored beside a run's runtime files instead of in the repository.
 
+### Run dependencies and the Paneyard skill
+
+- `queue_run` takes `after`: runIds in the same workspace and base branch whose work the new run builds on. It stays queued, holding no slot, until each one's commits are merged into that base branch (read from git: the branch has commits of its own, all in the base), and only then gets its worktree, from the base including that work. Unknown runs, runs in another workspace or on another base branch, failed or stopped runs, and cycles are refused. A run whose dependency failed or stopped unmerged waits as blocked. `list_runs`, `get_run` and the plugin's jobs popup show `after` and the waiting or blocked state with its reason. Schema: `runs.dependency_run_ids` (JSON, default `[]`).
+- `update_run_dependencies` on `/mcp/admin` (and `s` on a waiting job's screen in the plugin) re-points a waiting run or releases it.
+- `skills/paneyard/SKILL.md`: a short skill that teaches an agent to queue jobs well. `paneyard.setup` prints the command that links it into Claude Code.
+
 ### Removed
 
 - Rails credentials setup. Production now generates its only required secret, `secret_key_base`, beside the instance's databases on first start.

@@ -48,6 +48,23 @@ RSpec.describe RunDispatchJob do
     expect(free.reload.status).to eq("launching")
   end
 
+  # A run queued after another waits, holding no slot, until that run's work
+  # is merged (Orchestrator::RunDependencies); runs queued later go first.
+  it "passes over a run whose dependencies are not merged, and starts the next one" do
+    ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "2"
+    workspace = create_workspace(prefix: "dispatch-deps", repository_path: create_source_checkout)
+    dependency = create_run(workspace:, prefix: "dispatch-dependency", status: "running", base_branch: "main")
+    waiting = create_run(workspace:, prefix: "dispatch-dependent", status: "queued", base_branch: "main",
+      dependency_run_ids: [ dependency.run_id ], created_at: 2.minutes.ago)
+    later = create_run(workspace:, prefix: "dispatch-later", status: "queued", base_branch: "main", created_at: 1.minute.ago)
+
+    expect { described_class.perform_now }.to have_enqueued_job(StartRunSessionJob).once
+
+    expect(waiting.reload.status).to eq("queued")
+    expect(later.reload.status).to eq("launching")
+    expect(Orchestrator::RunConcurrency.occupied_run_ids).not_to include(waiting.id)
+  end
+
   it "does nothing at all when nothing is queued" do
     create_run(prefix: "dispatch-running", status: "running")
 

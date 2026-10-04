@@ -8,11 +8,12 @@ module Orchestrator
   # code serve a caller with no run of its own (falls back to the oldest
   # registered workspace, or an explicit `workspace:` argument).
   #
-  # register_workspace, update_workspace_layout, close_session and
-  # reopen_session are the tools only this endpoint has beyond ping: changing
-  # what Paneyard manages or what panes a run starts, or ending a session or
-  # bringing one back, is the operator's decision, while a run session works
-  # inside the workspace it was given.
+  # register_workspace, update_workspace_layout, close_session,
+  # reopen_session and update_run_dependencies are the tools only this
+  # endpoint has beyond ping: changing what Paneyard manages or what panes a
+  # run starts, ending a session or bringing one back, or letting a run start
+  # without the work it was queued after, is the operator's decision, while a
+  # run session works inside the workspace it was given.
   module AdminMcpServer
     module_function
 
@@ -26,7 +27,8 @@ module Orchestrator
       ::McpTools::RegisterWorkspaceTool,
       ::McpTools::UpdateWorkspaceLayoutTool,
       ::McpTools::CloseSessionTool,
-      ::McpTools::ReopenSessionTool
+      ::McpTools::ReopenSessionTool,
+      ::McpTools::UpdateRunDependenciesTool
     ].freeze
 
     # Clients that surface server instructions (Claude Code does) get the one
@@ -40,7 +42,9 @@ module Orchestrator
       "operator names another: the job starts from it and merges back into it. Leave it out only on a detached " \
       "HEAD, and the job starts from the workspace's defaultBaseBranch. Likewise pass driver as the agent CLI you are " \
       "(claude or codex), and model as the model id you are running on if you know it, unless the operator names " \
-      "others.".freeze
+      "others. When one job must build on another's work, queue it with after: [that job's runId] rather than " \
+      "asking the operator to merge them in order; it waits, holding no slot, until that work is merged into the " \
+      "shared baseBranch.".freeze
 
     def build
       MCP::Server.new(

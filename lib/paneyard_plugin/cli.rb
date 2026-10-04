@@ -504,7 +504,17 @@ module PaneyardPlugin
       clients.each { |client| configure_mcp_client(client, url) }
       say ""
       say dim("New agent sessions will have Paneyard's tools. This setup is safe to run again.")
+      show_skill_command
       pause
+    end
+
+    # skills/paneyard teaches an agent to queue well. Linked rather than
+    # copied, so it follows the plugin's own updates; setup prints the command
+    # rather than writing into the agent's own configuration.
+    def show_skill_command
+      say ""
+      say "To teach Claude Code how to hand off jobs well, link Paneyard's skill:"
+      say "  mkdir -p ~/.claude/skills && ln -sfn #{File.join(paths.app_root, 'skills', 'paneyard')} ~/.claude/skills/paneyard"
     end
 
     def mcp_clients
@@ -585,6 +595,7 @@ module PaneyardPlugin
       say "Manual setup:"
       say "  claude mcp add --transport http -s user paneyard #{url}"
       say "  codex mcp add paneyard --url #{url}"
+      show_skill_command
     end
 
     def run_command(*argv)
@@ -604,6 +615,8 @@ module PaneyardPlugin
         say dim("#{workspace.fetch('name')} · #{[ run['driver'], run['model'] ].compact.join(' ')} · #{run['branch'] || 'no branch yet'} from #{run['baseBranch']}")
         say dim("Follow-up of #{run['parentRunId']}") if run["parentRunId"]
         say dim("Follow-ups: #{run['followUpRunIds'].join(', ')}") if Array(run["followUpRunIds"]).any?
+        say dim("After: #{run['after'].join(', ')}") if Array(run["after"]).any?
+        say run.dig("dependencies", "reason") if run.dig("dependencies", "reason")
         say dim(run["worktree"]) if run["worktree"]
         say "Launch error: #{run['launchError']}" if run["launchError"]
         show_report(run)
@@ -612,6 +625,8 @@ module PaneyardPlugin
         options << "f to go to its herdr workspace" if live && session["herdrWorkspace"]
         options << "c to close its session" if live
         options << "o to reopen its session" if run["reopenable"]
+        waiting = %w[waiting blocked].include?(run.dig("dependencies", "state"))
+        options << "s to start it without waiting" if waiting
         options += [ "r to re-read", "b back", "q quit" ]
         case ask("#{options.join(', ')}: ")
         when nil, "q" then return :quit
@@ -631,6 +646,12 @@ module PaneyardPlugin
           next unless run["reopenable"]
 
           reopen!(client, workspace, run)
+          pause
+          return :quit
+        when "s"
+          next unless waiting
+
+          release!(client, workspace, run)
           pause
           return :quit
         end
@@ -693,6 +714,17 @@ module PaneyardPlugin
       say error.payload["message"] || error.message
     end
 
+    def release!(client, workspace, run)
+      say ""
+      say "It then starts when a slot frees, from #{run['baseBranch']} as it is, without #{run['after'].join(', ')}'s work."
+      return say("Left it waiting.") unless ask("Start #{run.fetch('runId')} without waiting? [y/N] ")&.downcase == "y"
+
+      client.release(run.fetch("runId"), workspace: workspace.fetch("name"))
+      say bold("Released. It starts when a slot frees.")
+    rescue PaneyardSandbox::McpClient::ToolError => error
+      say error.payload["message"] || error.message
+    end
+
     def register!(client, path)
       say "#{path} is not in a Paneyard workspace yet. Registering it…"
       workspace = client.register(path:)
@@ -725,7 +757,12 @@ module PaneyardPlugin
     def run_line(number, workspace, run)
       width = IO.console&.winsize&.last || 100
       session = run["session"] || {}
-      state = session["live"] && session["agentStatus"] ? "#{run['status']}/#{session['agentStatus']}" : run["status"]
+      waiting = run.dig("dependencies", "state")
+      state =
+        if session["live"] && session["agentStatus"] then "#{run['status']}/#{session['agentStatus']}"
+        elsif waiting && waiting != "met" then "#{run['status']}/#{waiting}"
+        else run["status"]
+        end
       parent = run["parentRunId"] ? "↳#{run['parentRunId'][-4..]}" : ""
       line = format("%3d  %-4s %-5s  %-18s  %-8s  %-14s  ", number, run.fetch("runId")[-4..], parent, state, run["driver"],
         workspace.fetch("name")[0, 14])

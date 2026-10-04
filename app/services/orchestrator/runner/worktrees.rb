@@ -116,6 +116,20 @@ module Orchestrator
         GitRef.branch?(branch) && local_branch?(Pathname(repository_path), branch)
       end
 
+      # Whether `branch` has work of its own -- commits beyond `since`, the
+      # commit it started from -- and all of it is in `base_branch`, by a
+      # merge or a fast-forward. A branch with no commits yet has nothing
+      # merged, however much it is "in" its base.
+      def merged?(repository_path:, branch:, base_branch:, since:)
+        repository = Pathname(repository_path)
+        return false unless GitRef.branch?(branch) && GitRef.branch?(base_branch) && since.to_s.match?(/\A\h{7,64}\z/)
+        return false unless local_branch?(repository, branch) && local_branch?(repository, base_branch)
+        return false unless git_success?(repository, "merge-base", "--is-ancestor", "refs/heads/#{branch}", "refs/heads/#{base_branch}")
+
+        output, _error, status = Open3.capture3("git", "-C", repository.to_s, "rev-list", "--count", "#{since}..refs/heads/#{branch}")
+        status.success? && output.to_i.positive?
+      end
+
       def local_branch?(repository, branch)
         git_success?(repository, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}^{commit}")
       end
