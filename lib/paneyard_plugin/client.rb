@@ -52,5 +52,10 @@ module PaneyardPlugin
     def reopen(run_id, workspace:)
       @mcp.call_tool("reopen_session", runId: run_id, workspace:)
     end
+
+    # Lets a queued run start without waiting for the runs it was queued after.
+    def release(run_id, workspace:)
+      @mcp.call_tool("update_run_dependencies", runId: run_id, workspace:, after: [])
+    end
   end
 end

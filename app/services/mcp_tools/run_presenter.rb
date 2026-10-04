@@ -22,6 +22,11 @@ module McpTools
         base_branch: run.base_branch,
         # The run this one follows up: the one whose branch it started from.
         parent_run_id: parents[run.id],
+        # queue_run's `after`, and, until the run first launches, whether
+        # their work is merged into base_branch yet: "waiting" or "blocked"
+        # keeps it queued, with the reason.
+        after: run.dependency_run_ids.presence,
+        dependencies: Orchestrator::RunDependencies.status(run),
         session: session && session_summary(session),
         started_at: run.started_at&.iso8601,
         stopped_at: run.stopped_at&.iso8601

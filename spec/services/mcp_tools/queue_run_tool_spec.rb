@@ -106,4 +106,44 @@ RSpec.describe McpTools::QueueRunTool do
 
     expect(response.error?).to be(true)
   end
+
+  describe "after" do
+    let(:workspace) { create_workspace(prefix: "queue-run-after", repository_path: repository) }
+
+    def queue(task, **arguments)
+      described_class.call(task:, workspace: workspace.name, server_context: {}, **arguments)
+    end
+
+    it "records the runs to wait for, and says it is waiting for them" do
+      first = create_run(workspace:, prefix: "after-first", status: "running", base_branch: "main")
+
+      response = queue("Build on it.", after: [ first.run_id ])
+
+      expect(response.error?).to be_falsey
+      expect(response.structured_content).to include(status: "queued", after: [ first.run_id ])
+      expect(response.structured_content[:dependencies]).to include(state: "waiting", reason: include(first.run_id, "`main`"))
+      expect(workspace.runs.find_by(task: "Build on it.").dependency_run_ids).to eq([ first.run_id ])
+    end
+
+    {
+      "a run that does not exist" => [ -> { "run-missing" }, "there is no run run-missing" ],
+      "a run in another workspace" => [ -> { create_run(prefix: "after-elsewhere", base_branch: "main").run_id }, "is in workspace" ],
+      "a run from another base branch" => [
+        -> { create_run(workspace:, prefix: "after-payments", base_branch: "feature/payments").run_id }, "starts from `feature/payments`, not `main`"
+      ],
+      "a failed run" => [ -> { create_run(workspace:, prefix: "after-failed", status: "failed").run_id }, "is failed" ],
+      "a stopped run" => [ -> { create_run(workspace:, prefix: "after-stopped", status: "stopped").run_id }, "is stopped" ]
+    }.each do |what, (dependency, message)|
+      it "refuses to wait for #{what}, queueing nothing" do
+        id = instance_exec(&dependency)
+        before = Run.count
+
+        response = queue("Wait.", after: [ id ])
+
+        expect(response.error?).to be(true)
+        expect(response.structured_content).to include(error: "dependency_invalid", message: include(message))
+        expect(Run.count).to eq(before)
+      end
+    end
+  end
 end

@@ -327,6 +327,31 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(lines.find { |line| line.include?("The original") }).to match(/7efb\s+completed/)
     end
 
+    it "shows a run waiting on another run's work as waiting or blocked, and why" do
+      blocked = child.merge("after" => [ parent["runId"] ], "dependencies" => {
+        "state" => "blocked", "reason" => "Blocked: #{parent['runId']} failed, and its work is not in `main`."
+      })
+      allow(client).to receive(:runs).and_return([ [ workspace, { "runs" => [ blocked, parent ] } ] ])
+      allow(client).to receive(:run).with(child["runId"], workspace: "app").and_return(blocked)
+
+      run_cli("runs-ui", input: "1\nq\n")
+
+      expect(out.string.lines.find { |line| line.include?("A follow-up") }).to match(/queued\/blocked/)
+      expect(out.string).to include("After: #{parent['runId']}", "Blocked: #{parent['runId']} failed", "s to start it without waiting")
+    end
+
+    it "releases a waiting run once confirmed" do
+      waiting = child.merge("after" => [ parent["runId"] ], "dependencies" => { "state" => "waiting", "reason" => "Waiting." })
+      allow(client).to receive(:runs).and_return([ [ workspace, { "runs" => [ waiting, parent ] } ] ])
+      allow(client).to receive(:run).with(child["runId"], workspace: "app").and_return(waiting)
+      allow(client).to receive(:release).and_return("status" => "queued", "after" => [])
+
+      run_cli("runs-ui", input: "1\ns\ny\n\n")
+
+      expect(client).to have_received(:release).with(child["runId"], workspace: "app")
+      expect(out.string).to include("Released.")
+    end
+
     it "offers to reopen a closed run's session, and reopens it once confirmed" do
       allow(client).to receive(:reopen).and_return(
         "status" => "queued", "worktree" => "recreated", "queuedBehind" => 0, "capacity" => { "inFlight" => 4, "limit" => 4 }
@@ -403,7 +428,8 @@ RSpec.describe PaneyardPlugin::Cli do
         expect(cli).not_to receive(:run_command)
       end
 
-      expect(out.string).to include("No configuration changed.", "Manual setup:", "claude mcp add", "codex mcp add")
+      expect(out.string).to include("No configuration changed.", "Manual setup:", "claude mcp add", "codex mcp add",
+        "skills/paneyard ~/.claude/skills/paneyard")
     end
 
     it "recognizes current entries and does not add duplicates" do

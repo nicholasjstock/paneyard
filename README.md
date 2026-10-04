@@ -169,6 +169,8 @@ When the agent stops, it posts a report. Open **Jobs and reports** from the Pane
 
 Closed the wrong one? Pick the job in **Jobs and reports** and press `o` to **reopen** it. It is queued again and gets a new session on its own branch when a slot is free: in its worktree if that was kept, or in one herdr makes again from the branch if it was removed. The agent resumes its conversation where it can, and otherwise starts fresh with the task and the job's newest report. A job whose branch is gone as well cannot be reopened.
 
+A job that has to build on another job's work can be queued **after** it (`queue_run`'s `after`, from your own agent). It waits, holding no slot, until that job's work is merged into the branch both started from, then starts from there. **Jobs and reports** shows it as `queued/waiting`, or `queued/blocked` if the job it waits for failed or was stopped. Press `s` on its screen to start it without waiting.
+
 A job handed off from another job's branch is a **follow-up** of it. **Jobs and reports** shows the parent's short id after the follow-up's own (`22da ↳7efb`), and a job's screen lists its follow-ups.
 
 ### 6. Queue jobs from your own agent
@@ -179,6 +181,14 @@ Paneyard's `/mcp/admin` endpoint lets an MCP client queue and inspect jobs. At t
 claude mcp add --transport http -s user paneyard "$(cat ~/.local/state/herdr/plugins/paneyard/url)/mcp/admin"
 codex mcp add paneyard --url "$(cat ~/.local/state/herdr/plugins/paneyard/url)/mcp/admin"
 ```
+
+To teach Claude Code to hand off jobs well (finding the workspace, writing a self-contained brief, splitting work, queuing one job `after` another instead of merging in order), link the skill that ships with Paneyard. `paneyard.setup` prints this command with the plugin's own path:
+
+```sh
+mkdir -p ~/.claude/skills && ln -sfn <paneyard checkout>/skills/paneyard ~/.claude/skills/paneyard
+```
+
+[skills/paneyard/SKILL.md](./skills/paneyard/SKILL.md) is a plain skill file, so other agents that read skills can use it the same way.
 
 The port stays the same across restarts; if it ever has to change (something else took it), Paneyard shows a notification, and `paneyard.setup` updates the registrations in one action. Then ask your agent to hand off a task, list jobs, or check on one. The endpoint is unauthenticated, like the rest of the app, so it only listens on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
 

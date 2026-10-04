@@ -52,6 +52,12 @@ module Orchestrator
         Worktrees.branch_exists?(repository_path:, branch:)
       end
 
+      # Whether `branch` has commits beyond `since` and they are all in
+      # `base_branch`: what a run another run is queued after must reach.
+      def branch_merged?(repository_path:, branch:, base_branch:, since:)
+        Worktrees.merged?(repository_path:, branch:, base_branch:, since:)
+      end
+
       # Whether `path` is a linked worktree of the repository that git knows.
       def worktree_registered?(repository_path:, path:)
         Worktrees.registered?(repository_path:, path:)
