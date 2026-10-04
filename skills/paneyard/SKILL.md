@@ -15,7 +15,7 @@ Each job gets its own worktree, branch and agent session, and starts when a slot
 
 ## The job sees only committed work
 
-The job branches from the base branch's last commit. Uncommitted or unstaged changes in the checkout are not in it. Run `git status` before you queue. If there are changes the job needs, tell the user and ask whether to commit them. Never commit on their behalf without asking.
+The job branches from the base branch's last commit. Uncommitted changes in the checkout, whether staged or unstaged, are not in it. Run `git status` before you queue. If there are changes the job needs, explain which required changes will be missing from its starting state.
 
 ## Write a self-contained brief
 
@@ -25,7 +25,6 @@ The job's agent knows only what the task says. Include:
 - **Constraints**: what must not change, conventions to follow, and anything already decided.
 - **Where**: the files, modules or commands that matter.
 - **Done when**: how to tell it worked, and the exact test command to run.
-- **Git**: commit on its branch, don't push. Merging is the user's call.
 
 ## Split work well
 
