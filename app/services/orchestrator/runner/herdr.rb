@@ -41,10 +41,15 @@ module Orchestrator
     #     unlike a --print/exec run there is no structured JSON log to parse one
     #     out of.
     #   - agent.prompt {target: pane_id, text} submits a prompt to an
-    #     already-running, ready agent and returns immediately (confirmed:
-    #     0.01s). text is delivered as the agent's own live input, not a shell
-    #     command line, so arbitrarily large/special-character content is safe
-    #     without any escaping.
+    #     already-running, ready agent. text is delivered as the agent's own
+    #     live input, not a shell command line, so arbitrarily
+    #     large/special-character content is safe without any escaping. It was
+    #     confirmed to return in 0.01s on an idle herdr, but it answers only
+    #     once the text is delivered, so its time grows with the prompt and
+    #     with whatever else herdr is doing: run-20261004-132411-8668 (a ~5KB
+    #     prompt, launched beside other runs' worktree.open) took over 5s, with
+    #     the text still arriving in the pane. Hence its own, longer timeout
+    #     (AGENT_PROMPT_TIMEOUT_SECONDS).
     #   - pane.process_info {pane_id} -> {shell_pid,
     #     foreground_process_group_id, foreground_processes}.
     #     foreground_process_group_id equals shell_pid while a pane sits idle at
@@ -118,7 +123,25 @@ module Orchestrator
       # comment.
       class Unreachable < Error; end
 
+      # herdr accepted the connection but did not answer within the request's
+      # timeout. Still Unreachable to every caller that only cares that
+      # nothing is known, but a caller that does care can tell it apart from
+      # herdr not running at all: a slow agent.prompt may well have delivered
+      # its text (see Runner::SessionLauncher#deliver_prompt).
+      class TimedOut < Unreachable; end
+
+      # Every request but agent.prompt is a quick lookup or a kickoff that
+      # herdr answers in milliseconds.
       REQUEST_TIMEOUT_SECONDS = 5
+      # agent.prompt answers only once its text is delivered, which takes
+      # longer the larger the prompt and the busier herdr is. A fixed 30s
+      # rather than one scaled by size: the run that hit the 5s limit had a
+      # ~5KB prompt while a 5.1KB one launched fine beside it, so size alone
+      # does not predict it, and a timeout here no longer fails the launch
+      # anyway -- SessionLauncher then watches whether the agent picked the
+      # prompt up. 30s is six times the slowest reply seen, and keeps a
+      # launch stuck on it well inside StartRunSessionJob's other waits.
+      AGENT_PROMPT_TIMEOUT_SECONDS = 30
 
       # A sandbox instance (Orchestrator::Sandbox) only ever talks to its own
       # fake herdr, whatever HERDR_SOCKET_PATH it inherited -- a run session's
@@ -157,7 +180,7 @@ module Orchestrator
       end
 
       def agent_prompt(pane_id, text)
-        request!("agent.prompt", target: pane_id, text:)
+        request!("agent.prompt", timeout: AGENT_PROMPT_TIMEOUT_SECONDS, target: pane_id, text:)
       end
 
       def agent_send_keys(pane_id, keys)
@@ -225,16 +248,18 @@ module Orchestrator
         nil
       end
 
-      def request!(method, **params)
-        response = request(method, **params)
+      def request!(method, timeout: REQUEST_TIMEOUT_SECONDS, **params)
+        response = request(method, timeout:, **params)
         raise Error, response.dig("error", "message") || "herdr #{method} failed" if response.key?("error")
 
         response.fetch("result")
       end
 
-      def request(method, **params)
+      # `timeout` (seconds) bounds the whole request, from connecting to the
+      # response line; it is not sent to herdr.
+      def request(method, timeout: REQUEST_TIMEOUT_SECONDS, **params)
         id = "paneyard:#{method}:#{SecureRandom.hex(4)}"
-        Timeout.timeout(REQUEST_TIMEOUT_SECONDS) do
+        Timeout.timeout(timeout) do
           socket = UNIXSocket.new(socket_path)
           begin
             socket.write("#{JSON.generate(id:, method:, params:)}\n")
@@ -249,7 +274,7 @@ module Orchestrator
       rescue Errno::ENOENT, Errno::ECONNREFUSED => e
         raise Unreachable, "herdr is not running (#{e.message})"
       rescue Timeout::Error
-        raise Unreachable, "herdr #{method} timed out after #{REQUEST_TIMEOUT_SECONDS}s"
+        raise TimedOut, "herdr #{method} timed out after #{timeout}s"
       rescue JSON::ParserError => e
         raise Unreachable, "herdr sent an unparseable response to #{method}: #{e.message}"
       end

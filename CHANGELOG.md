@@ -49,6 +49,7 @@ The first public version. It includes:
 - **Reopen session** queues a closed run again on its existing branch, restores its kept worktree or recreates one, and resumes the previous CLI conversation where possible; otherwise it starts fresh with the task and latest report.
 - Attachments added at launch are handed to the session as file paths.
 - Reconciliation that notices within about 30 seconds when a session dies without reporting, and keeps the agent pane's last screen when a launch fails.
+- A slow herdr `agent.prompt` no longer fails a launch. It gets its own 30 s timeout (other herdr requests keep 5 s), is never resent, and when it still times out the launch watches whether the agent picked the prompt up, failing only if the agent never showed any activity, with what it saw. herdr not running still fails at once. Every launch logs how long `agent.prompt` took.
 
 ### Worktree cleanup
 

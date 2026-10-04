@@ -154,11 +154,82 @@ RSpec.describe Orchestrator::Runner::SessionLauncher do
       expect(Rails.logger).to have_received(:warn).with(/working x#{attempts - 1}, error\(Error\)\); sending Enter 1/)
     end
 
+    describe "after agent.prompt" do
+      def submit_after!(timed_out:)
+        described_class.submit_prompt_if_unsent!("w1:p1", run_id: "run-1", prompt: { seconds: 30.1, timed_out: })
+      end
+
+      it "logs how long agent.prompt took with the verdict" do
+        stub_statuses(*working(attempts))
+
+        described_class.submit_prompt_if_unsent!("w1:p1", run_id: "run-1", prompt: { seconds: 0.4, timed_out: false })
+
+        expect(Rails.logger).to have_received(:info).with(/prompt picked up .*after agent.prompt \(which took 0.4s\), after 0 Enter/)
+      end
+
+      it "goes ahead when the agent picks up a prompt whose agent.prompt timed out" do
+        stub_statuses(*working(attempts))
+
+        expect(submit_after!(timed_out: true)).to be(true)
+        expect(Rails.logger).to have_received(:info).with(/prompt picked up .*\(which timed out after 30.1s\)/)
+      end
+
+      it "fails the launch, saying what it saw, when agent.prompt timed out and the agent never stirred" do
+        stub_statuses("idle")
+
+        expect { submit_after!(timed_out: true) }.to raise_error(
+          Orchestrator::Runner::LaunchError,
+          /agent.prompt gave no reply within 30.1s, and the agent in pane w1:p1 then was never seen busy in .*s of watching, through #{windows.size} Enters \(agent_status: idle x#{attempts}, ENTER, .*\): its task most likely never arrived/
+        )
+        expect(herdr).to have_received(:agent_send_keys).exactly(windows.size).times
+        expect(herdr).not_to have_received(:notify)
+      end
+
+      it "leaves a session that showed any sign of the prompt running, as when agent.prompt answered" do
+        stub_statuses("working", *idle(attempts - 1), "idle")
+
+        expect(submit_after!(timed_out: true)).to be(false)
+        expect(herdr).to have_received(:notify).with(hash_including(title: /prompt may be unsent/))
+      end
+
+      it "never fails the launch over an idle agent when agent.prompt answered" do
+        stub_statuses("idle")
+
+        expect(submit_after!(timed_out: false)).to be(false)
+      end
+    end
+
     it "rides out a herdr error earlier in the window" do
       stub_statuses(Orchestrator::Runner::Herdr::Error.new("boom"), *working(attempts - 1))
 
       expect(submit!).to be(true)
       expect(herdr).not_to have_received(:agent_send_keys)
+    end
+  end
+
+  describe ".deliver_prompt" do
+    let(:herdr) { Orchestrator::Runner::Herdr }
+
+    before { allow(Rails.logger).to receive(:warn) }
+
+    it "sends the prompt once and says how long it took" do
+      expect(herdr).to receive(:agent_prompt).with("w1:p1", "the task").once
+
+      expect(described_class.deliver_prompt("w1:p1", "the task", run_id: "run-1")).to match(seconds: a_value < 1, timed_out: false)
+    end
+
+    # herdr may have delivered it: sending it again would type the task twice.
+    it "neither resends nor fails on a timeout, and says so" do
+      expect(herdr).to receive(:agent_prompt).once.and_raise(herdr::TimedOut, "herdr agent.prompt timed out after 30s")
+
+      expect(described_class.deliver_prompt("w1:p1", "the task", run_id: "run-1")).to include(timed_out: true)
+      expect(Rails.logger).to have_received(:warn).with(/run run-1 pane w1:p1: herdr agent.prompt timed out after 30s \(8-byte prompt\); not resending it/)
+    end
+
+    it "fails at once when herdr is not running" do
+      allow(herdr).to receive(:agent_prompt).and_raise(herdr::Unreachable, "herdr is not running (No such file or directory)")
+
+      expect { described_class.deliver_prompt("w1:p1", "the task", run_id: "run-1") }.to raise_error(herdr::Unreachable, /not running/)
     end
   end
 end

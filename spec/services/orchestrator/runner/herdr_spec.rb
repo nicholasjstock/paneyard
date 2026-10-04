@@ -140,6 +140,23 @@ RSpec.describe Orchestrator::Runner::Herdr do
         .to raise_error(described_class::Unreachable, /timed out/)
     end
 
+    it "raises TimedOut, an Unreachable, for a timeout, saying how long it waited" do
+      allow(Timeout).to receive(:timeout).and_raise(Timeout::Error)
+
+      expect { described_class.request!("agent.get", target: "w1:p1") }
+        .to raise_error(described_class::TimedOut, "herdr agent.get timed out after #{described_class::REQUEST_TIMEOUT_SECONDS}s")
+    end
+
+    it "fails at once, as Unreachable but not TimedOut, when herdr is not running" do
+      expect(described_class.socket_path).not_to satisfy { |path| File.exist?(path) }
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      expect { described_class.agent_prompt("w1:p1", "the task") }.to raise_error(described_class::Unreachable, /herdr is not running/) { |error|
+        expect(error).not_to be_a(described_class::TimedOut)
+      }
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1
+    end
+
     it "raises Unreachable when herdr sends back unparseable JSON" do
       socket = instance_double(UNIXSocket, write: nil, gets: "not json", close: nil)
       allow(UNIXSocket).to receive(:new).and_return(socket)
@@ -157,7 +174,7 @@ RSpec.describe Orchestrator::Runner::Herdr do
     end
 
     it "raises a plain Error, not Unreachable, when herdr answers with an error envelope" do
-      allow(described_class).to receive(:request).with("agent.get", target: "w1:p1")
+      allow(described_class).to receive(:request).with("agent.get", timeout: described_class::REQUEST_TIMEOUT_SECONDS, target: "w1:p1")
         .and_return("error" => { "code" => "pane_not_found", "message" => "no such pane" })
 
       error = nil
@@ -169,6 +186,39 @@ RSpec.describe Orchestrator::Runner::Herdr do
 
       expect(error.message).to eq("no such pane")
       expect(error).not_to be_a(described_class::Unreachable)
+    end
+  end
+
+  # agent.prompt answers only once its text is delivered (see the header), so
+  # it gets longer than the quick lookups before herdr counts as unanswering.
+  describe "request timeouts", :fake_herdr do
+    before do
+      stub_const("#{described_class}::REQUEST_TIMEOUT_SECONDS", 0.2)
+      stub_const("#{described_class}::AGENT_PROMPT_TIMEOUT_SECONDS", 2)
+    end
+
+    it "keeps the short timeout for every other request" do
+      fake_herdr.slow!("pane.list", seconds: 0.6)
+
+      expect { described_class.pane_list(workspace_id: "w1") }
+        .to raise_error(described_class::TimedOut, "herdr pane.list timed out after 0.2s")
+    end
+
+    it "waits out a slow agent.prompt for its answer" do
+      fake_herdr.slow!("agent.prompt", seconds: 0.6)
+
+      # The fake has no such pane, so it answers with an error -- but it answers.
+      expect { described_class.agent_prompt("w9:p1", "the task") }.to raise_error(described_class::Error, /w9:p1 not found/) { |error|
+        expect(error).not_to be_a(described_class::Unreachable)
+      }
+    end
+
+    it "times agent.prompt out after its own timeout" do
+      stub_const("#{described_class}::AGENT_PROMPT_TIMEOUT_SECONDS", 0.3)
+      fake_herdr.slow!("agent.prompt", seconds: 1)
+
+      expect { described_class.agent_prompt("w9:p1", "the task") }
+        .to raise_error(described_class::TimedOut, "herdr agent.prompt timed out after 0.3s")
     end
   end
 end

@@ -82,8 +82,8 @@ module Orchestrator
         wait_for_agent_detected!(pane_id, kind:)
         dismiss_codex_trust_prompt!(pane_id) if spec.fetch(:driver) == "codex"
         wait_until_ready!(pane_id, kind:)
-        Herdr.agent_prompt(pane_id, spec.fetch(:prompt))
-        submit_prompt_if_unsent!(pane_id, run_id: spec.fetch(:run_id))
+        prompt = deliver_prompt(pane_id, spec.fetch(:prompt), run_id: spec.fetch(:run_id))
+        submit_prompt_if_unsent!(pane_id, run_id: spec.fetch(:run_id), prompt:)
 
         wait_for_pid(pane_id) || raise(LaunchError, "session for run #{spec.fetch(:run_id)} never started a foreground process")
       end
@@ -182,6 +182,31 @@ module Orchestrator
         false
       end
 
+      # Sends the prompt, once. Returns { seconds:, timed_out: } for
+      # submit_prompt_if_unsent!, which logs it with its verdict.
+      #
+      # herdr answering agent.prompt late is not evidence that the text was
+      # lost: on run-20261004-132411-8668 the 5s request timeout fired while
+      # the prompt was still arriving in claude's input box, and failing the
+      # launch then tore down a session that had its task. So a timeout
+      # (Herdr::TimedOut) is no verdict here; submit_prompt_if_unsent! decides
+      # from what the agent does next, and the launch fails only if it never
+      # showed any sign of the prompt. agent.prompt itself is never sent
+      # again: the first one may have been delivered, and a second would type
+      # the whole task into the agent twice. herdr not running at all
+      # (Herdr::Unreachable for a missing or refused socket) still fails the
+      # launch at once.
+      def deliver_prompt(pane_id, text, run_id:)
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        seconds = -> { (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(1) }
+        Herdr.agent_prompt(pane_id, text)
+        { seconds: seconds.call, timed_out: false }
+      rescue Herdr::TimedOut => error
+        Rails.logger.warn("[SessionLauncher] run #{run_id} pane #{pane_id}: #{error.message} (#{text.bytesize}-byte prompt); " \
+                          "not resending it, since herdr may have delivered it -- watching whether the agent picks it up")
+        { seconds: seconds.call, timed_out: true }
+      end
+
       # agent.prompt normally submits on its own -- confirmed live, including
       # with this app's real ~5KB composed prompt. But it has also been seen on
       # real runs to deliver the text and leave it sitting unsubmitted in
@@ -243,8 +268,17 @@ module Orchestrator
       #
       # Every Enter is logged with the time since agent.prompt and the samples
       # so far, so the next occurrence shows how late an Enter had to be to
-      # work. Returns true if no Enter was needed.
-      def submit_prompt_if_unsent!(pane_id, run_id:)
+      # work, and the verdict with how long agent.prompt itself took (`prompt`,
+      # from deliver_prompt). Returns true if no Enter was needed.
+      #
+      # When agent.prompt timed out, there is one more verdict: an agent that
+      # was never once seen non-idle, through every window and Enter, most
+      # likely never got its task, and the launch fails (LaunchError) with
+      # what was observed. Any activity at all -- even the brief blip of text
+      # arriving -- means the text is probably in its input box, which is the
+      # stranded-prompt case above, and the launch goes ahead as it does there.
+      def submit_prompt_if_unsent!(pane_id, run_id:, prompt: nil)
+        prompt_note = prompt_timing(prompt)
         started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         elapsed = -> { (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(1) }
         history = []
@@ -255,13 +289,13 @@ module Orchestrator
         loop do
           if prompt_picked_up?(window)
             Rails.logger.info("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt picked up #{elapsed.call}s after " \
-                              "agent.prompt, after #{enters} Enter(s) (agent_status: #{summarize_samples(history)})")
+                              "agent.prompt#{prompt_note}, after #{enters} Enter(s) (agent_status: #{summarize_samples(history)})")
             return enters.zero?
           end
           break if enters >= PROMPT_SUBMIT_RETRY_WINDOWS.size
           if enters.positive? && sustained_work?(history)
             Rails.logger.info("[SessionLauncher] run #{run_id} pane #{pane_id}: agent was seen working and is idle again " \
-                              "#{elapsed.call}s after agent.prompt; no more Enters (agent_status: #{summarize_samples(history)})")
+                              "#{elapsed.call}s after agent.prompt#{prompt_note}; no more Enters (agent_status: #{summarize_samples(history)})")
             return false
           end
 
@@ -274,12 +308,25 @@ module Orchestrator
           history.concat(window)
         end
 
+        if prompt&.fetch(:timed_out) && history.none? { |status| agent_busy?(status) }
+          raise LaunchError, "herdr agent.prompt gave no reply within #{prompt.fetch(:seconds)}s, and the agent in pane " \
+                             "#{pane_id} then was never seen busy in #{elapsed.call}s of watching, through #{enters} Enters " \
+                             "(agent_status: #{summarize_samples(history)}): its task most likely never arrived"
+        end
+
         Rails.logger.warn("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt still not seen picked up #{elapsed.call}s " \
-                          "after agent.prompt and #{enters} Enters (agent_status: #{summarize_samples(history)}); " \
+                          "after agent.prompt#{prompt_note} and #{enters} Enters (agent_status: #{summarize_samples(history)}); " \
                           "leaving the session running -- its task may be sitting unsent in the pane's input box")
         Herdr.notify(title: "Run #{run_id}: prompt may be unsent",
                      body: "#{enters} Enters did not submit it; press Enter in pane #{pane_id}", sound: "request")
         false
+      end
+
+      # " (which took 0.4s)", " (which timed out after 30.1s)", or "".
+      def prompt_timing(prompt)
+        return "" unless prompt
+
+        prompt.fetch(:timed_out) ? " (which timed out after #{prompt.fetch(:seconds)}s)" : " (which took #{prompt.fetch(:seconds)}s)"
       end
 
       def sample_prompt_status(pane_id, count, first_sleep: true)
