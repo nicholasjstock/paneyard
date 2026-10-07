@@ -55,6 +55,19 @@ RSpec.describe PaneyardSandbox::McpClient do
     ])
   end
 
+  it "sends request metadata alongside tool arguments" do
+    allow(client).to receive(:post).and_wrap_original do |original, body|
+      if body[:method] == "tools/call"
+        expect(body[:params]).to eq(name: "job_finished", arguments: { summary: "Merged; end requested" },
+          _meta: { progressToken: "finish" })
+      end
+      original.call(body)
+    end
+
+    client.call_tool("job_finished", meta: { progressToken: "finish" }, summary: "Merged; end requested")
+    expect(sent.last.first).to eq("tools/call")
+  end
+
   context "when the renewed session is refused as well" do
     let(:honour_new_sessions) { false }
 

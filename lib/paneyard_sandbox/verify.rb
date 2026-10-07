@@ -41,7 +41,7 @@ module PaneyardSandbox
       step(done.name) { verify_done(done) }
       step(dirty.name) { verify_dirty(dirty) }
       step(crash.name) { verify_crash(crash) }
-      finalized = queue("job_finished: explicit merge-and-end, acknowledgment, deferred close", "done")
+      finalized = queue("job_finished: metadata-bearing merge-and-end, acknowledgment, deferred close", "done")
       step(finalized.name) { verify_finalization(finalized) }
       pushed = queue("job_finished: explicit push-and-end without a merge", "done")
       step(pushed.name) { verify_finalization(pushed, pushed: true) }
@@ -94,7 +94,8 @@ module PaneyardSandbox
       end
       token = JSON.parse(File.read(paths.fetch("config"))).dig("mcpServers", "paneyard", "headers", "Authorization").delete_prefix("Bearer ")
       client = McpClient.new("#{@instance.url}/mcp/run", token:)
-      result = client.call_tool("job_finished", summary: "Sandbox requested work succeeded; explicit end requested")
+      result = client.call_tool("job_finished", meta: pushed ? nil : { progressToken: "sandbox-finalization" },
+        summary: "Sandbox requested work succeeded; explicit end requested")
       expect(result["finalization"] == "accepted", "no successful acknowledgment")
       expect(File.directory?(worktree), "worktree removed before acknowledgment was consumed")
       run = wait_for_run(scenario) { |detail| detail.dig("session", "finalizationCompletedAt") }

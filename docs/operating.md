@@ -203,6 +203,8 @@ Paneyard never commits, pushes, merges or creates PRs, and never force-removes d
 
 Repeated calls while the capability is live acknowledge the same request without adding checkpoints. If the response was interrupted before its body closed, retry with the same live capability to arm shutdown. Once the session ends, its capability is revoked and retries return HTTP 401: use the operator's `/mcp/admin` `get_run` to inspect completion and cleanup errors instead. Reopening a session supersedes old cleanup requests so they cannot close the new session or remove its worktree.
 
+If `finalizationRequestedAt` is set but `finalizationReadyAt` is absent, shutdown has not been armed. This can also happen with older versions when the client's `job_finished` request included `_meta`. After installing the fix and restarting, retry `job_finished` from that still-live session; it acknowledges the existing request without adding a checkpoint and arms shutdown when the new response closes. Restart recovery only retries requests with `finalizationReadyAt`: it cannot infer acknowledgment delivery from acceptance alone. Git preservation is rechecked before shutdown, so later edits or an unavailable push destination keep the session open with a finalization error.
+
 ## MCP endpoints
 
 - **`/mcp/run`** is what each session talks to, authenticated by a per-session bearer token that dies with the session. It has `report_idle`, `job_finished`, and the shared tools below. The orchestrator wires it into each CLI automatically, so you don't configure anything.

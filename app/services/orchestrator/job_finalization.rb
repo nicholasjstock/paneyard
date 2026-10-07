@@ -36,6 +36,9 @@ module Orchestrator
     end
 
     # The recurring reconciler repairs a lost enqueue or an exhausted retry.
+    # Acceptance alone cannot prove acknowledgment delivery: unarmed requests
+    # (including those accepted by older code) need a live-capability retry,
+    # whose own response close will arm shutdown without another checkpoint.
     def recover
       RunSession.where.not(finalization_ready_at: nil).where(finalization_completed_at: nil)
         .where(finalization_ready_at: ..5.seconds.ago).find_each do |session|

@@ -27,8 +27,8 @@ RSpec.describe "explicit job finalization", type: :request do
     run
   end
 
-  def finish(run)
-    mcp_call("/mcp/run", "job_finished", token: session_token(run), summary: "Authorized merge verified")
+  def finish(run, meta: nil)
+    mcp_call("/mcp/run", "job_finished", token: session_token(run), meta:, summary: "Authorized merge verified")
   end
 
   it "acknowledges first, repeats safely, closes and removes only its worktree while preserving history", :fake_herdr do
@@ -39,7 +39,7 @@ RSpec.describe "explicit job finalization", type: :request do
     operator_file = File.join(workspace.repository_path, "operator-notes.txt")
     File.write(operator_file, "keep me")
 
-    expect(finish(run)).to include("finalization" => "accepted")
+    expect(finish(run, meta: { progressToken: "finalization" })).to include("finalization" => "accepted")
     expect(session.reload).to be_live
     expect(session.finalization_ready_at).to be_present
     expect(File.directory?(run.target_root)).to be(true)
@@ -72,7 +72,7 @@ RSpec.describe "explicit job finalization", type: :request do
       "HTTP_AUTHORIZATION" => "Bearer #{session_token(run)}", "CONTENT_TYPE" => "application/json",
       "HTTP_ACCEPT" => "application/json, text/event-stream",
       input: JSON.generate(jsonrpc: "2.0", id: 2, method: "tools/call",
-        params: { name: "job_finished", arguments: { summary: "Merged" } }))
+        params: { name: "job_finished", arguments: { summary: "Merged" }, _meta: { progressToken: 42 } }))
     status, _headers, body = Orchestrator::RunMcpEndpoint.new.call(env)
     chunks = []
     body.each { |chunk| chunks << chunk }
@@ -86,6 +86,28 @@ RSpec.describe "explicit job finalization", type: :request do
     expect(session.reload.finalization_ready_at).to be_nil
     body.close
     expect(session.reload.finalization_ready_at).to be_present
+  end
+
+  it "waits for a still-launching agent to be recorded before closing its pane", :fake_herdr do
+    run = merged_run
+    session = run.live_session
+    pid = session.pid
+    session.update!(started_at: nil, pid: nil)
+    finish(run, meta: { progressToken: "quick-agent" })
+    expect(session.reload.status).to eq("done")
+
+    expect { JobFinalizationJob.perform_now(session.id) }
+      .to have_enqueued_job(JobFinalizationJob).with(session.id).at(a_value_within(1).of(5.seconds.from_now))
+    expect(session.reload).to be_live
+    expect(session.finalization_completed_at).to be_nil
+    expect(fake_herdr.workspace_ids).to include(session.herdr_workspace_id)
+    expect(fake_herdr.requests_for("worktree.remove")).to be_empty
+
+    session.update!(started_at: Time.current, pid:)
+    JobFinalizationJob.perform_now(session.id)
+    expect(session.reload.finalization_completed_at).to be_present
+    expect(run.reload.status).to eq("completed")
+    expect(File.directory?(run.target_root)).to be(false)
   end
 
   it "refuses unmerged branches, dirty worktrees, and another caller's run or path", :fake_herdr do

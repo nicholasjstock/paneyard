@@ -18,6 +18,13 @@ class JobFinalizationJob < ApplicationJob
       end
 
       if session.live?
+        # A quick agent can acknowledge completion while launch_agent is
+        # still submitting its prompt and reading the pid. Let start! finish
+        # before closing its pane, even if reporting changed starting to done.
+        if session.started_at.nil?
+          self.class.set(wait: 5.seconds).perform_later(session.id)
+          return
+        end
         # Recheck just before shutdown: later edits or branch changes must not
         # turn a previously accepted request into lost work.
         Orchestrator::JobFinalization.validate!(run)

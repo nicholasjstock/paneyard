@@ -12,8 +12,9 @@ module McpTools
       raise ArgumentError, "authenticated live run session required" unless session
 
       Orchestrator::JobFinalization.request!(session, summary:)
-      server_context[:job_finalization_accepted] = true
-      ToolResponse.structured(run_id: session.run.run_id, finalization: "accepted")
+      response = ToolResponse.structured(run_id: session.run.run_id, finalization: "accepted")
+      server_context[:job_finalization_acknowledgment]&.store(:accepted, true)
+      response
     rescue ArgumentError, Orchestrator::Runner::Error => error
       ToolResponse.error(error.message)
     end
