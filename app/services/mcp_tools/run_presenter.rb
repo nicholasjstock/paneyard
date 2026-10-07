@@ -84,6 +84,10 @@ module McpTools
         # The run's own herdr workspace, which is how the herdr plugin tells
         # that an action was invoked from inside this run.
         herdr_workspace: session.herdr_workspace_id,
+        finalization_requested_at: session.finalization_requested_at&.iso8601,
+        finalization_ready_at: session.finalization_ready_at&.iso8601,
+        finalization_completed_at: session.finalization_completed_at&.iso8601,
+        finalization_error: session.finalization_error,
         last_seen_at: session.last_seen_at&.iso8601
       }.compact
     end

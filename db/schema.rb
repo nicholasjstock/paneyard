@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_04_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_090000) do
   create_table "run_checkpoints", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "outcome", null: false
@@ -42,6 +42,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_04_140000) do
     t.datetime "started_at"
     t.string "status", default: "starting", null: false
     t.datetime "updated_at", null: false
+    t.datetime "finalization_requested_at"
+    t.datetime "finalization_ready_at"
+    t.datetime "finalization_completed_at"
+    t.text "finalization_error"
     t.index ["capability_token_digest"], name: "index_run_sessions_on_capability_token_digest", unique: true
     t.index ["run_id"], name: "index_run_sessions_on_one_live_session_per_run", unique: true, where: "ended_at IS NULL"
     t.index ["run_id"], name: "index_run_sessions_on_run_id"

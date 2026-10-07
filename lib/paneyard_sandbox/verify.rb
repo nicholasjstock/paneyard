@@ -1,5 +1,6 @@
 require "json"
 require "net/http"
+require "open3"
 require_relative "instance"
 require_relative "mcp_client"
 
@@ -40,6 +41,10 @@ module PaneyardSandbox
       step(done.name) { verify_done(done) }
       step(dirty.name) { verify_dirty(dirty) }
       step(crash.name) { verify_crash(crash) }
+      finalized = queue("job_finished: explicit merge-and-end, acknowledgment, deferred close", "done")
+      step(finalized.name) { verify_finalization(finalized) }
+      pushed = queue("job_finished: explicit push-and-end without a merge", "done")
+      step(pushed.name) { verify_finalization(pushed, pushed: true) }
 
       @out.puts(@failures.empty? ? "sandbox verify: all green" : "sandbox verify: #{@failures.size} failed")
       @failures.empty?
@@ -64,6 +69,51 @@ module PaneyardSandbox
       run = wait_for_run(scenario) { |detail| detail["status"] == "completed" }
       expect(run.dig("session", "live") == false, "session still live after Close session")
       expect(!File.directory?(run["worktree"]), "clean worktree #{run['worktree']} was not reclaimed")
+    end
+
+    def verify_finalization(scenario, pushed: false)
+      run = wait_for_run(scenario) { |detail| detail["checkpoints"]&.any? }
+      output, ok = @instance.run("bin/rails", "runner",
+        "run = Run.find_by!(run_id: #{scenario.run_id.inspect}); puts JSON.generate(repository: run.source_root, config: run.live_session.mcp_config_path)")
+      expect(ok, "could not inspect sandbox session")
+      paths = JSON.parse(output.lines.last)
+      repository = paths.fetch("repository")
+      worktree = run.fetch("worktree")
+      # These are the sandbox's own disposable repositories, never operator paths.
+      [ repository, worktree ].each do |path|
+        expect(File.realpath(path).start_with?(File.realpath(@instance.root) + "/"), "path outside sandbox: #{path}")
+      end
+      file = pushed ? "pushed-finalized.txt" : "finalized.txt"
+      File.write(File.join(worktree, file), "sandbox explicit finalization verification\n")
+      git(worktree, "add", file)
+      git(worktree, "-c", "user.name=Sandbox", "-c", "user.email=sandbox@example.test", "commit", "-qm", "Sandbox finalization")
+      if pushed
+        git(worktree, "push", "-u", "origin", run.fetch("branch"))
+      else
+        git(repository, "merge", "--ff-only", run.fetch("branch"))
+      end
+      token = JSON.parse(File.read(paths.fetch("config"))).dig("mcpServers", "paneyard", "headers", "Authorization").delete_prefix("Bearer ")
+      client = McpClient.new("#{@instance.url}/mcp/run", token:)
+      result = client.call_tool("job_finished", summary: "Sandbox requested work succeeded; explicit end requested")
+      expect(result["finalization"] == "accepted", "no successful acknowledgment")
+      expect(File.directory?(worktree), "worktree removed before acknowledgment was consumed")
+      run = wait_for_run(scenario) { |detail| detail.dig("session", "finalizationCompletedAt") }
+      expect(run["status"] == "completed", "finalized run status #{run['status']}")
+      expect(run.dig("session", "live") == false, "finalized session still live")
+      expect(!File.directory?(worktree), "finalized worktree not reclaimed")
+      expect(run["checkpoints"].size == 2, "finalization did not preserve report history")
+      if pushed
+        expect(!File.exist?(File.join(repository, file)), "push finalization changed the base checkout")
+        expect(!git(repository, "ls-remote", "origin", "refs/heads/#{run.fetch('branch')}").empty?, "pushed branch missing")
+      else
+        expect(File.exist?(File.join(repository, file)), "merged operator checkout file missing")
+      end
+    end
+
+    def git(path, *arguments)
+      output, status = Open3.capture2e("git", "-C", path, *arguments)
+      expect(status.success?, "sandbox Git failed: #{output}")
+      output.strip
     end
 
     def verify_dirty(scenario)

@@ -17,8 +17,10 @@ module Orchestrator
       session = RunSession.authenticate_capability(token)
       return unauthorized unless session
 
-      server = RunMcpServer.build(server_context: { run_session_id: session.id })
-      McpTransport.build(server, allowed_hosts: @allowed_hosts).call(env)
+      context = { run_session_id: session.id }
+      server = RunMcpServer.build(server_context: context)
+      status, headers, body = McpTransport.build(server, allowed_hosts: @allowed_hosts).call(env)
+      [ status, headers, Rack::BodyProxy.new(body) { JobFinalization.response_closed!(session.id) if context[:job_finalization_accepted] } ]
     end
 
     private

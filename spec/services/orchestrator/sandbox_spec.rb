@@ -77,6 +77,39 @@ RSpec.describe Orchestrator::Sandbox do
     expect(File.directory?(run.target_root)).to be(true)
   end
 
+  it "refuses job finalization verification outside the sandbox before any Git or Herdr action" do
+    repository = create_source_checkout
+    sandbox_on!
+
+    expect { Orchestrator::Runner.local.verify_job_finished!(repository_path: repository, path: repository, branch: "main", base_branch: "main") }
+      .to raise_error(Orchestrator::Runner::Error, /sandbox refuses/)
+  end
+
+  it "allows push verification only for local remotes inside the sandbox" do
+    sandbox_on!
+    expect { described_class.guard_git_remote!(nil) }.to raise_error(described_class::Violation, /remote outside/)
+    expect { described_class.guard_git_remote!(Dir.mktmpdir("outside-origin")) }.to raise_error(described_class::Violation)
+    expect { described_class.guard_git_remote!(File.join(sandbox_root, "origin.git")) }.not_to raise_error
+    ENV["PANEYARD_SANDBOX_REAL_HERDR"] = "1"
+    expect { described_class.guard_git_remote!(nil) }.to raise_error(described_class::Violation)
+  ensure
+    ENV.delete("PANEYARD_SANDBOX_REAL_HERDR")
+  end
+
+  it "refuses a network push destination before contacting it during finalization" do
+    repository = create_source_checkout
+    worktree = File.join(File.dirname(repository), "run")
+    system("git", "-C", repository, "worktree", "add", "-q", "-b", "paneyard/sandbox-push", worktree, "main", exception: true)
+    system("git", "-C", worktree, "commit", "--allow-empty", "-qm", "Unmerged work", exception: true)
+    ENV["PANEYARD_SANDBOX_ROOT"] = File.dirname(repository)
+    sandbox_on!
+    expect(Orchestrator::Runner::Worktrees).not_to receive(:remote_refs)
+
+    expect { Orchestrator::Runner.local.verify_job_finished!(repository_path: repository, path: worktree, branch: "paneyard/sandbox-push", base_branch: "main") }
+      .to raise_error(Orchestrator::Runner::Error, /sandbox refuses to verify a remote/)
+    expect(File.directory?(worktree)).to be(true)
+  end
+
   it "does not signal a session pid that is not one of its fake agents" do
     pid = Process.spawn("sleep", "30", pgroup: true)
     _run, session = create_run_and_session(pid:)

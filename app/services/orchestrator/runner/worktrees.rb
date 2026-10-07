@@ -1,5 +1,7 @@
 require "open3"
 require "shellwords"
+require "timeout"
+require "uri"
 
 module Orchestrator
   module Runner
@@ -130,6 +132,90 @@ module Orchestrator
         status.success? && output.to_i.positive?
       end
 
+      # Finishing is an explicit operator-requested action. Both the branch
+      # tip and worktree must be saved: in the local base, or at the actual
+      # configured push destination (never just stale remote-tracking refs).
+      def verify_job_finished!(repository_path:, path:, branch:, base_branch:)
+        guard_sandbox!(repository_path)
+        guard_sandbox!(path)
+        repository = Pathname(repository_path)
+        target = Pathname(path)
+        raise Error, "Not a managed linked worktree" unless registered?(repository_path:, path:)
+        if dirty?(target) || git!(target, "ls-files", "--others", "--ignored", "--exclude-standard").strip.present?
+          raise Error, "Worktree contains uncommitted or ignored files that would be lost"
+        end
+        raise Error, "Run branch does not exist" unless GitRef.branch?(branch) && local_branch?(repository, branch)
+
+        if GitRef.branch?(base_branch) && local_branch?(repository, base_branch) &&
+            git_success?(repository, "merge-base", "--is-ancestor", "refs/heads/#{branch}", "refs/heads/#{base_branch}") &&
+            git_success?(target, "merge-base", "--is-ancestor", "HEAD", "refs/heads/#{base_branch}")
+          return true
+        end
+        branch_tip = git!(repository, "rev-parse", "refs/heads/#{branch}").strip
+        unless git!(target, "rev-parse", "HEAD").strip == branch_tip && pushed_tip?(repository, branch, branch_tip)
+          raise Error, "Run branch and worktree HEAD must be merged into #{base_branch} or fully pushed"
+        end
+        true
+      end
+
+      def pushed_tip?(repository, branch, tip)
+        upstream = git!(repository, "for-each-ref", "--format=%(upstream:remotename) %(upstream:remoteref)", "refs/heads/#{branch}").strip.split
+        remote, ref = upstream.presence || [ "origin", "refs/heads/#{branch}" ]
+        return false if remote == "." || !ref.to_s.start_with?("refs/heads/")
+
+        url = git!(repository, "remote", "get-url", "--push", "--all", remote).strip
+        raise Error, "Ambiguous push destination" if url.include?("\n")
+
+        local_path = local_remote_path(repository, url)
+        Sandbox.guard_git_remote!(local_path)
+        output = remote_refs(repository, url, ref)
+        output.lines.any? { |line| line.split == [ tip, ref ] }
+      rescue Sandbox::Violation => error
+        raise Error, error.message
+      end
+
+      def local_remote_path(repository, url)
+        if url.start_with?("file://")
+          uri = URI.parse(url)
+          return unless uri.host.blank? || uri.host == "localhost"
+
+          URI::DEFAULT_PARSER.unescape(uri.path)
+        elsif !url.include?(":")
+          File.expand_path(url, repository.to_s)
+        end
+      rescue URI::InvalidURIError
+        nil
+      end
+
+      # Do not leave a worker stuck on authentication or an unreachable host.
+      # Only this newly spawned Git process group is signalled on timeout.
+      def remote_refs(repository, url, ref)
+        Open3.popen3({ "GIT_TERMINAL_PROMPT" => "0" }, "git", "-C", repository.to_s,
+          "-c", "credential.interactive=false", "ls-remote", "--exit-code", "--", url, ref, pgroup: true) do |input, output, errors, process|
+          input.close
+          reader = Thread.new { output.read }
+          error_reader = Thread.new { errors.read }
+          begin
+            Timeout.timeout(15) do
+              status = process.value
+              raise Error, "Could not verify the pushed branch at its remote; push it first or check remote access" unless status.success?
+
+              reader.value
+            end
+          rescue Timeout::Error
+            begin
+              Process.kill("KILL", -process.pid)
+            rescue Errno::ESRCH
+              # The child exited while its deadline was being handled.
+            end
+            raise Error, "Timed out verifying the pushed branch; session remains open"
+          ensure
+            reader.join
+            error_reader.join
+          end
+        end
+      end
+
       def local_branch?(repository, branch)
         git_success?(repository, "rev-parse", "--verify", "--quiet", "refs/heads/#{branch}^{commit}")
       end
@@ -163,10 +249,15 @@ module Orchestrator
       end
 
       # Removes `path` when nothing in it would be lost; returns whether it did.
-      def release(repository_path:, path:, base_branch:)
+      def release(repository_path:, path:, base_branch:, branch: nil)
         repository = Pathname(repository_path)
         path = Pathname(path)
-        return false unless registered?(repository_path: repository, path:) && work_saved?(path, repository:, base_branch:)
+        return false unless registered?(repository_path: repository, path:)
+        if branch
+          verify_job_finished!(repository_path: repository, path:, branch:, base_branch:)
+        else
+          return false unless work_saved?(path, repository:, base_branch:)
+        end
 
         remove!(repository, path)
         true
