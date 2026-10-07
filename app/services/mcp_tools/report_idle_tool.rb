@@ -8,7 +8,7 @@ module McpTools
   # This reports; it does not end the run. The pane stays open, the session
   # keeps its concurrency slot, and nothing is pushed or torn down. What
   # happens next -- send more work, close the session -- is the operator's
-  # decision.
+  # decision. JobFinishedTool provides the explicit end-of-job exception.
   #
   # The summary is the substance, not a status line: operator clients show the
   # checkpoints and not the pane, so each one has to stand on its own as a
@@ -25,7 +25,7 @@ module McpTools
       "`done` (task finished), `blocked` (you need the operator; put the question in the summary) or `failed` " \
       "(cannot be done as specified; say why). It does not end the run or close your terminal, and it is not " \
       "a cue to commit, push or merge: do each of those only when the operator asks for that one. The operator reads these reports instead of your terminal and may send more work; report " \
-      "again when you next stop."
+      "again when you next stop. Use job_finished only when explicitly asked to end the job, after completing all requested work and verifying a merge or push."
     input_schema(
       properties: {
         runId: { type: "string", description: "Optional: your own run is used by default." },

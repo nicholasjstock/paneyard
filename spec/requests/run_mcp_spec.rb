@@ -124,7 +124,73 @@ RSpec.describe "the run MCP endpoint", type: :request do
     names = Orchestrator::RunMcpServer::TOOLS.map(&:tool_name)
 
     expect(names).to contain_exactly(
-      "report_idle", "queue_run", "list_runs", "get_run", "list_workspaces"
+      "report_idle", "job_finished", "queue_run", "list_runs", "get_run", "list_workspaces"
     )
+  end
+
+  describe "job_finished acknowledgment" do
+    let(:token) { RunSession.issue_capability.first }
+    let(:run) { create_run(prefix: "mcp-finalization", branch_name: "paneyard/finished", worktree_name: "finished") }
+    let!(:session) do
+      create_run_and_session(run:).last.tap do |session|
+        session.update!(capability_token_digest: Digest::SHA256.hexdigest(token))
+      end
+    end
+    let(:runner) { instance_double(Orchestrator::Runner::Local, verify_job_finished!: true) }
+
+    before do
+      host! "127.0.0.1"
+      allow(Orchestrator::Runner).to receive(:for).with(run.workspace).and_return(runner)
+    end
+
+    def call_finish(meta: nil, arguments: { summary: "Explicit end requested; merged" })
+      params = { name: "job_finished", arguments: }
+      params[:_meta] = meta if meta
+      post "/mcp/run", params: JSON.generate(jsonrpc: "2.0", id: 1, method: "tools/call", params:),
+        headers: { "CONTENT_TYPE" => "application/json", "ACCEPT" => "application/json, text/event-stream",
+          "HTTP_AUTHORIZATION" => "Bearer #{token}" }
+      JSON.parse(response.body).fetch("result")
+    end
+
+    [ nil, { progressToken: "finish-1", "client/example" => { trace: "123" } } ].each do |meta|
+      it "arms deferred shutdown on response close #{meta ? 'with metadata' : 'without metadata'}" do
+        expect { expect(call_finish(meta:).dig("structuredContent", "finalization")).to eq("accepted") }
+          .to have_enqueued_job(JobFinalizationJob).with(session.id).at(a_value_within(1).of(5.seconds.from_now))
+        expect(session.reload.finalization_ready_at).to be_present
+        expect(session).to be_live
+        expect(run.checkpoints.count).to eq(1)
+      end
+    end
+
+    it "does not arm shutdown when metadata-bearing Git verification fails" do
+      allow(runner).to receive(:verify_job_finished!).and_raise(Orchestrator::Runner::Error, "uncommitted work")
+      expect { expect(call_finish(meta: { progressToken: 1 })["isError"]).to be(true) }
+        .not_to have_enqueued_job(JobFinalizationJob)
+      expect(session.reload.finalization_requested_at).to be_nil
+      expect(session.finalization_ready_at).to be_nil
+      expect(session).to be_live
+      expect(run.checkpoints.count).to eq(0)
+    end
+
+    it "keeps accepted but unarmed requests open across restart until a live-token retry is acknowledged" do
+      Orchestrator::JobFinalization.request!(session, summary: "Original final report")
+      session.update!(finalization_requested_at: 1.hour.ago)
+      expect { Orchestrator::JobFinalization.recover }.not_to have_enqueued_job(JobFinalizationJob)
+      JobFinalizationJob.perform_now(session.id)
+      expect(session.reload).to be_live
+      expect(session.finalization_ready_at).to be_nil
+
+      expect { expect(call_finish(meta: { progressToken: "invalid" }, arguments: {})["isError"]).to be(true) }
+        .not_to have_enqueued_job(JobFinalizationJob)
+      expect(session.reload.finalization_ready_at).to be_nil
+
+      expect { call_finish(meta: { progressToken: "retry" }) }.to have_enqueued_job(JobFinalizationJob).with(session.id)
+      ready_at = session.reload.finalization_ready_at
+      call_finish(meta: { progressToken: "retry-again" })
+      expect(session.reload.finalization_ready_at).to eq(ready_at)
+      expect(run.checkpoints.pluck(:summary)).to eq([ "Original final report" ])
+      session.update!(finalization_ready_at: 1.minute.ago)
+      expect { Orchestrator::JobFinalization.recover }.to have_enqueued_job(JobFinalizationJob).with(session.id)
+    end
   end
 end

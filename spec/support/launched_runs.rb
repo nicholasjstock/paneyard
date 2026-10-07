@@ -17,7 +17,7 @@ RSpec.shared_context "launched runs" do
   let(:workspace) { create_workspace(repository_path: create_source_checkout) }
 
   # The Streamable HTTP handshake a real MCP client performs, then one call.
-  def mcp_call(path, tool, token: nil, **arguments)
+  def mcp_call(path, tool, token: nil, meta: nil, **arguments)
     headers = { "CONTENT_TYPE" => "application/json", "ACCEPT" => "application/json, text/event-stream" }
     headers["HTTP_AUTHORIZATION"] = "Bearer #{token}" if token
     post path, headers:, params: JSON.generate(
@@ -27,7 +27,9 @@ RSpec.shared_context "launched runs" do
     expect(response).to have_http_status(:ok)
     headers["HTTP_MCP_SESSION_ID"] = response.headers["mcp-session-id"]
     post path, headers:, params: JSON.generate(jsonrpc: "2.0", method: "notifications/initialized")
-    post path, headers:, params: JSON.generate(jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: tool, arguments: })
+    params = { name: tool, arguments: }
+    params[:_meta] = meta if meta
+    post path, headers:, params: JSON.generate(jsonrpc: "2.0", id: 2, method: "tools/call", params:)
     body = response.body
     body = body.lines.find { |line| line.start_with?("data:") }.delete_prefix("data:") if body.start_with?("event:", "data:")
     result = JSON.parse(body).fetch("result")

@@ -58,10 +58,14 @@ module Orchestrator
     # workspace by hand, which RunSessionReconcileJob picks up. Both call this.
     # Removes the worktree when nothing in it would be lost, and returns
     # whether it did.
-    def release!(run)
+    # Explicit finalization also verifies the run branch at its actual push
+    # destination, allowing removal even without cached remote-tracking refs.
+    def release!(run, finalizing: false)
       return false if run.worktree_name.blank? || run.target_root.blank?
 
-      Runner.for(run.workspace).release_worktree(repository_path: repository_for(run), path: run.target_root, base_branch: run.base_branch)
+      options = { repository_path: repository_for(run), path: run.target_root, base_branch: run.base_branch }
+      options[:branch] = run.branch_name if finalizing
+      Runner.for(run.workspace).release_worktree(**options)
     end
 
     # The repository the run's worktree was made from, as recorded then.
