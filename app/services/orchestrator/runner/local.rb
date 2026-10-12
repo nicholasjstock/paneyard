@@ -5,8 +5,9 @@ module Orchestrator
     # are the whole runner interface -- a runner on another machine would
     # answer the same calls with the same plain data -- and the modules beside
     # it (Runner::Herdr, SessionLauncher, SessionLayout, SessionArgs,
-    # Worktrees, Repositories, ClaudeTrust, ModelDiscovery, Attachments) are
-    # its internals, which nothing outside Orchestrator::Runner uses.
+    # Worktrees, Repositories, ClaudeTrust, ModelDiscovery, Attachments,
+    # Transcripts) are its internals, which nothing outside
+    # Orchestrator::Runner uses.
     #
     # Errors leave as Runner::Error (or Runner::Unreachable when herdr never
     # answered, Runner::LaunchError when an agent never came up); herdr's and
@@ -107,7 +108,11 @@ module Orchestrator
         herdr { SessionLauncher.open(spec, runtime_root:) }
       end
 
-      # Starts the agent in the pane open_session returned. Returns its pid.
+      # Starts the agent in the pane open_session returned. Returns { "pid",
+      # "lost_prompts" }: the latter a record of each start of the CLI that
+      # never picked its prompt up and was restarted (SessionLauncher#launch).
+      # A launch whose every start lost it raises SessionLauncher::PromptLost,
+      # a LaunchError with the records in #lost_prompts.
       def launch_agent(spec, pane_id:, mcp_config_path:)
         herdr { SessionLauncher.launch(spec, pane_id:, mcp_config_path:) }
       end
@@ -194,6 +199,18 @@ module Orchestrator
       # Where the run's attachments are, as the session should be told.
       def attachments_dir(run_id:)
         Attachments.dir(runtime_root, run_id)
+      end
+
+      # Copies the CLI's own transcripts of the conversations it held in
+      # `cwd` (the run's worktree) beside the run's runtime files. `since` is
+      # when the session started (ISO 8601). Returns the saved conversation
+      # files' paths, or [] when the CLI kept none.
+      def save_transcripts(run_id:, driver:, cwd:, since:)
+        Transcripts.save(runtime_root:, run_id:, driver:, cwd:, since:)
+      rescue Sandbox::Violation => error
+        raise Error, error.message
+      rescue SystemCallError, IOError => error
+        raise Error, "could not save #{driver} transcripts for #{run_id}: #{error.message}"
       end
 
       private

@@ -50,6 +50,10 @@ The first public version. It includes:
 - Attachments added at launch are handed to the session as file paths.
 - Reconciliation that notices within about 30 seconds when a session dies without reporting, and keeps the agent pane's last screen when a launch fails.
 - A slow herdr `agent.prompt` no longer fails a launch. It gets its own 30 s timeout (other herdr requests keep 5 s), is never resent, and when it still times out the launch watches whether the agent picked the prompt up, failing only if the agent never showed any activity, with what it saw. herdr not running still fails at once. Every launch logs how long `agent.prompt` took.
+- An agent that never shows any sign of its prompt, through every Enter, whether or not `agent.prompt` answered in time, is no longer left as a live, idle session that never starts its task: its CLI is stopped and started again once in the same pane with the prompt sent afresh, and the launch fails, saying what it saw, if the second start never picks it up either.
+- Each prompt the CLI loses is recorded on its session (`lost_prompts`, in `get_run`, and a `[lost-prompt]` log line) with herdr's and the CLI's versions, the pane's screen, and the bytes left unread in the CLI's terminal input (some: herdr wrote it and the CLI never read it; none: it never arrived), so it shows whether the restart workaround still fires and whether herdr or the CLI is at fault.
+- Every session keeps its agent pane's last screen (`last_screen`, in `get_run`), read just before Paneyard kills its CLI or closes the pane: on Close session, a CLI that exited, or a failed launch. Restarting a CLI that lost its prompt logs what its pane showed.
+- Every session saves a copy of the CLI's own conversation transcripts (claude's project directory for the worktree, codex's rollouts that ran there) beside the run's runtime files when it ends, and lists them in `get_run` (`transcripts`). The CLIs prune their own copies, and a session whose CLI never began a conversation is logged as having kept none.
 
 ### Worktree cleanup
 

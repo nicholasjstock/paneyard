@@ -14,6 +14,34 @@ RSpec.describe McpTools::RunPresenter do
     ])
   end
 
+  it "gives a run's detail the agent pane's last screen, kept when its session was closed" do
+    run, session = create_run_and_session(prefix: "presenter")
+    expect(described_class.detail(run)).not_to have_key(:last_screen)
+
+    session.update!(last_screen: "> the task")
+
+    expect(described_class.detail(run.reload)).to include(last_screen: "> the task")
+    expect(described_class.summary(run)).not_to have_key(:last_screen)
+  end
+
+  it "gives a run's detail the paths of its saved CLI transcripts, once there are any" do
+    run, session = create_run_and_session(prefix: "presenter")
+    expect(described_class.detail(run)).not_to have_key(:transcripts)
+
+    session.update!(transcript_paths: [ "/state/run_sessions/run-1/transcripts/claude/abc.jsonl" ])
+
+    expect(described_class.detail(run.reload)).to include(transcripts: [ "/state/run_sessions/run-1/transcripts/claude/abc.jsonl" ])
+  end
+
+  it "gives a run's detail the prompts its CLI lost and was restarted over, once there are any" do
+    run, session = create_run_and_session(prefix: "presenter")
+    expect(described_class.detail(run)).not_to have_key(:lost_prompts)
+
+    session.update!(lost_prompts: [ { "at" => "2026-10-12T17:44:18Z", "herdr_version" => "0.9.3", "unread_input_bytes" => 0 } ])
+
+    expect(described_class.detail(run.reload)[:lost_prompts]).to eq([ { "at" => "2026-10-12T17:44:18Z", "herdr_version" => "0.9.3", "unread_input_bytes" => 0 } ])
+  end
+
   describe "follow-ups" do
     let(:workspace) { create_workspace(prefix: "presenter") }
     let!(:parent) { create_run(workspace:, prefix: "parent", status: "completed", branch_name: "paneyard/parent-7efb") }

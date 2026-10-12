@@ -77,6 +77,15 @@ RSpec.describe Orchestrator::Sandbox do
     expect(File.directory?(run.target_root)).to be(true)
   end
 
+  it "will not copy the CLI transcripts of a worktree outside the sandbox" do
+    run = create_run(status: "running", target_root: Dir.mktmpdir("outside-worktree"))
+    sandbox_on!
+
+    expect { Orchestrator::Runner.local.save_transcripts(run_id: run.run_id, driver: "claude", cwd: run.target_root, since: nil) }
+      .to raise_error(Orchestrator::Runner::Error, /sandbox refuses to save the CLI transcripts of .* outside/)
+    expect(Orchestrator::Runner::Transcripts).not_to have_received(:claude_config_dir)
+  end
+
   it "does not signal a session pid that is not one of its fake agents" do
     pid = Process.spawn("sleep", "30", pgroup: true)
     _run, session = create_run_and_session(pid:)

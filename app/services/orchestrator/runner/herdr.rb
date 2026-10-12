@@ -40,6 +40,8 @@ module Orchestrator
     #     is the only way to obtain a --resume id for an interactive session --
     #     unlike a --print/exec run there is no structured JSON log to parse one
     #     out of.
+    #   - ping {} -> {type: "pong", version, protocol, capabilities}: the
+    #     server's own version (confirmed live: "0.9.3", protocol 22).
     #   - agent.prompt {target: pane_id, text} submits a prompt to an
     #     already-running, ready agent. text is delivered as the agent's own
     #     live input, not a shell command line, so arbitrarily
@@ -177,6 +179,10 @@ module Orchestrator
 
       def agent_get(pane_id)
         request!("agent.get", target: pane_id).fetch("agent")
+      end
+
+      def ping
+        request!("ping")
       end
 
       def agent_prompt(pane_id, text)
