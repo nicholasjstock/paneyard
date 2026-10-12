@@ -18,6 +18,14 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
     value
   end
 
+  it "acknowledges strict close of a workspace and an already closed workspace" do
+    opened = herdr.worktree_create(cwd: create_source_checkout, branch: "paneyard/close-test", base: "main", label: "close-test")
+    id = opened.fetch("workspace").fetch("workspace_id")
+    expect { herdr.workspace_close!(id) }.not_to raise_error
+    expect { herdr.workspace_close!(id) }.not_to raise_error
+    expect(fake_herdr.workspace_ids).not_to include(id)
+  end
+
   it "is what specs reach instead of the operator's herdr" do
     expect(herdr.socket_path).to eq(fake_herdr.socket_path)
     expect(herdr.socket_path).not_to include(".config/herdr")

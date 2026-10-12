@@ -17,6 +17,7 @@ module Orchestrator
 
     TOOLS = [
       ::McpTools::ReportIdleTool,
+      ::McpTools::JobFinishedTool,
       ::McpTools::QueueRunTool,
       ::McpTools::ListRunsTool,
       ::McpTools::GetRunTool,
@@ -26,7 +27,8 @@ module Orchestrator
     # Belt and braces: clients that surface server instructions (Claude Code
     # does) get a one-paragraph map. The lifecycle itself lives in RunPrompt,
     # because not every driver is known to show these.
-    INSTRUCTIONS = "Orchestrator tools for an agent session. Call report_idle every time you stop working; the " \
+    INSTRUCTIONS = "Orchestrator tools for an agent session. Call report_idle every time you stop working; " \
+      "call job_finished only when explicitly asked to end your job, after completing requested work and a verified merge or push. The " \
       "others are optional, e.g. queue_run / list_runs / get_run / list_workspaces for other jobs. Files, shell " \
       "and git are yours to do directly; there are no tools for them.".freeze
 

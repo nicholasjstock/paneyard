@@ -58,8 +58,12 @@ RSpec.describe Orchestrator::RunPrompt do
     expect(prompt).to include("does not end the run")
   end
 
+  it "requires an explicit end request and permits merged or pushed completion" do
+    expect(prompt).to include("Only when the operator explicitly asks to end", "job_finished", "A push or merge alone is not permission to end", "or fully pushed", "PR URL", "HTTP 401")
+  end
+
   it "is short -- detail belongs in the repo's own files and the tool descriptions" do
-    expect(prompt.bytesize - run.task.bytesize).to be < 1_500
+    expect(prompt.bytesize - run.task.bytesize).to be < 2_700
   end
 
   it "gives the ToolSearch hint only to claude, the one driver that defers MCP tools" do
@@ -69,7 +73,7 @@ RSpec.describe Orchestrator::RunPrompt do
 
   it "does not fence off any paths or mention the planner era" do
     expect(prompt).not_to include("off limits")
-    expect(prompt).not_to match(/planner|pull request/i)
+    expect(prompt).not_to match(/planner/i)
   end
 
   # Uploads are stored on the runner at queue time, before the worktree

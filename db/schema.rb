@@ -45,6 +45,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_12_180000) do
     t.text "last_screen"
     t.json "transcript_paths", default: [], null: false
     t.json "lost_prompts", default: [], null: false
+    t.datetime "finalization_requested_at"
+    t.datetime "finalization_ready_at"
+    t.datetime "finalization_completed_at"
+    t.text "finalization_error"
     t.index ["capability_token_digest"], name: "index_run_sessions_on_capability_token_digest", unique: true
     t.index ["run_id"], name: "index_run_sessions_on_one_live_session_per_run", unique: true, where: "ended_at IS NULL"
     t.index ["run_id"], name: "index_run_sessions_on_run_id"

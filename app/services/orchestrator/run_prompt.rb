@@ -50,7 +50,9 @@ module Orchestrator
         was removed while closed (only ever once its work was saved), made again from the branch. Your `paneyard`
         MCP connection is a new one; report through `report_idle` as before. Do not start new work on your own:
         check the worktree is as you left it, call `report_idle` with where the run stands, and wait for the
-        operator.
+        operator. Call `job_finished` only if later explicitly asked to end the job/session, after all requested actions
+        succeed and this clean worktree's branch is merged into `#{run.base_branch}` or fully pushed. Include the
+        requested PR's URL in the final summary. A push or merge alone leaves this session open.
       PROMPT
     end
 
@@ -87,10 +89,18 @@ module Orchestrator
         Whenever you stop -- finished, stuck, or giving up -- call `report_idle` (MCP server `paneyard`) with `done`,
         `blocked` or `failed`. The operator reads these reports, not this terminal, so a question goes in a `blocked`
         summary. Reporting does not end the run; if more work comes, report again.
+        Only when the operator explicitly asks to end the job/session (for example "merge and end" or "push,
+        create a PR, then end"), complete every requested action and call `job_finished` with a final Markdown summary
+        including the PR URL when requested. A push or merge alone is not permission to end; use `report_idle` and wait.
+        It verifies the branch tip and clean worktree are merged into this run's base branch or fully pushed,
+        acknowledges, then closes your session/workspace and safely removes the disposable worktree. It does not
+        commit, push, merge or create PRs. Ordinary completion or awaiting review uses `report_idle` and stays open.
+        You may retry `job_finished` while your capability is live; after closure it returns HTTP 401. The operator
+        can inspect `get_run` for finalization status/errors; accepted shutdown and cleanup survive restarts.
       SECTION
       # Only Claude Code defers MCP tools behind ToolSearch; codex has no such
       # tool and names MCP tools differently.
-      section += "If report_idle is not listed, load it with ToolSearch: `select:mcp__paneyard__report_idle`.\n" if session_driver == "claude"
+      section += "If the reporting tools are not listed, load them with ToolSearch: `select:mcp__paneyard__report_idle,mcp__paneyard__job_finished`.\n" if session_driver == "claude"
       section
     end
 

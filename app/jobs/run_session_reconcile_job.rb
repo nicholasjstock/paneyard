@@ -25,6 +25,7 @@ class RunSessionReconcileJob < ApplicationJob
   queue_as :default
 
   def perform
+    Orchestrator::JobFinalization.recover
     RunSession.live.includes(:run).find_each do |session|
       Orchestrator::RunSessionRunner.refresh!(session)
 

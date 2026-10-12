@@ -43,9 +43,11 @@ module PaneyardSandbox
 
     # Returns the tool's structuredContent (or its text content parsed as
     # JSON); raises when the tool reports an error.
-    def call_tool(name, **arguments)
+    def call_tool(name, meta: nil, **arguments)
       initialize_session!
-      result = rpc("tools/call", name:, arguments:)
+      params = { name:, arguments: }
+      params[:_meta] = meta if meta
+      result = rpc("tools/call", **params)
       text = Array(result["content"]).filter_map { |part| part["text"] }.join("\n")
       raise ToolError.new("#{name} failed: #{text}", result["structuredContent"] || (JSON.parse(text) rescue {})) if result["isError"]
 
