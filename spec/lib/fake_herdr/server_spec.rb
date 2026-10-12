@@ -31,6 +31,10 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
     expect(herdr.socket_path).not_to include(".config/herdr")
   end
 
+  it "answers ping with its version, as herdr does" do
+    expect(herdr.ping).to include("type" => "pong", "version" => "fake")
+  end
+
   # A run's herdr workspace is the one worktree.create opens.
   def open_worktree(repository = create_source_checkout, branch: "paneyard/run-1", base: "main")
     herdr.worktree_create(cwd: repository, branch:, base:, label: "run-1")

@@ -13,6 +13,7 @@ module Orchestrator
   #     sandbox root (herdr picks where the worktree itself goes: the fake herdr
   #     beside the repository, so inside the root too);
   #   - processes: a session pid is only signalled if it is a fake agent;
+  #   - CLI transcripts: copied only for a worktree under the sandbox root;
   #
   # Herdr can be opted back in for an operator who wants to see the real
   # thing (`bin/sandbox start --real-herdr`), never by

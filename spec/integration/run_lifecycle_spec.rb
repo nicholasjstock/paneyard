@@ -52,10 +52,22 @@ RSpec.describe "a run's lifecycle", type: :request do
     expect(fake_herdr.requests_for("agent.prompt").last["text"]).to eq("one more thing")
     expect(wait_for { fake_herdr.pane("w1:p1")[:transcript].scan("received a").size == 2 }).to be(true)
 
+    # Where claude keeps the conversation it held in the worktree.
+    claude_project = Orchestrator::Runner::Transcripts.claude_project_dirs(run.target_root).last
+    FileUtils.mkdir_p(claude_project)
+    File.write(File.join(claude_project, "conversation-1.jsonl"), %({"type":"user","message":"Exercise the lifecycle"}\n))
+
     expect { Orchestrator::SessionClose.call(run) }.to have_enqueued_job(RunDispatchJob)
 
     expect(run.reload.status).to eq("completed")
     expect(session.reload).to have_attributes(outcome: "done", herdr_pane_id: nil)
+    # What the pane showed before it was closed.
+    expect(session.last_screen).to include("received a", "one more thing")
+    # A copy of claude's own transcript, beside the run's runtime files.
+    saved = session.transcript_paths.sole
+    expect(saved).to end_with("/#{run.run_id}/transcripts/claude/conversation-1.jsonl")
+    expect(File.read(saved)).to include("Exercise the lifecycle")
+    FileUtils.rm_rf(claude_project)
     expect(session).to be_ended
     expect(fake_herdr.workspace_ids).to be_empty
     expect(wait_for { !process_alive?(session.pid) }).to be(true)
@@ -73,6 +85,56 @@ RSpec.describe "a run's lifecycle", type: :request do
     transcript = -> { fake_herdr.pane("w1:p1")[:transcript] }
     expect(wait_for { transcript.call.include?("received a") }).to be(true)
     expect(transcript.call.index("left a")).to be < transcript.call.index("received a")
+  end
+
+  # run-20261012-174300-3933: agent.prompt was answered, claude then never
+  # stirred, and the run sat "running / idle / live" with no agent at work.
+  describe "an agent that never gets its task" do
+    before do
+      stub_const("Orchestrator::Runner::SessionLauncher::PROMPT_SUBMIT_POLL_ATTEMPTS", 8)
+      stub_const("Orchestrator::Runner::SessionLauncher::PROMPT_SUBMIT_RETRY_WINDOWS", [ 4, 4 ])
+    end
+
+    it "starts the agent again in the same pane, and the run goes ahead when that one gets it", :fake_herdr do
+      run = queue_and_launch("Lost the first time [fake-agent-prompt: lost-once]")
+
+      session = run.reload.live_session
+      expect(session).to have_attributes(status: "running", herdr_pane_id: "w1:p1")
+      expect(fake_herdr.requests_for("agent.start").size).to eq(2)
+      expect(fake_herdr.requests_for("agent.prompt").size).to eq(2)
+      transcript = -> { fake_herdr.pane("w1:p1")[:transcript] }
+      expect(wait_for { transcript.call.include?("received a") }).to be(true)
+      expect(transcript.call).to include("lost a", "[fake agent exited]")
+      expect(transcript.call.index("[fake agent exited]")).to be < transcript.call.index("received a")
+      # The session's pid is the second CLI's, which is the one still running.
+      expect(process_alive?(session.pid)).to be(true)
+      # The workaround's record of firing. The fake agent reads from a pipe,
+      # not a terminal, so there is no unread count to take.
+      expect(session.lost_prompts.sole).to include(
+        "herdr_version" => "fake", "cli" => "claude", "cli_version" => "claude 9.9.9 (spec)", "unread_input_bytes" => nil,
+        "screen" => include("lost a")
+      )
+      expect(mcp_call("/mcp/admin", "get_run", runId: run.run_id, workspace: workspace.name)["lostPrompts"].size).to eq(1)
+    end
+
+    it "fails the launch, saying what it saw, when the restarted agent never gets it either", :fake_herdr do
+      run_id = nil
+      perform_enqueued_jobs(only: RunDispatchJob) do
+        run_id = mcp_call("/mcp/admin", "queue_run", task: "Always lost [fake-agent-prompt: lost]", workspace: workspace.name)
+          .fetch("runId")
+      end
+      run = Run.find_by!(run_id:)
+      expect { StartRunSessionJob.perform_now(run.id) }
+        .to raise_error(Orchestrator::Runner::LaunchError, /never seen busy.*its task never arrived, on each of 2 starts of claude/)
+
+      expect(run.reload).to have_attributes(status: "failed", launch_error: include("its task never arrived"))
+      expect(run.latest_session.result).to include("lost a")
+      expect(run.latest_session.last_screen).to include("lost a")
+      expect(run.latest_session.lost_prompts.size).to eq(2)
+      expect(fake_herdr.requests_for("agent.start").size).to eq(2)
+      expect(fake_herdr.workspace_ids).to be_empty
+      expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
+    end
   end
 
   it "keeps a worktree with uncommitted work when the session is closed", :fake_herdr do
@@ -162,9 +224,10 @@ RSpec.describe "a run's lifecycle", type: :request do
       expect { StartRunSessionJob.perform_now(run.id) }
         .to raise_error(Orchestrator::Runner::LaunchError, /agent.prompt gave no reply within [\d.]+s.*never seen busy/)
 
-      expect(run.reload).to have_attributes(status: "failed", launch_error: include("its task most likely never arrived"))
-      expect(fake_herdr.requests_for("agent.prompt").size).to eq(1)
-      expect(fake_herdr.requests_for("agent.send_keys").size).to eq(2)
+      expect(run.reload).to have_attributes(status: "failed", launch_error: include("its task never arrived, on each of 2 starts"))
+      # Never twice to one CLI: once to the first start, once to the restart.
+      expect(fake_herdr.requests_for("agent.prompt").size).to eq(2)
+      expect(fake_herdr.requests_for("agent.send_keys").size).to eq(4)
       expect(fake_herdr.workspace_ids).to be_empty
       expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
     end

@@ -177,6 +177,7 @@ module FakeHerdr
         when "agent.prompt" then agent_prompt(params)
         when "agent.send_keys" then agent_send_keys(params)
         when "notification.show" then {}
+        when "ping" then { "type" => "pong", "version" => "fake", "protocol" => 22 }
         else raise MethodError.new("method_not_found", "unknown method #{method}")
         end
       end

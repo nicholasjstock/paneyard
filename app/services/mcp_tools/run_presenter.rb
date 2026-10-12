@@ -40,6 +40,15 @@ module McpTools
         worktree: run.target_root,
         worktree_name: run.worktree_name,
         launch_error: run.launch_error,
+        # What the agent pane showed when Paneyard last killed its CLI or
+        # closed it (nil while the session is live: the pane itself is there).
+        last_screen: run.latest_session&.last_screen,
+        # The runner's copies of the CLI's own conversation transcripts, saved
+        # when the session ended.
+        transcripts: run.latest_session&.transcript_paths.presence,
+        # Each start of the CLI that never picked its prompt up and was
+        # restarted, with what was known (Runner::SessionLauncher#launch).
+        lost_prompts: run.latest_session&.lost_prompts.presence,
         launched_by: run.launched_by,
         # Runs started from this one's branch.
         follow_up_run_ids: run.branch_name.present? ? run.workspace.runs.where(base_branch: run.branch_name).order(:created_at).pluck(:run_id) : [],
