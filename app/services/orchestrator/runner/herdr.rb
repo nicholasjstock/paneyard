@@ -157,6 +157,14 @@ module Orchestrator
         request("workspace.close", workspace_id:)
       end
 
+      def workspace_close!(workspace_id)
+        response = workspace_close(workspace_id)
+        error = response["error"]
+        return if error.nil? || error["code"] == "workspace_not_found"
+
+        raise Error, error["message"] || "herdr could not close workspace"
+      end
+
       def worktree_create(cwd:, branch:, base:, label:, focus: false)
         request!("worktree.create", cwd:, branch:, base:, label: Sandbox.label(label), focus:)
       end

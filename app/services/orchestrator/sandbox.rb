@@ -63,6 +63,15 @@ module Orchestrator
       raise Violation, "sandbox refuses to #{action} #{path}: it is outside #{root}"
     end
 
+    # Sandbox push verification may only read local remotes inside its root.
+    # Network remotes (nil local_path) and copied production origins are refused.
+    def guard_git_remote!(local_path)
+      return unless enabled?
+      return if local_path.present? && allows_path?(local_path)
+
+      raise Violation, "sandbox refuses to verify a remote outside its root"
+    end
+
     # Only a process started by the fake herdr may be signalled: a copied
     # database's run_sessions.pid belongs to a real agent on this machine.
     # With real herdr, the sandbox's own sessions run real CLIs, and a pid one

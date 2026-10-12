@@ -58,15 +58,20 @@ module Orchestrator
         Worktrees.merged?(repository_path:, branch:, base_branch:, since:)
       end
 
+      def verify_job_finished!(repository_path:, path:, branch:, base_branch:)
+        Worktrees.verify_job_finished!(repository_path:, path:, branch:, base_branch:)
+      end
+
       # Whether `path` is a linked worktree of the repository that git knows.
       def worktree_registered?(repository_path:, path:)
         Worktrees.registered?(repository_path:, path:)
       end
 
       # Removes `path` if it is clean and its HEAD is in base_branch or on a
-      # remote branch. Returns whether it did.
-      def release_worktree(repository_path:, path:, base_branch:)
-        Worktrees.release(repository_path:, path:, base_branch:)
+      # remote branch. With branch supplied for explicit finalization, verifies
+      # the actual run tip/base or push destination before removal.
+      def release_worktree(repository_path:, path:, base_branch:, branch: nil)
+        Worktrees.release(repository_path:, path:, base_branch:, branch:)
       end
 
       # Removes `path`; refuses a dirty worktree unless `force`.
@@ -163,6 +168,11 @@ module Orchestrator
         nil
       rescue Herdr::Error
         nil
+      end
+
+      # Finalization needs failures to be retryable rather than best effort.
+      def close_workspace!(workspace_id)
+        herdr { Herdr.workspace_close!(workspace_id) }
       end
 
       # A desktop notification on this machine. Best effort.
