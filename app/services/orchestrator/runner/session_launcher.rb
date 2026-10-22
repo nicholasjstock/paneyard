@@ -1,4 +1,5 @@
 require "fileutils"
+require "open3"
 
 module Orchestrator
   module Runner
@@ -47,6 +48,31 @@ module Orchestrator
       # agent.prompt, and a launch gives up about 70 s after it. Why those
       # numbers is in submit_prompt_if_unsent!'s comment.
       PROMPT_SUBMIT_RETRY_WINDOWS = [ 6, 10, 14, 20, 30, 40 ].freeze
+      # How many times launch starts the CLI afresh in the same pane when the
+      # agent never showed any sign of its prompt -- see #launch.
+      PROMPT_LOST_RESTARTS = 1
+      # How much of the pane a lost prompt's record keeps, as it was just
+      # before the CLI was stopped.
+      RESTART_SCREEN_LINES = 60
+      # FIONREAD: the bytes waiting unread in a terminal's input queue.
+      FIONREAD = RUBY_PLATFORM.include?("darwin") ? 0x4004667f : 0x541B
+
+      # submit_prompt_if_unsent!'s verdict that the agent never once stirred
+      # after agent.prompt and every Enter: its task never reached it. #launch
+      # restarts the CLI over it, and lets it through as the launch's failure
+      # once the restarts are spent.
+      class PromptNeverArrived < LaunchError; end
+
+      # The launch's failure once every start lost its prompt, carrying a
+      # record of each (see #lost_prompt_record) for the session.
+      class PromptLost < LaunchError
+        attr_reader :lost_prompts
+
+        def initialize(message, lost_prompts:)
+          super(message)
+          @lost_prompts = lost_prompts
+        end
+      end
 
       # Writes the files the CLI reads (its MCP config for claude, and the
       # prompt, kept for the record) and builds the layout in the herdr
@@ -74,18 +100,136 @@ module Orchestrator
       end
 
       # Starts the agent in the pane #open returned and submits the prompt.
-      # Returns its pid, or raises LaunchError.
+      # Returns { "pid", "lost_prompts" }, or raises LaunchError (PromptLost
+      # when every start lost its prompt).
+      #
+      # An agent that never once showed any sign of its prompt
+      # (PromptNeverArrived) is stopped and started again in the same pane,
+      # with the prompt sent afresh. run-20261012-174300-3933 (claude, ~4.5KB
+      # prompt) was that case: herdr detected claude, reported it ready,
+      # answered agent.prompt in 0.3s, as on every healthy launch beside it --
+      # and claude then sat idle through every sample and all six Enters, never
+      # began a conversation (it wrote no transcript), and the launch went
+      # ahead as a live, idle session that would never report. The identical
+      # task queued again a minute later started at once, and every healthy
+      # launch is seen working within a second of agent.prompt, so whatever
+      # swallowed the prompt belongs to that one CLI start and not to the
+      # task. Stopping the CLI also throws away whatever it may have kept in
+      # its input box, so the prompt is never typed in twice. A second start
+      # that loses its prompt too fails the launch, saying what was seen.
+      #
+      # Each lost prompt is recorded (lost_prompt_record), and the records go
+      # back with the pid, or with the failure, for the session to keep: this
+      # restart is a workaround for a cause not yet pinned on herdr or the
+      # CLI, and the records are how to tell whether it still fires, on which
+      # versions, and which of the two to report it to.
       def launch(spec, pane_id:, mcp_config_path:)
         kind, args = command(spec, mcp_config_path)
         trust_claude_folder!(spec.fetch(:cwd)) if spec.fetch(:driver) == "claude"
+        lost_prompts = []
+        begin
+          start_and_prompt!(spec, kind:, args:, pane_id:)
+        rescue PromptNeverArrived => error
+          lost_prompts << lost_prompt_record(pane_id, kind:, verdict: error.message)
+          Rails.logger.warn("[SessionLauncher] [lost-prompt] run #{spec.fetch(:run_id)} pane #{pane_id}: " \
+                            "#{lost_prompts.last.except('screen').to_json}\nIts screen was:\n#{lost_prompts.last['screen'] || '(unread)'}")
+          if lost_prompts.size > PROMPT_LOST_RESTARTS
+            raise PromptLost.new("#{error.message}, on each of #{lost_prompts.size} starts of #{kind}", lost_prompts:)
+          end
+
+          Rails.logger.warn("[SessionLauncher] run #{spec.fetch(:run_id)} pane #{pane_id}: stopping #{kind} and starting it " \
+                            "again (restart #{lost_prompts.size}/#{PROMPT_LOST_RESTARTS})")
+          stop_agent!(pane_id, kind:)
+          retry
+        end
+
+        pid = wait_for_pid(pane_id) || raise(LaunchError, "session for run #{spec.fetch(:run_id)} never started a foreground process")
+        { "pid" => pid, "lost_prompts" => lost_prompts }
+      end
+
+      # What is known about a prompt the agent never picked up, read before
+      # the CLI is stopped, as plain data:
+      #
+      #   - at, verdict: when, and what submit_prompt_if_unsent! saw;
+      #   - herdr_version, cli_version: what to compare once either is upgraded;
+      #   - unread_input_bytes: the bytes waiting unread in the CLI's terminal
+      #     input. This is what tells herdr from the CLI on
+      #     run-20261012-174300-3933's evidence (claude processed no input at
+      #     all): bytes waiting mean herdr wrote them and the CLI never read
+      #     them; none means they never arrived. A macOS terminal holds only
+      #     about 1KB of unread input before writes to it block, so a prompt
+      #     the CLI never read shows as about 1022 here, not its full size.
+      #     nil when it could not be read.
+      #   - screen: the pane's last RESTART_SCREEN_LINES lines.
+      #
+      # Each part is best effort: a record must never fail the launch.
+      def lost_prompt_record(pane_id, kind:, verdict:)
+        {
+          "at" => Time.now.utc.iso8601, "verdict" => verdict, "herdr_version" => herdr_version, "cli" => kind,
+          "cli_version" => cli_version(kind), "unread_input_bytes" => unread_input_bytes(pane_id), "screen" => pane_screen(pane_id)
+        }
+      end
+
+      def pane_screen(pane_id)
+        Herdr.pane_read(pane_id, source: "recent_unwrapped", lines: RESTART_SCREEN_LINES).rstrip.presence
+      rescue Herdr::Error
+        nil
+      end
+
+      def herdr_version
+        Herdr.ping["version"]
+      rescue Herdr::Error
+        nil
+      end
+
+      def cli_version(kind)
+        ModelDiscovery.capture(kind, "--version")&.strip.presence
+      end
+
+      # FIONREAD on the terminal of the pane's foreground process (the CLI),
+      # opened without reading or becoming its controlling terminal. Only for
+      # a process the sandbox would let this signal, as stop_agent! is about
+      # to.
+      def unread_input_bytes(pane_id)
+        group_id = Herdr.pane_process_info(pane_id)["foreground_process_group_id"]
+        return nil if group_id.nil? || !Sandbox.allows_signal?(group_id)
+
+        tty, status = Open3.capture2("ps", "-o", "tty=", "-p", group_id.to_s)
+        tty = tty.strip
+        return nil unless status.success? && tty.match?(%r{\A(?:tty\w+|pts/\d+)\z})
+
+        File.open("/dev/#{tty}", File::RDONLY | File::NOCTTY | File::NONBLOCK) do |terminal|
+          count = [ 0 ].pack("l")
+          terminal.ioctl(FIONREAD, count)
+          count.unpack1("l")
+        end
+      rescue Herdr::Error, SystemCallError, IOError
+        nil
+      end
+
+      def start_and_prompt!(spec, kind:, args:, pane_id:)
         start_agent!(name: spec.fetch(:run_id), kind:, pane_id:, args:)
         wait_for_agent_detected!(pane_id, kind:)
         dismiss_codex_trust_prompt!(pane_id) if spec.fetch(:driver) == "codex"
         wait_until_ready!(pane_id, kind:)
         prompt = deliver_prompt(pane_id, spec.fetch(:prompt), run_id: spec.fetch(:run_id))
         submit_prompt_if_unsent!(pane_id, run_id: spec.fetch(:run_id), prompt:)
+      end
 
-        wait_for_pid(pane_id) || raise(LaunchError, "session for run #{spec.fetch(:run_id)} never started a foreground process")
+      # Ends the CLI in the pane so it can be started again: SIGTERM to its
+      # process group (the foreground group that is not the shell's), as
+      # Runner::Local#terminate ends a session, then the pane is back at its
+      # shell once start_agent! sees it idle there. Nothing to signal means the
+      # CLI has already gone.
+      def stop_agent!(pane_id, kind:)
+        info = Herdr.pane_process_info(pane_id)
+        group_id = info["foreground_process_group_id"]
+        return if group_id.nil? || group_id == info["shell_pid"]
+        raise LaunchError, "will not signal process group #{group_id} in pane #{pane_id} to restart #{kind}" unless Sandbox.allows_signal?(group_id)
+
+        Process.kill("SIGTERM", -group_id)
+      rescue Errno::ESRCH
+        nil
       end
 
       # A config problem should not mask the launch. If trust could not be
@@ -242,11 +386,12 @@ module Orchestrator
       # together in case being a few seconds late is enough, and the spacing
       # then widens to reach past a minute in few attempts. The last window
       # ends about 70 s after agent.prompt, so a stuck launch holds
-      # StartRunSessionJob about a minute longer than a healthy one and never
-      # more: after that the launch goes ahead (the pid is read, the run is
-      # running) with a warning in the log and a herdr notification, and the
-      # operator can still press Enter in the pane -- failing the run would
-      # only throw away a session one keystroke from working.
+      # StartRunSessionJob about a minute longer than a healthy one: after
+      # that, an agent that showed any sign of the prompt goes ahead (the pid
+      # is read, the run is running) with a warning in the log and a herdr
+      # notification, and the operator can still press Enter in the pane --
+      # failing the run would only throw away a session one keystroke from
+      # working. One that never stirred at all is the verdict below.
       #
       # An Enter on an already-submitted (empty) input box does nothing, so a
       # spurious one is cheap, while a missed one strands the run: lean towards
@@ -271,12 +416,13 @@ module Orchestrator
       # work, and the verdict with how long agent.prompt itself took (`prompt`,
       # from deliver_prompt). Returns true if no Enter was needed.
       #
-      # When agent.prompt timed out, there is one more verdict: an agent that
-      # was never once seen non-idle, through every window and Enter, most
-      # likely never got its task, and the launch fails (LaunchError) with
-      # what was observed. Any activity at all -- even the brief blip of text
-      # arriving -- means the text is probably in its input box, which is the
-      # stranded-prompt case above, and the launch goes ahead as it does there.
+      # There is one more verdict: an agent that was never once seen non-idle,
+      # through every window and Enter, never got its task, whether
+      # agent.prompt answered or timed out, and this raises PromptNeverArrived
+      # with what was observed (#launch restarts the CLI over it). Any
+      # activity at all -- even the brief blip of text arriving -- means the
+      # text is probably in its input box, which is the stranded-prompt case
+      # above, and the launch goes ahead as it does there.
       def submit_prompt_if_unsent!(pane_id, run_id:, prompt: nil)
         prompt_note = prompt_timing(prompt)
         started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -308,10 +454,14 @@ module Orchestrator
           history.concat(window)
         end
 
-        if prompt&.fetch(:timed_out) && history.none? { |status| agent_busy?(status) }
-          raise LaunchError, "herdr agent.prompt gave no reply within #{prompt.fetch(:seconds)}s, and the agent in pane " \
-                             "#{pane_id} then was never seen busy in #{elapsed.call}s of watching, through #{enters} Enters " \
-                             "(agent_status: #{summarize_samples(history)}): its task most likely never arrived"
+        if history.none? { |status| agent_busy?(status) }
+          reply = if prompt.nil? then "after herdr agent.prompt,"
+          elsif prompt.fetch(:timed_out) then "herdr agent.prompt gave no reply within #{prompt.fetch(:seconds)}s, and"
+          else "herdr agent.prompt answered in #{prompt.fetch(:seconds)}s, but"
+          end
+          raise PromptNeverArrived, "#{reply} the agent in pane #{pane_id} then was never seen busy in #{elapsed.call}s " \
+                                    "of watching, through #{enters} Enters (agent_status: #{summarize_samples(history)}): " \
+                                    "its task never arrived"
         end
 
         Rails.logger.warn("[SessionLauncher] run #{run_id} pane #{pane_id}: prompt still not seen picked up #{elapsed.call}s " \

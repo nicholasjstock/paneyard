@@ -75,19 +75,41 @@ RSpec.describe Orchestrator::Runner::SessionLauncher do
       expect(Rails.logger).to have_received(:info).with(/prompt picked up .*after 2 Enter\(s\)/)
     end
 
-    it "gives up after a bounded number of Enters, warns, and lets the launch go on" do
-      stub_statuses("idle")
+    # The blip of the text arriving: it is probably in the input box.
+    it "gives up after a bounded number of Enters, warns, and lets the launch go on once the agent stirred" do
+      stub_statuses("working", "idle")
 
       expect(submit!).to be(false)
       expect(herdr).to have_received(:agent_send_keys).exactly(windows.size).times
       expect(herdr).to have_received(:agent_get).exactly(attempts + windows.sum).times
       expect(Rails.logger).to have_received(:warn)
-        .with(/run run-1 pane w1:p1: prompt still not seen picked up .*after agent.prompt and #{windows.size} Enters \(agent_status: idle x#{attempts}, ENTER, idle x#{windows[0]}, ENTER, .*\); leaving the session running/)
+        .with(/run run-1 pane w1:p1: prompt still not seen picked up .*after agent.prompt and #{windows.size} Enters \(agent_status: working, idle x#{attempts - 1}, ENTER, idle x#{windows[0]}, ENTER, .*\); leaving the session running/)
       expect(herdr).to have_received(:notify).with(hash_including(title: /run-1: prompt may be unsent/))
     end
 
-    it "keeps the whole retry schedule to about a minute" do
+    # run-20261012-174300-3933: agent.prompt answered in 0.3s, and claude
+    # then sat idle through every sample and Enter without ever starting on
+    # its task -- left running, it was a live, idle session that would never
+    # report.
+    it "says the task never arrived when the agent never stirred, through every Enter" do
       stub_statuses("idle")
+
+      expect { submit! }.to raise_error(
+        described_class::PromptNeverArrived,
+        /after herdr agent.prompt, the agent in pane w1:p1 then was never seen busy in .*s of watching, through #{windows.size} Enters \(agent_status: idle x#{attempts}, ENTER, .*\): its task never arrived/
+      )
+      expect(herdr).to have_received(:agent_send_keys).exactly(windows.size).times
+      expect(herdr).not_to have_received(:notify)
+    end
+
+    it "does not count herdr errors as the agent stirring" do
+      stub_statuses(Orchestrator::Runner::Herdr::Error.new("boom"), "idle")
+
+      expect { submit! }.to raise_error(described_class::PromptNeverArrived, /agent_status: error\(Error\), idle x/)
+    end
+
+    it "keeps the whole retry schedule to about a minute" do
+      stub_statuses("working", "idle")
       slept = []
       allow(described_class).to receive(:sleep) { |seconds| slept << seconds }
 
@@ -174,12 +196,12 @@ RSpec.describe Orchestrator::Runner::SessionLauncher do
         expect(Rails.logger).to have_received(:info).with(/prompt picked up .*\(which timed out after 30.1s\)/)
       end
 
-      it "fails the launch, saying what it saw, when agent.prompt timed out and the agent never stirred" do
+      it "says the task never arrived, and what it saw, when agent.prompt timed out and the agent never stirred" do
         stub_statuses("idle")
 
         expect { submit_after!(timed_out: true) }.to raise_error(
-          Orchestrator::Runner::LaunchError,
-          /agent.prompt gave no reply within 30.1s, and the agent in pane w1:p1 then was never seen busy in .*s of watching, through #{windows.size} Enters \(agent_status: idle x#{attempts}, ENTER, .*\): its task most likely never arrived/
+          described_class::PromptNeverArrived,
+          /agent.prompt gave no reply within 30.1s, and the agent in pane w1:p1 then was never seen busy in .*s of watching, through #{windows.size} Enters \(agent_status: idle x#{attempts}, ENTER, .*\): its task never arrived/
         )
         expect(herdr).to have_received(:agent_send_keys).exactly(windows.size).times
         expect(herdr).not_to have_received(:notify)
@@ -192,10 +214,12 @@ RSpec.describe Orchestrator::Runner::SessionLauncher do
         expect(herdr).to have_received(:notify).with(hash_including(title: /prompt may be unsent/))
       end
 
-      it "never fails the launch over an idle agent when agent.prompt answered" do
+      it "says the task never arrived when agent.prompt answered but the agent never stirred" do
         stub_statuses("idle")
 
-        expect(submit_after!(timed_out: false)).to be(false)
+        expect { submit_after!(timed_out: false) }.to raise_error(
+          described_class::PromptNeverArrived, /agent.prompt answered in 30.1s, but the agent in pane w1:p1 then was never seen busy/
+        )
       end
     end
 
@@ -204,6 +228,176 @@ RSpec.describe Orchestrator::Runner::SessionLauncher do
 
       expect(submit!).to be(true)
       expect(herdr).not_to have_received(:agent_send_keys)
+    end
+  end
+
+  describe ".launch" do
+    let(:herdr) { Orchestrator::Runner::Herdr }
+    let(:spec) { { run_id: "run-1", driver: "claude", cwd: "/tmp/wt", prompt: "the task" } }
+    let(:shell) { { "shell_pid" => 100, "foreground_process_group_id" => 100, "foreground_processes" => [ { "pid" => 100 } ] } }
+    let(:agent) { { "shell_pid" => 100, "foreground_process_group_id" => 555, "foreground_processes" => [ { "pid" => 555 } ] } }
+
+    # `statuses` is the agent_status of each start of the CLI in turn; the
+    # agent holds the pane's foreground from its start until it is signalled.
+    def stub_starts(*statuses)
+      starts = 0
+      running = false
+      allow(herdr).to receive(:agent_start) { starts += 1; running = true; nil }
+      allow(herdr).to receive(:agent_get) do
+        { "agent" => "claude", "interactive_ready" => true, "agent_status" => statuses.fetch(starts - 1) }
+      end
+      allow(herdr).to receive(:pane_process_info) { running ? agent : shell }
+      allow(Process).to receive(:kill).with("SIGTERM", -555) { running = false; 1 }
+    end
+
+    def launch!
+      described_class.launch(spec, pane_id: "w1:p1", mcp_config_path: "/tmp/mcp.json")
+    end
+
+    before do
+      allow(described_class).to receive(:sleep)
+      allow(described_class).to receive(:command).and_return([ "claude", [] ])
+      allow(herdr).to receive(:pane_read).and_raise(herdr::Error, "no pane")
+      allow(herdr).to receive(:ping).and_return("type" => "pong", "version" => "0.9.3")
+      # Read for real in .unread_input_bytes's own examples.
+      allow(described_class).to receive(:unread_input_bytes).with("w1:p1").and_return(1022)
+      allow(herdr).to receive(:agent_prompt)
+      allow(herdr).to receive(:agent_send_keys)
+      allow(herdr).to receive(:notify)
+      allow(Rails.logger).to receive(:info)
+      allow(Rails.logger).to receive(:warn)
+    end
+
+    it "starts the agent once and sends its prompt once when it picks the prompt up" do
+      stub_starts("working")
+
+      expect(launch!).to eq("pid" => 555, "lost_prompts" => [])
+      expect(herdr).to have_received(:agent_start).once
+      expect(herdr).to have_received(:agent_prompt).with("w1:p1", "the task").once
+      expect(Process).not_to have_received(:kill)
+    end
+
+    # run-20261012-174300-3933: the identical task queued again started at once.
+    it "stops and starts the agent again, with the prompt sent afresh, when it never stirred" do
+      stub_starts("idle", "working")
+
+      expect(launch!).to include("pid" => 555)
+      expect(Process).to have_received(:kill).with("SIGTERM", -555).once
+      expect(herdr).to have_received(:agent_start).twice
+      expect(herdr).to have_received(:agent_prompt).with("w1:p1", "the task").twice
+      expect(Rails.logger).to have_received(:warn)
+        .with(/run run-1 pane w1:p1: stopping claude and starting it again \(restart 1\/1\)/)
+    end
+
+    # The workaround's own record: whether it still fires, on which versions,
+    # and whether herdr wrote the prompt the CLI never read.
+    it "records what it knew about the lost prompt, read before the agent was stopped" do
+      stub_starts("idle", "working")
+      allow(herdr).to receive(:pane_read).with("w1:p1", source: "recent_unwrapped", lines: described_class::RESTART_SCREEN_LINES)
+        .and_return("Some claude dialog\n\n")
+
+      record = launch!.fetch("lost_prompts").sole
+
+      expect(described_class).to have_received(:unread_input_bytes).once.ordered
+      expect(Process).to have_received(:kill).with("SIGTERM", -555).ordered
+
+      expect(record).to include(
+        "herdr_version" => "0.9.3", "cli" => "claude", "cli_version" => "claude 9.9.9 (spec)",
+        "unread_input_bytes" => 1022, "screen" => "Some claude dialog",
+        "verdict" => a_string_matching(/never seen busy .*its task never arrived/)
+      )
+      expect(Time.iso8601(record.fetch("at"))).to be_within(5).of(Time.now)
+      expect(Rails.logger).to have_received(:warn)
+        .with(/\[lost-prompt\] run run-1 pane w1:p1: \{.*"herdr_version":"0.9.3".*"unread_input_bytes":1022.*\}\nIts screen was:\nSome claude dialog\z/m)
+    end
+
+    it "still records a lost prompt when nothing about it can be read" do
+      stub_starts("idle", "working")
+      allow(herdr).to receive(:ping).and_raise(herdr::Unreachable, "timed out")
+      allow(described_class).to receive(:cli_version).and_return(nil)
+      allow(described_class).to receive(:unread_input_bytes).and_return(nil)
+
+      expect(launch!.fetch("lost_prompts").sole)
+        .to include("herdr_version" => nil, "cli_version" => nil, "unread_input_bytes" => nil, "screen" => nil)
+    end
+
+    it "fails the launch, saying what it saw, when the restarted agent never stirs either" do
+      stub_starts("idle", "idle")
+
+      expect { launch! }.to raise_error(
+        described_class::PromptLost,
+        /the agent in pane w1:p1 then was never seen busy .*its task never arrived, on each of 2 starts of claude/
+      ) { |error| expect(error.lost_prompts.map { it["unread_input_bytes"] }).to eq([ 1022, 1022 ]) }
+      expect(herdr).to have_received(:agent_start).twice
+      expect(Process).to have_received(:kill).once
+      expect(herdr).not_to have_received(:notify)
+    end
+
+    it "restarts no agent that showed any sign of its prompt" do
+      stub_starts("idle")
+      # The blip of the text arriving, on the first sample after agent.prompt.
+      blip = false
+      allow(herdr).to receive(:agent_prompt) { blip = true }
+      allow(herdr).to receive(:agent_get) do
+        status = blip ? "working" : "idle"
+        blip = false
+        { "agent" => "claude", "interactive_ready" => true, "agent_status" => status }
+      end
+
+      expect(launch!).to eq("pid" => 555, "lost_prompts" => [])
+      expect(herdr).to have_received(:agent_start).once
+      expect(herdr).to have_received(:notify).with(hash_including(title: /prompt may be unsent/))
+    end
+
+    it "does not signal a process group the sandbox does not allow" do
+      stub_starts("idle", "working")
+      allow(Orchestrator::Sandbox).to receive(:allows_signal?).with(555).and_return(false)
+
+      expect { launch! }.to raise_error(Orchestrator::Runner::LaunchError, /will not signal process group 555/)
+      expect(Process).not_to have_received(:kill)
+    end
+  end
+
+  # A real terminal, as the CLI has in its pane: the count is the kernel's.
+  describe ".unread_input_bytes" do
+    let(:herdr) { Orchestrator::Runner::Herdr }
+
+    def with_terminal_process
+      reader, writer, pid = PTY.spawn("sleep", "30")
+      allow(herdr).to receive(:pane_process_info).with("w1:p1")
+        .and_return("shell_pid" => 1, "foreground_process_group_id" => Process.getpgid(pid))
+      yield writer
+    ensure
+      Process.kill("KILL", pid) if pid
+      [ reader, writer ].compact.each(&:close)
+    end
+
+    it "counts the input waiting unread in the terminal of the pane's foreground process" do
+      require "pty"
+      with_terminal_process do |terminal|
+        terminal.write("the task\r")
+        sleep 0.2
+
+        expect(described_class.unread_input_bytes("w1:p1")).to eq(9)
+      end
+    end
+
+    it "says nothing for a process the sandbox would not let it signal" do
+      require "pty"
+      with_terminal_process do |terminal|
+        terminal.write("the task\r")
+        allow(Orchestrator::Sandbox).to receive(:allows_signal?).and_return(false)
+
+        expect(described_class.unread_input_bytes("w1:p1")).to be_nil
+      end
+    end
+
+    it "says nothing for a process with no terminal, or when herdr cannot say which it is" do
+      allow(herdr).to receive(:pane_process_info).with("w1:p1").and_return("foreground_process_group_id" => Process.pid)
+      expect(described_class.unread_input_bytes("w1:p1")).to be_nil
+
+      allow(herdr).to receive(:pane_process_info).with("w1:p1").and_raise(herdr::Unreachable, "gone")
+      expect(described_class.unread_input_bytes("w1:p1")).to be_nil
     end
   end
 

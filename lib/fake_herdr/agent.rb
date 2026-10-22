@@ -27,6 +27,11 @@ module FakeHerdr
   # input box", and only acts on it once an Enter arrives through
   # agent.send_keys.
   #
+  # `[fake-agent-prompt: lost]` reproduces a CLI that never gets its task
+  # (run-20261012-174300-3933): agent.prompt is answered, and the agent stays
+  # idle through it and every Enter. `lost-once` loses it only on the first
+  # launch in its directory, as that run's identical retry then started.
+  #
   # Like claude, it keeps each conversation it starts under the directory it
   # ran in (FAKE_AGENT_CONVERSATIONS_DIR, which FakeHerdr::Server sets), and
   # resumes one when launched with claude's `--resume <id>` or codex's
@@ -38,6 +43,7 @@ module FakeHerdr
   class Agent
     DIRECTIVE = /\[fake-agent:\s*([a-z]+)\]/
     UNSUBMITTED = /\[fake-agent-prompt:\s*unsubmitted\]/
+    LOST = /\[fake-agent-prompt:\s*lost(-once)?\]/
     MODES = %w[done blocked failed dirty crash manual working].freeze
 
     def initialize(argv: ARGV, env: ENV, input: $stdin, output: $stdout)
@@ -91,6 +97,7 @@ module FakeHerdr
     end
 
     def receive_prompt(text)
+      return say("fake agent lost a #{text.length}-character prompt") if lose_prompt?(text)
       return handle_prompt(text) unless text.match?(UNSUBMITTED)
 
       control(status: "working")
@@ -98,6 +105,21 @@ module FakeHerdr
       control(status: "idle")
       @unsubmitted = text
       say("fake agent left a #{text.length}-character prompt unsubmitted")
+    end
+
+    # `lost-once` remembers, beside this directory's conversations, that a
+    # launch here already lost one.
+    def lose_prompt?(text)
+      lost = text.match(LOST)
+      return false unless lost
+      return true unless lost[1]
+
+      marker = conversation_path(".prompt-lost-once")
+      return false if File.exist?(marker)
+
+      FileUtils.mkdir_p(File.dirname(marker))
+      File.write(marker, "")
+      true
     end
 
     def handle_keys(keys)

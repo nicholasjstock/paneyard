@@ -286,6 +286,14 @@ RSpec.describe Orchestrator::RunSessionRunner do
     # and on run-20260929-194456-3ec1 the first Enter was ignored too.
     it "nudges the agent with bounded Enters when the prompt is left unsubmitted, and still starts the run" do
       stub_successful_launch(agent_status: "idle")
+      # The blip of the text arriving in the input box, right after agent.prompt.
+      blip = false
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_prompt) { blip = true }
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_get) do
+        status = blip ? "working" : "idle"
+        blip = false
+        { "agent" => "claude", "interactive_ready" => true, "agent_status" => status }
+      end
       allow(Orchestrator::Runner::Herdr).to receive(:agent_send_keys)
       allow(Orchestrator::Runner::Herdr).to receive(:notify)
 
@@ -294,6 +302,58 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(Orchestrator::Runner::Herdr).to have_received(:agent_send_keys).with("w9:p1", [ "Enter" ])
         .exactly(Orchestrator::Runner::SessionLauncher::PROMPT_SUBMIT_RETRY_WINDOWS.size).times
       expect(session.reload).to have_attributes(status: "running", pid: 555)
+    end
+
+    # run-20261012-174300-3933: claude sat idle, never starting on its task,
+    # and the session was left running, idle and "live" until the operator
+    # closed it. Now its CLI is started again, and if that one never stirs
+    # either the launch fails with what was seen.
+    it "fails the session, saying the task never arrived, when the agent never stirs through a restart" do
+      stub_successful_launch(agent_status: "idle")
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_send_keys)
+      allow(Orchestrator::Runner::Herdr).to receive(:notify)
+      starts = 0
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_start) { starts += 1; nil }
+      allow(Orchestrator::Runner::Herdr).to receive(:pane_process_info) { starts.positive? ? running_agent_info : idle_shell_info }
+      allow(Process).to receive(:kill).with("SIGTERM", -555) { starts = 0; 1 }
+
+      expect { described_class.start!(run) }
+        .to raise_error(Orchestrator::Runner::LaunchError, /its task never arrived, on each of 2 starts of claude/)
+
+      expect(Orchestrator::Runner::Herdr).to have_received(:agent_start).twice
+      expect(Orchestrator::Runner::Herdr).to have_received(:agent_prompt).twice
+      expect(Orchestrator::Runner::Herdr).not_to have_received(:notify)
+      expect(run.run_sessions.sole).to have_attributes(status: "failed", outcome: "failed",
+        result: include("never seen busy").and(include("its task never arrived")))
+      expect(Orchestrator::Runner::Herdr).to have_received(:workspace_close).with("w9")
+      # Both lost prompts, kept on the failed session.
+      expect(run.run_sessions.sole.lost_prompts.map { it["cli"] }).to eq(%w[claude claude])
+    end
+
+    it "keeps the record of a lost prompt on a session whose restarted CLI got it" do
+      stub_successful_launch
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_send_keys)
+      allow(Orchestrator::Runner::Herdr).to receive(:ping).and_return("version" => "0.9.3")
+      # The first start loses its prompt; the second picks it up.
+      starts = 0
+      running = false
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_start) { starts += 1; running = true; nil }
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_get) do
+        { "agent" => "claude", "interactive_ready" => true, "agent_status" => starts > 1 ? "working" : "idle" }
+      end
+      allow(Orchestrator::Runner::Herdr).to receive(:pane_process_info) { running ? running_agent_info : idle_shell_info }
+      allow(Process).to receive(:kill).with("SIGTERM", -555) { running = false; 1 }
+
+      session = described_class.start!(run)
+
+      expect(session.reload).to have_attributes(status: "running", pid: 555)
+      expect(session.lost_prompts.sole).to include("herdr_version" => "0.9.3", "cli_version" => "claude 9.9.9 (spec)")
+    end
+
+    it "keeps no lost prompts for a launch that needed no restart" do
+      stub_successful_launch
+
+      expect(described_class.start!(run).reload.lost_prompts).to eq([])
     end
 
     it "does not nudge a claude session that picked the prompt up on its own" do
@@ -341,12 +401,35 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect { described_class.start!(run) }.to raise_error(Orchestrator::Runner::LaunchError, /never became ready/)
 
       expect(Orchestrator::Runner::Herdr).to have_received(:pane_read)
-        .with("w9:p1", source: "recent_unwrapped", lines: described_class::LAUNCH_SCREEN_LINES).ordered
+        .with("w9:p1", source: "recent_unwrapped", lines: described_class::LAST_SCREEN_LINES).ordered
       expect(Orchestrator::Runner::Herdr).to have_received(:workspace_close).with("w9").ordered
       expect(run.run_sessions.sole.result).to eq(
         "herdr agent in pane w9:p1 never became ready\n\n" \
         "--- Last screen of agent pane w9:p1 ---\n~/worktree $ claude --model x\nError: cwd was deleted"
       )
+      expect(run.run_sessions.sole.last_screen).to eq("~/worktree $ claude --model x\nError: cwd was deleted")
+    end
+
+    it "saves the CLI's transcripts from the worktree when the launch fails" do
+      stub_successful_launch
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_start).and_raise(Orchestrator::Runner::Herdr::Error, "unknown agent kind")
+      allow(Orchestrator::Runner.local).to receive(:save_transcripts).and_return([])
+
+      expect { described_class.start!(run) }.to raise_error(Orchestrator::Runner::Error)
+
+      expect(Orchestrator::Runner.local).to have_received(:save_transcripts).with(hash_including(run_id: run.run_id, cwd: worktree))
+      expect(run.run_sessions.sole).to have_attributes(status: "failed", transcript_paths: [])
+    end
+
+    it "puts only the tail of the kept screen in the result" do
+      stub_const("#{described_class}::LAUNCH_SCREEN_LINES", 2)
+      stub_successful_launch
+      allow(Orchestrator::Runner::Herdr).to receive(:agent_start).and_raise(Orchestrator::Runner::Herdr::Error, "unknown agent kind")
+      allow(Orchestrator::Runner::Herdr).to receive(:pane_read).and_return("one\ntwo\nthree\n")
+
+      expect { described_class.start!(run) }.to raise_error(Orchestrator::Runner::Error)
+
+      expect(run.run_sessions.sole).to have_attributes(last_screen: "one\ntwo\nthree", result: end_with("---\ntwo\nthree"))
     end
 
     it "names claude's folder-trust prompt when that is where the launch stopped" do
@@ -764,6 +847,71 @@ RSpec.describe Orchestrator::RunSessionRunner do
       expect(session).not_to be_live
       expect(run.reload.live_session).to be_nil
       expect(Orchestrator::RunConcurrency.occupied_run_ids).not_to include(run.id)
+    end
+
+    # run-20261012-174300-3933: closing a session whose agent never started
+    # left nothing to say what its pane had been showing.
+    it "keeps the agent pane's last screen, read before the CLI is killed and the pane closed" do
+      _run, session = create_run_and_session(run:, prefix: "session-runner", pid: 4321)
+      allow(Process).to receive(:kill)
+      allow(Orchestrator::Runner::Herdr).to receive(:pane_read).and_return("> the task\n\n  ? for shortcuts\n\n")
+
+      pane_id = session.herdr_pane_id
+
+      described_class.finish!(session, outcome: "failed", result: "Closed")
+
+      expect(Orchestrator::Runner::Herdr).to have_received(:pane_read)
+        .with(pane_id, source: "recent_unwrapped", lines: described_class::LAST_SCREEN_LINES).ordered
+      expect(Process).to have_received(:kill).with("SIGTERM", -4321).ordered
+      expect(Orchestrator::Runner::Herdr).to have_received(:workspace_close).ordered
+      expect(session.reload.last_screen).to eq("> the task\n\n  ? for shortcuts")
+    end
+
+    it "keeps only the tail of a long screen" do
+      stub_const("#{described_class}::LAST_SCREEN_MAX_CHARS", 10)
+      _run, session = create_run_and_session(run:, prefix: "session-runner", pid: 4321)
+      allow(Process).to receive(:kill)
+      allow(Orchestrator::Runner::Herdr).to receive(:pane_read).and_return("#{'x' * 50}0123456789")
+
+      described_class.finish!(session, outcome: "done")
+
+      expect(session.reload.last_screen).to eq("[...]\n0123456789")
+    end
+
+    it "ends the session all the same when the pane cannot be read" do
+      _run, session = create_run_and_session(run:, prefix: "session-runner", pid: 4321)
+      allow(Process).to receive(:kill)
+      allow(Orchestrator::Runner::Herdr).to receive(:pane_read).and_raise(KeyError, "read")
+
+      described_class.finish!(session, outcome: "done")
+
+      expect(session.reload).to have_attributes(status: "done", last_screen: nil)
+      expect(Process).to have_received(:kill).with("SIGTERM", -4321)
+    end
+
+    it "saves the CLI's own transcripts from the run's worktree once the CLI is stopped, and records them" do
+      run.update!(target_root: worktree)
+      _run, session = create_run_and_session(run:, prefix: "session-runner", pid: 4321)
+      allow(Process).to receive(:kill)
+      allow(Orchestrator::Runner.local).to receive(:save_transcripts).and_return([ "/rt/run/transcripts/claude/abc.jsonl" ])
+
+      described_class.finish!(session, outcome: "done")
+
+      expect(Process).to have_received(:kill).with("SIGTERM", -4321).ordered
+      expect(Orchestrator::Runner.local).to have_received(:save_transcripts)
+        .with(run_id: run.run_id, driver: session.driver, cwd: worktree, since: session.created_at.iso8601).ordered
+      expect(session.reload.transcript_paths).to eq([ "/rt/run/transcripts/claude/abc.jsonl" ])
+    end
+
+    it "ends the session all the same when its transcripts cannot be saved" do
+      run.update!(target_root: worktree)
+      _run, session = create_run_and_session(run:, prefix: "session-runner", pid: 4321)
+      allow(Process).to receive(:kill)
+      allow(Orchestrator::Runner.local).to receive(:save_transcripts).and_raise(Orchestrator::Runner::Error, "disk full")
+
+      described_class.finish!(session, outcome: "done")
+
+      expect(session.reload).to have_attributes(status: "done", transcript_paths: [])
     end
 
     it "tolerates a process that is already gone" do

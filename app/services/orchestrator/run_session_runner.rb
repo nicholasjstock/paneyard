@@ -21,7 +21,12 @@ module Orchestrator
 
     class Error < StandardError; end
 
-    # How much of the agent pane a failed launch keeps in the run record. The
+    # How much of the agent pane is kept as the session's last_screen,
+    # whenever Paneyard kills its CLI or closes it (keep_last_screen!): once
+    # the pane is gone, it is the only record of what the agent was showing.
+    LAST_SCREEN_LINES = 300
+    LAST_SCREEN_MAX_CHARS = 30_000
+    # How much of that a failed launch also puts in the session result. The
     # tail is what matters (the shell's last error, the CLI's exit message).
     LAUNCH_SCREEN_LINES = 80
     LAUNCH_SCREEN_MAX_CHARS = 8_000
@@ -68,11 +73,12 @@ module Orchestrator
           mcp_config_path: opened.fetch("mcp_config_path"), prompt_path: opened.fetch("prompt_path")
         )
 
-        pid = launch_agent!(runner, session, spec, fresh_prompt: resume && plan.fetch(:prompt))
+        launched = launch_agent!(runner, session, spec, fresh_prompt: resume && plan.fetch(:prompt))
         # A quick agent can call report_idle before launch_agent returns; its
         # report (session done/blocked/failed) must not be overwritten here.
         session.with_lock do
-          session.update!(pid:, started_at: Time.current, last_seen_at: Time.current,
+          session.update!(pid: launched.fetch("pid"), lost_prompts: launched.fetch("lost_prompts"),
+            started_at: Time.current, last_seen_at: Time.current,
             **(session.status == "starting" ? { status: "running" } : {}))
         end
         session
@@ -80,11 +86,13 @@ module Orchestrator
         # Closing the workspace destroys the only evidence of why the agent
         # did not start (a shell error, the CLI's own exit message), so read
         # the pane first.
-        screen = launch_failure_screen(session)
+        screen = keep_last_screen!(session)
         close_herdr_workspace(session)
+        keep_transcripts!(session)
         session.update!(
-          status: "failed", outcome: "failed", result: launch_failure_result(error, session, screen),
-          ended_at: Time.current
+          status: "failed", outcome: "failed", result: launch_failure_result(error, session, launch_failure_screen(screen)),
+          ended_at: Time.current,
+          **(error.respond_to?(:lost_prompts) ? { lost_prompts: error.lost_prompts } : {})
         )
         raise
       end
@@ -140,16 +148,51 @@ module Orchestrator
       "#{base}/mcp"
     end
 
-    # Best effort by design: nothing here may mask the launch error itself.
-    def launch_failure_screen(session)
-      text = snapshot(session, lines: LAUNCH_SCREEN_LINES, source: "recent_unwrapped")
+    # Reads the agent pane and keeps it as the session's last_screen, before
+    # anything kills the CLI or closes the pane: run-20261012-174300-3933's
+    # agent never started on its task, and closing its session left nothing
+    # to say what claude had been showing. Returns the screen, or nil. Best
+    # effort by design: nothing here may stop a session from ending.
+    def keep_last_screen!(session)
+      text = snapshot(session, lines: LAST_SCREEN_LINES, source: "recent_unwrapped")
       return nil if text.blank?
 
-      text = text.rstrip
-      text.length > LAUNCH_SCREEN_MAX_CHARS ? "[...]\n#{text[-LAUNCH_SCREEN_MAX_CHARS..]}" : text
+      text = clip_screen(text.rstrip, LAST_SCREEN_MAX_CHARS)
+      session.update!(last_screen: text)
+      text
     rescue StandardError => error
-      Rails.logger.warn("[RunSessionRunner] could not read #{session.herdr_pane_id} after a failed launch: #{error.message}")
+      Rails.logger.warn("[RunSessionRunner] could not keep the last screen of #{session.herdr_pane_id}: #{error.message}")
       nil
+    end
+
+    # Has the runner copy the CLI's own conversation transcripts from this
+    # session's worktree (Runner::Transcripts) once the CLI is stopped, so
+    # they are final, and records the copies. Every ending goes through here:
+    # the CLI keeps its originals only until it prunes them, and finding none
+    # at all -- as for run-20261012-174300-3933, whose claude never began a
+    # conversation -- is worth knowing too. Best effort, like
+    # keep_last_screen!.
+    def keep_transcripts!(session)
+      cwd = session.run.target_root
+      return if cwd.blank?
+
+      paths = runner_for(session).save_transcripts(
+        run_id: session.run.run_id, driver: session.driver, cwd:, since: session.created_at.iso8601
+      )
+      Rails.logger.info("[RunSessionRunner] run #{session.run.run_id}: #{session.driver} kept no transcript in #{cwd}") if paths.empty?
+      session.update!(transcript_paths: paths)
+    rescue StandardError => error
+      Rails.logger.warn("[RunSessionRunner] could not keep the transcripts of run #{session.run.run_id}: #{error.message}")
+    end
+
+    def launch_failure_screen(screen)
+      return nil if screen.nil?
+
+      clip_screen(screen.lines.last(LAUNCH_SCREEN_LINES).join.rstrip, LAUNCH_SCREEN_MAX_CHARS)
+    end
+
+    def clip_screen(text, max_chars)
+      text.length > max_chars ? "[...]\n#{text[-max_chars..]}" : text
     end
 
     def launch_failure_result(error, session, screen)
@@ -232,8 +275,10 @@ module Orchestrator
     # which is how SessionClose removes a worktree herdr's way (worktree.remove
     # needs it open, and closes it) without herdr having to reopen it.
     def finish!(session, outcome:, result: nil, close_workspace: true)
+      keep_last_screen!(session)
       kill_process(session)
       close_herdr_workspace(session) if close_workspace
+      keep_transcripts!(session)
       # ended_at is what actually frees the slot; status is only descriptive,
       # and must not be left at a live-looking value like "blocked" (which
       # means "waiting at a question", not "gave up and handed the run back").
@@ -273,6 +318,7 @@ module Orchestrator
       )
       kill_process(session)
       close_herdr_workspace(session)
+      keep_transcripts!(session)
       session
     end
 
