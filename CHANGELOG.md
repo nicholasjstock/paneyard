@@ -15,6 +15,7 @@ The first public version. It includes:
 - Settings from `$(herdr plugin config-dir paneyard)/.env`, written as a commented sample on first start.
 - The queue popup defaults to the agent running in the focused pane, and the model it is on now (read from the CLI's session log, so `/model` switches count), and offers the driver's models to pick another (`list_models` on `/mcp/admin`; `queue_run` takes `model`).
 - `close_session`, `reopen_session`, `list_models` and `update_workspace_layout` on `/mcp/admin`, `PANEYARD_RUNTIME_DIR`, and each run's herdr workspace id and follow-up relationships in `list_runs`/`get_run`.
+- A workspace's lobby: the plugin's lobby action (and `open_lobby` on `/mcp/admin`) opens an agent on the repository's own checkout, connected to `/mcp/admin`, on the branch the checkout is on, or another branch or a pull request's (`#123`). Opening it on another branch switches the checkout, only when tracked files have no uncommitted changes. It holds no job slot, and `list_workspaces` and the jobs popup show it while it is open.
 
 ### Repositories, base branches and herdr worktrees
 

@@ -20,14 +20,22 @@ module Orchestrator
     module SessionArgs
       module_function
 
+      # Which of the orchestrator's MCP endpoints a session talks to: a run's
+      # session reports through /mcp/run with its own capability; a workspace's
+      # lobby (Orchestrator::LobbyOpen) is the operator's own integration
+      # session and gets /mcp/admin, which takes no credentials.
+      MCP_ENDPOINTS = %w[run admin].freeze
+
       # Returns [command, args] for the given driver. Nothing goes in the
       # environment: a session's pane is the operator's own login shell
       # (herdr's worktree.create takes no env), so its /mcp/run capability
       # reaches the CLI in a config file (claude) or a -c override (codex).
-      def build(driver:, root_dir:, mcp_config_path:, capability_token:, mcp_url:, model:, resume_session_id: nil)
+      def build(driver:, root_dir:, mcp_config_path:, capability_token:, mcp_url:, model:, resume_session_id: nil, mcp_endpoint: "run")
+        raise ArgumentError, "unsupported MCP endpoint: #{mcp_endpoint.inspect}" unless MCP_ENDPOINTS.include?(mcp_endpoint)
+
         case driver
         when "claude" then [ "claude", claude_args(root_dir:, mcp_config_path:, resume_session_id:, model:) ]
-        when "codex" then [ "codex", codex_args(root_dir:, mcp_url:, capability_token:, resume_session_id:, model:) ]
+        when "codex" then [ "codex", codex_args(root_dir:, mcp_url:, capability_token:, resume_session_id:, model:, mcp_endpoint:) ]
         else raise ArgumentError, "unsupported driver: #{driver.inspect}"
         end
       end
@@ -96,10 +104,13 @@ module Orchestrator
       # env, which sessions no longer have.) The override is typed into the
       # pane's shell, so the token can land in the operator's shell history;
       # it is dead the moment the session ends (RunSession.authenticate_capability).
-      def codex_args(root_dir:, mcp_url:, capability_token:, model:, resume_session_id: nil)
+      #
+      # A lobby's codex (mcp_endpoint "admin") gets /mcp/admin and no
+      # http_headers override at all: that endpoint takes no credentials.
+      def codex_args(root_dir:, mcp_url:, capability_token:, model:, resume_session_id: nil, mcp_endpoint: "run")
         config_args = [
-          %(mcp_servers.paneyard.url=#{"#{mcp_url}/run".to_json}),
-          %(mcp_servers.paneyard.http_headers={Authorization=#{"Bearer #{capability_token}".to_json}}),
+          %(mcp_servers.paneyard.url=#{"#{mcp_url}/#{mcp_endpoint}".to_json}),
+          *(mcp_endpoint == "run" ? [ %(mcp_servers.paneyard.http_headers={Authorization=#{"Bearer #{capability_token}".to_json}}) ] : []),
           %(mcp_servers.paneyard.default_tools_approval_mode="approve"),
           "check_for_update_on_startup=false"
         ].flat_map { |override| [ "-c", override ] }
@@ -117,16 +128,12 @@ module Orchestrator
         model.present? ? [ flag, model ] : []
       end
 
-      def write_claude_mcp_config(path, capability_token, mcp_url:)
-        config = {
-          "mcpServers" => {
-            "paneyard" => {
-              "type" => "http",
-              "url" => "#{mcp_url}/run",
-              "headers" => { "Authorization" => "Bearer #{capability_token}" }
-            }
-          }
-        }
+      # A lobby's config (mcp_endpoint "admin") points at /mcp/admin with no
+      # headers, since that endpoint takes no credentials.
+      def write_claude_mcp_config(path, capability_token, mcp_url:, mcp_endpoint: "run")
+        server = { "type" => "http", "url" => "#{mcp_url}/#{mcp_endpoint}" }
+        server["headers"] = { "Authorization" => "Bearer #{capability_token}" } if mcp_endpoint == "run"
+        config = { "mcpServers" => { "paneyard" => server } }
         File.write(path, "#{JSON.pretty_generate(config)}\n")
         File.chmod(0o600, path)
         path

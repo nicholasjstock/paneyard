@@ -31,6 +31,23 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
     expect(herdr.socket_path).not_to include(".config/herdr")
   end
 
+  # A lobby's herdr workspace: the repository's own checkout, not a worktree.
+  it "opens a workspace on a directory with its root pane, as herdr's workspace.create does" do
+    repository = create_source_checkout
+
+    created = herdr.workspace_create(cwd: repository, label: "repo lobby")
+
+    expect(created.fetch("root_pane")).to eq("workspace_id" => "w1", "tab_id" => "w1:t1", "pane_id" => "w1:p1")
+    expect(fake_herdr.pane("w1:p1")[:cwd]).to eq(repository)
+  end
+
+  it "refuses an agent name herdr would, as herdr does" do
+    pane_id = herdr.workspace_create(cwd: create_source_checkout, label: "repo").dig("root_pane", "pane_id")
+
+    expect { herdr.agent_start(name: "lobby-gembani.com", kind: "claude", pane_id:, args: []) }
+      .to raise_error(herdr::Error, /agent name must start with a lowercase letter/)
+  end
+
   it "answers ping with its version, as herdr does" do
     expect(herdr.ping).to include("type" => "pong", "version" => "fake")
   end

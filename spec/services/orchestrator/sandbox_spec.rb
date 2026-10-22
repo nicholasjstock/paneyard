@@ -64,6 +64,20 @@ RSpec.describe Orchestrator::Sandbox do
     expect(output.lines.size).to eq(1)
   end
 
+  it "will not switch the checkout of, or open a lobby on, a workspace outside the sandbox" do
+    workspace = create_workspace(repository_path: create_source_checkout)
+    branch, = Open3.capture2("git", "-C", workspace.repository_path, "branch", "--show-current")
+    sandbox_on!
+    allow(Orchestrator::Runner::Herdr).to receive(:workspace_create)
+
+    expect { Orchestrator::LobbyOpen.call(workspace, branch: "elsewhere") }
+      .to raise_error(Orchestrator::Runner::Error, /sandbox refuses to switch the checkout of .* outside/)
+    expect { Orchestrator::Runner.for(workspace).open_checkout_workspace(repository_path: workspace.repository_path, label: "x") }
+      .to raise_error(Orchestrator::Runner::Error, /sandbox refuses to open a workspace on .* outside/)
+    expect(Orchestrator::Runner::Herdr).not_to have_received(:workspace_create)
+    expect(Open3.capture2("git", "-C", workspace.repository_path, "branch", "--show-current").first).to eq(branch)
+  end
+
   it "never sweeps or releases worktrees of a workspace outside the sandbox" do
     workspace = create_workspace(repository_path: create_source_checkout)
     worktree = File.join(Dir.mktmpdir("outside-worktrees"), "done")

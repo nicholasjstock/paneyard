@@ -48,6 +48,13 @@ contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "runs"]
 
 [[actions]]
+id = "lobby"
+title = "Paneyard: open the lobby"
+description = "An agent on this repository's own checkout, connected to Paneyard, to hand off jobs and merge them. Pick the branch (or #PR); it switches the checkout only if nothing would be lost."
+contexts = ["workspace"]
+command = ["/bin/sh", "bin/herdr-plugin", "pane", "lobby"]
+
+[[actions]]
 id = "report"
 title = "Paneyard: this job's report"
 description = "Inside a job's herdr workspace: what it reported last."
@@ -120,6 +127,14 @@ placement = "popup"
 width = "90%"
 height = "80%"
 command = ["/bin/sh", "bin/herdr-plugin", "runs-ui"]
+
+[[panes]]
+id = "lobby"
+title = "Paneyard: open the lobby"
+placement = "popup"
+width = "80%"
+height = "60%"
+command = ["/bin/sh", "bin/herdr-plugin", "lobby-ui"]
 
 [[panes]]
 id = "report"

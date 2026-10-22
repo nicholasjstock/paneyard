@@ -42,7 +42,7 @@ RSpec.describe PaneyardPlugin::Cli do
         expect(cli).to receive(:layout_ui)
       end
 
-      expect(out.string).to include("Hand off a task", "Jobs and reports", "Job layout for this repository")
+      expect(out.string).to include("Hand off a task", "Jobs and reports", "Open this repository's lobby", "Job layout for this repository")
     end
 
     it "closes without doing anything when no choice is made" do
@@ -391,6 +391,102 @@ RSpec.describe PaneyardPlugin::Cli do
 
       expect(out.string).not_to include("o to reopen")
       expect(client).not_to have_received(:reopen)
+    end
+  end
+
+  describe "lobby-ui" do
+    let(:workspace) { { "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main", "lobby" => nil } }
+
+    before do
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "main" ])
+      allow(client).to receive(:workspaces).and_return([ workspace ])
+      allow(client).to receive(:models).and_return({})
+      allow(client).to receive(:open_lobby).and_return("state" => "opened", "branch" => "main", "herdrWorkspace" => "w7")
+    end
+
+    it "opens the repository's lobby on the branch its checkout is on, and goes to it" do
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "feature/x" ])
+
+      run_cli("lobby-ui", input: "\n\n\n\n", context: { "focused_pane_cwd" => "/code/app/lib" })
+
+      expect(PaneyardPlugin::WorkspaceMatch).to have_received(:repository_of).with("/code/app").at_least(:once)
+      expect(client).to have_received(:open_lobby).with(workspace: "app", branch: nil, driver: nil, model: nil)
+      expect(herdr_calls).to eq([ %w[workspace focus w7] ])
+      expect(out.string).to include("PANEYARD  /  LOBBY", "Branch, or #number for a pull request (Enter to stay on feature/x; q cancels)")
+    end
+
+    it "opens it on a pull request's head branch, which gh looks up in the repository" do
+      run_cli("lobby-ui", input: "\n#79\ncodex\n\n", context: { "focused_pane_cwd" => "/code/app" }) do |cli|
+        allow(cli).to receive(:run_command)
+          .with("gh", "pr", "view", "79", "--json", "headRefName,isCrossRepository", chdir: "/code/app")
+          .and_return(success: true, output: %({"headRefName":"fix/flaky","isCrossRepository":false}), error: "")
+      end
+
+      expect(out.string).to include("Pull request #79 is fix/flaky.")
+      expect(client).to have_received(:open_lobby).with(workspace: "app", branch: "fix/flaky", driver: "codex", model: nil)
+    end
+
+    it "asks again when gh cannot say, or the pull request is from a fork" do
+      run_cli("lobby-ui", input: "\n#5\n#6\nq\n", context: { "focused_pane_cwd" => "/code/app" }) do |cli|
+        allow(cli).to receive(:run_command).with("gh", "pr", "view", "5", any_args)
+          .and_return(success: false, output: "", error: "no pull requests found\n")
+        allow(cli).to receive(:run_command).with("gh", "pr", "view", "6", any_args)
+          .and_return(success: true, output: %({"headRefName":"main","isCrossRepository":true}), error: "")
+      end
+
+      expect(out.string).to include("Could not look up pull request #5 with gh: no pull requests found",
+        "Pull request #6 is from a fork", "Cancelled.")
+      expect(client).not_to have_received(:open_lobby)
+    end
+
+    it "goes to the lobby already open instead of asking for a branch" do
+      workspace["lobby"] = { "branch" => "release", "herdrWorkspace" => "w4", "driver" => "claude", "model" => "opus", "live" => true }
+
+      run_cli("lobby-ui", input: "\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(out.string).to include("lobby open on release (claude)", "Its lobby is open on release (claude, opus).")
+      expect(herdr_calls).to eq([ %w[workspace focus w4] ])
+      expect(client).not_to have_received(:open_lobby)
+    end
+
+    it "lists every workspace, and opens the one picked by number from a pane in none of them" do
+      other = { "id" => 4, "name" => "site", "repositoryPath" => "/code/site", "defaultBaseBranch" => "main", "lobby" => nil }
+      allow(client).to receive(:workspaces).and_return([ workspace, other ])
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).with("/tmp/elsewhere").and_return([ nil, nil ])
+
+      run_cli("lobby-ui", input: "\n2\n\n\n\n", context: { "focused_pane_cwd" => "/tmp/elsewhere" })
+
+      expect(out.string).to match(/1  app\s+on main/)
+      expect(out.string).to match(/2  site\s+on main/)
+      expect(out.string).to include("Workspace number, q cancels")
+      expect(client).to have_received(:open_lobby).with(workspace: "site", branch: nil, driver: nil, model: nil)
+    end
+
+    it "shows why the server would not open it, and waits for a key" do
+      allow(client).to receive(:open_lobby).and_raise(
+        PaneyardSandbox::McpClient::ToolError.new("open_lobby failed", { "error" => "lobby_failed", "message" => "/code/app has uncommitted changes" })
+      )
+
+      run_cli("lobby-ui", input: "\nrelease\n\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(out.string).to include("/code/app has uncommitted changes")
+      expect(herdr_calls).to be_empty
+    end
+  end
+
+  describe "runs-ui with a lobby open" do
+    let(:workspace) do
+      { "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main",
+        "lobby" => { "branch" => "release", "herdrWorkspace" => "w4", "driver" => "claude", "live" => true } }
+    end
+
+    it "lists it above the jobs, by letter, and goes to it" do
+      allow(client).to receive(:runs).and_return([ [ workspace, { "runs" => [] } ] ])
+
+      run_cli("runs-ui", input: "a\n")
+
+      expect(out.string).to match(/a  lobby  app\s+claude\s+release/)
+      expect(herdr_calls).to eq([ %w[workspace focus w4] ])
     end
   end
 

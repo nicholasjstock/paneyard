@@ -23,7 +23,9 @@ module Orchestrator
     # line back. Every method below was confirmed against a running server via
     # `herdr api schema --json` plus direct socket probes:
     #
-    #   - agent.start {name, kind, pane_id, args} launches a real interactive CLI
+    #   - agent.start {name, kind, pane_id, args} (name: a lowercase letter, then
+    #     lowercase letters, digits, - or _, 32 characters at most; confirmed
+    #     live) launches a real interactive CLI
     #     session in an existing pane and returns almost immediately (confirmed:
     #     0.0s, response carries launch_pending: true) -- a kickoff, not a
     #     synchronous "wait until running" call. args are typed into the pane's
@@ -91,6 +93,11 @@ module Orchestrator
     #     visible|recent|recent_unwrapped|detection.
     #   - workspace.close {workspace_id} takes every tab and pane in the
     #     workspace down, and the processes in them.
+    #   - workspace.create {label, cwd, focus} -> {workspace: {workspace_id,
+    #     ...}, root_pane: {pane_id, tab_id, workspace_id}} opens a workspace on
+    #     a directory that is not a run's worktree: a workspace's own checkout,
+    #     for its lobby (Runner::Local#open_checkout_workspace). It takes env
+    #     too, which Paneyard never passes.
     #   - worktree.create {cwd, branch, base, label, focus} (herdr 0.7.5) makes
     #     a linked git worktree of the repository at cwd, wherever the
     #     operator's herdr config puts worktrees (~/.herdr/worktrees/<repo>/
@@ -165,6 +172,10 @@ module Orchestrator
         return if error.nil? || error["code"] == "workspace_not_found"
 
         raise Error, error["message"] || "herdr could not close workspace"
+      end
+
+      def workspace_create(cwd:, label:, focus: false)
+        request!("workspace.create", cwd:, label: Sandbox.label(label), focus:)
       end
 
       def worktree_create(cwd:, branch:, base:, label:, focus: false)
