@@ -196,7 +196,7 @@ module Orchestrator
 
         tty, status = Open3.capture2("ps", "-o", "tty=", "-p", group_id.to_s)
         tty = tty.strip
-        return nil unless status.success? && tty.match?(/\Atty[\w]+\z/)
+        return nil unless status.success? && tty.match?(%r{\A(?:tty\w+|pts/\d+)\z})
 
         File.open("/dev/#{tty}", File::RDONLY | File::NOCTTY | File::NONBLOCK) do |terminal|
           count = [ 0 ].pack("l")
