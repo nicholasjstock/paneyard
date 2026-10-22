@@ -20,8 +20,8 @@ module PaneyardPlugin
 
     SAMPLE = <<~ENV.freeze
       # Paneyard settings. Every line is optional; uncomment what you need.
-      # Applied when Paneyard starts: run the "Restart Paneyard" action
-      # (herdr plugin action invoke paneyard.restart --plugin paneyard) after a change.
+      # Applied when Paneyard starts: run the "Paneyard: restart" action
+      # (herdr plugin action invoke restart --plugin paneyard) after a change.
 
       # Live agent sessions at once, across every workspace (default 4).
       # PANEYARD_MAX_CONCURRENT_RUNS=4
