@@ -9,11 +9,12 @@ module Orchestrator
   # registered workspace, or an explicit `workspace:` argument).
   #
   # register_workspace, update_workspace_layout, close_session,
-  # reopen_session and update_run_dependencies are the tools only this
-  # endpoint has beyond ping: changing what Paneyard manages or what panes a
-  # run starts, ending a session or bringing one back, or letting a run start
-  # without the work it was queued after, is the operator's decision, while a
-  # run session works inside the workspace it was given.
+  # reopen_session, update_run_dependencies and open_lobby are the tools only
+  # this endpoint has beyond ping: changing what Paneyard manages or what panes
+  # a run starts, ending a session or bringing one back, letting a run start
+  # without the work it was queued after, or switching the operator's own
+  # checkout for their lobby, is the operator's decision, while a run session
+  # works inside the workspace it was given.
   module AdminMcpServer
     module_function
 
@@ -28,7 +29,8 @@ module Orchestrator
       ::McpTools::UpdateWorkspaceLayoutTool,
       ::McpTools::CloseSessionTool,
       ::McpTools::ReopenSessionTool,
-      ::McpTools::UpdateRunDependenciesTool
+      ::McpTools::UpdateRunDependenciesTool,
+      ::McpTools::OpenLobbyTool
     ].freeze
 
     # Clients that surface server instructions (Claude Code does) get the one
@@ -44,7 +46,8 @@ module Orchestrator
       "(claude or codex), and model as the model id you are running on if you know it, unless the operator names " \
       "others. When one job must build on another's work, queue it with after: [that job's runId] rather than " \
       "asking the operator to merge them in order; it waits, holding no slot, until that work is merged into the " \
-      "shared baseBranch.".freeze
+      "shared baseBranch. A workspace's lobby (open_lobby) is the operator's own integration session on its " \
+      "checkout; open one only when the operator asks.".freeze
 
     def build
       MCP::Server.new(

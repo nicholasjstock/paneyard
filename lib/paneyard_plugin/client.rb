@@ -53,6 +53,12 @@ module PaneyardPlugin
       @mcp.call_tool("reopen_session", runId: run_id, workspace:)
     end
 
+    # {"state", "branch", "switchedFrom", "herdrWorkspace", ...}: the
+    # workspace's lobby, opened on branch (or found open on it).
+    def open_lobby(workspace:, branch: nil, driver: nil, model: nil)
+      @mcp.call_tool("open_lobby", workspace:, **{ branch:, driver:, model: }.compact)
+    end
+
     # Lets a queued run start without waiting for the runs it was queued after.
     def release(run_id, workspace:)
       @mcp.call_tool("update_run_dependencies", runId: run_id, workspace:, after: [])

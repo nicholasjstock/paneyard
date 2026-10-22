@@ -145,13 +145,14 @@ command = "paneyard.menu"
 description = "paneyard menu"
 ```
 
-The menu offers: hand off a task, jobs and reports (where a closed job can be reopened), this job's report, close this job, the job layout, and letting your agents queue jobs. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke <id> --plugin paneyard`.
+The menu offers: hand off a task, jobs and reports (where a closed job can be reopened), the repository's lobby, this job's report, close this job, the job layout, and letting your agents queue jobs. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke <id> --plugin paneyard`.
 
 | Action | What it does |
 | --- | --- |
 | `paneyard.menu` | Open the single Paneyard menu recommended for key binding. |
 | `paneyard.queue` | Hand off a task from the repository and branch of the current pane. |
-| `paneyard.runs` | The 40 newest jobs, newest first, a follow-up marked with its parent (`22da ↳7efb`). Pick one to read its newest report, jump to its herdr workspace, close it, or reopen it once closed. |
+| `paneyard.runs` | Open lobbies, then the 40 newest jobs, newest first, a follow-up marked with its parent (`22da ↳7efb`). Pick one to read its newest report, jump to its herdr workspace, close it, or reopen it once closed. |
+| `paneyard.lobby` | Pick a workspace (Enter for the current repository's) and open its [lobby](./docs/operating.md#the-lobby): an agent on its own checkout, connected to Paneyard, to hand off jobs and merge them. Name a branch or `#PR`; it switches the checkout only if nothing would be lost. |
 | `paneyard.report` | Inside a job's herdr workspace: that job's newest report. |
 | `paneyard.close` | Inside a job's herdr workspace: close it (asks first). |
 | `paneyard.layout` | Visually build and validate the current repository's tabs and panes in a Herdr popup, including from one of its job worktrees. |

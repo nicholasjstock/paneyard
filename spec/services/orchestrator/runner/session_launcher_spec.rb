@@ -277,6 +277,18 @@ RSpec.describe Orchestrator::Runner::SessionLauncher do
       expect(Process).not_to have_received(:kill)
     end
 
+    # A lobby (Orchestrator::LobbyOpen): the operator speaks to it first.
+    it "only waits for the agent to be ready when there is no prompt, so there is nothing to lose" do
+      stub_starts("idle")
+
+      result = described_class.launch(spec.merge(prompt: nil), pane_id: "w1:p1", mcp_config_path: "/tmp/mcp.json")
+
+      expect(result).to eq("pid" => 555, "lost_prompts" => [])
+      expect(herdr).to have_received(:agent_start).once
+      expect(herdr).not_to have_received(:agent_prompt)
+      expect(herdr).not_to have_received(:agent_send_keys)
+    end
+
     # run-20261012-174300-3933: the identical task queued again started at once.
     it "stops and starts the agent again, with the prompt sent afresh, when it never stirred" do
       stub_starts("idle", "working")
@@ -355,6 +367,26 @@ RSpec.describe Orchestrator::Runner::SessionLauncher do
 
       expect { launch! }.to raise_error(Orchestrator::Runner::LaunchError, /will not signal process group 555/)
       expect(Process).not_to have_received(:kill)
+    end
+  end
+
+  describe ".open" do
+    let(:runtime_root) { Dir.mktmpdir }
+    let(:spec) do
+      { run_id: "lobby-app", driver: "claude", cwd: "/repos/app", capability_token: nil, prompt: nil,
+        mcp_url: "http://127.0.0.1:7263/mcp", mcp_endpoint: "admin", layout: [ { "panes" => [ { "name" => "agent" } ] } ],
+        herdr_workspace_id: "w1", herdr_tab_id: "w1:t1", herdr_pane_id: "w1:p1" }
+    end
+
+    after { FileUtils.rm_rf(runtime_root) }
+
+    it "writes a lobby's admin MCP config and no prompt file" do
+      opened = described_class.open(spec, runtime_root:)
+
+      expect(opened).to include("pane_id" => "w1:p1", "prompt_path" => nil)
+      config = JSON.parse(File.read(opened.fetch("mcp_config_path")))
+      expect(config.dig("mcpServers", "paneyard")).to eq("type" => "http", "url" => "http://127.0.0.1:7263/mcp/admin")
+      expect(Dir.children(File.dirname(opened.fetch("mcp_config_path")))).to eq([ "mcp.json" ])
     end
   end
 

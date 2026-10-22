@@ -18,6 +18,8 @@ module PaneyardPlugin
     # it misses a /model switch.
     MODEL_FLAGS = { "claude" => %w[--model], "codex" => %w[-m --model] }.freeze
     MODEL_CHOICES_SHOWN = 15
+    # The keys runs_ui lists live lobbies under, beside the jobs' numbers.
+    LOBBY_KEYS = ("a".."p").to_a.freeze
 
     USAGE = <<~TEXT.freeze
       Usage: bin/herdr-plugin <command>
@@ -26,7 +28,7 @@ module PaneyardPlugin
         start | restart | stop | status
         url          print the daemon's base URL
         mcp-url      print /mcp/admin's URL (and show it as a herdr notification)
-        menu-ui | queue-ui | runs-ui | report-ui | close-ui | layout-ui | setup-ui | mcp-ui
+        menu-ui | queue-ui | runs-ui | lobby-ui | report-ui | close-ui | layout-ui | setup-ui | mcp-ui
                      the interactive popups behind the plugin's actions
     TEXT
 
@@ -53,6 +55,7 @@ module PaneyardPlugin
       when "menu-ui" then interactive { menu_ui }
       when "queue-ui" then interactive { queue_ui }
       when "runs-ui" then interactive { runs_ui }
+      when "lobby-ui" then interactive { lobby_ui }
       when "report-ui" then interactive { this_run_ui(:report) }
       when "close-ui" then interactive { this_run_ui(:close) }
       when "layout-ui" then interactive { layout_ui }
@@ -347,6 +350,7 @@ module PaneyardPlugin
       heading "Paneyard"
       say "q  Hand off a task"
       say "r  Jobs and reports"
+      say "o  Open this repository's lobby"
       say "p  This job's report"
       say "x  Close this job"
       say "l  Job layout for this repository"
@@ -356,6 +360,7 @@ module PaneyardPlugin
       case ask("Choose an action (Enter cancels): ")&.downcase
       when "q" then queue_ui
       when "r" then runs_ui
+      when "o" then lobby_ui
       when "p" then this_run_ui(:report)
       when "x" then this_run_ui(:close)
       when "l" then layout_ui
@@ -439,26 +444,161 @@ module PaneyardPlugin
       answer.nil? || answer.empty? ? default : answer
     end
 
+    # Live lobbies first, by letter, then the jobs, by number.
     def runs_ui
       client = connect!
       loop do
-        entries = run_entries(client)
+        listed = client.runs
+        lobbies = listed.map(&:first).select { |workspace| workspace.dig("lobby", "live") }.first(LOBBY_KEYS.size)
+        entries = run_entries(listed)
         heading "Paneyard jobs"
+        lobbies.each_with_index { |workspace, index| say lobby_line(LOBBY_KEYS[index], workspace) }
+        say "" if lobbies.any?
         if entries.empty?
           say "No jobs yet. Use \"Hand off a task\" in a repository's pane."
         else
           entries.each_with_index { |(workspace, run), index| say run_line(index + 1, workspace, run) }
         end
         say ""
-        choice = ask("Number for a job, Enter to refresh, q to quit: ")
+        choice = ask("Number for a job#{', a letter to go to a lobby' if lobbies.any?}, Enter to refresh, q to quit: ")
         case choice
         when nil, "q" then return
         when /\A\d+\z/
           workspace, run = entries[choice.to_i - 1]
           next say("No run #{choice}.") unless run
           return if run_screen(client, workspace, run.fetch("runId")) == :quit
+        when /\A[a-p]\z/
+          workspace = lobbies[LOBBY_KEYS.index(choice)]
+          next say("No lobby #{choice}.") unless workspace
+
+          return herdr("workspace", "focus", workspace.dig("lobby", "herdrWorkspace"))
         end
       end
+    end
+
+    # A workspace's lobby: an agent on the repository's own checkout,
+    # connected to Paneyard to queue jobs, read their reports and merge their
+    # branches. Lists every workspace, Enter picking the one this pane is in;
+    # goes to the lobby when it is already open, and otherwise opens it on
+    # the branch the operator names (#123 being pull request 123's).
+    def lobby_ui
+      client = connect!
+      workspaces = client.workspaces
+      if workspaces.empty?
+        say "No workspaces yet. Hand off a task from a repository's pane to register it."
+        return pause
+      end
+
+      here = pane_workspace(workspaces)
+      clear_screen
+      say accent("PANEYARD  /  LOBBY")
+      say rule
+      say dim("An agent on a repository's own checkout, connected to Paneyard: hand off jobs, read their reports, merge them.")
+      say ""
+      workspaces.each_with_index { |candidate, index| say lobby_choice_line(index + 1, candidate, here: candidate == here) }
+      say ""
+      workspace = choose_lobby_workspace(workspaces, here)
+      return say("Cancelled.") unless workspace
+
+      say ""
+      say "#{bold(workspace.fetch('name'))}  #{dim(workspace.fetch('repositoryPath'))}"
+      lobby = workspace["lobby"]
+      if lobby && lobby["live"]
+        say "Its lobby is open on #{lobby['branch']} (#{[ lobby['driver'], lobby['model'] ].compact.join(', ')})."
+        return say("Cancelled.") if ask("Enter to go to it, q to cancel: ") != ""
+
+        return herdr("workspace", "focus", lobby.fetch("herdrWorkspace"))
+      end
+
+      say dim("Opening it on another branch switches the checkout, and only if it has no uncommitted changes.")
+      say ""
+      branch = ask_lobby_branch(workspace)
+      return say("Cancelled.") unless branch
+
+      branch = nil if branch == :current
+
+      pane_driver, pane_model, pane_switch = pane_agent
+      driver = ask_driver(pane_driver)
+      same_agent = driver == pane_driver
+      model = ask_model(client, workspace, driver || "claude", same_agent ? pane_model : nil, same_agent ? pane_switch : nil)
+      say ""
+      say branch ? "Opening the lobby on #{branch}…" : "Opening the lobby…"
+      opened = client.open_lobby(workspace: workspace.fetch("name"), branch:, driver:, model:)
+      herdr("workspace", "focus", opened.fetch("herdrWorkspace"))
+    rescue PaneyardSandbox::McpClient::ToolError => error
+      say ""
+      say error.payload["message"] || error.message
+      pause
+    end
+
+    # The workspace this pane's directory is in, if any.
+    def pane_workspace(workspaces)
+      dir = context_dir
+      return unless dir
+
+      repository, _branch = WorkspaceMatch.repository_of(dir)
+      WorkspaceMatch.workspace_for(workspaces, dir, repository:)
+    end
+
+    def lobby_choice_line(number, workspace, here:)
+      _repository, branch = WorkspaceMatch.repository_of(workspace.fetch("repositoryPath"))
+      lobby = workspace["lobby"]
+      state = lobby && lobby["live"] ? "lobby open on #{lobby['branch']} (#{lobby['driver']})" : "on #{branch || 'a detached HEAD'}"
+      format("%3d  %-20s  %s%s", number, workspace.fetch("name")[0, 20], state, here ? dim("  (this pane)") : "")
+    end
+
+    def choose_lobby_workspace(workspaces, here)
+      loop do
+        answer = ask("Workspace number#{", Enter for #{here.fetch('name')}" if here}, q cancels: ")
+        return nil if answer.nil? || answer == "q"
+        return here if answer.empty? && here
+
+        chosen = workspaces[answer.to_i - 1] if answer.match?(/\A\d+\z/) && answer.to_i.positive?
+        return chosen if chosen
+
+        say "No workspace #{answer}." unless answer.empty?
+      end
+    end
+
+    # Enter keeps the checkout on the branch it has checked out (:current,
+    # which the server reads for itself); otherwise the branch the operator
+    # names, or #123 for pull request 123's head branch. nil cancels.
+    def ask_lobby_branch(workspace)
+      _repository, current = WorkspaceMatch.repository_of(workspace.fetch("repositoryPath"))
+      stay = current ? "stay on #{current}" : "stay where it is"
+      loop do
+        answer = ask("Branch, or #number for a pull request (Enter to #{stay}; q cancels): ")
+        return nil if answer.nil? || answer == "q"
+        return :current if answer.empty?
+        return answer unless (number = answer[/\A#(\d+)\z/, 1])
+
+        branch = pull_request_branch(workspace, number)
+        return branch if branch
+      end
+    end
+
+    # A pull request's head branch, from gh in the repository; nil, having
+    # said why, when gh can't say or the branch is on a fork rather than
+    # origin, where the lobby could not fetch it.
+    def pull_request_branch(workspace, number)
+      result = run_command("gh", "pr", "view", number, "--json", "headRefName,isCrossRepository",
+        chdir: workspace.fetch("repositoryPath"))
+      unless result[:success]
+        say "Could not look up pull request ##{number} with gh: #{result[:error].strip}"
+        return nil
+      end
+
+      pull_request = JSON.parse(result[:output])
+      if pull_request["isCrossRepository"]
+        say "Pull request ##{number} is from a fork; the lobby can only open a branch origin has."
+        return nil
+      end
+
+      say dim("Pull request ##{number} is #{pull_request.fetch('headRefName')}.")
+      pull_request.fetch("headRefName")
+    rescue JSON::ParserError, KeyError
+      say "gh did not say which branch pull request ##{number} is."
+      nil
     end
 
     # The report and close actions, for the run whose herdr workspace the
@@ -598,8 +738,8 @@ module PaneyardPlugin
       show_skill_command
     end
 
-    def run_command(*argv)
-      stdout, stderr, status = Open3.capture3(*argv)
+    def run_command(*argv, **options)
+      stdout, stderr, status = Open3.capture3(*argv, **options)
       { success: status.success?, output: stdout, error: stderr.empty? ? stdout : stderr }
     rescue SystemCallError => error
       { success: false, output: "", error: error.message }
@@ -747,9 +887,14 @@ module PaneyardPlugin
       nil
     end
 
-    def run_entries(client)
-      client.runs.flat_map { |workspace, listed| listed.fetch("runs").map { |run| [ workspace, run ] } }
+    def run_entries(listed)
+      listed.flat_map { |workspace, listed| listed.fetch("runs").map { |run| [ workspace, run ] } }
         .sort_by { |_workspace, run| run.fetch("runId") }.reverse.first(40)
+    end
+
+    def lobby_line(key, workspace)
+      lobby = workspace.fetch("lobby")
+      format("  %s  lobby  %-14s  %-8s  %s", key, workspace.fetch("name")[0, 14], lobby["driver"], lobby["branch"])
     end
 
     # A follow-up -- a run started from another run's branch -- shows its
