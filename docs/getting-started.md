@@ -11,6 +11,7 @@ Everything you need to install Paneyard as a herdr plugin, hand off your first j
   5. [Read reports, close and reopen jobs](#5-read-reports-close-and-reopen-jobs)
   6. [Queue jobs from your own agent](#6-queue-jobs-from-your-own-agent)
   - [Settings, updates and removal](#settings-updates-and-removal)
+  - [Running Paneyard on another machine](#running-paneyard-on-another-machine)
   - [Running without the plugin](#running-without-the-plugin)
 - [How a job works](#how-a-job-works)
 - [Workspace layouts](#workspace-layouts)
@@ -104,6 +105,45 @@ The port stays the same across restarts; if it ever has to change (something els
 - **Removing:** `herdr plugin action invoke stop --plugin paneyard`, then `herdr plugin uninstall paneyard`. herdr leaves the state and config directories in place; delete them to remove your job history too.
 - **Logs:** `~/.local/state/herdr/plugins/paneyard/log/paneyard.log`, and `herdr plugin log list --plugin paneyard` for the actions themselves.
 
+### Running Paneyard on another machine
+
+Paneyard can run on a second machine, such as an always-on Linux box, while you hand off and read jobs from the one you sit at. The jobs run in the server's herdr, on the server's own checkouts of your repositories, and your machine's plugin only drives it. Both machines need herdr and the plugin. Paneyard has no authentication, so reach the server over a private network such as [Tailscale](https://tailscale.com). The example below uses a server called `server`, with the tailnet name `server.example.ts.net`.
+
+1. **On the server, install and prepare as usual.** Install the plugin ([step 1](#1-install-the-plugin)). Sign in to the agent CLIs (and `gh`, if sessions push over HTTPS). Clone the repositories you want jobs for, each with an `origin` remote. The [Requirements](#requirements) all apply to the server.
+2. **On the server, pin the port and allow the name** that you'll reach it by. Add these to `$(herdr plugin config-dir paneyard)/.env`, then run `herdr plugin action invoke restart --plugin paneyard`:
+
+   ```sh
+   PORT=7263
+   PANEYARD_ALLOWED_HOSTS=server.example.ts.net
+   ```
+
+3. **On the server, expose it to your own machines only.** Paneyard keeps listening on loopback; `tailscale serve` (not Funnel, which is public) forwards the tailnet name to it:
+
+   ```sh
+   tailscale serve --bg --http=7263 http://127.0.0.1:7263
+   ```
+
+   From your machine, `curl http://server.example.ts.net:7263/up` should now answer.
+4. **On your machine, point the plugin at the server.** Install the plugin there too. Add these to its `.env`, then run any Paneyard action:
+
+   ```sh
+   PANEYARD_REMOTE_URL=http://server.example.ts.net:7263
+   PANEYARD_REMOTE_PATHS=/Users/me=/home/me
+   ```
+
+   With `PANEYARD_REMOTE_URL` set, the plugin starts no Paneyard of its own. `PANEYARD_REMOTE_PATHS` lists `local=remote` path prefixes, separated by commas. It tells Paneyard where a checkout here is on the server, so keep your clones at matching paths under those prefixes. `bin/herdr-plugin status`, run in the plugin's directory, shows whether the server answers and how paths map.
+5. **Connect your agents** with `paneyard.setup` ([step 2](#2-connect-your-coding-agents)) on each machine where you run one. It registers the server's `/mcp/admin` URL.
+6. **Optionally, see the server's herdr from yours.** `herdr machine add server` saves it as an SSH machine, so your herdr can reach the server's herdr. `herdr --remote server` attaches to it in a terminal.
+
+Some things differ with a remote server:
+
+- A job starts from the server's copy of its base branch, so push the commits it should build on first.
+- Jobs and lobbies open in the server's herdr. Actions that would focus one tell you its herdr workspace instead.
+- **This job's report** and **Close this job** send you to the jobs list.
+- `paneyard.restart` has to be run on the server.
+
+[Operating](./operating.md#as-a-herdr-plugin) has the details.
+
 ### Running without the plugin
 
 Paneyard is an ordinary Rails app, and the plugin only packages it. To run it from a clone instead (as its contributors do):
@@ -166,6 +206,7 @@ Everything is optional except herdr and an agent CLI. With the plugin, put these
 | `PANEYARD_MAX_CONCURRENT_RUNS` | `4` | Global cap on live sessions. |
 | `PANEYARD_CLAUDE_MODEL`, `PANEYARD_CODEX_MODEL` | `opus`; none (codex's own default) | Default model per driver; a model picked when queueing wins. |
 | `HERDR_SOCKET_PATH` | the socket herdr gives the plugin, else `~/.config/herdr/herdr.sock` | herdr's socket. |
+| `PANEYARD_REMOTE_URL`, `PANEYARD_REMOTE_PATHS` | unset | Plugin only: drive a Paneyard running on another machine instead of starting one, with `local=remote` path prefixes for your checkouts. See [Operating](./operating.md#as-a-herdr-plugin). |
 | `PANEYARD_RUBY` | bundled runtime | Development links only: fallback Ruby when `[[build]]` has not installed the bundle. |
 
 Pane layouts are set per workspace ([above](#workspace-layouts)). Paneyard sets no environment variables in a session's panes; see [What a job starts with](./operating.md#3-what-a-run-starts-with-inside-the-repo).

@@ -694,4 +694,75 @@ RSpec.describe PaneyardPlugin::Cli do
 
     expect(herdr_calls.first).to include("Paneyard moved to port 7999")
   end
+  describe "with PANEYARD_REMOTE_URL" do
+    let(:remote_client) { instance_double(PaneyardPlugin::Client) }
+    let(:workspace) do
+      { "id" => 3, "name" => "app", "repositoryPath" => "/Users/me/app", "defaultBaseBranch" => "main",
+        "lobby" => { "branch" => "main", "herdrWorkspace" => "w4", "driver" => "claude", "live" => true } }
+    end
+
+    before do
+      File.write(File.join(state, ".env"), "PANEYARD_REMOTE_URL=http://server.example:7263\nPANEYARD_REMOTE_PATHS=/Users/me=/home/me\n")
+      allow_any_instance_of(PaneyardPlugin::Remote).to receive(:up?).and_return(true)
+      allow(PaneyardPlugin::Client).to receive(:new)
+        .with("http://server.example:7263", paths: an_instance_of(PaneyardPlugin::Remote)).and_return(remote_client)
+    end
+
+    it "starts no daemon of its own" do
+      expect(daemon).not_to receive(:ensure_running)
+
+      expect(run_cli("startup")).to eq(0)
+      expect(out.string).to include("Paneyard runs on server.example")
+    end
+
+    it "refuses to restart, which has to happen on the server" do
+      expect(daemon).not_to receive(:restart)
+
+      expect { expect(run_cli("restart")).to eq(1) }.to output(/restart it there/).to_stderr
+    end
+
+    it "prints the remote URL" do
+      run_cli("mcp-url")
+
+      expect(out.string).to include("http://server.example:7263/mcp/admin")
+    end
+
+    it "queues through the remote Paneyard, saying the branch has to be there" do
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/Users/me/app", "main" ])
+      allow(remote_client).to receive_messages(workspaces: [ workspace ], models: {})
+      allow(remote_client).to receive(:queue).and_return("runId" => "run-1", "baseBranch" => "main", "capacity" => {})
+
+      run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/Users/me/app" })
+
+      expect(remote_client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil)
+      expect(out.string).to include("Runs on server.example, from its own copy of the branch")
+    end
+
+    it "names a herdr workspace on the server instead of focusing one here" do
+      allow(remote_client).to receive(:runs).and_return([ [ workspace, { "runs" => [] } ] ])
+
+      run_cli("runs-ui", input: "a\n\n")
+
+      expect(herdr_calls).to be_empty
+      expect(out.string).to include("herdr workspace w4 on server.example")
+    end
+
+    it "does not match this herdr's workspace against the server's jobs" do
+      allow(remote_client).to receive(:runs).and_return([ [ workspace, { "runs" => [ { "runId" => "run-9", "session" => { "herdrWorkspace" => "w5" } } ] } ] ])
+      allow(remote_client).to receive(:close)
+
+      run_cli("close-ui", input: "q\n", context: { "workspace_id" => "w5" })
+
+      expect(remote_client).not_to have_received(:close)
+      expect(out.string).to include("can't be told from here")
+    end
+
+    it "says so when the server does not answer" do
+      allow_any_instance_of(PaneyardPlugin::Remote).to receive(:up?).and_return(false)
+
+      run_cli("runs-ui", input: "\n")
+
+      expect(out.string).to include("Paneyard on server.example is not answering")
+    end
+  end
 end

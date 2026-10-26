@@ -4,15 +4,19 @@ module PaneyardPlugin
   # The plugin's view of a running daemon: its /mcp/admin tools, the same ones
   # an operator's own Claude Code uses, so the herdr surface adds no API of
   # its own. Results are the tools' structuredContent (camelCase keys).
+  #
+  # For a Paneyard on another machine, `paths` (a Remote) translates
+  # repository paths, so callers see this machine's checkouts throughout.
   class Client
     Error = PaneyardSandbox::McpClient::Error
 
-    def initialize(url)
+    def initialize(url, paths: nil)
       @mcp = PaneyardSandbox::McpClient.new("#{url}/mcp/admin", client_name: "paneyard-herdr-plugin")
+      @paths = paths
     end
 
     def workspaces
-      @mcp.call_tool("list_workspaces").fetch("workspaces")
+      @mcp.call_tool("list_workspaces").fetch("workspaces").map { |workspace| local_workspace(workspace) }
     end
 
     # [workspace name, list_runs result] for every workspace.
@@ -38,7 +42,7 @@ module PaneyardPlugin
 
     # The server names it after the repository and works out its default branch.
     def register(path:)
-      @mcp.call_tool("register_workspace", path:)
+      local_workspace(@mcp.call_tool("register_workspace", path: @paths ? @paths.to_remote(path) : path))
     end
 
     def update_layout(workspace:, layout:)
@@ -62,6 +66,14 @@ module PaneyardPlugin
     # Lets a queued run start without waiting for the runs it was queued after.
     def release(run_id, workspace:)
       @mcp.call_tool("update_run_dependencies", runId: run_id, workspace:, after: [])
+    end
+
+    private
+
+    def local_workspace(workspace)
+      return workspace unless @paths && workspace["repositoryPath"]
+
+      workspace.merge("repositoryPath" => @paths.to_local(workspace["repositoryPath"]))
     end
   end
 end

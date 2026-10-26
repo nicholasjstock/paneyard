@@ -50,7 +50,7 @@ module PaneyardPlugin
       when "restart" then restart
       when "stop" then stop
       when "status" then status
-      when "url" then puts(running!.url)
+      when "url" then puts(base_url)
       when "mcp-url" then mcp_url
       when "menu-ui" then interactive { menu_ui }
       when "queue-ui" then interactive { queue_ui }
@@ -76,12 +76,16 @@ module PaneyardPlugin
     # --- lifecycle --------------------------------------------------------
 
     def start
+      return puts("Paneyard runs on #{remote.host} (#{remote.url}); nothing to start here.") if remote
+
       result = daemon.ensure_running
       report(result)
       announce(result)
     end
 
     def restart
+      raise Error, "Paneyard runs on #{remote.host}: restart it there (herdr plugin action invoke restart --plugin paneyard)." if remote
+
       result = daemon.restart
       report(result)
       announce(result)
@@ -94,6 +98,8 @@ module PaneyardPlugin
     end
 
     def status
+      return remote_status if remote
+
       result = daemon.status
       unless result
         puts "Paneyard is not running. State: #{paths.state_dir}"
@@ -109,8 +115,17 @@ module PaneyardPlugin
       0
     end
 
+    def remote_status
+      reachable = remote.up?
+      puts "Paneyard runs on #{remote.host}: #{remote.url} (#{reachable ? 'answering' : 'not answering'})"
+      puts "  MCP:    #{remote.url}/mcp/admin"
+      remote.prefixes.each { |local, there| puts "  paths:  #{local} here is #{there} there" }
+      puts "  config: #{paths.env_file}"
+      reachable ? 0 : 3
+    end
+
     def mcp_url
-      url = "#{running!.url}/mcp/admin"
+      url = "#{base_url}/mcp/admin"
       puts url
       notify("Paneyard MCP", url)
     end
@@ -388,6 +403,7 @@ module PaneyardPlugin
       say rule
       say "#{bold(workspace.fetch('name'))}  #{dim(workspace.fetch('repositoryPath'))}"
       say dim("Registered as a new workspace; runs start from #{default} by default.") if registered
+      say dim("Runs on #{remote.host}, from its own copy of the branch: push your commits there first.") if remote
       say ""
       say bold("Task")
       say dim("Describe the goal, constraints, and how to tell it worked.")
@@ -471,7 +487,7 @@ module PaneyardPlugin
           workspace = lobbies[LOBBY_KEYS.index(choice)]
           next say("No lobby #{choice}.") unless workspace
 
-          return herdr("workspace", "focus", workspace.dig("lobby", "herdrWorkspace"))
+          return go_to(workspace.dig("lobby", "herdrWorkspace"))
         end
       end
     end
@@ -507,7 +523,7 @@ module PaneyardPlugin
         say "Its lobby is open on #{lobby['branch']} (#{[ lobby['driver'], lobby['model'] ].compact.join(', ')})."
         return say("Cancelled.") if ask("Enter to go to it, q to cancel: ") != ""
 
-        return herdr("workspace", "focus", lobby.fetch("herdrWorkspace"))
+        return go_to(lobby.fetch("herdrWorkspace"))
       end
 
       say dim("Opening it on another branch switches the checkout, and only if it has no uncommitted changes.")
@@ -524,7 +540,7 @@ module PaneyardPlugin
       say ""
       say branch ? "Opening the lobby on #{branch}…" : "Opening the lobby…"
       opened = client.open_lobby(workspace: workspace.fetch("name"), branch:, driver:, model:)
-      herdr("workspace", "focus", opened.fetch("herdrWorkspace"))
+      go_to(opened.fetch("herdrWorkspace"))
     rescue PaneyardSandbox::McpClient::ToolError => error
       say ""
       say error.payload["message"] || error.message
@@ -541,9 +557,15 @@ module PaneyardPlugin
     end
 
     def lobby_choice_line(number, workspace, here:)
-      _repository, branch = WorkspaceMatch.repository_of(workspace.fetch("repositoryPath"))
+      branch = checkout_branch(workspace)
       lobby = workspace["lobby"]
-      state = lobby && lobby["live"] ? "lobby open on #{lobby['branch']} (#{lobby['driver']})" : "on #{branch || 'a detached HEAD'}"
+      state = if lobby && lobby["live"]
+        "lobby open on #{lobby['branch']} (#{lobby['driver']})"
+      elsif remote
+        "on #{remote.host}"
+      else
+        "on #{branch || 'a detached HEAD'}"
+      end
       format("%3d  %-20s  %s%s", number, workspace.fetch("name")[0, 20], state, here ? dim("  (this pane)") : "")
     end
 
@@ -564,7 +586,7 @@ module PaneyardPlugin
     # which the server reads for itself); otherwise the branch the operator
     # names, or #123 for pull request 123's head branch. nil cancels.
     def ask_lobby_branch(workspace)
-      _repository, current = WorkspaceMatch.repository_of(workspace.fetch("repositoryPath"))
+      current = checkout_branch(workspace)
       stay = current ? "stay on #{current}" : "stay where it is"
       loop do
         answer = ask("Branch, or #number for a pull request (Enter to #{stay}; q cancels): ")
@@ -575,6 +597,15 @@ module PaneyardPlugin
         branch = pull_request_branch(workspace, number)
         return branch if branch
       end
+    end
+
+    # The branch the workspace's checkout is on; nil on a detached HEAD, or
+    # when Paneyard runs elsewhere and the checkout that counts is over there.
+    def checkout_branch(workspace)
+      return if remote
+
+      _repository, branch = WorkspaceMatch.repository_of(workspace.fetch("repositoryPath"))
+      branch
     end
 
     # A pull request's head branch, from gh in the repository; nil, having
@@ -605,6 +636,11 @@ module PaneyardPlugin
     # action was invoked in.
     def this_run_ui(mode)
       client = connect!
+      if remote
+        say "Jobs run in #{remote.host}'s herdr, so this one can't be told from here. Pick it from the list."
+        return runs_ui
+      end
+
       workspace, run = WorkspaceMatch.run_in_herdr_workspace(client.runs, herdr_workspace_id)
       unless run
         say "This herdr workspace is not a Paneyard job's."
@@ -774,7 +810,7 @@ module PaneyardPlugin
         when "f"
           next unless live && session["herdrWorkspace"]
 
-          herdr("workspace", "focus", session["herdrWorkspace"])
+          go_to(session["herdrWorkspace"])
           return :quit
         when "c"
           next unless live
@@ -1098,13 +1134,34 @@ module PaneyardPlugin
       @daemon ||= Daemon.new(paths:, env: @env)
     end
 
+    # PANEYARD_REMOTE_URL's Paneyard, or nil when this machine runs its own.
+    def remote
+      return @remote if defined?(@remote)
+
+      settings, = EnvFile.load(paths.env_file)
+      @remote = Remote.from(settings)
+    end
+
+    def base_url
+      remote ? remote.url : running!.url
+    end
+
     # Starts the daemon if need be, and returns a client for it.
     def connect!
+      return connect_remote! if remote
+
       say dim("Starting Paneyard…") unless daemon.status
       result = daemon.ensure_running
       announce(result)
       @url = result.url
       Client.new(result.url)
+    end
+
+    def connect_remote!
+      raise Error, "Paneyard on #{remote.host} is not answering at #{remote.url}." unless remote.up?
+
+      @url = remote.url
+      Client.new(remote.url, paths: remote)
     end
 
     def running!
@@ -1126,6 +1183,16 @@ module PaneyardPlugin
 
       notify("Paneyard moved to port #{result.port}",
         "Port #{result.previous_port} was taken. Re-register MCP: #{result.url}/mcp/admin (action: paneyard.setup)")
+    end
+
+    # A herdr workspace of Paneyard's: focused here, or only named when it is
+    # in the remote machine's herdr, whose ids mean nothing to this one.
+    def go_to(herdr_workspace)
+      return herdr("workspace", "focus", herdr_workspace) unless remote
+
+      say ""
+      say "It is herdr workspace #{herdr_workspace} on #{remote.host}: attach to that herdr to see it."
+      pause
     end
 
     def notify(title, body)
