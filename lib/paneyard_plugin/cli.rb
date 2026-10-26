@@ -487,7 +487,7 @@ module PaneyardPlugin
           workspace = lobbies[LOBBY_KEYS.index(choice)]
           next say("No lobby #{choice}.") unless workspace
 
-          return go_to(workspace.dig("lobby", "herdrWorkspace"))
+          return go_to(workspace.dig("lobby", "herdrWorkspace"), "The #{workspace.fetch('name')} lobby")
         end
       end
     end
@@ -523,7 +523,7 @@ module PaneyardPlugin
         say "Its lobby is open on #{lobby['branch']} (#{[ lobby['driver'], lobby['model'] ].compact.join(', ')})."
         return say("Cancelled.") if ask("Enter to go to it, q to cancel: ") != ""
 
-        return go_to(lobby.fetch("herdrWorkspace"))
+        return go_to(lobby.fetch("herdrWorkspace"), "The #{workspace.fetch('name')} lobby")
       end
 
       say dim("Opening it on another branch switches the checkout, and only if it has no uncommitted changes.")
@@ -540,7 +540,7 @@ module PaneyardPlugin
       say ""
       say branch ? "Opening the lobby on #{branch}…" : "Opening the lobby…"
       opened = client.open_lobby(workspace: workspace.fetch("name"), branch:, driver:, model:)
-      go_to(opened.fetch("herdrWorkspace"))
+      go_to(opened.fetch("herdrWorkspace"), "The #{workspace.fetch('name')} lobby")
     rescue PaneyardSandbox::McpClient::ToolError => error
       say ""
       say error.payload["message"] || error.message
@@ -810,7 +810,7 @@ module PaneyardPlugin
         when "f"
           next unless live && session["herdrWorkspace"]
 
-          go_to(session["herdrWorkspace"])
+          go_to(session["herdrWorkspace"], "Job #{run.fetch('runId')}")
           return :quit
         when "c"
           next unless live
@@ -1185,14 +1185,16 @@ module PaneyardPlugin
         "Port #{result.previous_port} was taken. Re-register MCP: #{result.url}/mcp/admin (action: paneyard.setup)")
     end
 
-    # A herdr workspace of Paneyard's: focused here, or only named when it is
-    # in the remote machine's herdr, whose ids mean nothing to this one.
-    def go_to(herdr_workspace)
+    # A herdr workspace of Paneyard's: focused here. One in the remote
+    # machine's herdr can't be: a plugin can't switch this window to another
+    # machine, and the ids mean nothing to this herdr. So the popup closes,
+    # leaving a notification that says where to find it.
+    def go_to(herdr_workspace, what)
       return herdr("workspace", "focus", herdr_workspace) unless remote
 
-      say ""
-      say "It is herdr workspace #{herdr_workspace} on #{remote.host}: attach to that herdr to see it."
-      pause
+      notify("#{what} is open on #{remote.host}",
+        "Select that machine in herdr's sidebar, then its workspace #{herdr_workspace}. " \
+        "Paneyard actions run from there go straight to it.")
     end
 
     def notify(title, body)

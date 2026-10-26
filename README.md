@@ -234,7 +234,7 @@ Paneyard can run on a second machine, such as an always-on Linux box, while you 
 Some things differ with a remote server:
 
 - A job starts from the server's copy of its base branch, so push the commits it should build on first.
-- Jobs and lobbies open in the server's herdr. Actions that would focus one tell you its herdr workspace instead.
+- Jobs and lobbies open in the server's herdr, and the plugin can't move your herdr window to another machine. Going to one closes the popup with a notification saying which machine and workspace to select in herdr's sidebar. To skip that step, select the server's machine first and use the Paneyard menu from there: actions then run on the server and focus directly.
 - **This job's report** and **Close this job** send you to the jobs list.
 - `paneyard.restart` has to be run on the server.
 

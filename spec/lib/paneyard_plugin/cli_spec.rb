@@ -738,13 +738,14 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(out.string).to include("Runs on server.example, from its own copy of the branch")
     end
 
-    it "names a herdr workspace on the server instead of focusing one here" do
+    it "closes with a notification naming the server's herdr workspace instead of focusing one here" do
       allow(remote_client).to receive(:runs).and_return([ [ workspace, { "runs" => [] } ] ])
 
-      run_cli("runs-ui", input: "a\n\n")
+      run_cli("runs-ui", input: "a\n")
 
-      expect(herdr_calls).to be_empty
-      expect(out.string).to include("herdr workspace w4 on server.example")
+      expect(herdr_calls.map(&:first)).to eq([ "notification" ])
+      expect(herdr_calls.first).to include("The app lobby is open on server.example")
+      expect(herdr_calls.first.last).to include("workspace w4")
     end
 
     it "does not match this herdr's workspace against the server's jobs" do
