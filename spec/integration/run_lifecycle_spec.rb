@@ -497,4 +497,45 @@ RSpec.describe "a run's lifecycle", type: :request do
       expect(second.reload.status).to eq("running")
     end
   end
+
+  describe "a workspace's lobby" do
+    let(:workspace) { create_workspace(repository_path: create_source_checkout(branches: [ "release" ])) }
+
+    def current_branch
+      Open3.capture2("git", "-C", workspace.repository_path, "branch", "--show-current").first.strip
+    end
+
+    it "opens on the checkout itself, switched to the branch asked for, with an agent on /mcp/admin", :fake_herdr do
+      opened = mcp_call("/mcp/admin", "open_lobby", workspace: workspace.name, branch: "release")
+
+      expect(opened).to include("state" => "opened", "branch" => "release", "switchedFrom" => "main", "herdrWorkspace" => "w1")
+      expect(current_branch).to eq("release")
+      expect(fake_herdr.requests_for("workspace.create").sole).to include("cwd" => workspace.repository_path, "focus" => false)
+      expect(fake_herdr.requests_for("worktree.create")).to be_empty
+      expect(fake_herdr.requests_for("agent.start").sole).to include("kind" => "claude", "pane_id" => "w1:p1")
+      expect(fake_herdr.requests_for("agent.prompt")).to be_empty
+      lobby = workspace.open_lobby
+      expect(process_alive?(lobby.pid)).to be(true)
+      config = JSON.parse(File.read(fake_herdr.requests_for("agent.start").sole["args"].then { |args| args[args.index("--mcp-config") + 1] }))
+      expect(config.dig("mcpServers", "paneyard")).to eq("type" => "http", "url" => "#{Orchestrator::RunSessionRunner.mcp_url}/admin")
+      # It is not a run: it holds no slot.
+      expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
+
+      again = mcp_call("/mcp/admin", "open_lobby", workspace: workspace.name, branch: "release")
+      expect(again).to include("state" => "already_open", "herdrWorkspace" => "w1")
+      listed = mcp_call("/mcp/admin", "list_workspaces")["workspaces"].find { |w| w["name"] == workspace.name }
+      expect(listed["lobby"]).to include("branch" => "release", "live" => true)
+
+      # Its agent quits: the next open closes what was left and starts afresh,
+      # staying on the branch the checkout is on when none is named.
+      Process.kill("TERM", -lobby.pid)
+      expect(wait_for { !process_alive?(lobby.pid) }).to be(true)
+      reopened = mcp_call("/mcp/admin", "open_lobby", workspace: workspace.name)
+
+      expect(reopened).to include("state" => "opened", "branch" => "release", "switchedFrom" => nil, "herdrWorkspace" => "w2")
+      expect(fake_herdr.workspace_ids).to eq([ "w2" ])
+      expect(lobby.reload.closed_at).to be_present
+      expect(current_branch).to eq("release")
+    end
+  end
 end

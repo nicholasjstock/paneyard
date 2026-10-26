@@ -27,6 +27,8 @@ module FakeHerdr
   # Nothing here runs a model or touches the operator's real herdr.
   class Server
     SHELL_PID_BASE = 4_000_000
+    # herdr's own rule for agent.start's name (confirmed live).
+    AGENT_NAME = /\A[a-z][a-z0-9_-]{0,31}\z/
     # A real pane's shell starts from the operator's login environment, not
     # from whatever process runs herdr, so the Bundler activation of this
     # server's own parent (a spec run, bin/sandbox) must not leak into it.
@@ -368,6 +370,11 @@ module FakeHerdr
 
     # herdr refuses agent.start unless the pane sits at an idle shell.
     def agent_start(params)
+      unless params["name"].to_s.match?(AGENT_NAME)
+        raise MethodError.new("invalid_agent_name", "agent name must start with a lowercase letter and contain only " \
+          "lowercase letters, digits, '-' or '_' (1-32 characters)")
+      end
+
       pane = pane!(params["pane_id"])
       if pane[:agent]&.fetch(:alive)
         raise MethodError.new("pane_busy", "pane #{pane[:pane_id]} is not an available shell")

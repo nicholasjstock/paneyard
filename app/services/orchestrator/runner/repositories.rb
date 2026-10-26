@@ -9,11 +9,14 @@ module Orchestrator
     # will do, wherever it is and whatever branch it has checked out: runs
     # never work in it, they get their own worktree of it from herdr.
     #
-    # This only looks. It never creates, fetches, switches or renames
+    # Checking only looks. It never creates, fetches, switches or renames
     # anything; a problem comes back with the commands that would fix it, for
     # the operator to run. Worktrees.base_branch_problem is the same branch
     # rule a queued run is held to, so a workspace that registers does not
     # fail its first run over its branch.
+    #
+    # The one thing here that changes a checkout is switch_checkout!, which
+    # puts it on the branch the operator opens its lobby on.
     module Repositories
       module_function
 
@@ -52,6 +55,63 @@ module Orchestrator
         result(raw, nil, nil, [ problem("outside_sandbox", error.message) ])
       rescue Worktrees::Error => error
         result(raw, nil, nil, [ problem("git_error", error.message) ])
+      end
+
+      # Puts the repository's own checkout on `branch`, for the workspace's
+      # lobby (Orchestrator::LobbyOpen), which the operator opens on the branch
+      # they are integrating. Only a switch that cannot lose anything: it
+      # refuses a checkout with uncommitted changes to tracked files, and
+      # whatever else git refuses (an untracked file the branch would
+      # overwrite, a branch checked out in a run's worktree) comes back as
+      # git's own message. Never resets, stashes or forces.
+      #
+      # A branch only origin has (a pull request's, say) is fetched and
+      # checked out as a local branch tracking it.
+      #
+      # Returns { "branch", "previous_branch", "switched" }; previous_branch
+      # is nil on a detached HEAD.
+      def switch_checkout!(repository_path:, branch:)
+        repository = Pathname(repository_path)
+        Sandbox.guard_path!(repository, "switch the checkout of")
+        raise Worktrees::Error, "Repository does not exist: #{repository}" unless repository.directory?
+        raise Worktrees::Error, "`#{branch}` is not a valid branch name" unless GitRef.branch?(branch)
+
+        current = git_output(repository, "symbolic-ref", "--quiet", "--short", "HEAD")
+        return switched(branch, current, false) if current == branch
+
+        changed = Worktrees.git!(repository, "status", "--porcelain", "--untracked-files=no").lines.map(&:strip)
+        if changed.any?
+          listed = changed.first(5).join(", ") + (changed.size > 5 ? ", ..." : "")
+          raise Worktrees::Error, "#{repository} has uncommitted changes (#{listed}) on #{current || 'a detached HEAD'}; " \
+            "commit or stash them before switching it to #{branch}"
+        end
+
+        if Worktrees.local_branch?(repository, branch)
+          Worktrees.git!(repository, "switch", branch)
+        else
+          unless Worktrees.git_success?(repository, "fetch", "origin", "refs/heads/#{branch}:refs/remotes/origin/#{branch}")
+            raise Worktrees::Error, "#{repository} has no branch `#{branch}`, and origin has none either"
+          end
+
+          Worktrees.git!(repository, "switch", "--track", "origin/#{branch}")
+        end
+        switched(branch, current, true)
+      rescue Sandbox::Violation => error
+        raise Worktrees::Error, error.message
+      end
+
+      # The branch the repository's own checkout is on, or nil on a detached
+      # HEAD.
+      def current_branch(repository_path)
+        repository = Pathname(repository_path)
+        Sandbox.guard_path!(repository, "read the checkout of")
+        git_output(repository, "symbolic-ref", "--quiet", "--short", "HEAD")
+      rescue Sandbox::Violation => error
+        raise Worktrees::Error, error.message
+      end
+
+      def switched(branch, previous_branch, switched)
+        { "branch" => branch, "previous_branch" => previous_branch, "switched" => switched }
       end
 
       # The checkout that owns the repository: for a linked worktree, the main

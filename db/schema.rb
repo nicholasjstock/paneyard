@@ -10,7 +10,22 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_12_180000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_23_120000) do
+  create_table "lobbies", force: :cascade do |t|
+    t.integer "workspace_id", null: false
+    t.string "branch", null: false
+    t.string "driver", null: false
+    t.string "model"
+    t.string "herdr_workspace_id"
+    t.string "herdr_pane_id"
+    t.integer "pid"
+    t.datetime "closed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["workspace_id"], name: "index_lobbies_on_one_open_per_workspace", unique: true, where: "closed_at IS NULL"
+    t.index ["workspace_id"], name: "index_lobbies_on_workspace_id"
+  end
+
   create_table "run_checkpoints", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "outcome", null: false
@@ -93,6 +108,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_12_180000) do
     t.index ["repository_path"], name: "index_workspaces_on_repository_path", unique: true
   end
 
+  add_foreign_key "lobbies", "workspaces"
   add_foreign_key "run_checkpoints", "run_sessions"
   add_foreign_key "run_checkpoints", "runs"
   add_foreign_key "run_sessions", "runs"

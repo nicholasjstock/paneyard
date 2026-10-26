@@ -2,10 +2,14 @@
 # checkout, wherever it is and whatever it has checked out, plus the branch
 # runs start from unless they name another (Run#base_branch). Runs never work
 # in this checkout: herdr creates each run's worktree, where its own
-# configuration puts worktrees (Orchestrator::GitWorktree), and Paneyard never
-# deletes, resets or switches the checkout itself.
+# configuration puts worktrees (Orchestrator::GitWorktree). The checkout is
+# the operator's, and their lobby's (Lobby): Paneyard never deletes or resets
+# it, and switches its branch only when the operator opens the lobby on
+# another branch, and only when nothing can be lost
+# (Orchestrator::LobbyOpen).
 class Workspace < ApplicationRecord
   has_many :runs, dependent: :restrict_with_error
+  has_many :lobbies, dependent: :destroy
 
   validates :name, presence: true, uniqueness: true
   validates :repository_path, presence: true, uniqueness: true
@@ -31,6 +35,12 @@ class Workspace < ApplicationRecord
 
   def self.default
     order(:created_at).first
+  end
+
+  # The lobby Paneyard last knew to be open, live or not: LobbyOpen.status
+  # says which.
+  def open_lobby
+    lobbies.open.order(:created_at).last
   end
 
   private

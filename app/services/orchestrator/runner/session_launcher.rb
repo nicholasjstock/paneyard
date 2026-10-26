@@ -79,16 +79,22 @@ module Orchestrator
       # workspace herdr opened for the run's worktree. Returns
       # { "workspace_id", "tab_id", "pane_id", "mcp_config_path",
       # "prompt_path" }, the pane ids being the agent's.
+      #
+      # A lobby's spec (Orchestrator::LobbyOpen) has no prompt, so no
+      # prompt_path, and no capability: its mcp_endpoint is "admin".
       def open(spec, runtime_root:)
         runtime_dir = File.join(runtime_root.to_s, Attachments.sanitize_run_id(spec.fetch(:run_id)))
         FileUtils.mkdir_p(runtime_dir)
         mcp_config_path = File.join(runtime_dir, "mcp.json")
         if spec.fetch(:driver) == "claude"
-          SessionArgs.write_claude_mcp_config(mcp_config_path, spec.fetch(:capability_token), mcp_url: spec.fetch(:mcp_url))
+          SessionArgs.write_claude_mcp_config(mcp_config_path, spec[:capability_token], mcp_url: spec.fetch(:mcp_url),
+            mcp_endpoint: spec.fetch(:mcp_endpoint, "run"))
         end
 
-        prompt_path = File.join(runtime_dir, "prompt.txt")
-        File.write(prompt_path, spec.fetch(:prompt))
+        if spec[:prompt]
+          prompt_path = File.join(runtime_dir, "prompt.txt")
+          File.write(prompt_path, spec[:prompt])
+        end
 
         # Only the agent pane is recorded -- see SessionLayout.
         root_pane = {
@@ -101,7 +107,9 @@ module Orchestrator
 
       # Starts the agent in the pane #open returned and submits the prompt.
       # Returns { "pid", "lost_prompts" }, or raises LaunchError (PromptLost
-      # when every start lost its prompt).
+      # when every start lost its prompt). With no prompt (a lobby, which the
+      # operator speaks to first) it only waits for the agent to be ready, so
+      # there is no prompt to lose.
       #
       # An agent that never once showed any sign of its prompt
       # (PromptNeverArrived) is stopped and started again in the same pane,
@@ -212,6 +220,8 @@ module Orchestrator
         wait_for_agent_detected!(pane_id, kind:)
         dismiss_codex_trust_prompt!(pane_id) if spec.fetch(:driver) == "codex"
         wait_until_ready!(pane_id, kind:)
+        return if spec[:prompt].nil?
+
         prompt = deliver_prompt(pane_id, spec.fetch(:prompt), run_id: spec.fetch(:run_id))
         submit_prompt_if_unsent!(pane_id, run_id: spec.fetch(:run_id), prompt:)
       end
@@ -243,8 +253,8 @@ module Orchestrator
       def command(spec, mcp_config_path)
         SessionArgs.build(
           driver: spec.fetch(:driver), root_dir: spec.fetch(:cwd), mcp_config_path:,
-          capability_token: spec.fetch(:capability_token), mcp_url: spec.fetch(:mcp_url),
-          model: spec.fetch(:model), resume_session_id: spec[:resume_session_id]
+          capability_token: spec[:capability_token], mcp_url: spec.fetch(:mcp_url),
+          model: spec.fetch(:model), resume_session_id: spec[:resume_session_id], mcp_endpoint: spec.fetch(:mcp_endpoint, "run")
         )
       end
 

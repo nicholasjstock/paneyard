@@ -96,6 +96,48 @@ RSpec.describe Orchestrator::Runner::SessionArgs do
     end
   end
 
+  describe "a lobby's admin endpoint" do
+    it "points claude's config at /mcp/admin with no credentials" do
+      path = File.join(Dir.mktmpdir, "mcp.json")
+      described_class.write_claude_mcp_config(path, nil, mcp_url:, mcp_endpoint: "admin")
+
+      expect(JSON.parse(File.read(path)).dig("mcpServers", "paneyard")).to eq("type" => "http", "url" => "#{mcp_url}/admin")
+    end
+
+    it "points codex at /mcp/admin with no Authorization header, keeping every other flag" do
+      _command, run_args = described_class.build(
+        driver: "codex", root_dir: "/repos/app", mcp_config_path: "/tmp/mcp.json", capability_token: "tok", mcp_url:, model: nil
+      )
+      _command, args = described_class.build(
+        driver: "codex", root_dir: "/repos/app", mcp_config_path: "/tmp/mcp.json", capability_token: nil, mcp_url:, model: nil,
+        mcp_endpoint: "admin"
+      )
+
+      header = run_args.index { |arg| arg.start_with?("mcp_servers.paneyard.http_headers") }
+      expected = run_args.reject.with_index { |_arg, index| [ header - 1, header ].include?(index) }
+        .map { |arg| arg.sub("#{mcp_url}/run", "#{mcp_url}/admin") }
+
+      expect(args).to eq(expected)
+      expect(args.join(" ")).not_to include("http_headers", "Bearer")
+    end
+
+    it "builds the same claude command line, the endpoint being in its config" do
+      run = described_class.build(driver: "claude", root_dir: "/repos/app", mcp_config_path: "/tmp/mcp.json",
+        capability_token: "tok", mcp_url:, model: nil)
+      lobby = described_class.build(driver: "claude", root_dir: "/repos/app", mcp_config_path: "/tmp/mcp.json",
+        capability_token: nil, mcp_url:, model: nil, mcp_endpoint: "admin")
+
+      expect(lobby).to eq(run)
+    end
+
+    it "rejects any other endpoint" do
+      expect do
+        described_class.build(driver: "claude", root_dir: "/tmp", mcp_config_path: "/tmp/x.json", capability_token: nil, mcp_url:,
+          model: nil, mcp_endpoint: "anything")
+      end.to raise_error(ArgumentError, /unsupported MCP endpoint/)
+    end
+  end
+
   describe "codex" do
     it "uses the bare interactive command with -s danger-full-access, never the broken bypass flag" do
       command, args = described_class.build(

@@ -99,13 +99,38 @@ module Orchestrator
         Repositories.check(path, default_base_branch:)
       end
 
+      # Puts the repository's own checkout on `branch` for its lobby, only
+      # when nothing can be lost (Repositories.switch_checkout!). Returns
+      # { "branch", "previous_branch", "switched" }.
+      def switch_checkout(repository_path:, branch:)
+        Repositories.switch_checkout!(repository_path:, branch:)
+      end
+
+      # The branch the repository's own checkout is on; nil on a detached HEAD.
+      def checkout_branch(repository_path:)
+        Repositories.current_branch(repository_path)
+      end
+
+      # A herdr workspace on the repository's own checkout, for its lobby:
+      # { "workspace_id", "tab_id", "pane_id" }, the root pane being the
+      # agent's, as provision_worktree returns for a run.
+      def open_checkout_workspace(repository_path:, label:)
+        Sandbox.guard_path!(repository_path, "open a workspace on")
+        root_pane = herdr { Herdr.workspace_create(cwd: repository_path.to_s, label:, focus: false) }.fetch("root_pane")
+        root_pane.slice("workspace_id", "tab_id", "pane_id")
+      rescue Sandbox::Violation => error
+        raise Error, error.message
+      end
+
       # --- Sessions ---------------------------------------------------------
       #
       # `spec` is the plain hash Orchestrator::RunSessionRunner.session_spec
       # builds: run_id, label, driver, model, cwd, capability_token, prompt,
       # mcp_url, layout, resume_session_id, and the herdr workspace
       # provision_worktree opened (herdr_workspace_id, herdr_tab_id,
-      # herdr_pane_id), which the session's layout is built in.
+      # herdr_pane_id), which the session's layout is built in. A lobby's
+      # (Orchestrator::LobbyOpen) has no prompt or capability, and
+      # mcp_endpoint "admin".
 
       # Returns { "workspace_id", "tab_id", "pane_id", "mcp_config_path",
       # "prompt_path" }.
