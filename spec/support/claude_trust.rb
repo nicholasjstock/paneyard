@@ -1,7 +1,11 @@
-# Launching a Claude run marks its worktree as trusted in Claude's own config,
-# which specs must never write. ClaudeTrust's own examples opt out.
+# Launching a claude or codex run marks its worktree as trusted in the CLI's
+# own config, which specs must never write. ClaudeTrust's and CodexTrust's own
+# examples opt out.
 RSpec.configure do |config|
   config.before do |example|
-    allow(Orchestrator::Runner::ClaudeTrust).to receive(:trust!).and_return(true) unless example.metadata[:claude_trust]
+    unless example.metadata[:claude_trust]
+      allow(Orchestrator::Runner::ClaudeTrust).to receive(:trust!).and_return(true)
+      allow(Orchestrator::Runner::CodexTrust).to receive(:trust!).and_return(true)
+    end
   end
 end

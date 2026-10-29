@@ -277,6 +277,21 @@ RSpec.describe Orchestrator::Runner::SessionLauncher do
       expect(Process).not_to have_received(:kill)
     end
 
+    it "marks the folder trusted in its own CLI's config before starting it" do
+      stub_starts("working")
+
+      launch!
+      expect(Orchestrator::Runner::ClaudeTrust).to have_received(:trust!).with("/tmp/wt")
+      expect(Orchestrator::Runner::CodexTrust).not_to have_received(:trust!)
+    end
+
+    it "launches anyway when the folder could not be marked trusted" do
+      stub_starts("working")
+      allow(Orchestrator::Runner::ClaudeTrust).to receive(:trust!).and_raise(JSON::ParserError, "bad config")
+
+      expect(launch!).to include("pid" => 555)
+    end
+
     # A lobby (Orchestrator::LobbyOpen): the operator speaks to it first.
     it "only waits for the agent to be ready when there is no prompt, so there is nothing to lose" do
       stub_starts("idle")
