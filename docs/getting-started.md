@@ -60,7 +60,7 @@ command = "paneyard.menu"
 description = "paneyard menu"
 ```
 
-The menu offers: hand off a task, jobs and reports (where a closed job can be reopened), the repository's lobby, this job's report, close this job, the job layout, and letting your agents queue jobs. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke <id> --plugin paneyard`.
+The menu offers: hand off a task, jobs and reports (where a closed job can be reopened), a lobby, this job's report, close this job, the job layout, and letting your agents queue jobs. Individual actions remain available through Herdr's action menu or the CLI: `herdr plugin action list --plugin paneyard`, then `herdr plugin action invoke <id> --plugin paneyard`.
 
 | Action | What it does |
 | --- | --- |

@@ -365,7 +365,7 @@ module PaneyardPlugin
       heading "Paneyard"
       say "q  Hand off a task"
       say "r  Jobs and reports"
-      say "o  Open this repository's lobby"
+      say "o  Open a lobby"
       say "p  This job's report"
       say "x  Close this job"
       say "l  Job layout for this repository"

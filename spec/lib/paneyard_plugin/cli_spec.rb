@@ -42,7 +42,7 @@ RSpec.describe PaneyardPlugin::Cli do
         expect(cli).to receive(:layout_ui)
       end
 
-      expect(out.string).to include("Hand off a task", "Jobs and reports", "Open this repository's lobby", "Job layout for this repository")
+      expect(out.string).to include("Hand off a task", "Jobs and reports", "Open a lobby", "Job layout for this repository")
     end
 
     it "closes without doing anything when no choice is made" do
