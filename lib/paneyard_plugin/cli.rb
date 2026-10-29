@@ -538,8 +538,9 @@ module PaneyardPlugin
       same_agent = driver == pane_driver
       model = ask_model(client, workspace, driver || "claude", same_agent ? pane_model : nil, same_agent ? pane_switch : nil)
       say ""
-      say branch ? "Opening the lobby on #{branch}…" : "Opening the lobby…"
-      opened = client.open_lobby(workspace: workspace.fetch("name"), branch:, driver:, model:)
+      opened = waiting(branch ? "Opening the lobby on #{branch}…" : "Opening the lobby…") do
+        client.open_lobby(workspace: workspace.fetch("name"), branch:, driver:, model:)
+      end
       go_to(opened.fetch("herdrWorkspace"), "The #{workspace.fetch('name')} lobby")
     rescue PaneyardSandbox::McpClient::ToolError => error
       say ""
@@ -1266,6 +1267,35 @@ module PaneyardPlugin
     def pause
       ask(dim("Press Enter to close."))
       nil
+    end
+
+    SPINNER = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
+
+    # Says what it is waiting for and returns the block's value. On a
+    # terminal the line spins and counts seconds, so a call that takes a
+    # while (opening a lobby waits for its CLI to come up) doesn't look stuck.
+    def waiting(message)
+      unless @out.tty?
+        say message
+        return yield
+      end
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      spinner = Thread.new do
+        SPINNER.cycle do |frame|
+          elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to_i
+          @out.print("\r\e[K#{accent(frame)} #{message} #{dim("#{elapsed}s")}")
+          @out.flush
+          sleep 0.1
+        end
+      end
+      yield
+    ensure
+      if spinner
+        spinner.kill.join
+        @out.print("\r\e[K")
+        say message
+      end
     end
 
     def heading(text)

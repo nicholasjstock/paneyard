@@ -415,6 +415,20 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(out.string).to include("PANEYARD  /  LOBBY", "Branch, or #number for a pull request (Enter to stay on feature/x; q cancels)")
     end
 
+    it "spins with the seconds elapsed while the lobby opens, on a terminal" do
+      allow(out).to receive(:tty?).and_return(true)
+      allow(client).to receive(:open_lobby) do
+        sleep 0.3
+        { "state" => "opened", "branch" => "main", "herdrWorkspace" => "w7" }
+      end
+
+      run_cli("lobby-ui", input: "\n\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(out.string).to match(/\r\e\[K\e\[36m⠋\e\[0m Opening the lobby… \e\[2m0s/)
+      expect(out.string).to include("\r\e[KOpening the lobby…\n")
+      expect(herdr_calls).to eq([ %w[workspace focus w7] ])
+    end
+
     it "opens it on a pull request's head branch, which gh looks up in the repository" do
       run_cli("lobby-ui", input: "\n#79\ncodex\n\n", context: { "focused_pane_cwd" => "/code/app" }) do |cli|
         allow(cli).to receive(:run_command)
