@@ -133,7 +133,7 @@ module Orchestrator
       # versions, and which of the two to report it to.
       def launch(spec, pane_id:, mcp_config_path:)
         kind, args = command(spec, mcp_config_path)
-        trust_claude_folder!(spec.fetch(:cwd)) if spec.fetch(:driver) == "claude"
+        trust_folder!(spec.fetch(:driver), spec.fetch(:cwd))
         lost_prompts = []
         begin
           start_and_prompt!(spec, kind:, args:, pane_id:)
@@ -243,11 +243,12 @@ module Orchestrator
       end
 
       # A config problem should not mask the launch. If trust could not be
-      # recorded, the normal launch diagnostics will show Claude's prompt.
-      def trust_claude_folder!(dir)
-        ClaudeTrust.trust!(dir)
+      # recorded, the normal launch diagnostics will show claude's prompt, and
+      # codex's is still answered by dismiss_codex_trust_prompt!.
+      def trust_folder!(driver, dir)
+        { "claude" => ClaudeTrust, "codex" => CodexTrust }.fetch(driver).trust!(dir)
       rescue StandardError => error
-        Rails.logger.warn("[SessionLauncher] could not mark #{dir} as trusted for claude: #{error.message}")
+        Rails.logger.warn("[SessionLauncher] could not mark #{dir} as trusted for #{driver}: #{error.message}")
       end
 
       def command(spec, mcp_config_path)

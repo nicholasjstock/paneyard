@@ -35,6 +35,13 @@ module PaneyardPlugin
       # free one the first time and keeps it.
       # PORT=
 
+      # Use a Paneyard running on another machine instead of starting one
+      # here: its URL (reachable from this one), and where checkouts here are
+      # there, as local=remote path prefixes, comma-separated. Its jobs run
+      # in that machine's herdr.
+      # PANEYARD_REMOTE_URL=http://server.example.ts.net:7263
+      # PANEYARD_REMOTE_PATHS=/Users/me=/home/me
+
       # For a development checkout linked without the plugin build, an optional
       # Ruby override. Installed plugins use their bundled runtime.
       # PANEYARD_RUBY=/path/to/ruby
