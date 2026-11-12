@@ -138,7 +138,7 @@ module Orchestrator
                    "remaining" => remaining(target, full_name))
       rescue Worktrees::Error, Sandbox::Violation, SystemCallError => error
         made_on_github = [ *done, current ].include?("create_github_repository")
-        failed(plan, target, full_name, done, made_directory, made_on_github, error.message.chomp("."))
+        failed(plan, target, full_name, done, made_directory, made_on_github, error.message.strip.chomp("."))
       end
 
       # --- carrying it out ----------------------------------------------------

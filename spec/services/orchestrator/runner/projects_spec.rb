@@ -114,6 +114,7 @@ RSpec.describe Orchestrator::Runner::Projects do
                                 "remaining" => { "local_repository" => target, "github_repository" => "operator/lists" })
       expect(result["message"]).to include("push refused", "Nothing was removed", "call create_workspace again",
                                            "git -C #{target} push -u origin main", "register_workspace")
+      expect(result["message"]).not_to match(/\n\./)
 
       FileUtils.rm(File.join(gh.remote("operator/lists"), "hooks", "pre-receive"))
       retried = create
