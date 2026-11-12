@@ -268,6 +268,29 @@ RSpec.describe PaneyardPlugin::Daemon do
     expect(daemon.stop).to be(false)
   end
 
+  # bin/production exits once its own children have; a grandchild that
+  # ignores TERM (a Solid Queue scheduler stuck on a lock) must not outlive it.
+  it "kills what is left of its process group once the leader has gone" do
+    stubborn = <<~'RUBY'
+      child = fork do
+        trap("TERM") {}
+        File.write(File.join(ENV.fetch("STAND_IN_DIR"), "stubborn.pid"), Process.pid.to_s)
+        sleep
+      end
+      Process.detach(child)
+    RUBY
+    leader = daemon(command: [ RbConfig.ruby, "-e", stubborn + STAND_IN ])
+    leader.ensure_running
+    pid_file = File.join(stand_in_dir, "stubborn.pid")
+    sleep 0.05 until File.exist?(pid_file) && !File.read(pid_file).empty?
+    child = Integer(File.read(pid_file))
+
+    expect(leader.stop).to be(true)
+    deadline = Time.now + 2
+    sleep 0.05 while alive?(child) && Time.now < deadline
+    expect(alive?(child)).to be(false)
+  end
+
   it "fails with the log when the daemon dies while starting" do
     crashing = daemon(command: [ RbConfig.ruby, "-e", "warn 'simulated boot failure'; exit 1" ])
 
