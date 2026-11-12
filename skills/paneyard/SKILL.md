@@ -1,6 +1,6 @@
 ---
 name: paneyard
-description: Hand work off to Paneyard, a job queue that runs each task as its own coding-agent session in a separate git worktree. Use when the user asks to queue, hand off, delegate, parallelise or split work into jobs, or to check on queued jobs, and Paneyard's MCP tools (queue_run, list_runs, get_run, list_workspaces) are available.
+description: Hand work off to Paneyard, a job queue that runs each task as its own coding-agent session in a separate git worktree. Use when the user asks to queue, hand off, delegate, parallelise or split work into jobs, to check on queued jobs, or to start a new project (or set one up) and queue work in it, and Paneyard's MCP tools (queue_run, list_runs, get_run, list_workspaces, create_workspace) are available.
 ---
 
 # Queueing work with Paneyard
