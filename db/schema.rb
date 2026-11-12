@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_23_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_12_180000) do
   create_table "lobbies", force: :cascade do |t|
     t.integer "workspace_id", null: false
     t.string "branch", null: false
@@ -95,6 +95,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_23_120000) do
     t.index ["status"], name: "index_runs_on_status"
     t.index ["workspace_id"], name: "index_runs_on_workspace_id"
     t.index ["worktree_name"], name: "index_runs_on_worktree_name"
+  end
+
+  create_table "settings", force: :cascade do |t|
+    t.string "key", null: false
+    t.string "value"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_settings_on_key", unique: true
   end
 
   create_table "workspaces", force: :cascade do |t|

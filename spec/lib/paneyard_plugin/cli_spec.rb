@@ -42,7 +42,13 @@ RSpec.describe PaneyardPlugin::Cli do
         expect(cli).to receive(:layout_ui)
       end
 
-      expect(out.string).to include("Hand off a task", "Jobs and reports", "Open a lobby", "Job layout for this repository")
+      expect(out.string).to include("Hand off a task", "Jobs and reports", "Open a lobby", "New workspace", "Job layout for this repository")
+    end
+
+    it "offers the new workspace screen" do
+      run_cli("menu-ui", input: "n\n") do |cli|
+        expect(cli).to receive(:project_ui)
+      end
     end
 
     it "closes without doing anything when no choice is made" do
@@ -391,6 +397,120 @@ RSpec.describe PaneyardPlugin::Cli do
 
       expect(out.string).not_to include("o to reopen")
       expect(client).not_to have_received(:reopen)
+    end
+  end
+
+  describe "project-ui" do
+    let(:created) do
+      { "name" => "lists", "repositoryPath" => "/home/me/Source/lists", "defaultBaseBranch" => "main",
+        "githubUrl" => "https://github.com/Gembani/lists", "steps" => %w[create_directory git_init first_commit create_github_repository push_branch],
+        "notes" => [] }
+    end
+    let(:set) { { "projectsDir" => "/home/me/Source", "defaultGithubOwner" => "Gembani" } }
+
+    def invalid(*messages)
+      PaneyardSandbox::McpClient::ToolError.new("create_workspace failed",
+        { "error" => "workspace_invalid", "problems" => messages.map { |message| { "code" => "x", "message" => message } } })
+    end
+
+    it "asks for the projects directory first when none is set, saves it, then starts the project by name" do
+      allow(client).to receive(:settings).and_return("projectsDir" => nil, "defaultGithubOwner" => nil)
+      allow(client).to receive(:update_projects_dir).with(File.expand_path("~/Source"))
+        .and_return("projectsDir" => File.expand_path("~/Source"), "defaultGithubOwner" => nil)
+      allow(client).to receive(:create_workspace).and_return(created)
+
+      run_cli("project-ui", input: "~/Source\nlists\n\n\n\n")
+
+      expect(client).to have_received(:create_workspace).with(name: "lists", path: nil, owner: nil, visibility: nil)
+      expect(out.string).to include("PANEYARD  /  NEW WORKSPACE", "No projects directory is set yet",
+        "Saved: new projects go in #{File.expand_path('~/Source')}.", "GitHub owner (Enter for your gh account",
+        "lists is ready", "https://github.com/Gembani/lists", "Done: create directory, git init")
+    end
+
+    it "asks again when the directory is refused, and cancels with q" do
+      allow(client).to receive(:settings).and_return("projectsDir" => nil)
+      allow(client).to receive(:update_projects_dir).and_raise(PaneyardSandbox::McpClient::ToolError.new("update_settings failed",
+        { "problems" => [ { "message" => "/nope is not a directory here; create it first (mkdir -p /nope)." } ] }))
+
+      run_cli("project-ui", input: "/nope\nq\n")
+
+      expect(out.string).to include("mkdir -p /nope", "Cancelled.")
+      expect(client).not_to receive(:create_workspace)
+    end
+
+    it "adds an existing directory by path, taking owner/name, visibility, and the pane's directory for ./" do
+      allow(client).to receive(:settings).and_return(set)
+      allow(client).to receive(:create_workspace).and_return(created.merge("steps" => %w[create_github_repository push_branch],
+        "notes" => [ "1 file(s) already in /code/notes are left untracked: commit what belongs in the repository." ]))
+
+      run_cli("project-ui", input: "./notes\n\npublic\n\n", context: { "focused_pane_cwd" => "/code" })
+      expect(client).to have_received(:create_workspace).with(name: nil, path: "/code/notes", owner: nil, visibility: "public")
+      expect(out.string).to include("GitHub owner (Enter for Gembani", "left untracked", "Done: create github repository, push branch")
+
+      run_cli("project-ui", input: "someone/archive\n\n\n")
+      expect(client).to have_received(:create_workspace).with(name: "archive", path: nil, owner: "someone", visibility: nil)
+    end
+
+    it "lists every problem and lets the operator try another name" do
+      allow(client).to receive(:settings).and_return(set)
+      calls = 0
+      allow(client).to receive(:create_workspace) do
+        calls += 1
+        raise invalid("GitHub already has Gembani/lists, and ... Choose another name") if calls == 1
+
+        created
+      end
+
+      run_cli("project-ui", input: "lists\n\n\nlists2\n\n\n\n")
+
+      expect(calls).to eq(2)
+      expect(out.string).to include("Nothing was done. To fix it:", "1. GitHub already has Gembani/lists", "lists is ready")
+    end
+
+    it "says what exists when a step failed part way, and stops" do
+      allow(client).to receive(:settings).and_return(set)
+      allow(client).to receive(:create_workspace).and_raise(PaneyardSandbox::McpClient::ToolError.new("create_workspace failed",
+        { "error" => "workspace_not_created", "message" => "push refused. Nothing was removed. Call create_workspace again." }))
+
+      run_cli("project-ui", input: "lists\n\n\n\n")
+
+      expect(out.string).to include("push refused. Nothing was removed.")
+    end
+
+    it "changes the projects directory with d" do
+      allow(client).to receive(:settings).and_return(set)
+      allow(client).to receive(:update_projects_dir).with("/srv/projects").and_return(set.merge("projectsDir" => "/srv/projects"))
+
+      run_cli("project-ui", input: "d\n/srv/projects\nq\n")
+
+      expect(out.string).to include("Saved: new projects go in /srv/projects.", "Projects directory: /srv/projects")
+    end
+
+    it "hands off the first task to the new workspace, from its default branch whatever the pane is on" do
+      allow(client).to receive(:settings).and_return(set)
+      allow(client).to receive(:create_workspace).and_return(created)
+      allow(client).to receive(:models).and_return({})
+      allow(client).to receive(:queue).and_return("runId" => "run-9", "baseBranch" => "main", "queuedBehind" => 0,
+        "capacity" => { "inFlight" => 1, "limit" => 4 })
+
+      run_cli("project-ui", input: "lists\n\n\nq\nBuild the subscribe page.\n\n\n\n\n\n",
+        context: { "focused_pane_cwd" => "/code/zendin-back" })
+
+      expect(client).to have_received(:queue).with(task: "Build the subscribe page.", workspace: "lists", base_branch: "main",
+        driver: nil, model: nil)
+      expect(out.string).to include("Queued run-9 from main.")
+    end
+
+    it "opens the new workspace's lobby" do
+      allow(client).to receive(:settings).and_return(set)
+      allow(client).to receive(:create_workspace).and_return(created)
+      allow(client).to receive(:models).and_return({})
+      allow(client).to receive(:open_lobby).and_return("herdrWorkspace" => "w9")
+
+      run_cli("project-ui", input: "lists\n\n\no\n\n\n")
+
+      expect(client).to have_received(:open_lobby).with(workspace: "lists", branch: nil, driver: nil, model: nil)
+      expect(herdr_calls).to eq([ %w[workspace focus w9] ])
     end
   end
 

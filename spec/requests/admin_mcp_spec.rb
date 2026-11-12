@@ -17,7 +17,7 @@ RSpec.describe "the admin MCP endpoint", type: :request do
     names = Orchestrator::AdminMcpServer::TOOLS.map(&:tool_name)
 
     expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces", "list_models", "register_workspace",
-      "update_workspace_layout", "close_session", "reopen_session", "update_run_dependencies", "open_lobby")
+      "create_workspace", "get_settings", "update_settings", "update_workspace_layout", "close_session", "reopen_session", "update_run_dependencies", "open_lobby")
   end
 
   it "tells clients how to find or register the workspace before queuing" do
@@ -27,7 +27,7 @@ RSpec.describe "the admin MCP endpoint", type: :request do
 
     body = response.body
     body = body.lines.find { |line| line.start_with?("data:") }.delete_prefix("data:") if body.start_with?("event:", "data:")
-    expect(JSON.parse(body).dig("result", "instructions")).to include("list_workspaces", "register_workspace", "queue_run")
+    expect(JSON.parse(body).dig("result", "instructions")).to include("list_workspaces", "register_workspace", "create_workspace", "update_settings", "queue_run")
   end
 
   # An operator's own client may sit idle for hours, and stays connected
@@ -52,7 +52,8 @@ RSpec.describe "the admin MCP endpoint", type: :request do
 
   it "keeps the admin mutations off the run endpoint" do
     expect(Orchestrator::RunMcpServer::TOOLS).not_to include(
-      McpTools::RegisterWorkspaceTool, McpTools::UpdateWorkspaceLayoutTool, McpTools::CloseSessionTool,
+      McpTools::RegisterWorkspaceTool, McpTools::CreateWorkspaceTool, McpTools::GetSettingsTool,
+      McpTools::UpdateSettingsTool, McpTools::UpdateWorkspaceLayoutTool, McpTools::CloseSessionTool,
       McpTools::ReopenSessionTool, McpTools::UpdateRunDependenciesTool
     )
   end

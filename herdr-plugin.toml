@@ -55,6 +55,13 @@ contexts = ["workspace"]
 command = ["/bin/sh", "bin/herdr-plugin", "pane", "lobby"]
 
 [[actions]]
+id = "project"
+title = "Paneyard: new workspace"
+description = "Start a project by name (its directory, git repository and private GitHub repository), clone one from GitHub, or add an existing directory or repository, doing only what it lacks. Asks for your projects directory the first time."
+contexts = ["workspace"]
+command = ["/bin/sh", "bin/herdr-plugin", "pane", "project"]
+
+[[actions]]
 id = "report"
 title = "Paneyard: this job's report"
 description = "Inside a job's herdr workspace: what it reported last."
@@ -135,6 +142,14 @@ placement = "popup"
 width = "80%"
 height = "60%"
 command = ["/bin/sh", "bin/herdr-plugin", "lobby-ui"]
+
+[[panes]]
+id = "project"
+title = "Paneyard: new workspace"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["/bin/sh", "bin/herdr-plugin", "project-ui"]
 
 [[panes]]
 id = "report"
