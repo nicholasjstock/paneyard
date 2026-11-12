@@ -313,11 +313,19 @@ module Orchestrator
           "letters, digits, '-', '_' and '.', starting with a letter, digit or '_', e.g. #{name.parameterize.presence&.inspect || '"my-project"'}.")
       end
 
-      # The first commit needs an author.
+      # The first commit needs an author. Read from the home directory, not
+      # this process's own working directory, which a plugin reinstall can
+      # delete under a running Paneyard (git then refuses to run at all). Only
+      # git's "not set" (exit 1) means no identity; any other failure is
+      # reported as itself.
       def git_identity_problem
-        missing = %w[user.name user.email].reject do |key|
-          output, _error, status = Open3.capture3("git", "config", "--get", key)
-          status.success? && output.strip.present?
+        missing = []
+        %w[user.name user.email].each do |key|
+          output, error, status = Open3.capture3("git", "config", "--get", key, chdir: Dir.home)
+          next if status.success? && output.strip.present?
+          return problem("git_error", "Could not read git's #{key}: #{error.strip}") unless status.exitstatus == 1
+
+          missing << key
         end
         return if missing.empty?
 

@@ -283,6 +283,29 @@ RSpec.describe Orchestrator::Runner::Projects do
       expect(create).to include("created" => true, "done" => %w[clone])
     end
 
+    # A plugin reinstall swaps the checkout a running Paneyard was started
+    # in, leaving its working directory deleted.
+    it "still works when this process's working directory has been deleted" do
+      gone = File.join(tmp, "gone")
+      Dir.mkdir(gone)
+      result = Dir.chdir(gone) do
+        Dir.rmdir(gone)
+        create
+      end
+
+      expect(result).to include("created" => true, "problems" => [])
+    end
+
+    it "reports a git failure as itself, not as a missing identity" do
+      allow(Open3).to receive(:capture3).and_call_original
+      allow(Open3).to receive(:capture3).with("git", "config", "--get", "user.name", chdir: Dir.home)
+        .and_return([ "", "fatal: something else broke\n", instance_double(Process::Status, success?: false, exitstatus: 128) ])
+
+      result = refused
+      expect(codes(result)).to eq(%w[git_error])
+      expect(result["problems"].first["message"]).to eq("Could not read git's user.name: fatal: something else broke")
+    end
+
     it "refuses when gh is missing or not logged in" do
       allow(Orchestrator::Runner::GitHub).to receive(:executable).and_return(File.join(tmp, "no-such-gh"))
       expect(codes(refused)).to eq(%w[gh_missing])

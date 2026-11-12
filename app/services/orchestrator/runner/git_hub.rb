@@ -98,9 +98,11 @@ module Orchestrator
         error.to_s.include?("HTTP 404") || error.to_s.include?("Not Found")
       end
 
-      # [stdout, stderr, success?]
+      # [stdout, stderr, success?]. Run from the home directory, never this
+      # process's own working directory, which a plugin reinstall can delete
+      # under a running Paneyard; every path gh is given is absolute.
       def run(*args)
-        output, error, status = Open3.capture3(ENV_OFF_PROMPTS, executable, *args)
+        output, error, status = Open3.capture3(ENV_OFF_PROMPTS, executable, *args, chdir: Dir.home)
         [ output, error, status.success? ]
       end
     end

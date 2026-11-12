@@ -221,13 +221,30 @@ module PaneyardPlugin
       state
     end
 
+    # TERM to the whole process group, then KILL to whatever of it is still
+    # there after the grace period. The group, not just its leader: the
+    # leader (bin/production) exits as soon as its own children do, and a
+    # grandchild that ignores TERM (a Solid Queue scheduler stuck on a lock)
+    # would otherwise outlive every restart, running old code beside the new.
     def stop_locked(state)
       pid = state["pid"]
       signal_group(pid, "TERM")
       deadline = Time.now + @stop_grace
-      sleep POLL_INTERVAL while alive?(pid) && Time.now < deadline
-      signal_group(pid, "KILL") if alive?(pid)
+      sleep POLL_INTERVAL while (alive?(pid) || group_alive?(pid)) && Time.now < deadline
+      signal_group(pid, "KILL") if alive?(pid) || group_alive?(pid)
       FileUtils.rm_f(paths.daemon_file)
+    end
+
+    # Whether anything is left in the process group `pid` led.
+    def group_alive?(pid)
+      return false unless pid.is_a?(Integer) && pid.positive?
+
+      Process.kill(0, -pid)
+      true
+    rescue Errno::ESRCH
+      false
+    rescue Errno::EPERM
+      true
     end
 
     # The port kept from last time, unless something else has taken it. A
