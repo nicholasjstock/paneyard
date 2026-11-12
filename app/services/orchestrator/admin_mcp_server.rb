@@ -52,7 +52,10 @@ module Orchestrator
       "not ready yet (a local directory or repository with no GitHub repository, or a GitHub repository not cloned " \
       "here), call create_workspace with its name (or path): it does only the missing steps -- directory, git " \
       "repository on main, GitHub repository, clone, push -- registers the workspace and returns it, ready for " \
-      "queue_run; only do this when asked. If it says no projects directory is set, ask the operator where projects " \
+      "queue_run. It is not a job: it finishes in seconds, so never queue a job to create a workspace. Call it " \
+      "first, then queue every job into the new workspace; when one job must build on another's work there (scaffold " \
+      "first, then the feature), queue both there and give the later one after: [the earlier runId]. Only do this " \
+      "when asked. If it says no projects directory is set, ask the operator where projects " \
       "go and save it with update_settings. Pass driver as the agent CLI you are " \
       "(claude or codex), and model as the model id you are running on if you know it, unless the operator names " \
       "others. When one job must build on another's work, queue it with after: [that job's runId] rather than " \

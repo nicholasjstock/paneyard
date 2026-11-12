@@ -27,7 +27,8 @@ RSpec.describe "the admin MCP endpoint", type: :request do
 
     body = response.body
     body = body.lines.find { |line| line.start_with?("data:") }.delete_prefix("data:") if body.start_with?("event:", "data:")
-    expect(JSON.parse(body).dig("result", "instructions")).to include("list_workspaces", "register_workspace", "create_workspace", "update_settings", "queue_run")
+    expect(JSON.parse(body).dig("result", "instructions")).to include("list_workspaces", "register_workspace", "create_workspace", "update_settings", "queue_run",
+      "never queue a job to create a workspace", "after: [the earlier runId]")
   end
 
   # An operator's own client may sit idle for hours, and stays connected

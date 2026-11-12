@@ -10,7 +10,8 @@ module McpTools
   class CreateWorkspaceTool < MCP::Tool
     tool_name "create_workspace"
     description "Get a project ready and register it as a workspace, so jobs can be queued in it right away -- only " \
-      "when the operator asks. It works from whatever exists: with nothing at the path and nothing on GitHub it " \
+      "when the operator asks. It is not a job: it finishes in seconds, so call it first and then queue jobs into the " \
+      "new workspace (a later stage with queue_run's after: [an earlier runId] in that workspace). It works from whatever exists: with nothing at the path and nothing on GitHub it " \
       "makes the directory, runs git init on main with a first commit (a README and an AGENTS.md stub), creates the " \
       "GitHub repository <owner>/<name> as origin (private unless visibility says otherwise) and pushes main; with " \
       "nothing at the path but <owner>/<name> on GitHub, it clones that; for an existing directory or repository it " \
