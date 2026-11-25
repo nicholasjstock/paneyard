@@ -26,7 +26,7 @@ elif [ "$platform" = "x86_64-darwin" ]; then
   # jdx/ruby's published macOS archive is ARM64. Build the same portable
   # recipe on the Intel release runner instead of mislabelling that binary.
   git clone --quiet https://github.com/jdx/ruby.git "$stage/ruby-builder"
-  git -C "$stage/ruby-builder" checkout --quiet 346cbf35816bc0fa7ed816dc6600d3305033b661
+  git -C "$stage/ruby-builder" checkout --quiet dd84a4910e1b3fa84da9d09747af860f12b6dd2a
   baseruby=$(ruby -rrbconfig -e 'print RbConfig.ruby')
   JDX_RUBY_BASERUBY="$baseruby" "$stage/ruby-builder/bin/package" "$ruby_version" \
     --target macos --no-yjit --output "$stage/rubies"
