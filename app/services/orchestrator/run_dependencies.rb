@@ -95,8 +95,8 @@ module Orchestrator
     def merged?(dependency, run)
       return false if dependency.branch_name.blank? || dependency.base_sha.blank?
 
-      Runner.for(run.workspace).branch_merged?(
-        repository_path: run.workspace.repository_path, branch: dependency.branch_name,
+      Runner.for(run).branch_merged?(
+        repository_path: run.repository_path, branch: dependency.branch_name,
         base_branch: run.base_branch, since: dependency.base_sha
       )
     rescue Runner::Error

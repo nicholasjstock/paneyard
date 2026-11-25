@@ -99,4 +99,23 @@ RSpec.describe Run, type: :model do
       end.to raise_error(ActiveRecord::RecordNotUnique)
     end
   end
+
+  describe "runner" do
+    it "is the local runner unless one is named" do
+      run = create_run
+
+      expect(run.runner).to eq(RegisteredRunner.local)
+      expect(run.repository_path).to eq(run.workspace.repository_path)
+    end
+
+    it "keeps the runner it was given, and resolves its checkout there" do
+      mac = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet:3100")
+      workspace = create_workspace
+      workspace.checkouts.create!(runner: mac, repository_path: "/Users/me/src/app")
+      run = create_run(workspace:, runner: mac)
+
+      expect(run.reload.runner).to eq(mac)
+      expect(run.repository_path).to eq("/Users/me/src/app")
+    end
+  end
 end

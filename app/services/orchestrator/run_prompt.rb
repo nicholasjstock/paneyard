@@ -70,7 +70,7 @@ module Orchestrator
     # The run merges back into the branch it started from, which need not be
     # the one the operator's checkout has out, or checked out anywhere.
     def changes_section(run)
-      repository = run.source_root.presence || run.workspace.repository_path
+      repository = run.source_root.presence || run.repository_path
       base = run.base_branch
       branch = run.branch_name
 
@@ -110,7 +110,7 @@ module Orchestrator
       names = Array(run.launch_artifacts).filter_map { |artifact| artifact["name"] || artifact[:name] }
       return if names.empty?
 
-      dir = Runner.for(run.workspace).attachments_dir(run_id: run.run_id)
+      dir = Runner.for(run).attachments_dir(run_id: run.run_id)
       "Attached files: #{names.join(', ')}, in `#{dir}`.\n"
     end
 

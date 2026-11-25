@@ -349,7 +349,7 @@ module Orchestrator
     end
 
     def runner_for(session)
-      Runner.for(session.run.workspace)
+      Runner.for(session.run)
     end
   end
 end

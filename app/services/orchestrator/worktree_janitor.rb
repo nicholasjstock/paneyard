@@ -26,15 +26,16 @@ module Orchestrator
       Workspace.find_each.select { |workspace| Sandbox.allows_path?(workspace.repository_path) }.sum { |workspace| sweep(workspace) }
     end
 
-    # Returns the number of worktrees removed.
+    # Returns the number of worktrees removed. Each runner is handed only its
+    # own runs' worktrees, in its own checkout of the repository.
     def sweep(workspace)
-      worktrees = finished(workspace).map { |run| { "path" => run.target_root, "base_branch" => run.base_branch } }
-      return 0 if worktrees.empty?
-
-      Runner.for(workspace).reclaim_worktrees(repository_path: workspace.repository_path, worktrees:)
-    rescue Runner::Error => error
-      Rails.logger.warn("WorktreeJanitor: #{workspace.name}: #{error.message}")
-      0
+      finished(workspace).includes(:runner).group_by(&:runner).sum do |runner, runs|
+        worktrees = runs.map { |run| { "path" => run.target_root, "base_branch" => run.base_branch } }
+        Runner.for(runner).reclaim_worktrees(repository_path: workspace.repository_path_for(runner), worktrees:)
+      rescue Runner::Error => error
+        Rails.logger.warn("WorktreeJanitor: #{workspace.name} on #{runner.name}: #{error.message}")
+        0
+      end
     end
 
     # The workspace's runs with a worktree of their own whose session is over
@@ -49,7 +50,7 @@ module Orchestrator
     def remove_for_run!(run, force: false)
       raise Error, "Run #{run.run_id} has no managed worktree" if run.worktree_name.blank? || run.target_root.blank?
 
-      Runner.for(run.workspace).remove_worktree(repository_path: repository_for(run), path: run.target_root, force:)
+      Runner.for(run).remove_worktree(repository_path: repository_for(run), path: run.target_root, force:)
       run
     end
 
@@ -65,12 +66,12 @@ module Orchestrator
 
       options = { repository_path: repository_for(run), path: run.target_root, base_branch: run.base_branch }
       options[:branch] = run.branch_name if finalizing
-      Runner.for(run.workspace).release_worktree(**options)
+      Runner.for(run).release_worktree(**options)
     end
 
     # The repository the run's worktree was made from, as recorded then.
     def repository_for(run)
-      run.source_root.presence || run.workspace.repository_path
+      run.source_root.presence || run.repository_path
     end
   end
 end

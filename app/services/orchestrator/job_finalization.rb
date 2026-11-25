@@ -20,7 +20,7 @@ module Orchestrator
     end
 
     def validate!(run)
-      Runner.for(run.workspace).verify_job_finished!(
+      Runner.for(run).verify_job_finished!(
         repository_path: WorktreeJanitor.repository_for(run), path: run.target_root,
         branch: run.branch_name, base_branch: run.base_branch
       )

@@ -63,7 +63,7 @@ module Orchestrator
         raise NotReopenable, "Run #{run.run_id} is already #{run.status}."
       end
 
-      runner = Runner.for(run.workspace)
+      runner = Runner.for(run)
       return new_worktree(run, runner) if run.branch_name.blank?
 
       repository = WorktreeJanitor.repository_for(run)
@@ -83,7 +83,7 @@ module Orchestrator
     # A run whose launch failed before it had a branch starts from its base
     # branch, which has to still be there.
     def new_worktree(run, runner)
-      problem = runner.base_branch_problem(repository_path: run.workspace.repository_path, branch: run.base_branch)
+      problem = runner.base_branch_problem(repository_path: run.repository_path, branch: run.base_branch)
       raise NotReopenable, "Run #{run.run_id} never got a worktree, and its base branch cannot start one: #{problem.fetch('message')}" if problem
 
       "new"

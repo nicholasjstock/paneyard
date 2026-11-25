@@ -27,6 +27,9 @@ class Run < ApplicationRecord
   SESSION_ACTIVE_STATUSES = %w[queued launching running].freeze
 
   belongs_to :workspace
+  # The machine the run happens on (Orchestrator::Runner.for(run)). Local
+  # unless the caller named another.
+  belongs_to :runner, class_name: "RegisteredRunner", inverse_of: :runs
 
   # Ordinary integer FK, unlike the string-run_id associations below: a
   # RunSession is Rails' own bookkeeping and never crosses the MCP wire, so it
@@ -56,6 +59,7 @@ class Run < ApplicationRecord
   validate :dependency_run_ids_are_a_list
 
   before_validation :default_base_branch, on: :create
+  before_validation :default_runner, on: :create
 
   scope :active, -> { where(status: NON_TERMINAL_STATUSES) }
   scope :queued, -> { where(status: "queued") }
@@ -129,7 +133,12 @@ class Run < ApplicationRecord
   # worktree of the repository, ruling out both.
   def kept_worktree?
     managed_worktree? && target_root.present? && session_over? &&
-      Orchestrator::Runner.for(workspace).worktree_registered?(repository_path: workspace.repository_path, path: target_root)
+      Orchestrator::Runner.for(self).worktree_registered?(repository_path:, path: target_root)
+  end
+
+  # The workspace's repository checkout on this run's runner.
+  def repository_path
+    workspace.repository_path_for(runner)
   end
 
   def to_param
@@ -140,6 +149,10 @@ class Run < ApplicationRecord
 
   def default_base_branch
     self.base_branch = workspace&.default_base_branch if base_branch.blank?
+  end
+
+  def default_runner
+    self.runner ||= RegisteredRunner.local
   end
 
   def dependency_run_ids_are_a_list

@@ -10,6 +10,9 @@
 class Workspace < ApplicationRecord
   has_many :runs, dependent: :restrict_with_error
   has_many :lobbies, dependent: :destroy
+  # Where the repository is checked out on each runner's machine. The local
+  # runner's row is kept in step with repository_path (sync_local_checkout).
+  has_many :checkouts, class_name: "WorkspaceCheckout", inverse_of: :workspace, dependent: :delete_all
 
   validates :name, presence: true, uniqueness: true
   validates :repository_path, presence: true, uniqueness: true
@@ -17,6 +20,8 @@ class Workspace < ApplicationRecord
   validate :repository_is_not_changed_while_runs_are_active
   validate :layout_is_valid
   validate :repository_path_is_inside_the_sandbox
+
+  after_save :sync_local_checkout, if: :saved_change_to_repository_path?
 
   # A blank layout is stored as NULL, which means the default. A valid one is
   # stored as canonical YAML whatever form it arrived in (the workspace form's
@@ -43,7 +48,22 @@ class Workspace < ApplicationRecord
     lobbies.open.order(:created_at).last
   end
 
+  # The repository's checkout on runner's machine, a path the orchestrator
+  # only hands back to that runner. The local runner's is repository_path
+  # (its checkout row mirrors it); another runner's must have been recorded.
+  def repository_path_for(runner)
+    return repository_path if runner.nil? || runner.local?
+
+    checkouts.find_by(runner:)&.repository_path ||
+      raise(Orchestrator::Runner::Error, "workspace #{name.inspect} has no checkout on runner #{runner.name.inspect}")
+  end
+
   private
+
+  def sync_local_checkout
+    checkout = checkouts.find_or_initialize_by(runner: RegisteredRunner.local)
+    checkout.update!(repository_path:)
+  end
 
   def layout_is_valid
     return if layout.blank?

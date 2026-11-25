@@ -95,6 +95,7 @@ RSpec.describe McpTools::RegisterWorkspaceTool do
     git(repository, "worktree", "add", "-q", "-b", "side", worktree)
 
     expect(call(File.join(repository, "app", "models")).structured_content).to include(repositoryPath: repository)
+    WorkspaceCheckout.delete_all
     Workspace.delete_all
     expect(call(worktree).structured_content).to include(repositoryPath: repository)
   end

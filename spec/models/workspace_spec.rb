@@ -46,4 +46,39 @@ RSpec.describe Workspace do
       expect(workspace.errors[:layout]).to include("`agent` must be the first pane of the first tab")
     end
   end
+
+  describe "checkouts" do
+    it "records its repository as its checkout on the local runner, and keeps it there" do
+      workspace = create_workspace
+      checkout = workspace.checkouts.sole
+
+      expect(checkout).to have_attributes(runner: RegisteredRunner.local, repository_path: workspace.repository_path)
+
+      moved = Dir.mktmpdir("moved")
+      workspace.update!(repository_path: moved)
+
+      expect(checkout.reload.repository_path).to eq(moved)
+      expect(workspace.checkouts.count).to eq(1)
+    end
+
+    it "resolves the repository path per runner" do
+      workspace = create_workspace
+      mac = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet:3100")
+
+      expect(workspace.repository_path_for(RegisteredRunner.local)).to eq(workspace.repository_path)
+      expect(workspace.repository_path_for(nil)).to eq(workspace.repository_path)
+      expect { workspace.repository_path_for(mac) }.to raise_error(Orchestrator::Runner::Error, /no checkout on runner "mac"/)
+
+      workspace.checkouts.create!(runner: mac, repository_path: "/Users/me/src/app")
+
+      expect(workspace.repository_path_for(mac)).to eq("/Users/me/src/app")
+    end
+
+    it "goes with the workspace" do
+      workspace = create_workspace
+      workspace.destroy!
+
+      expect(WorkspaceCheckout.count).to eq(0)
+    end
+  end
 end

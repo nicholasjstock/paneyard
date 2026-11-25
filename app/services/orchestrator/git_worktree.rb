@@ -12,8 +12,8 @@ module Orchestrator
     def provision!(run, session:)
       name = run.worktree_name.presence || name_for(run)
       current = run.target_root if run.worktree_name.present? && run.branch_name.present? && run.source_root.present?
-      result = Runner.for(run.workspace).provision_worktree(
-        repository_path: run.workspace.repository_path, branch: run.branch_name.presence || "paneyard/#{name}",
+      result = Runner.for(run).provision_worktree(
+        repository_path: run.repository_path, branch: run.branch_name.presence || "paneyard/#{name}",
         base_branch: run.base_branch, label: name, current_target_root: current
       )
 
