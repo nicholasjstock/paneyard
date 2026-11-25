@@ -41,6 +41,9 @@ module PaneyardPlugin
       # in that machine's herdr.
       # PANEYARD_REMOTE_URL=http://server.example.ts.net:7263
       # PANEYARD_REMOTE_PATHS=/Users/me=/home/me
+      # The runner this machine is registered as, when that is not its host
+      # name: what the queue popup offers by default once there are several.
+      # PANEYARD_RUNNER_NAME=
 
       # For a development checkout linked without the plugin build, an optional
       # Ruby override. Installed plugins use their bundled runtime.

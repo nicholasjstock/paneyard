@@ -15,7 +15,9 @@ module McpTools
       "on other jobs' work, pass their runIds as after: it stays queued, holding no slot, until each of them has " \
       "its commits merged into the shared baseBranch, and only then gets its worktree, from the base including " \
       "that work. If one of them fails or is stopped first, it waits as blocked (get_run says why) instead of " \
-      "launching. Use after for a genuine order dependency, not to serialise jobs that merely touch the same files."
+      "launching. Use after for a genuine order dependency, not to serialise jobs that merely touch the same files. " \
+      "Pass runner (a machine, from list_runners where offered) only when the operator names one; by default the job " \
+      "runs on your own machine from inside a run, else on the workspace's runner."
     input_schema(
       properties: {
         task: { type: "string" },
@@ -26,33 +28,37 @@ module McpTools
         after: {
           type: "array", items: { type: "string" },
           description: "runIds of jobs in the same workspace and baseBranch, not failed or stopped, whose work must be merged into baseBranch before this one starts."
-        }
+        },
+        runner: { type: "string", description: "Name of the runner (machine) to run it on; only when the operator names one." }
       },
       required: %w[task]
     )
 
-    def self.call(task:, server_context:, workspace: nil, baseBranch: nil, driver: nil, model: nil, after: nil)
+    def self.call(task:, server_context:, workspace: nil, baseBranch: nil, driver: nil, model: nil, after: nil, runner: nil)
       raise ArgumentError, "task is required" if task.blank?
 
       target = WorkspaceResolution.resolve!(server_context:, workspace:, explicit: true)
+      machine = Orchestrator::RunRunner.choose!(target, runner, caller_run: WorkspaceResolution.caller_run(server_context))
       base_branch = Orchestrator::RunBaseBranch.for(target, baseBranch)
-      problem = Orchestrator::RunBaseBranch.problem(target, base_branch)
+      problem = Orchestrator::RunBaseBranch.problem(target, base_branch, runner: machine)
       return ToolResponse.error(problem, code: "base_branch_invalid") if problem
 
       dependencies = Orchestrator::RunDependencies.validate!(after, workspace: target, base_branch:)
 
       run = target.runs.new(
+        runner: machine,
         run_id: "run-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}",
         task:, base_branch:, launcher_variant: driver.presence || "claude", model: model.to_s.strip.presence,
-        target_root: target.repository_path, status: "queued", launched_by: "mcp", dependency_run_ids: dependencies.map(&:run_id)
+        target_root: target.repository_path_for(machine), status: "queued", launched_by: "mcp", dependency_run_ids: dependencies.map(&:run_id)
       )
       run.worktree_name = Orchestrator::GitWorktree.name_for(run)
       run.save!
       RunDispatchJob.perform_later
 
-      ToolResponse.structured(
+      response = {
         run_id: run.run_id,
         workspace: target.name,
+        runner: machine.name,
         base_branch: run.base_branch,
         driver: run.launcher_variant,
         model: run.model,
@@ -61,9 +67,16 @@ module McpTools
         dependencies: Orchestrator::RunDependencies.status(run),
         queued_behind: target.runs.queued.where("created_at < ?", run.created_at).count,
         capacity: { limit: Orchestrator::RunConcurrency.limit, in_flight: Orchestrator::RunConcurrency.in_flight }
-      )
+      }
+      # Only for a runner with a cap of its own.
+      if machine.max_concurrent_runs
+        response[:runner_capacity] = { limit: machine.max_concurrent_runs, in_flight: Orchestrator::RunConcurrency.in_flight_on(machine) }
+      end
+      ToolResponse.structured(response)
     rescue Orchestrator::RunDependencies::Invalid => error
       ToolResponse.error(error.message, code: "dependency_invalid")
+    rescue Orchestrator::RunRunner::Invalid => error
+      ToolResponse.error(error.message, code: "runner_invalid")
     rescue ArgumentError, ActiveRecord::RecordInvalid => error
       ToolResponse.error(error.message)
     end

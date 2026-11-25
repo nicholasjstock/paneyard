@@ -28,4 +28,18 @@ RSpec.describe McpTools::ListWorkspacesTool do
 
     expect(listed[:lobby]).to eq(branch: "release", herdrWorkspace: "w9", driver: "codex", model: "gpt-5.5", live: false)
   end
+
+  it "lists the runners each workspace is checked out on, local first, with the path on each" do
+    workspace = create_workspace(prefix: "list-workspaces-runners")
+    laptop = RegisteredRunner.create!(name: "laptop", kind: "remote", url: "http://laptop.tailnet:3100")
+
+    listed = -> { described_class.call(server_context: {}).structured_content[:workspaces].find { |w| w[:name] == workspace.name } }
+    expect(listed.call[:runners]).to eq([ { name: "local", kind: "local", repositoryPath: workspace.repository_path } ])
+
+    workspace.checkouts.create!(runner: laptop, repository_path: "/Users/me/code/app")
+    expect(listed.call[:runners]).to eq([
+      { name: "local", kind: "local", repositoryPath: workspace.repository_path },
+      { name: "laptop", kind: "remote", repositoryPath: "/Users/me/code/app" }
+    ])
+  end
 end

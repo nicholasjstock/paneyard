@@ -14,6 +14,15 @@ RSpec.describe McpTools::RunPresenter do
     ])
   end
 
+  it "says which runner a run is on" do
+    run = create_run(prefix: "presenter-runner")
+    expect(described_class.summary(run)).to include(runner: "local")
+
+    laptop = RegisteredRunner.create!(name: "laptop", kind: "remote", url: "http://laptop.tailnet:3100")
+    run.update!(runner: laptop)
+    expect(described_class.detail(run.reload)).to include(runner: "laptop")
+  end
+
   it "gives a run's detail the agent pane's last screen, kept when its session was closed" do
     run, session = create_run_and_session(prefix: "presenter")
     expect(described_class.detail(run)).not_to have_key(:last_screen)

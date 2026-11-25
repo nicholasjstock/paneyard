@@ -39,9 +39,11 @@ module Orchestrator
     end
 
     # The workspace's runs with a worktree of their own whose session is over
-    # (Run#session_over?). The runner skips any that is already gone.
+    # (Run#session_over?), never a runner's checkout of the repository itself.
+    # The runner skips any that is already gone.
     def finished(workspace)
-      runs = workspace.runs.where.not(worktree_name: [ nil, "" ]).where.not(target_root: [ nil, "", workspace.repository_path ])
+      checkouts = [ workspace.repository_path, *workspace.checkouts.pluck(:repository_path) ].uniq
+      runs = workspace.runs.where.not(worktree_name: [ nil, "" ]).where.not(target_root: [ nil, "", *checkouts ])
       runs.where.not(status: Run::SESSION_ACTIVE_STATUSES).where.not(id: RunSession.live.select(:run_id))
     end
 
