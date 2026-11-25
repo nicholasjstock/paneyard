@@ -44,6 +44,13 @@ RSpec.describe Orchestrator::Sandbox do
   end
 
   it "never starts a new project: no directory outside it, and no GitHub repository even inside it" do
+    # The plan also checks git's identity; give it one rather than depend on
+    # the machine's (a CI runner has none), so only the sandbox guard objects.
+    identity = File.join(sandbox_root, "gitconfig")
+    File.write(identity, "[user]\n\tname = Spec\n\temail = spec@example.test\n")
+    saved = ENV.to_h.slice("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
+    ENV["GIT_CONFIG_GLOBAL"] = identity
+    ENV["GIT_CONFIG_NOSYSTEM"] = "1"
     gh = use_fake_gh!(File.join(sandbox_root, "fake-gh"))
     sandbox_on!
 
@@ -59,6 +66,8 @@ RSpec.describe Orchestrator::Sandbox do
     expect(gh.calls).to be_empty
     expect(File.exist?(File.join(sandbox_root, "scratch"))).to be(false)
     expect(Workspace.count).to eq(0)
+  ensure
+    %w[GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM].each { |key| saved&.key?(key) ? ENV[key] = saved[key] : ENV.delete(key) }
   end
 
   it "will not even look at a repository outside the sandbox when registering one" do
