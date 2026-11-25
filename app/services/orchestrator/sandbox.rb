@@ -14,6 +14,8 @@ module Orchestrator
   #     beside the repository, so inside the root too);
   #   - processes: a session pid is only signalled if it is a fake agent;
   #   - CLI transcripts: copied only for a worktree under the sandbox root;
+  #   - GitHub: never; a sandbox cannot start a new project (create_workspace),
+  #     which would make a real GitHub repository;
   #
   # Herdr can be opted back in for an operator who wants to see the real
   # thing (`bin/sandbox start --real-herdr`), never by
@@ -71,6 +73,14 @@ module Orchestrator
       return if local_path.present? && allows_path?(local_path)
 
       raise Violation, "sandbox refuses to verify a remote outside its root"
+    end
+
+    # Starting a new project makes a GitHub repository (Runner::GitHub), which
+    # no sandbox may do, real herdr or not.
+    def guard_github!(action)
+      return unless enabled?
+
+      raise Violation, "sandbox refuses to #{action}: GitHub is outside #{root}"
     end
 
     # Only a process started by the fake herdr may be signalled: a copied

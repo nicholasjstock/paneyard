@@ -5,7 +5,7 @@ module Orchestrator
     # are the whole runner interface -- a runner on another machine would
     # answer the same calls with the same plain data -- and the modules beside
     # it (Runner::Herdr, SessionLauncher, SessionLayout, SessionArgs,
-    # Worktrees, Repositories, ClaudeTrust, CodexTrust, ConfigFile,
+    # Worktrees, Repositories, Projects, GitHub, ClaudeTrust, CodexTrust, ConfigFile,
     # ModelDiscovery, Attachments, Transcripts) are its internals, which nothing outside
     # Orchestrator::Runner uses.
     #
@@ -97,6 +97,30 @@ module Orchestrator
       # "message" }] }, problems empty when it is fine.
       def check_repository(path:, default_base_branch: nil)
         Repositories.check(path, default_base_branch:)
+      end
+
+      # Whether `path` is a directory new projects can go in (the
+      # projects_dir setting): { "path" (expanded), "problems" }.
+      def check_projects_dir(path:)
+        Projects.check_projects_dir(path)
+      end
+
+      # What getting project `name` at `path` ready as a workspace takes, from
+      # whatever exists there and on GitHub (Runner::Projects.check): the
+      # steps, and every problem. Looks only. Returns { "repository_path",
+      # "name", "owner", "github_repository", "visibility", "local",
+      # "default_base_branch", "steps", "notes", "problems" }.
+      def check_project(path:, name:, owner: nil, visibility: nil)
+        Projects.check(path:, name:, owner:, visibility:)
+      end
+
+      # Carries those steps out (Runner::Projects.create): any of a new
+      # directory, `git init`, a first commit, `gh repo create` or
+      # `gh repo clone`, and pushing the default branch to origin. Returns
+      # check_project's keys plus "created", "done", "origin_url",
+      # "github_url", "remaining", and "message" on failure.
+      def create_project(path:, name:, owner: nil, visibility: nil, description: nil)
+        Projects.create(path:, name:, owner:, visibility:, description:)
       end
 
       # Puts the repository's own checkout on `branch` for its lobby, only

@@ -43,6 +43,24 @@ RSpec.describe Orchestrator::Sandbox do
     expect(inside).to be_valid
   end
 
+  it "never starts a new project: no directory outside it, and no GitHub repository even inside it" do
+    gh = use_fake_gh!(File.join(sandbox_root, "fake-gh"))
+    sandbox_on!
+
+    outside = Orchestrator::WorkspaceCreation.create(name: "real", path: File.join(Dir.tmpdir, "paneyard-sandbox-real")).last
+    inside = Orchestrator::WorkspaceCreation.create(name: "scratch", path: File.join(sandbox_root, "scratch")).last
+
+    expect(outside["problems"].map { |problem| problem["code"] }).to eq(%w[outside_sandbox])
+    expect(inside["problems"].map { |problem| problem["message"] }).to eq([ "sandbox refuses to create or clone a GitHub repository: GitHub is outside #{sandbox_root}" ])
+    expect(Orchestrator::Runner::GitHub.create_repository(full_name: "a/b", visibility: "private", source: sandbox_root))
+      .to eq([ false, "sandbox refuses to create a GitHub repository: GitHub is outside #{sandbox_root}" ])
+    expect(Orchestrator::Runner::GitHub.clone_repository(full_name: "a/b", target: File.join(sandbox_root, "b")))
+      .to eq([ false, "sandbox refuses to clone a GitHub repository: GitHub is outside #{sandbox_root}" ])
+    expect(gh.calls).to be_empty
+    expect(File.exist?(File.join(sandbox_root, "scratch"))).to be(false)
+    expect(Workspace.count).to eq(0)
+  end
+
   it "will not even look at a repository outside the sandbox when registering one" do
     repository = create_source_checkout
     sandbox_on!

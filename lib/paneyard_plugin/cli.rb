@@ -28,7 +28,7 @@ module PaneyardPlugin
         start | restart | stop | status
         url          print the daemon's base URL
         mcp-url      print /mcp/admin's URL (and show it as a herdr notification)
-        menu-ui | queue-ui | runs-ui | lobby-ui | report-ui | close-ui | layout-ui | setup-ui | mcp-ui
+        menu-ui | queue-ui | runs-ui | lobby-ui | project-ui | report-ui | close-ui | layout-ui | setup-ui | mcp-ui
                      the interactive popups behind the plugin's actions
     TEXT
 
@@ -56,6 +56,7 @@ module PaneyardPlugin
       when "queue-ui" then interactive { queue_ui }
       when "runs-ui" then interactive { runs_ui }
       when "lobby-ui" then interactive { lobby_ui }
+      when "project-ui" then interactive { project_ui }
       when "report-ui" then interactive { this_run_ui(:report) }
       when "close-ui" then interactive { this_run_ui(:close) }
       when "layout-ui" then interactive { layout_ui }
@@ -366,6 +367,7 @@ module PaneyardPlugin
       say "q  Hand off a task"
       say "r  Jobs and reports"
       say "o  Open a lobby"
+      say "n  New workspace: start a project, or add an existing one"
       say "p  This job's report"
       say "x  Close this job"
       say "l  Job layout for this repository"
@@ -376,6 +378,7 @@ module PaneyardPlugin
       when "q" then queue_ui
       when "r" then runs_ui
       when "o" then lobby_ui
+      when "n" then project_ui
       when "p" then this_run_ui(:report)
       when "x" then this_run_ui(:close)
       when "l" then layout_ui
@@ -384,18 +387,23 @@ module PaneyardPlugin
       end
     end
 
-    def queue_ui
-      client = connect!
-      dir = context_dir
-      raise Error, "herdr did not say which directory this pane is in." unless dir
-
-      repository, current_branch = WorkspaceMatch.repository_of(dir)
+    # `workspace` (one project_ui just set up) skips finding the pane's: the
+    # task then starts from that workspace's default branch, not this pane's.
+    def queue_ui(client: nil, workspace: nil)
+      client ||= connect!
       pane_driver, pane_model, pane_switch = pane_agent
-      workspaces = client.workspaces
       registered = false
-      workspace = WorkspaceMatch.workspace_for(workspaces, dir, repository:) ||
-        register!(client, repository || dir).tap { |found| registered = !found.nil? }
-      return unless workspace
+      current_branch = nil
+      unless workspace
+        dir = context_dir
+        raise Error, "herdr did not say which directory this pane is in." unless dir
+
+        repository, current_branch = WorkspaceMatch.repository_of(dir)
+        workspaces = client.workspaces
+        workspace = WorkspaceMatch.workspace_for(workspaces, dir, repository:) ||
+          register!(client, repository || dir).tap { |found| registered = !found.nil? }
+        return unless workspace
+      end
 
       default = current_branch || workspace.fetch("defaultBaseBranch")
       clear_screen
@@ -531,8 +539,16 @@ module PaneyardPlugin
       branch = ask_lobby_branch(workspace)
       return say("Cancelled.") unless branch
 
-      branch = nil if branch == :current
+      open_lobby!(client, workspace, branch == :current ? nil : branch)
+    rescue PaneyardSandbox::McpClient::ToolError => error
+      say ""
+      say error.payload["message"] || error.message
+      pause
+    end
 
+    # Asks for the agent and model, then opens the workspace's lobby on
+    # `branch` (nil: wherever its checkout is) and goes to it.
+    def open_lobby!(client, workspace, branch)
       pane_driver, pane_model, pane_switch = pane_agent
       driver = ask_driver(pane_driver)
       same_agent = driver == pane_driver
@@ -542,10 +558,142 @@ module PaneyardPlugin
         client.open_lobby(workspace: workspace.fetch("name"), branch:, driver:, model:)
       end
       go_to(opened.fetch("herdrWorkspace"), "The #{workspace.fetch('name')} lobby")
+    end
+
+    # A new workspace: a project name for a brand-new project (or one already
+    # on GitHub, which is cloned), or the path of an existing directory or
+    # repository, set up with whatever it lacks (create_workspace). New
+    # projects go in the projects directory, which there is no default for:
+    # until it is set this asks for it first, and saves it (update_settings).
+    # Afterwards, offers to hand off the first task or open the lobby.
+    def project_ui
+      client = connect!
+      settings = client.settings
+      clear_screen
+      say accent("PANEYARD  /  NEW WORKSPACE")
+      say rule
+      say dim("A project name starts a new project in your projects directory, or clones it if it is already on GitHub.")
+      say dim("A path (/…, ~/…, ./…) adds an existing directory or repository, doing only what it lacks: git init,")
+      say dim("a first commit of a README and AGENTS.md (nothing else), the GitHub repository, a push.")
+      say ""
+      settings = ask_projects_dir(client) unless settings["projectsDir"]
+      return say("Cancelled.") unless settings
+
+      loop do
+        say "Projects directory: #{settings.fetch('projectsDir')}"
+        answer = ask("Project name, owner/name, or path (d changes the projects directory, q cancels): ")
+        return say("Cancelled.") if answer.nil? || answer.empty? || answer == "q"
+
+        if answer == "d"
+          settings = ask_projects_dir(client, current: settings["projectsDir"]) || settings
+          say ""
+          next
+        end
+
+        target = project_target(answer)
+        owner = target.delete(:owner) || ask_owner(settings)
+        return say("Cancelled.") if owner == :cancel
+
+        visibility = ask_visibility
+        return say("Cancelled.") if visibility == :cancel
+
+        say ""
+        workspace = set_up_project(client, **target, owner:, visibility:)
+        return after_project(client, workspace) if workspace
+        return if workspace == false
+
+        say ""
+      end
+    end
+
+    # nil cancels; otherwise the settings with the directory saved.
+    def ask_projects_dir(client, current: nil)
+      say "Where do new projects go? No projects directory is set yet." unless current
+      loop do
+        answer = ask("Projects directory, e.g. ~/Source (#{current ? 'Enter keeps it' : 'q cancels'}): ")
+        return nil if answer.nil? || answer == "q" || (answer.empty? && current)
+        next if answer.empty?
+
+        begin
+          return client.update_projects_dir(expand_path(answer)).tap { |saved| say "Saved: new projects go in #{saved.fetch('projectsDir')}." }
+        rescue PaneyardSandbox::McpClient::ToolError => error
+          problems(error).each { |problem| say problem }
+        end
+      end
+    end
+
+    def ask_owner(settings)
+      default = settings["defaultGithubOwner"] || "your gh account"
+      answer = ask("GitHub owner (Enter for #{default}; q cancels): ")
+      return :cancel if answer.nil? || answer == "q"
+
+      answer.empty? ? nil : answer
+    end
+
+    def ask_visibility
+      loop do
+        answer = ask("Visibility of a new GitHub repository: private, public, internal (Enter for private; q cancels): ")
+        return :cancel if answer.nil? || answer == "q"
+        return nil if answer.empty?
+        return answer if %w[private public internal].include?(answer)
+
+        say "#{answer} is not a visibility."
+      end
+    end
+
+    # { path: } for anything that looks like a path, { owner:, name: } for
+    # owner/name, else { name: }.
+    def project_target(answer)
+      return { path: expand_path(answer) } if answer.start_with?("/", "~", ".")
+
+      owner, name = answer.split("/", 2)
+      name && !name.empty? && !name.include?("/") ? { owner:, name: } : { name: answer }
+    end
+
+    # ~ and ./ against this machine, and the pane's directory.
+    def expand_path(path)
+      File.expand_path(path, context_dir || Dir.pwd)
+    end
+
+    # The workspace; nil to ask again (it found problems and changed
+    # nothing); false when it stopped part way, having said what exists.
+    def set_up_project(client, owner:, visibility:, name: nil, path: nil)
+      waiting("Setting up #{name || path}…") { client.create_workspace(name:, path:, owner:, visibility:) }
     rescue PaneyardSandbox::McpClient::ToolError => error
       say ""
+      if error.payload["error"] == "workspace_invalid"
+        say "Nothing was done. To fix it:"
+        problems(error).each_with_index { |problem, index| say "#{index + 1}. #{problem}" }
+        say ""
+        say "Try again, or q to cancel."
+        return nil
+      end
+
       say error.payload["message"] || error.message
       pause
+      false
+    end
+
+    def problems(error)
+      listed = Array(error.payload["problems"]).filter_map { |problem| problem["message"] }
+      listed.empty? ? [ error.payload["message"] || error.message ] : listed
+    end
+
+    def after_project(client, workspace)
+      steps = Array(workspace["steps"])
+      say ""
+      say bold("#{workspace.fetch('name')} is ready")
+      say "#{workspace.fetch('repositoryPath')}, jobs start from #{workspace.fetch('defaultBaseBranch')}."
+      say workspace["githubUrl"] if workspace["githubUrl"]
+      say dim("Done: #{steps.empty? ? 'nothing needed doing, it was registered as it was' : steps.map { |step| step.tr('_', ' ') }.join(', ')}.")
+      Array(workspace["notes"]).each { |note| say note }
+      say ""
+      say "q  Hand off its first task"
+      say "o  Open its lobby"
+      case ask("Choose (Enter closes): ")&.downcase
+      when "q" then queue_ui(client:, workspace:)
+      when "o" then open_lobby!(client, workspace, nil)
+      end
     end
 
     # The workspace this pane's directory is in, if any.

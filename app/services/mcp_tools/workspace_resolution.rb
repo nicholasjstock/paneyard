@@ -38,7 +38,8 @@ module McpTools
       listed = registered.any? ? "Registered workspaces: #{registered.join(', ')}." : "No workspace is registered yet."
       "workspace is required when calling from outside a run. #{listed} Pass the one whose repository is the " \
         "one you mean; if it is not listed, register it first with register_workspace (path: the repository's " \
-        "directory), then queue again."
+        "directory), or, for a brand-new project the operator asked for, create it with create_workspace, then " \
+        "queue again."
     end
 
     def run!(server_context:, run_id:, workspace: nil)

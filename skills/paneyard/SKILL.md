@@ -1,6 +1,6 @@
 ---
 name: paneyard
-description: Hand work off to Paneyard, a job queue that runs each task as its own coding-agent session in a separate git worktree. Use when the user asks to queue, hand off, delegate, parallelise or split work into jobs, or to check on queued jobs, and Paneyard's MCP tools (queue_run, list_runs, get_run, list_workspaces) are available.
+description: Hand work off to Paneyard, a job queue that runs each task as its own coding-agent session in a separate git worktree. Use when the user asks to queue, hand off, delegate, parallelise or split work into jobs, to check on queued jobs, or to start a new project (or set one up) and queue work in it, and Paneyard's MCP tools (queue_run, list_runs, get_run, list_workspaces, create_workspace) are available.
 ---
 
 # Queueing work with Paneyard
@@ -9,7 +9,9 @@ Each job gets its own worktree, branch and agent session, and starts when a slot
 
 ## Queue it in the right place
 
-1. `list_workspaces`, and pick the one whose `repositoryPath` is this repository (its main checkout, if you are in a linked worktree). If none is, `register_workspace` with the repository's path, follow any fix it returns, and try again.
+1. `list_workspaces`, and pick the one whose `repositoryPath` is this repository (its main checkout, if you are in a linked worktree). If none is, `register_workspace` with the repository's path, follow any fix it returns, and try again. If the user asks for a new project, or one that is only local or only on GitHub, `create_workspace` with its name or path (and `owner`, if they say) does whatever is missing and registers it; if it says no projects directory is set, ask the user where projects go and save it with `update_settings`. Queue into it without `baseBranch`.
+
+   `create_workspace` is not a job: it returns in seconds with the workspace ready. Never queue a job to create a project. Call `create_workspace` first, then queue the jobs into the new workspace. If the work comes in stages (for example, scaffold the app, then build the feature), queue both there and give the later one `after: [the earlier runId]`, so it starts from the merged scaffold.
 2. Pass `baseBranch` as the branch you have checked out (`git branch --show-current`) unless the user names another. The job starts from it and merges back into it.
 3. Pass `driver` (the agent CLI you are: `claude` or `codex`) and `model` (the model you are running on, if you know it) unless the user wants different ones.
 

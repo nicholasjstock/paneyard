@@ -51,5 +51,16 @@ RSpec.describe PaneyardPlugin::Remote do
 
       expect(client.register(path: "/Users/me/Source/app")).to include("repositoryPath" => "/Users/me/Source/app")
     end
+
+    it "sets up a project and saves the projects directory by their remote paths, showing them as local ones" do
+      allow(mcp).to receive(:call_tool).with("create_workspace", path: "/home/me/Source/notes")
+        .and_return("name" => "notes", "repositoryPath" => "/home/me/Source/notes")
+      allow(mcp).to receive(:call_tool).with("update_settings", projectsDir: "/home/me/Source")
+        .and_return("projectsDir" => "/home/me/Source", "defaultGithubOwner" => nil)
+
+      expect(client.create_workspace(path: "/Users/me/Source/notes")).to include("repositoryPath" => "/Users/me/Source/notes")
+      expect(client.update_projects_dir("/Users/me/Source")).to include("projectsDir" => "/Users/me/Source")
+      expect(PaneyardSandbox::McpClient).to have_received(:new).with("http://server.example:7263/mcp/admin", hash_including(timeout: 300))
+    end
   end
 end

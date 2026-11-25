@@ -5,7 +5,7 @@ module McpTools
       "workspace -- with its repository checkout, the branch jobs start from by default, and how many runs it has " \
       "in flight. Match repositoryPath against the repository you are working in (its main checkout, if you are " \
       "in a linked worktree) to find the workspace for \"this repo\"; if none matches, that repository is not " \
-      "registered, and register_workspace (where offered) adds it. isDefault marks the workspace list_runs " \
+      "registered, and register_workspace (where offered) adds it; create_workspace sets up and registers a project (new, local only, or only on GitHub) when the operator asks for that. isDefault marks the workspace list_runs " \
       "and get_run fall back to when called from outside a run with no workspace argument; queue_run never does. " \
       "lobby is the workspace's open lobby (the operator's integration session on its checkout), with the branch " \
       "it is on and whether its agent is still live, or null."
@@ -17,19 +17,25 @@ module McpTools
 
       ToolResponse.structured(
         workspaces: Workspace.order(:created_at).map do |workspace|
-          {
-            id: workspace.id,
-            name: workspace.name,
-            repository_path: workspace.repository_path,
-            default_base_branch: workspace.default_base_branch,
-            layout_yaml: workspace.layout,
-            default_layout_yaml: Orchestrator::WorkspaceLayout::DEFAULT_YAML,
-            is_default: workspace == default,
-            active_runs: active_counts.fetch(workspace.id, 0),
-            lobby: lobby(workspace)
-          }
+          present(workspace, default:, active_runs: active_counts.fetch(workspace.id, 0))
         end
       )
+    end
+
+    # One workspace as this tool lists it; create_workspace returns its new
+    # one the same way.
+    def self.present(workspace, default: Workspace.default, active_runs: workspace.runs.active.count)
+      {
+        id: workspace.id,
+        name: workspace.name,
+        repository_path: workspace.repository_path,
+        default_base_branch: workspace.default_base_branch,
+        layout_yaml: workspace.layout,
+        default_layout_yaml: Orchestrator::WorkspaceLayout::DEFAULT_YAML,
+        is_default: workspace == default,
+        active_runs:,
+        lobby: lobby(workspace)
+      }
     end
 
     def self.lobby(workspace)
