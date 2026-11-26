@@ -1,7 +1,8 @@
 # Multi-runner: one orchestrator, a runner on each machine
 
-Status: phases 1 and 2 of 4 implemented on the `multi-runner` branch (the runner registry and a runner per
-run; a runner-only process and `Runner::Remote`). Phases 3 and 4 are planned. The four phases land on `multi-runner` and go into `main` as a
+Status: phases 1, 2 and 3 of 4 implemented on the `multi-runner` branch (the runner registry and a runner per
+run; a runner-only process and `Runner::Remote`; choosing a runner and per-runner caps). Phase 4 is planned.
+The four phases land on `multi-runner` and go into `main` as a
 single pull request. Where a build changes the plan, the plan is updated to match.
 
 ## Goal
@@ -117,17 +118,27 @@ client, no concurrency or plugin changes.
   own fake herdr and sandbox root, registered over `/mcp/admin`; `Orchestrator::Sandbox` refuses any runner
   url that is not a loopback one it started (`PANEYARD_SANDBOX_RUNNER_URLS`).
 
-### 3. Choosing a runner
+### 3. Choosing a runner (done)
 
-- `queue_run` takes `runner:` (a runner name; default local), validated against the registry and the
-  workspace's checkouts there.
-- Per-runner caps: `RunConcurrency` counts slots per runner as well as globally, with
-  `max_concurrent_runs` (nil means only the global cap), and `RunDispatchJob` skips a run whose runner is
-  full without blocking runs for other runners.
-- Plugin: the queue popup offers the runners (defaulting to the machine the pane is on); run lists show
-  each run's runner. `get_run`/`list_runs` report it.
-- The janitor, reconcile and model discovery work per runner; a runner that is unreachable is skipped for
-  that sweep and its runs are left alone.
+- `queue_run` takes an optional `runner:` (a runner name). `Orchestrator::RunRunner` picks and checks it:
+  the named runner, else the calling run's own runner (a session queuing follow-up work), else the
+  workspace's runner when it is checked out on only one, else local. A named runner must exist and have a
+  checkout of the workspace; the error lists the ones that do. The run's `target_root` starts as that
+  runner's checkout, and the base branch is checked there (`RunBaseBranch.problem(..., runner:)`).
+- Per-runner caps: `RunConcurrency` counts slots per runner as well as globally (`in_flight_by_runner`,
+  `slots`), with `max_concurrent_runs` (nil means only the global cap). `RunDispatchJob` makes one
+  oldest-first pass, passing over a run whose runner is full, so it never blocks runs for other runners.
+  Dependencies (`after`) are unchanged.
+- An admin-only `list_runners`: name, kind, url, cap, in-flight runs, the workspaces checked out there, and
+  reachability (the local runner always; a remote one if `Runner.for` gives an object that answers `id`).
+- `get_run`/`list_runs` report each run's `runner`; `list_workspaces` lists each workspace's `runners` (name,
+  kind, path there); `queue_run` reports `runner`, and `runnerCapacity` when the runner has a cap.
+- Plugin: the queue popup offers the workspace's runners only when there is more than one, defaulting to
+  this machine's: the local runner, or in remote mode the runner named `PANEYARD_RUNNER_NAME`, else the one
+  named after this host, else the only remote one. With one runner nothing changes.
+- The janitor already sweeps per runner (phase 1) and never treats any runner's checkout as a run's
+  worktree. Reconcile skips an unreachable runner's sessions for the sweep (phase 2). Still to do: model
+  discovery per runner (`list_models` still asks the local one).
 
 ### 4. `move_run`
 

@@ -20,7 +20,7 @@ module McpTools
       target = WorkspaceResolution.resolve!(server_context:, workspace:)
       scope = target.runs
       scope = scope.active unless includeFinished
-      runs = scope.order(created_at: :desc).limit(limit.to_i.clamp(1, 100)).includes(:run_sessions).to_a
+      runs = scope.order(created_at: :desc).limit(limit.to_i.clamp(1, 100)).includes(:run_sessions, :runner).to_a
       parents = RunPresenter.parent_run_ids(runs)
 
       ToolResponse.structured(

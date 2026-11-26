@@ -95,6 +95,43 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "feature/payments", driver: nil, model: nil)
     end
 
+    describe "with more than one runner" do
+      let(:workspace) do
+        { "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main",
+          "runners" => [ { "name" => "local", "kind" => "local", "repositoryPath" => "/code/app" },
+            { "name" => "laptop", "kind" => "remote", "repositoryPath" => "/Users/me/app" } ] }
+      end
+
+      before do
+        allow(client).to receive(:workspaces).and_return([ workspace ])
+        allow(client).to receive(:queue) { |**args| { "runId" => "run-7", "runner" => args[:runner], "baseBranch" => "main", "capacity" => {} } }
+      end
+
+      it "offers the runners, and Enter picks this machine's" do
+        run_cli("queue-ui", input: "Task\n\n\n\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+        expect(out.string).to include("local  (this machine)", "laptop", "Runner (Enter for local", "Queued run-7 on local from main.")
+        expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil, runner: "local")
+      end
+
+      it "queues on the runner picked by number or name" do
+        run_cli("queue-ui", input: "Task\n\n\nmars\n2\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+        expect(out.string).to include("No runner mars.", "Runs on laptop, from its own copy of the branch")
+        expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil, runner: "laptop")
+      end
+    end
+
+    it "asks nothing about runners when the workspace is on one" do
+      allow(client).to receive(:workspaces).and_return([ workspace.merge("runners" => [ { "name" => "local", "kind" => "local" } ]) ])
+      allow(client).to receive(:queue).and_return("runId" => "run-8", "baseBranch" => "main", "capacity" => {})
+
+      run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(out.string).not_to include("Runner")
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil)
+    end
+
     it "queues from the branch the operator types instead" do
       allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "feature/payments" ])
       allow(client).to receive(:workspaces).and_return([ workspace ])
@@ -859,6 +896,20 @@ RSpec.describe PaneyardPlugin::Cli do
       run_cli("mcp-url")
 
       expect(out.string).to include("http://server.example:7263/mcp/admin")
+    end
+
+    it "defaults to this machine's runner, the one named after its host" do
+      allow(Socket).to receive(:gethostname).and_return("laptop.local")
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/Users/me/app", "main" ])
+      runners = [ { "name" => "local", "kind" => "local" }, { "name" => "desktop", "kind" => "remote" }, { "name" => "laptop", "kind" => "remote" } ]
+      allow(remote_client).to receive_messages(workspaces: [ workspace.merge("runners" => runners) ], models: {})
+      allow(remote_client).to receive(:queue).and_return("runId" => "run-1", "runner" => "laptop", "baseBranch" => "main", "capacity" => {})
+
+      run_cli("queue-ui", input: "Task\n\n\n\n\n\n", context: { "focused_pane_cwd" => "/Users/me/app" })
+
+      expect(out.string).to include("laptop  (this machine)", "Runner (Enter for laptop")
+      expect(out.string).not_to include("push your commits there first")
+      expect(remote_client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil, runner: "laptop")
     end
 
     it "queues through the remote Paneyard, saying the branch has to be there" do

@@ -3,6 +3,7 @@ require "io/console"
 require "json"
 require "open3"
 require "shellwords"
+require "socket"
 require "tempfile"
 require "yaml"
 require_relative "../paneyard_plugin"
@@ -434,12 +435,13 @@ module PaneyardPlugin
       end
 
       default = current_branch || workspace.fetch("defaultBaseBranch")
+      runners = Array(workspace["runners"])
       clear_screen
       say accent("PANEYARD  /  NEW RUN")
       say rule
       say "#{bold(workspace.fetch('name'))}  #{dim(workspace.fetch('repositoryPath'))}"
       say dim("Registered as a new workspace; runs start from #{default} by default.") if registered
-      say dim("Runs on #{remote.host}, from its own copy of the branch: push your commits there first.") if remote
+      say dim("Runs on #{remote.host}, from its own copy of the branch: push your commits there first.") if remote && runners.size < 2
       say ""
       say bold("Task")
       say dim("Describe the goal, constraints, and how to tell it worked.")
@@ -449,16 +451,18 @@ module PaneyardPlugin
       return say("Nothing queued.") if task.empty?
 
       base_branch = ask_base_branch(default, workspace.fetch("defaultBaseBranch"))
+      runner = ask_runner(runners)
       driver = ask_driver(pane_driver)
       same_agent = driver == pane_driver
       model = ask_model(client, workspace, driver || "claude", same_agent ? pane_model : nil, same_agent ? pane_switch : nil)
-      queued = queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, model:, default:)
+      queued = queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, model:, default:, runner:)
       return unless queued
 
       capacity = queued.fetch("capacity", {})
       agent = [ queued["driver"], queued["model"] ].compact.join(", ")
+      on = " on #{queued['runner']}" if runner
       say ""
-      say bold("Queued #{queued.fetch('runId')} from #{queued.fetch('baseBranch', base_branch || default)}#{" (#{agent})" unless agent.empty?}.")
+      say bold("Queued #{queued.fetch('runId')}#{on} from #{queued.fetch('baseBranch', base_branch || default)}#{" (#{agent})" unless agent.empty?}.")
       behind = queued.fetch("queuedBehind", 0)
       say "#{capacity['inFlight']} of #{capacity['limit']} sessions in use#{behind.positive? ? ", #{behind} queued ahead of it" : ''}. " \
         "Its herdr workspace opens when it starts."
@@ -467,9 +471,9 @@ module PaneyardPlugin
 
     # A mistyped base branch is the one queue error worth another try: asking
     # again keeps the task the operator just wrote.
-    def queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, model:, default:)
+    def queue_with_base_branch(client, task:, workspace:, base_branch:, driver:, model:, default:, runner: nil)
       loop do
-        return client.queue(task:, workspace: workspace.fetch("name"), base_branch:, driver:, model:)
+        return client.queue(task:, workspace: workspace.fetch("name"), base_branch:, driver:, model:, **({ runner: } if runner))
       rescue PaneyardSandbox::McpClient::ToolError => error
         raise unless error.payload["error"] == "base_branch_invalid"
 
@@ -1209,6 +1213,52 @@ module PaneyardPlugin
 
     # Enter keeps the agent the operator is using in this pane; with none
     # there, the server's default (claude).
+    # The machine to run it on, asked only when the workspace is checked out
+    # on more than one runner (list_workspaces' runners); nil leaves it to the
+    # server. Enter picks this machine's: the local runner, or for a
+    # remote-mode plugin, the runner this machine is.
+    def ask_runner(runners)
+      return if runners.size < 2
+
+      names = runners.map { |runner| runner.fetch("name") }
+      mine = this_machines_runner(runners)
+      runners.each_with_index do |runner, index|
+        say dim(format("%3d  %s%s", index + 1, runner.fetch("name"), runner["name"] == mine ? "  (this machine)" : ""))
+      end
+      loop do
+        answer = ask("Runner (Enter for #{mine}; or a number or name): ")
+        choice = if answer.nil? || answer.empty?
+          mine
+        elsif answer.match?(/\A\d+\z/) && answer.to_i.positive?
+          names[answer.to_i - 1]
+        else
+          names.find { |name| name == answer }
+        end
+        if choice
+          say dim("Runs on #{choice}, from its own copy of the branch: push your commits there first.") if choice != mine
+          return choice
+        end
+
+        say "No runner #{answer}."
+      end
+    end
+
+    # In local mode, the local runner. In remote mode, the remote runner
+    # named PANEYARD_RUNNER_NAME in the plugin's .env, else the one named
+    # after this host, else the only remote one there is.
+    def this_machines_runner(runners)
+      local = runners.find { |runner| runner["kind"] == "local" } || runners.first
+      return local.fetch("name") unless remote
+
+      others = runners.reject { |runner| runner["kind"] == "local" }
+      settings, = EnvFile.load(paths.env_file)
+      host = Socket.gethostname.to_s
+      wanted = [ settings["PANEYARD_RUNNER_NAME"].to_s.strip, host, host.split(".").first ].reject(&:empty?)
+      found = wanted.lazy.filter_map { |name| others.find { |runner| runner["name"] == name } }.first
+      found ||= others.first if others.one?
+      (found || local).fetch("name")
+    end
+
     def ask_driver(pane_driver)
       loop do
         answer = ask("Agent: #{DRIVERS.join(', ')} (Enter for #{pane_driver ? "#{pane_driver}, this pane's" : 'claude'}): ")

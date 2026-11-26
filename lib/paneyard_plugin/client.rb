@@ -36,8 +36,8 @@ module PaneyardPlugin
       @mcp.call_tool("get_run", runId: run_id, workspace:)
     end
 
-    def queue(task:, workspace:, base_branch: nil, driver: nil, model: nil)
-      @mcp.call_tool("queue_run", task:, workspace:, **{ baseBranch: base_branch, driver:, model: }.compact)
+    def queue(task:, workspace:, base_branch: nil, driver: nil, model: nil, runner: nil)
+      @mcp.call_tool("queue_run", task:, workspace:, **{ baseBranch: base_branch, driver:, model:, runner: }.compact)
     end
 
     # {"driver", "defaultModel", "models" => [{"id", "label"}]}

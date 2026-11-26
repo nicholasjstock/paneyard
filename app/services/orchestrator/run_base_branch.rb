@@ -11,8 +11,11 @@ module Orchestrator
     end
 
     # nil when runs can start from `branch`, else why not and how to fix it.
-    def problem(workspace, branch)
-      found = Runner.for(workspace).base_branch_problem(repository_path: workspace.repository_path, branch:)
+    # Checked in the checkout on `runner`, the machine the run is queued on
+    # (nil: the local one), since each machine has its own copy of the branch.
+    def problem(workspace, branch, runner: nil)
+      runner ||= RegisteredRunner.local
+      found = Runner.for(runner).base_branch_problem(repository_path: workspace.repository_path_for(runner), branch:)
       found && "Base branch `#{branch}`: #{found.fetch('message')}"
     rescue Runner::Error => error
       "Could not check base branch `#{branch}`: #{error.message}"

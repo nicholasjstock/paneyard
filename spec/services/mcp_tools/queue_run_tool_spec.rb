@@ -146,4 +146,76 @@ RSpec.describe McpTools::QueueRunTool do
       end
     end
   end
+
+  describe "runner" do
+    let(:workspace) { create_workspace(prefix: "queue-run-runner", repository_path: repository) }
+    # Another machine's checkout of the same project. Remote runners have no
+    # client yet, so the local one answers for it here, against this copy.
+    let(:laptop_checkout) { create_source_checkout(name: "laptop-copy") }
+    let(:laptop) { RegisteredRunner.create!(name: "laptop", kind: "remote", url: "http://laptop.tailnet:3100", max_concurrent_runs: 2) }
+
+    before do
+      allow(Orchestrator::Runner).to receive(:resolve).and_call_original
+      allow(Orchestrator::Runner).to receive(:resolve).with(laptop).and_return(Orchestrator::Runner.local)
+    end
+
+    def check_out_on_laptop
+      workspace.checkouts.create!(runner: laptop, repository_path: laptop_checkout)
+    end
+
+    it "queues on the local runner, saying so and nothing else new, when it is the only one" do
+      response = described_class.call(task: "Here.", workspace: workspace.name, server_context: {})
+
+      expect(response.structured_content).to include(runner: "local")
+      expect(response.structured_content.keys).to contain_exactly(
+        :runId, :workspace, :runner, :baseBranch, :driver, :model, :status, :after, :dependencies, :queuedBehind, :capacity
+      )
+      expect(workspace.runs.sole).to have_attributes(runner: RegisteredRunner.local, target_root: repository)
+    end
+
+    it "queues on the runner the caller names, in that runner's checkout, and reports its own cap" do
+      check_out_on_laptop
+
+      response = described_class.call(task: "There.", workspace: workspace.name, runner: "laptop", server_context: {})
+
+      expect(response.error?).to be_falsey
+      expect(response.structured_content).to include(runner: "laptop", runnerCapacity: { limit: 2, inFlight: 0 })
+      expect(workspace.runs.sole).to have_attributes(runner: laptop, target_root: laptop_checkout)
+    end
+
+    it "checks the base branch in the named runner's own checkout" do
+      check_out_on_laptop
+
+      response = described_class.call(task: "There.", workspace: workspace.name, runner: "laptop",
+        baseBranch: "feature/payments", server_context: {})
+
+      expect(response.structured_content).to include(error: "base_branch_invalid")
+      expect(workspace.runs).to be_empty
+    end
+
+    it "defaults to the calling run's own runner" do
+      check_out_on_laptop
+      _run, session = create_run_and_session(run: create_run(workspace:, runner: laptop))
+
+      response = described_class.call(task: "Follow up.", server_context: { run_session_id: session.id })
+
+      expect(response.structured_content).to include(runner: "laptop")
+      expect(workspace.runs.find_by(task: "Follow up.").runner).to eq(laptop)
+    end
+
+    it "refuses a runner with no checkout of the workspace, listing the valid runners, and queues nothing" do
+      laptop
+
+      response = described_class.call(task: "There.", workspace: workspace.name, runner: "laptop", server_context: {})
+
+      expect(response.structured_content).to include(error: "runner_invalid", message: include("no checkout", "local"))
+      expect(workspace.runs).to be_empty
+    end
+
+    it "refuses a runner that does not exist" do
+      response = described_class.call(task: "There.", workspace: workspace.name, runner: "mars", server_context: {})
+
+      expect(response.structured_content).to include(error: "runner_invalid", message: include("no runner named \"mars\"", "local"))
+    end
+  end
 end

@@ -42,6 +42,12 @@ module McpTools
         "queue again."
     end
 
+    # The run behind a run session's call, or nil from /mcp/admin.
+    def caller_run(server_context)
+      run_session_id = context_value(server_context, :run_session_id)
+      RunSession.find_by(id: run_session_id)&.run if run_session_id.present?
+    end
+
     def run!(server_context:, run_id:, workspace: nil)
       resolved = resolve!(server_context:, workspace:)
       resolved.runs.find_by(run_id:) || raise(ArgumentError, "no run #{run_id} in workspace #{resolved.name.inspect}")

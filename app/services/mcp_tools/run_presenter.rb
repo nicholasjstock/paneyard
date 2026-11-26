@@ -17,6 +17,8 @@ module McpTools
         driver: run.launcher_variant,
         # Blank: the driver's default when the session starts.
         model: run.model.presence,
+        # The machine it runs on (list_runners).
+        runner: run.runner&.name,
         branch: run.branch_name,
         # What it started from, and merges back into.
         base_branch: run.base_branch,
