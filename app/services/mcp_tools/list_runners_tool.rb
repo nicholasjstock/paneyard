@@ -33,12 +33,13 @@ module McpTools
       )
     end
 
-    # The local runner is this process. Another answers only if its runner
-    # object can be had and says who it is.
+    # The local runner is this process. Another is reachable if it answers a
+    # ping (Runner::Remote: a short timeout, so a machine that is off costs
+    # seconds, not the listing).
     def self.reachability(runner)
       return { reachable: true } if runner.local?
 
-      Orchestrator::Runner.for(runner).id
+      Orchestrator::Runner.for(runner).ping
       { reachable: true }
     rescue Orchestrator::Runner::Error => error
       { reachable: false, unreachable_reason: error.message }

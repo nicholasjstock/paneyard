@@ -26,6 +26,8 @@ module Orchestrator
       READ_TIMEOUT = 60
       SLOW_READ_TIMEOUT = 600
       SLOW_METHODS = %w[launch_agent create_project provision_worktree save_transcripts available_models].freeze
+      # ping only says the runner is there (list_runners, registration).
+      PING_READ_TIMEOUT = 5
 
       attr_reader :name, :url
 
@@ -78,6 +80,8 @@ module Orchestrator
       end
 
       def read_timeout(method)
+        return PING_READ_TIMEOUT if method == "ping"
+
         SLOW_METHODS.include?(method) ? SLOW_READ_TIMEOUT : READ_TIMEOUT
       end
 
