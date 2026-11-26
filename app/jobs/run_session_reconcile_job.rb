@@ -26,7 +26,10 @@ class RunSessionReconcileJob < ApplicationJob
 
   def perform
     Orchestrator::JobFinalization.recover
+    skipped_runners = Set.new
     RunSession.live.includes(:run).find_each do |session|
+      next if skipped_runners.include?(session.run.runner_id)
+
       Orchestrator::RunSessionRunner.refresh!(session)
 
       # Only a session that refresh! just ended needs finishing off -- an
@@ -40,11 +43,13 @@ class RunSessionReconcileJob < ApplicationJob
       )
       release_worktree(session.run)
     rescue Orchestrator::Runner::Error => error
-      # herdr itself is unreachable (not running, socket replaced). That says
-      # nothing about this session in particular, so leave every row alone and
-      # try again next minute rather than failing every run at once.
-      Rails.logger.warn("RunSessionReconcileJob: #{error.message}")
-      break
+      # The runner, or its herdr, is unreachable (not running, socket
+      # replaced, the other machine asleep). That says nothing about this
+      # session in particular, so leave every row on that runner alone and
+      # try again next time rather than failing its runs at once; sessions on
+      # other runners are still reconciled.
+      Rails.logger.warn("RunSessionReconcileJob: runner #{session.run.runner_id}: #{error.message}")
+      skipped_runners << session.run.runner_id
     end
   end
 

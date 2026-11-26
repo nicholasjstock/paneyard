@@ -1,7 +1,7 @@
 # Multi-runner: one orchestrator, a runner on each machine
 
-Status: phase 1 of 4 implemented on the `multi-runner` branch (the runner registry, and a runner per run,
-still local only). Phases 2 to 4 are planned. The four phases land on `multi-runner` and go into `main` as a
+Status: phases 1 and 2 of 4 implemented on the `multi-runner` branch (the runner registry and a runner per
+run; a runner-only process and `Runner::Remote`). Phases 3 and 4 are planned. The four phases land on `multi-runner` and go into `main` as a
 single pull request. Where a build changes the plan, the plan is updated to match.
 
 ## Goal
@@ -60,7 +60,8 @@ If auth arrives later, it arrives for `/mcp/admin` and the runner interface toge
 
 - **`runners`** (`RegisteredRunner`, so that it does not shadow `Orchestrator::Runner` inside the
   `Orchestrator` module): `name` (unique), `kind` (`local` or `remote`), `url` (nil for local, required for
-  remote), `max_concurrent_runs` (nullable: only the global cap applies), timestamps. There is exactly one
+  remote), `orchestrator_url` (remote only: where that machine's sessions reach the orchestrator's `/mcp`,
+  given when it registers), `max_concurrent_runs` (nullable: only the global cap applies), timestamps. There is exactly one
   `local` row (a partial unique index), and it can never be removed. It is made by the migration for an
   existing database, and by `RegisteredRunner.local` the first time anything asks for it otherwise, so a
   schema-loaded database (tests, `bin/sandbox`, `bin/preflight`) needs no seed.
@@ -77,8 +78,7 @@ If auth arrives later, it arrives for `/mcp/admin` and the runner interface toge
 `Orchestrator::Runner.for` resolves a runner object: a run or session gives its run's runner, a
 `RegisteredRunner` gives itself, and a workspace or nil gives the local runner (the lobby, workspace
 registration and settings checks, which have no run). A `local` record is `Runner::Local`. A `remote` record
-raises `Runner::Error` ("remote runners are not implemented yet") until phase 2, which plugs in there and
-nowhere else.
+is a `Runner::Remote` for its url (phase 2), which plugs in there and nowhere else.
 
 ## Phases
 
@@ -89,21 +89,33 @@ path resolution (the janitor sweeps each runner's runs in that runner's checkout
 behaves changes, and nothing can create a remote runner yet. No new `queue_run` arguments, no remote
 client, no concurrency or plugin changes.
 
-### 2. A runner-only process and `Runner::Remote`
+### 2. A runner-only process and `Runner::Remote` (done)
 
-- A runner-only mode of the app on the second machine: no queue, no recurring jobs, no MCP endpoints, its
-  own small state directory, serving `Runner::Local`'s public methods over loopback HTTP as JSON (plain
-  data in, plain data out, `Runner::Error`/`Unreachable`/`LaunchError` mapped onto the response).
-- The plugin, in remote mode (`PANEYARD_REMOTE_URL` set), starts this process instead of no process at all,
-  and registers it with the orchestrator over `/mcp/admin` (a new admin tool: name, url), idempotently on
-  every start. It records where this machine's checkouts are as `workspace_checkouts` rows for that runner
-  (from `PANEYARD_REMOTE_PATHS`, or registration from a pane there).
-- `Runner::Remote` (in `app/services/orchestrator/runner/`, inside the boundary) is the HTTP client;
-  `Runner.for` returns one for a `remote` record. A runner that does not answer raises
-  `Runner::Unreachable`, so reconcile treats it as a blip, never as a dead session.
-- A remote session's spec carries the orchestrator's tailnet `/mcp/run` URL (`PANEYARD_RAILS_URL`).
-- The sandbox gains a fake remote runner (a second runner-only process against its own fake herdr), and
-  `Orchestrator::Sandbox` refuses any runner url that is not its own.
+- `bin/runner` (`PANEYARD_ROLE=runner`): Puma alone on loopback (default port 3100), no Solid Queue, no
+  recurring jobs, no `db:prepare`, no MCP endpoints, its own state directory (`PANEYARD_STORAGE_DIR`,
+  `PANEYARD_RUNTIME_DIR`). Its only routes are `/up` (`X-Paneyard-Role: runner`) and
+  `Runner::Endpoint` at `/runner`: `POST /runner/call` with `{ method, args, kwargs }` for one of
+  `Runner::Wire::METHODS` (exactly `Runner::Local`'s public methods, plus `ping`), answered as
+  `{ ok, result }` or `{ ok: false, error: { class, message, lost_prompts? } }`. Binary strings cross as
+  `{ "$base64" }`. It takes only `application/json` and refuses an `Origin`, so no browser page can reach it.
+- `Runner::Remote` is the HTTP client; `Runner.for` returns one for a `remote` record. Connection failures,
+  timeouts and anything that is not the runner's own answer (a proxy's 502) are `Runner::Unreachable`;
+  `RunSessionReconcileJob` then skips that runner's sessions for the sweep and reconciles the others.
+- `register_runner` (admin-only, `Orchestrator::RunnerRegistration`): name, url, `orchestratorUrl` and
+  checkouts (`[{ workspace, path }]`, each checked there with `check_repository` and recorded as that
+  runner's `workspace_checkouts` row). Nothing is saved unless the runner answers `ping`; registering again
+  updates it.
+- A remote session's spec carries `runners.orchestrator_url` + `/mcp` (`RunSessionRunner.mcp_url(runner)`);
+  local sessions and lobbies keep `PANEYARD_RAILS_URL`.
+- The plugin, in remote mode with `PANEYARD_RUNNER_URL` (the runner's tailnet URL) set, runs `bin/runner`
+  as a second daemon (`PaneyardPlugin::Daemon` with `role: "runner"`, `Paths#runner`'s files,
+  `PANEYARD_RUNNER_PORT`, `PANEYARD_RUNNER_NAME` defaulting to the hostname) and registers it on every start
+  of that process, or when what it would register changes, with each workspace that has a checkout here
+  (its repository path through `PANEYARD_REMOTE_PATHS`, which keeps translating everything else). Without
+  `PANEYARD_RUNNER_URL` nothing new starts. Registering a checkout from a pane there is left for later.
+- `bin/sandbox start --remote-runner` and `bin/sandbox verify` run a second runner-only process with its
+  own fake herdr and sandbox root, registered over `/mcp/admin`; `Orchestrator::Sandbox` refuses any runner
+  url that is not a loopback one it started (`PANEYARD_SANDBOX_RUNNER_URLS`).
 
 ### 3. Choosing a runner
 
@@ -157,5 +169,9 @@ A single-machine install stays zero-config and behaves exactly as today, through
   the default-local behaviour (`RegisteredRunner`, `Run`, `Workspace`), and `Runner.for` resolution,
   including the remote refusal; the boundary spec unchanged; `bin/verify --prod-copy` migrating a copy of
   the production database.
-- Phases 2 to 4 add a fake remote runner to the lifecycle spec and `bin/sandbox verify`, so a run can be
-  queued on, reported from, and moved between two runners without a second real machine.
+- Phase 2: `spec/integration/remote_runner_lifecycle_spec.rb` (a real `bin/runner` subprocess with its own
+  fake herdr: register, launch, report, reconcile while it is down, close, janitor), `Runner::Remote` and
+  `Runner::Endpoint` specs over real HTTP, the sandbox's runner-url guard, and a remote-runner scenario in
+  `bin/sandbox verify`.
+- Phases 3 and 4 extend the same, so a run can be queued on and moved between two runners without a second
+  real machine.

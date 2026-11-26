@@ -8,7 +8,7 @@ module Orchestrator
   # code serve a caller with no run of its own (falls back to the oldest
   # registered workspace, or an explicit `workspace:` argument).
   #
-  # register_workspace, create_workspace, get_settings, update_settings,
+  # register_workspace, register_runner, create_workspace, get_settings, update_settings,
   # update_workspace_layout, close_session,
   # reopen_session, update_run_dependencies and open_lobby are the tools only
   # this endpoint has beyond ping: changing what Paneyard manages or what panes
@@ -28,6 +28,7 @@ module Orchestrator
       ::McpTools::ListWorkspacesTool,
       ::McpTools::ListModelsTool,
       ::McpTools::RegisterWorkspaceTool,
+      ::McpTools::RegisterRunnerTool,
       ::McpTools::CreateWorkspaceTool,
       ::McpTools::GetSettingsTool,
       ::McpTools::UpdateSettingsTool,

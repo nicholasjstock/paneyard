@@ -1,0 +1,52 @@
+#!/usr/bin/env ruby
+# A runner-only Paneyard (PANEYARD_ROLE=runner), for a second machine that
+# hosts sessions for an orchestrator elsewhere (docs/multi-runner-plan.md):
+# Puma serving Orchestrator::Runner::Endpoint at /runner, which answers that
+# orchestrator's Runner::Remote with this machine's herdr, CLIs, checkouts and
+# worktrees. Nothing else: no Solid Queue, no recurring jobs, no MCP
+# endpoints, no db:prepare, and nothing reads or writes an orchestrator
+# database.
+#
+# The herdr plugin starts this in remote mode (PANEYARD_REMOTE_URL and
+# PANEYARD_RUNNER_URL in its .env) and registers it with the orchestrator;
+# bin/sandbox starts one beside its sandbox. Loopback only, like
+# bin/production: expose it to the tailnet with `tailscale serve`, and put
+# that name in PANEYARD_ALLOWED_HOSTS (or PANEYARD_RUNNER_URL) so it is
+# answered.
+
+require_relative "../lib/paneyard_plugin"
+
+ENV["RAILS_ENV"] = "production"
+ENV["PANEYARD_ROLE"] = "runner"
+ENV["BINDING"] ||= "127.0.0.1"
+# Long calls (an agent launch waits for the CLI to take its prompt) must not
+# hold up the quick ones the orchestrator's reconcile makes meanwhile.
+ENV["RAILS_MAX_THREADS"] ||= "8"
+
+# Its own state, never an orchestrator's storage/: Rails still wants a
+# secret_key_base and a database configuration to boot, though nothing uses
+# either.
+state_dir = ENV.fetch("PANEYARD_STORAGE_DIR") { File.expand_path("../tmp/runner", __dir__) }
+ENV["PANEYARD_STORAGE_DIR"] = state_dir
+ENV["PANEYARD_RUNTIME_DIR"] ||= File.join(state_dir, "run_sessions")
+ENV["SECRET_KEY_BASE"] ||= PaneyardPlugin::Secrets.secret_key_base(File.join(state_dir, "secret_key_base"))
+
+require "socket"
+
+Dir.chdir(File.expand_path("..", __dir__))
+
+unless system("bundle", "check", out: File::NULL)
+  warn "bin/runner: Ruby dependencies are incomplete. Run bin/setup, then retry bin/runner."
+  exit 1
+end
+
+port = Integer(ENV.fetch("PORT", "3100"), 10)
+ENV["PORT"] = port.to_s
+begin
+  TCPServer.new("127.0.0.1", port).close
+rescue Errno::EADDRINUSE
+  warn "bin/runner: port #{port} is already in use. Stop its owning service or choose another PORT before retrying."
+  exit 1
+end
+
+exec({ "RAILS_ENV" => "production" }, "./bin/rails", "server", *ARGV)

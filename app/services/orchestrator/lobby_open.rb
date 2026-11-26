@@ -112,7 +112,8 @@ module Orchestrator
         capability_token: nil,
         resume_session_id: nil,
         prompt: nil,
-        mcp_url: RunSessionRunner.mcp_url,
+        # The lobby is on the local runner (Runner.for(workspace)).
+        mcp_url: RunSessionRunner.mcp_url(nil),
         mcp_endpoint: "admin",
         layout: WorkspaceLayout.for(lobby.workspace),
         herdr_workspace_id: opened.fetch("workspace_id"),

@@ -45,6 +45,13 @@ RSpec.describe "host authorization (DNS rebinding)", type: :request do
     expect(get_with_host("runner-host.lan:3000", env:).status).to eq(200)
   end
 
+  it "answers a runner-only process's own tailnet name (PANEYARD_RUNNER_URL), and nothing for an unset one" do
+    env = { "PANEYARD_RUNNER_URL" => "https://laptop.tailnet.ts.net:7264", "PANEYARD_RAILS_URL" => "" }
+
+    expect(PaneyardAllowedHosts.extra(env)).to eq([ "laptop.tailnet.ts.net" ])
+    expect(get_with_host("laptop.tailnet.ts.net:7264", env:).status).to eq(200)
+  end
+
   # The MCP gem's transport does its own Host/Origin check
   # (dns_rebinding_protection, on by default). Neither endpoint may turn it
   # off: /mcp/admin has no auth at all. The test environment's config.hosts

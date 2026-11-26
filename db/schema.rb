@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_25_180200) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_25_190000) do
   create_table "lobbies", force: :cascade do |t|
     t.integer "workspace_id", null: false
     t.string "branch", null: false
@@ -77,6 +77,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_180200) do
     t.integer "max_concurrent_runs"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "orchestrator_url"
     t.index ["kind"], name: "index_runners_on_one_local", unique: true, where: "kind = 'local'"
     t.index ["name"], name: "index_runners_on_name", unique: true
   end

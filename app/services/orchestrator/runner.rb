@@ -22,10 +22,11 @@ module Orchestrator
   # are the runner's, and the orchestrator only stores and hands them back.
   #
   # Each run belongs to a runner in the registry (RegisteredRunner, the
-  # runners table), and Runner.for(run) is that runner's object. Today every
-  # one is Runner::Local, in this process and on this machine. A different
-  # implementation with the same public methods (see Runner::Local) can later
-  # take its place for a remote runner without the orchestrator changing
+  # runners table), and Runner.for(run) is that runner's object. The local one
+  # is Runner::Local, in this process and on this machine. A different
+  # implementation with the same public methods (see Runner::Local) takes its
+  # place for a remote runner, Runner::Remote, over HTTP to that machine's
+  # runner-only process (bin/runner), without the orchestrator changing
   # (docs/multi-runner-plan.md).
   module Runner
     module_function
@@ -54,9 +55,8 @@ module Orchestrator
     #
     # This is the one place a runner record becomes an implementation, and
     # the only orchestrator data the runner module sees: the object returned
-    # is handed plain data only. Every runner record resolves to Runner::Local
-    # today; a remote one raises until Runner::Remote exists
-    # (docs/multi-runner-plan.md, phase 2).
+    # is handed plain data only. The local record is Runner::Local; a remote
+    # one is a Runner::Remote for its url (docs/multi-runner-plan.md).
     def for(subject)
       resolve(registered(subject))
     end
@@ -64,7 +64,7 @@ module Orchestrator
     def resolve(record)
       return local if record.nil? || record.local?
 
-      raise Error, "runner #{record.name.inspect} is remote, and remote runners are not implemented yet"
+      Remote.new(name: record.name, url: record.url)
     end
 
     def registered(subject)

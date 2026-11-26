@@ -22,15 +22,15 @@ RSpec.describe Orchestrator::Runner::Local do
       expect(Orchestrator::Runner.for(Run.new)).to be(local)
     end
 
-    it "refuses a remote runner until there is a client for one" do
+    it "resolves a remote runner, and its runs, to a client for its url" do
       mac = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet:3100")
       workspace = create_workspace
       workspace.checkouts.create!(runner: mac, repository_path: "/Users/me/src/app")
       run = create_run(workspace:, runner: mac)
 
-      expect { Orchestrator::Runner.for(mac) }
-        .to raise_error(Orchestrator::Runner::Error, 'runner "mac" is remote, and remote runners are not implemented yet')
-      expect { Orchestrator::Runner.for(run) }.to raise_error(Orchestrator::Runner::Error, /not implemented yet/)
+      expect(Orchestrator::Runner.for(mac)).to be_a(Orchestrator::Runner::Remote)
+        .and(have_attributes(name: "mac", url: "http://mac.tailnet:3100", id: "remote:mac"))
+      expect(Orchestrator::Runner.for(run)).to have_attributes(id: "remote:mac")
       expect(Orchestrator::Runner.for(workspace)).to be(local)
     end
 

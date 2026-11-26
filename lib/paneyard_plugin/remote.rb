@@ -1,4 +1,5 @@
 require "net/http"
+require "socket"
 require "uri"
 
 module PaneyardPlugin
@@ -8,19 +9,29 @@ module PaneyardPlugin
   # own checkouts, so a path crosses between the two: PANEYARD_REMOTE_PATHS
   # ("local=remote" prefixes, comma-separated, e.g. /Users/me=/home/me) says
   # where a checkout here is there.
+  #
+  # With PANEYARD_RUNNER_URL as well, this machine also hosts that
+  # Paneyard's sessions: the plugin runs a runner-only process here
+  # (bin/runner) and registers it there (register_runner) under runner_name,
+  # with each of its workspaces that has a checkout here -- found through the
+  # same path prefixes -- as that runner's checkout.
   class Remote
     # nil unless PANEYARD_REMOTE_URL is set.
     def self.from(settings)
       url = settings["PANEYARD_REMOTE_URL"].to_s.strip.delete_suffix("/")
       return if url.empty?
 
-      new(url, settings["PANEYARD_REMOTE_PATHS"].to_s)
+      new(url, settings["PANEYARD_REMOTE_PATHS"].to_s,
+        runner_url: settings["PANEYARD_RUNNER_URL"], runner_name: settings["PANEYARD_RUNNER_NAME"])
     end
 
-    attr_reader :url, :prefixes
+    attr_reader :url, :prefixes, :runner_url
 
-    def initialize(url, prefixes)
+    def initialize(url, prefixes, runner_url: nil, runner_name: nil)
       @url = url
+      @runner_url = runner_url.to_s.strip.delete_suffix("/")
+      @runner_url = nil if @runner_url.empty?
+      @runner_name = runner_name.to_s.strip
       @prefixes = prefixes.split(",").filter_map do |pair|
         local, remote = pair.split("=", 2).map { |path| path.to_s.strip.delete_suffix("/") }
         [ local, remote ] unless local.to_s.empty? || remote.to_s.empty?
@@ -35,6 +46,29 @@ module PaneyardPlugin
 
     def to_remote(path) = translate(path, prefixes)
     def to_local(path) = translate(path, prefixes.map(&:reverse))
+
+    # Whether this machine hosts sessions too (PANEYARD_RUNNER_URL).
+    def runner?
+      !runner_url.nil?
+    end
+
+    # The name it registers under: PANEYARD_RUNNER_NAME, else this machine's
+    # short hostname (never "local", the orchestrator's own runner).
+    def runner_name
+      name = @runner_name.empty? ? Socket.gethostname.split(".").first.to_s.downcase : @runner_name
+      name == "local" ? "#{name}-remote" : name
+    end
+
+    # [{ "workspace", "path" }] for each workspace (as Client#workspaces
+    # lists them, with paths already on this machine) checked out here.
+    def checkouts(workspaces)
+      workspaces.filter_map do |workspace|
+        path = workspace["repositoryPath"]
+        next unless path.is_a?(String) && File.exist?(File.join(path, ".git"))
+
+        { "workspace" => workspace.fetch("name"), "path" => path }
+      end
+    end
 
     # Its /up, which names the service so that some other app's /up is not
     # mistaken for it.

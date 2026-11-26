@@ -1,3 +1,4 @@
+require "digest"
 require "io/console"
 require "json"
 require "open3"
@@ -77,14 +78,23 @@ module PaneyardPlugin
     # --- lifecycle --------------------------------------------------------
 
     def start
-      return puts("Paneyard runs on #{remote.host} (#{remote.url}); nothing to start here.") if remote
+      return start_remote if remote
 
       result = daemon.ensure_running
       report(result)
       announce(result)
     end
 
+    def start_remote
+      return puts("Paneyard runs on #{remote.host} (#{remote.url}); nothing to start here.") unless remote.runner?
+
+      connect_remote!(quiet: false)
+      puts "Paneyard runs on #{remote.host} (#{remote.url}); this machine's runner #{remote.runner_name} is up at " \
+        "#{remote.runner_url}."
+    end
+
     def restart
+      return restart_runner if remote&.runner?
       raise Error, "Paneyard runs on #{remote.host}: restart it there (herdr plugin action invoke restart --plugin paneyard)." if remote
 
       result = daemon.restart
@@ -93,8 +103,20 @@ module PaneyardPlugin
       notify("Paneyard restarted", result.url)
     end
 
+    # In remote mode only this machine's runner is here to restart; the
+    # orchestrator is restarted on its own machine.
+    def restart_runner
+      result = runner_daemon.restart
+      puts "This machine's runner #{result.outcome} (pid #{result.pid}) on #{result.url}. Paneyard itself runs on " \
+        "#{remote.host}: restart that there."
+      register_runner!(Client.new(remote.url, paths: remote), force: true) if remote.up?
+      notify("Paneyard runner restarted", remote.runner_url)
+    end
+
     def stop
+      stopped_runner = runner_daemon.stop
       puts(daemon.stop ? "Paneyard stopped." : "Paneyard was not running.")
+      puts "This machine's runner stopped." if stopped_runner
       notify("Paneyard stopped", "Any action starts it again.")
     end
 
@@ -121,6 +143,12 @@ module PaneyardPlugin
       puts "Paneyard runs on #{remote.host}: #{remote.url} (#{reachable ? 'answering' : 'not answering'})"
       puts "  MCP:    #{remote.url}/mcp/admin"
       remote.prefixes.each { |local, there| puts "  paths:  #{local} here is #{there} there" }
+      if remote.runner?
+        runner = runner_daemon.status
+        puts "  runner: #{remote.runner_name} at #{remote.runner_url}, " +
+          (runner ? "running (pid #{runner.pid}) on #{runner.url}" : "not running here (any action starts it)")
+        puts "  runner log: #{paths.runner.log_file}"
+      end
       puts "  config: #{paths.env_file}"
       reachable ? 0 : 3
     end
@@ -1306,11 +1334,50 @@ module PaneyardPlugin
       Client.new(result.url)
     end
 
-    def connect_remote!
+    def connect_remote!(quiet: true)
       raise Error, "Paneyard on #{remote.host} is not answering at #{remote.url}." unless remote.up?
 
       @url = remote.url
-      Client.new(remote.url, paths: remote)
+      client = Client.new(remote.url, paths: remote)
+      ensure_runner!(client, quiet:) if remote.runner?
+      client
+    end
+
+    def runner_daemon
+      @runner_daemon ||= Daemon.new(paths: paths.runner, env: @env, role: "runner")
+    end
+
+    # This machine's runner (remote mode with PANEYARD_RUNNER_URL): started
+    # if need be, and registered with the orchestrator whenever it started or
+    # what it registers changed. A failure here is reported and does not stop
+    # the action, which talks to the orchestrator, not the runner.
+    def ensure_runner!(client, quiet: true)
+      say dim("Starting this machine's runner…") unless quiet || runner_daemon.status
+      result = runner_daemon.ensure_running
+      register_runner!(client, force: result.started?)
+      result
+    rescue Error, Client::Error, SystemCallError => error
+      raise unless quiet
+
+      warn "paneyard: this machine's runner: #{error.message}"
+      nil
+    end
+
+    # register_runner, idempotent on the orchestrator's side; skipped when the
+    # same registration already went through for this runner process.
+    def register_runner!(client, force: false)
+      registration = {
+        name: remote.runner_name, url: remote.runner_url, orchestrator_url: remote.url,
+        checkouts: remote.checkouts(client.workspaces)
+      }
+      stamp = Digest::SHA256.hexdigest(JSON.generate([ registration, runner_daemon.status&.pid ]))
+      file = paths.runner.registration_file
+      return if !force && File.exist?(file) && File.read(file).strip == stamp
+
+      result = client.register_runner(**registration)
+      Array(result["problems"]).each { |problem| warn "paneyard: runner checkout #{problem['workspace']}: #{problem['message']}" }
+      File.write(file, stamp)
+      result
     end
 
     def running!

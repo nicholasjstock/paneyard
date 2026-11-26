@@ -134,7 +134,7 @@ module Orchestrator
         capability_token:,
         resume_session_id:,
         prompt: prompt || RunPrompt.compose(run:, session_driver: run.launcher_variant),
-        mcp_url:,
+        mcp_url: mcp_url(run.runner),
         layout: WorkspaceLayout.for(run.workspace),
         herdr_workspace_id: session.herdr_workspace_id,
         herdr_tab_id: session.herdr_tab_id,
@@ -142,10 +142,16 @@ module Orchestrator
       }
     end
 
-    # This orchestrator's /mcp endpoint, as a session reaches it.
-    def mcp_url
-      base = ENV.fetch("PANEYARD_RAILS_URL", "http://127.0.0.1:#{ENV.fetch('PORT', 3000)}")
-      "#{base}/mcp"
+    # This orchestrator's /mcp endpoint, as a session on `runner`'s machine
+    # (a RegisteredRunner; nil is the local one) reaches it. A local session
+    # is on this machine, so PANEYARD_RAILS_URL (else loopback). A remote one
+    # is not: it gets the URL that runner registered with, this orchestrator's
+    # tailnet name as that machine sees it, so report_idle and job_finished go
+    # straight here and never through its runner.
+    def mcp_url(runner = nil)
+      base = runner&.remote? && runner.orchestrator_url.presence
+      base ||= ENV.fetch("PANEYARD_RAILS_URL", "http://127.0.0.1:#{ENV.fetch('PORT', 3000)}")
+      "#{base.delete_suffix('/')}/mcp"
     end
 
     # Reads the agent pane and keeps it as the session's last_screen, before

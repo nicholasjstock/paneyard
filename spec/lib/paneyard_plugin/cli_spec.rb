@@ -899,5 +899,61 @@ RSpec.describe PaneyardPlugin::Cli do
 
       expect(out.string).to include("Paneyard on server.example is not answering")
     end
+
+    it "starts no runner either unless PANEYARD_RUNNER_URL says this machine hosts jobs" do
+      allow(remote_client).to receive(:runs).and_return([ [ workspace, { "runs" => [] } ] ])
+      expect(PaneyardPlugin::Daemon).not_to receive(:new).with(hash_including(role: "runner"))
+
+      run_cli("runs-ui", input: "\n")
+    end
+
+    describe "and PANEYARD_RUNNER_URL" do
+      let(:runner_daemon) do
+        instance_double(PaneyardPlugin::Daemon, status: nil, stop: false,
+          ensure_running: PaneyardPlugin::Daemon::Result.new(outcome: :started, pid: 42, port: 7264, url: "http://127.0.0.1:7264"))
+      end
+      let(:checkout) { File.join(state, "checkout").tap { |path| FileUtils.mkdir_p(File.join(path, ".git")) } }
+
+      before do
+        File.write(File.join(state, ".env"), "PANEYARD_REMOTE_URL=http://server.example:7263\n" \
+          "PANEYARD_RUNNER_URL=https://laptop.example.ts.net:7264/\nPANEYARD_RUNNER_NAME=laptop\n")
+        allow(PaneyardPlugin::Daemon).to receive(:new).with(hash_including(role: "runner")).and_return(runner_daemon)
+        allow(remote_client).to receive(:workspaces).and_return([
+          workspace.merge("repositoryPath" => checkout), workspace.merge("name" => "elsewhere", "repositoryPath" => "/nowhere/here")
+        ])
+        allow(remote_client).to receive(:register_runner).and_return("problems" => [])
+        allow(remote_client).to receive(:runs).and_return([ [ workspace, { "runs" => [] } ] ])
+      end
+
+      it "starts this machine's runner and registers it with its checkouts here, once per runner start" do
+        run_cli("startup")
+
+        expect(runner_daemon).to have_received(:ensure_running)
+        expect(remote_client).to have_received(:register_runner).with(name: "laptop", url: "https://laptop.example.ts.net:7264",
+          orchestrator_url: "http://server.example:7263", checkouts: [ { "workspace" => "app", "path" => checkout } ])
+        expect(out.string).to include("this machine's runner laptop is up at https://laptop.example.ts.net:7264")
+
+        allow(runner_daemon).to receive_messages(ensure_running: PaneyardPlugin::Daemon::Result.new(outcome: :running, pid: 42,
+          port: 7264, url: "http://127.0.0.1:7264"))
+        run_cli("runs-ui", input: "\n")
+        expect(remote_client).to have_received(:register_runner).once
+      end
+
+      it "goes on with the action, warning, when the runner cannot start" do
+        allow(runner_daemon).to receive(:ensure_running).and_raise(PaneyardPlugin::Error, "port 7264 is in use")
+
+        expect { run_cli("runs-ui", input: "\n") }.to output(/this machine's runner: port 7264 is in use/).to_stderr
+        expect(remote_client).to have_received(:runs).at_least(:once)
+      end
+
+      it "restarts the runner here, and re-registers it, rather than refusing" do
+        allow(runner_daemon).to receive(:restart).and_return(PaneyardPlugin::Daemon::Result.new(outcome: :restarted, pid: 43,
+          port: 7264, url: "http://127.0.0.1:7264"))
+
+        expect(run_cli("restart")).to eq(0)
+        expect(out.string).to include("This machine's runner restarted", "restart that there")
+        expect(remote_client).to have_received(:register_runner)
+      end
+    end
   end
 end

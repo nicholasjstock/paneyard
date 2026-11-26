@@ -1,4 +1,6 @@
+require "ipaddr"
 require "open3"
+require "uri"
 
 module Orchestrator
   # The in-app side of a sandbox instance (bin/sandbox, bin/preflight; see
@@ -16,6 +18,9 @@ module Orchestrator
   #   - CLI transcripts: copied only for a worktree under the sandbox root;
   #   - GitHub: never; a sandbox cannot start a new project (create_workspace),
   #     which would make a real GitHub repository;
+  #   - remote runners: only the sandbox's own runner-only process, a loopback
+  #     url it was started with (PANEYARD_SANDBOX_RUNNER_URLS), never a
+  #     runner a copied database registered on another machine;
   #
   # Herdr can be opted back in for an operator who wants to see the real
   # thing (`bin/sandbox start --real-herdr`), never by
@@ -81,6 +86,40 @@ module Orchestrator
       return unless enabled?
 
       raise Violation, "sandbox refuses to #{action}: GitHub is outside #{root}"
+    end
+
+    RUNNER_URLS_ENV_VAR = "PANEYARD_SANDBOX_RUNNER_URLS".freeze
+
+    # The runner-only processes this sandbox started itself (bin/sandbox's
+    # remote runner), by url. A sandbox calls no other runner: bin/preflight's
+    # database may be a production copy, whose remote runners are the
+    # operator's real machines.
+    def runner_urls
+      ENV.fetch(RUNNER_URLS_ENV_VAR, "").split(",").map { |url| normalize_url(url) }.reject(&:empty?)
+    end
+
+    def allows_runner_url?(url)
+      return true unless enabled?
+
+      normalized = normalize_url(url)
+      loopback_url?(normalized) && runner_urls.include?(normalized)
+    end
+
+    def guard_runner_url!(url)
+      return if allows_runner_url?(url)
+
+      raise Violation, "sandbox refuses to call the runner at #{url}: it is not one this sandbox started"
+    end
+
+    def loopback_url?(url)
+      host = URI(url).hostname.to_s
+      host == "localhost" || IPAddr.new(host).loopback?
+    rescue URI::InvalidURIError, IPAddr::InvalidAddressError
+      false
+    end
+
+    def normalize_url(url)
+      url.to_s.strip.delete_suffix("/")
     end
 
     # Only a process started by the fake herdr may be signalled: a copied

@@ -21,8 +21,9 @@ module PaneyardAllowedHosts
 
   # Loopback, plus the names an operator has deliberately put in front of the
   # app: PANEYARD_ALLOWED_HOSTS (comma-separated; Rails' `config.hosts`
-  # syntax, so a leading dot also allows subdomains) and the host of
-  # PANEYARD_RAILS_URL, the URL sessions are told to reach /mcp on. IP
+  # syntax, so a leading dot also allows subdomains), the host of
+  # PANEYARD_RAILS_URL, the URL sessions are told to reach /mcp on, and the
+  # host of PANEYARD_RUNNER_URL, a runner-only process's tailnet URL. IP
   # literals become IPAddr, which is how Rails matches `[::1]:3000`.
   def hosts(env = ENV)
     LOOPBACK + extra(env).flat_map do |host|
@@ -37,13 +38,15 @@ module PaneyardAllowedHosts
   def extra(env = ENV)
     listed = env.fetch("PANEYARD_ALLOWED_HOSTS", "").split(",")
       .map { |host| host.strip.delete_prefix("[").delete_suffix("]") }.reject(&:empty?)
-    rails_url_host = begin
-      URI(env["PANEYARD_RAILS_URL"].to_s).hostname
-    rescue URI::InvalidURIError
-      nil
-    end
-    listed << rails_url_host if rails_url_host
+    listed += %w[PANEYARD_RAILS_URL PANEYARD_RUNNER_URL].filter_map { |key| url_host(env[key]) }
     listed.map(&:downcase).uniq
+  end
+
+  def url_host(url)
+    host = URI(url.to_s).hostname
+    host.nil? || host.empty? ? nil : host
+  rescue URI::InvalidURIError
+    nil
   end
 
   def ip(host)

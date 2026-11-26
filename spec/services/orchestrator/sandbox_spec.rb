@@ -222,7 +222,38 @@ RSpec.describe Orchestrator::Sandbox do
     end
   end
 
+  describe "remote runners" do
+    around do |example|
+      example.run
+    ensure
+      ENV.delete("PANEYARD_SANDBOX_RUNNER_URLS")
+    end
+
+    it "calls only a loopback runner it started itself, never one a copied database registered" do
+      ENV["PANEYARD_SANDBOX_RUNNER_URLS"] = "http://127.0.0.1:4100, http://mac.tailnet.ts.net:3100"
+      real = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet.ts.net:3100")
+      own = RegisteredRunner.create!(name: "sandbox-remote", kind: "remote", url: "http://127.0.0.1:4100/")
+      stray = RegisteredRunner.create!(name: "other", kind: "remote", url: "http://127.0.0.1:4200")
+      sandbox_on!
+
+      expect(described_class.allows_runner_url?(own.url)).to be(true)
+      # Listed, but not loopback: a sandbox never leaves the machine.
+      expect(described_class.allows_runner_url?(real.url)).to be(false)
+      expect(described_class.allows_runner_url?(stray.url)).to be(false)
+      expect { Orchestrator::Runner.for(real).checkout_branch(repository_path: "/home/me/app") }
+        .to raise_error(Orchestrator::Runner::Error, /sandbox refuses to call the runner at http:\/\/mac/)
+      expect { Orchestrator::Runner.for(stray).ping }.to raise_error(Orchestrator::Runner::Error, /sandbox refuses/)
+    end
+
+    it "refuses every runner when it started none" do
+      sandbox_on!
+
+      expect(described_class.allows_runner_url?("http://127.0.0.1:4100")).to be(false)
+    end
+  end
+
   it "changes nothing when it is off" do
+    expect(described_class.allows_runner_url?("http://mac.tailnet.ts.net:3100")).to be(true)
     expect(described_class.allows_path?("/anywhere")).to be(true)
     expect(described_class.allows_signal?(1)).to be(true)
     expect(Orchestrator::Runner::Herdr.socket_path).to end_with("specs-have-no-herdr.sock")

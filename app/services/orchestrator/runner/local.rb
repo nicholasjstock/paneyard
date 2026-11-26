@@ -1,3 +1,5 @@
+require "socket"
+
 module Orchestrator
   module Runner
     # The runner on this machine, in this process: herdr over its local
@@ -26,6 +28,12 @@ module Orchestrator
       # Identifies this runner, e.g. in cache keys for what it reports.
       def id
         "local"
+      end
+
+      # That this runner answers, and which machine it is on: what
+      # registering a remote runner checks first (register_runner).
+      def ping
+        { "hostname" => Socket.gethostname, "runtime_root" => runtime_root }
       end
 
       # --- Worktrees --------------------------------------------------------

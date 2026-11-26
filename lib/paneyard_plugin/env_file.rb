@@ -13,7 +13,7 @@ module PaneyardPlugin
   module EnvFile
     RESERVED = %w[
       RAILS_ENV BINDING PIDFILE HERDR_SOCKET_PATH PANEYARD_STORAGE_DIR PANEYARD_RUNTIME_DIR
-      PANEYARD_RAILS_URL PANEYARD_SANDBOX PANEYARD_SANDBOX_ROOT PANEYARD_SANDBOX_REAL_HERDR
+      PANEYARD_RAILS_URL PANEYARD_SANDBOX PANEYARD_SANDBOX_ROOT PANEYARD_SANDBOX_REAL_HERDR PANEYARD_ROLE
     ].freeze
 
     KEY = /\A[A-Za-z_][A-Za-z0-9_]*\z/
@@ -41,6 +41,17 @@ module PaneyardPlugin
       # in that machine's herdr.
       # PANEYARD_REMOTE_URL=http://server.example.ts.net:7263
       # PANEYARD_REMOTE_PATHS=/Users/me=/home/me
+
+      # With PANEYARD_REMOTE_URL, also host that Paneyard's jobs on this
+      # machine: the plugin starts a runner here (bin/runner, loopback on
+      # PANEYARD_RUNNER_PORT) and registers it there as PANEYARD_RUNNER_NAME
+      # (default: this machine's hostname), reachable at PANEYARD_RUNNER_URL,
+      # e.g. through `tailscale serve --bg --https=7264 http://127.0.0.1:7264`.
+      # Checkouts here of that Paneyard's workspaces (found through
+      # PANEYARD_REMOTE_PATHS) are registered with it.
+      # PANEYARD_RUNNER_URL=https://laptop.example.ts.net:7264
+      # PANEYARD_RUNNER_PORT=7264
+      # PANEYARD_RUNNER_NAME=laptop
 
       # For a development checkout linked without the plugin build, an optional
       # Ruby override. Installed plugins use their bundled runtime.

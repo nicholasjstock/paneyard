@@ -15,10 +15,14 @@ module PaneyardSandbox
 
     Scenario = Struct.new(:name, :directive, :run_id, keyword_init: true)
 
-    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session].freeze
+    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session register_runner].freeze
 
-    def initialize(instance, workspace:, workspace_id:, out: $stdout, timeout: 90)
+    # remote_runner: the name of a runner-only process the instance started
+    # and registered (Instance#register_remote_runner!), to run a session on
+    # as well.
+    def initialize(instance, workspace:, workspace_id:, out: $stdout, timeout: 90, remote_runner: nil)
       @instance = instance
+      @remote_runner = remote_runner
       @workspace = workspace
       @workspace_id = workspace_id
       @out = out
@@ -45,6 +49,9 @@ module PaneyardSandbox
       step(finalized.name) { verify_finalization(finalized) }
       pushed = queue("job_finished: explicit push-and-end without a merge", "done")
       step(pushed.name) { verify_finalization(pushed, pushed: true) }
+      if @remote_runner
+        step("remote runner: launched there, reports here over HTTP, closed, worktree reclaimed there") { verify_remote }
+      end
 
       @out.puts(@failures.empty? ? "sandbox verify: all green" : "sandbox verify: #{@failures.size} failed")
       @failures.empty?
@@ -69,6 +76,28 @@ module PaneyardSandbox
       run = wait_for_run(scenario) { |detail| detail["status"] == "completed" }
       expect(run.dig("session", "live") == false, "session still live after Close session")
       expect(!File.directory?(run["worktree"]), "clean worktree #{run['worktree']} was not reclaimed")
+    end
+
+    # A run on the remote runner (bin/runner with its own fake herdr): it is
+    # launched over the runner's HTTP endpoint, its fake agent reports to this
+    # instance's /mcp/run over real HTTP with the URL the runner registered,
+    # and Close session has the janitor remove the worktree over there.
+    def verify_remote
+      output, ok = @instance.run("bin/rails", "sandbox:queue_on_runner", "WORKSPACE=#{@workspace}", "RUNNER=#{@remote_runner}",
+        "TASK=Sandbox verify (remote runner) [fake-agent: done]")
+      expect(ok, "could not queue on #{@remote_runner}: #{output.lines.last(5).join}")
+      scenario = Scenario.new(name: "remote", directive: "done", run_id: output.lines.last.strip)
+
+      run = wait_for_run(scenario) { |detail| detail["checkpoints"]&.any? }
+      remote_root = File.realpath(@instance.remote_root)
+      expect(run["status"] == "awaiting_review", "status #{run['status']} after reporting")
+      expect(run["checkpoints"].last["summary"].to_s.include?(remote_root), "reported from #{run['checkpoints'].last['summary']}")
+      expect(File.realpath(run["worktree"]).start_with?("#{remote_root}/"), "worktree #{run['worktree']} is not the remote runner's")
+
+      close(scenario)
+      run = wait_for_run(scenario) { |detail| detail["status"] == "completed" }
+      expect(run.dig("session", "live") == false, "session still live after Close session")
+      expect(!File.directory?(run["worktree"]), "clean worktree #{run['worktree']} was not reclaimed on the remote runner")
     end
 
     def verify_finalization(scenario, pushed: false)

@@ -87,6 +87,13 @@ module PaneyardPlugin
       @mcp.call_tool("open_lobby", workspace:, **{ branch:, driver:, model: }.compact)
     end
 
+    # Registers this machine's runner-only process with the orchestrator
+    # (remote mode). checkouts' paths are this machine's, as the runner sees
+    # them, so they are not translated.
+    def register_runner(name:, url:, orchestrator_url:, checkouts:)
+      @mcp.call_tool("register_runner", name:, url:, orchestratorUrl: orchestrator_url, checkouts:)
+    end
+
     # Lets a queued run start without waiting for the runs it was queued after.
     def release(run_id, workspace:)
       @mcp.call_tool("update_run_dependencies", runId: run_id, workspace:, after: [])

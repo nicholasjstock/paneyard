@@ -14,6 +14,7 @@ Bundler.require(*Rails.groups)
 
 # Needed by config/environments/production.rb, before autoloading exists.
 require_relative "../lib/paneyard_allowed_hosts"
+require_relative "../lib/paneyard_role"
 
 module Paneyard
   class Application < Rails::Application
@@ -23,7 +24,7 @@ module Paneyard
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.
-    config.autoload_lib(ignore: %w[assets tasks paneyard_allowed_hosts.rb paneyard_plugin.rb paneyard_plugin])
+    config.autoload_lib(ignore: %w[assets tasks paneyard_allowed_hosts.rb paneyard_role.rb paneyard_plugin.rb paneyard_plugin])
 
     # Configuration for the application, engines, and railties goes here.
     #
