@@ -496,6 +496,31 @@ RSpec.describe "a run's lifecycle", type: :request do
 
       expect(second.reload.status).to eq("running")
     end
+
+    # A blocked run is not counted ahead of a new one, and cancel_run takes it
+    # out of the queue for good: it never gets a worktree.
+    it "is not counted ahead of a later run, and is cancelled without ever launching", :fake_herdr do
+      first = queue("Lay the groundwork")
+      second = queue("Build on it", after: [ first.run_id ])
+      report(first, "failed", "Could not")
+      Orchestrator::SessionClose.call(first)
+
+      # second is older and still queued, but blocked: it will not delay this one.
+      queued = mcp_call("/mcp/admin", "queue_run", task: "Something else", workspace: workspace.name)
+      expect(queued).to include("queuedBehind" => 0)
+      third = Run.find_by!(run_id: queued.fetch("runId"))
+
+      cancelled = mcp_call("/mcp/admin", "cancel_run", runId: second.run_id, workspace: workspace.name)
+      expect(cancelled).to include("status" => "stopped", "stopReason" => Orchestrator::RunCancel::REASON)
+      dispatch
+
+      expect(second.reload).to have_attributes(status: "stopped", branch_name: nil)
+      expect(second.run_sessions).to be_empty
+      expect(third.reload.status).to eq("running")
+      expect(fake_herdr.requests_for("worktree.create").size).to eq(2)
+      detail = mcp_call("/mcp/admin", "get_run", runId: second.run_id, workspace: workspace.name)
+      expect(detail).to include("status" => "stopped", "stopReason" => Orchestrator::RunCancel::REASON)
+    end
   end
 
   describe "a workspace's lobby" do

@@ -15,7 +15,7 @@ module PaneyardSandbox
 
     Scenario = Struct.new(:name, :directive, :run_id, keyword_init: true)
 
-    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session].freeze
+    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session cancel_run].freeze
 
     def initialize(instance, workspace:, workspace_id:, out: $stdout, timeout: 90)
       @instance = instance
