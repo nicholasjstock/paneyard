@@ -59,14 +59,17 @@ module Orchestrator
       "queue_run. It is not a job: it finishes in seconds, so never queue a job to create a workspace. Call it " \
       "first, then queue every job into the new workspace; when one job must build on another's work there (scaffold " \
       "first, then the feature), queue both there and give the later one after: [the earlier runId]. Only do this " \
-      "when asked. If it says no projects directory is set, ask the operator where projects " \
-      "go and save it with update_settings. Pass driver as the agent CLI you are " \
+      "when asked. New projects go in the runner's projects directory (get_settings; update_settings changes it " \
+      "when the operator says so); pass path only when the " \
+      "operator names another place. Pass driver as the agent CLI you are " \
       "(claude or codex), and model as the model id you are running on if you know it, unless the operator names " \
       "others. When one job must build on another's work, queue it with after: [that job's runId] rather than " \
       "asking the operator to merge them in order; it waits, holding no slot, until that work is merged into the " \
       "shared baseBranch. A workspace's lobby (open_lobby) is the operator's own integration session on its " \
       "checkout; open one only when the operator asks. Pass runner to queue_run only when the operator names a " \
-      "machine to run a job on (list_runners lists them); otherwise leave it out. Move a run to another runner " \
+      "machine to run a job on (list_runners lists them); otherwise leave it out. A runner with no checkout of " \
+      "the workspace clones it into its projects directory when the job starts there. When a repository is only " \
+      "on another machine, register_workspace takes that machine's runner and its path there. Move a run to another runner " \
       "(move_run) only when the operator asks.".freeze
 
     def build

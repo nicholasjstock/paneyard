@@ -23,17 +23,22 @@ module Orchestrator
     module_function
 
     def sweep_all
-      Workspace.find_each.select { |workspace| Sandbox.allows_path?(workspace.repository_path) }.sum { |workspace| sweep(workspace) }
+      Workspace.includes(:checkouts).find_each.sum { |workspace| sweep(workspace) }
     end
 
     # Returns the number of worktrees removed. Each runner is handed only its
     # own runs' worktrees, in its own checkout of the repository, and the
     # worktrees runs left behind on it when they moved to another runner
-    # (RunMoveRecord), by the same rule.
+    # (RunMoveRecord), by the same rule. A runner with no checkout (a run
+    # whose clone failed) has no worktrees of it to reclaim, and a sandbox
+    # sweeps only the checkouts inside its root.
     def sweep(workspace)
       reclaimed = finished(workspace).includes(:runner).group_by(&:runner).sum do |runner, runs|
+        repository_path = workspace.checkout_path(runner)
+        next 0 if repository_path.nil? || !Sandbox.allows_path?(repository_path)
+
         worktrees = runs.map { |run| { "path" => run.target_root, "base_branch" => run.base_branch } }
-        Runner.for(runner).reclaim_worktrees(repository_path: workspace.repository_path_for(runner), worktrees:)
+        Runner.for(runner).reclaim_worktrees(repository_path:, worktrees:)
       rescue Runner::Error => error
         Rails.logger.warn("WorktreeJanitor: #{workspace.name} on #{runner.name}: #{error.message}")
         0
@@ -43,6 +48,7 @@ module Orchestrator
 
     def sweep_left_behind(workspace)
       moves = RunMoveRecord.left_behind.joins(:run).where(runs: { workspace_id: workspace.id }).includes(:run, :from_runner)
+      moves = moves.select { |move| Sandbox.allows_path?(move.source_repository_path) }
       moves.reject { |move| move.run.runner_id == move.from_runner_id && move.run.target_root == move.source_target_root }
         .group_by(&:from_runner).sum { |runner, left| RunMove.sweep_left_behind(runner, left) }
     end
@@ -51,7 +57,7 @@ module Orchestrator
     # (Run#session_over?), never a runner's checkout of the repository itself.
     # The runner skips any that is already gone.
     def finished(workspace)
-      checkouts = [ workspace.repository_path, *workspace.checkouts.pluck(:repository_path) ].uniq
+      checkouts = workspace.checkouts.map(&:repository_path).uniq
       runs = workspace.runs.where.not(worktree_name: [ nil, "" ]).where.not(target_root: [ nil, "", *checkouts ])
       runs.where.not(status: Run::SESSION_ACTIVE_STATUSES).where.not(id: RunSession.live.select(:run_id))
     end

@@ -107,8 +107,17 @@ module Orchestrator
         Repositories.check(path, default_base_branch:)
       end
 
-      # Whether `path` is a directory new projects can go in (the
-      # projects_dir setting): { "path" (expanded), "problems" }.
+      # A checkout of the workspace's origin at `path`: the one already there
+      # if it is a checkout of that origin, else a fresh `git clone` into a
+      # path with nothing there; anything else there is refused untouched
+      # (Repositories.ensure_checkout). Returns check_repository's keys plus
+      # "cloned".
+      def ensure_checkout(path:, origin_url:, default_base_branch: nil)
+        Repositories.ensure_checkout(path:, origin_url:, default_base_branch:)
+      end
+
+      # Whether `path` is a directory new projects can go in (a runner's
+      # projects directory): { "path" (expanded), "problems" }.
       def check_projects_dir(path:)
         Projects.check_projects_dir(path)
       end

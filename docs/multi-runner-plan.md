@@ -63,7 +63,8 @@ If auth arrives later, it arrives for `/mcp/admin` and the runner interface toge
 - **`runners`** (`RegisteredRunner`, so that it does not shadow `Orchestrator::Runner` inside the
   `Orchestrator` module): `name` (unique), `kind` (`local` or `remote`), `url` (nil for local, required for
   remote), `orchestrator_url` (remote only: where that machine's sessions reach the orchestrator's `/mcp`,
-  given when it registers), `max_concurrent_runs` (nullable: only the global cap applies), timestamps. There is exactly one
+  given when it registers), `projects_dir` (where it clones a workspace it has no checkout of; see "Checkouts
+  on demand"), `max_concurrent_runs` (nullable: only the global cap applies), timestamps. There is exactly one
   `local` row (a partial unique index), and it can never be removed. It is made by the migration for an
   existing database, and by `RegisteredRunner.local` the first time anything asks for it otherwise, so a
   schema-loaded database (tests, `bin/sandbox`, `bin/preflight`) needs no seed.
@@ -72,14 +73,15 @@ If auth arrives later, it arrives for `/mcp/admin` and the runner interface toge
 - **`workspace_checkouts`** (`workspace_id`, `runner_id`, `repository_path`), unique per
   (workspace, runner) and per (runner, path): where the workspace's repository is checked out on each
   machine, because the same project lives at different paths on each. Backfilled from
-  `workspaces.repository_path` for the local runner. `workspaces.repository_path` stays as the local
-  checkout for now, and `Workspace` keeps the local row in step with it, so nothing that reads it breaks.
-  Paths resolve through `Workspace#repository_path_for(runner)` and `Run#repository_path`, never by reading
-  either column directly in run-scoped code.
+  `workspaces.repository_path` for the local runner, a column that has since gone
+  (`20261127100000_make_workspaces_a_name_and_an_origin`): a workspace is a name, an origin
+  (`workspaces.origin_url`) and a default branch, and every runner, the local one included, has an optional
+  checkout row. Paths resolve through `Workspace#repository_path_for(runner)` and `Run#repository_path`;
+  `Workspace#repository_path` is only the local runner's checkout, or nil.
 
 `Orchestrator::Runner.for` resolves a runner object: a run or session gives its run's runner, a
-`RegisteredRunner` gives itself, and a workspace or nil gives the local runner (the lobby, workspace
-registration and settings checks, which have no run). A `local` record is `Runner::Local`. A `remote` record
+`RegisteredRunner` gives itself, and a workspace or nil gives the local runner (the lobby and settings
+checks, which have no run; workspace registration names its runner, local by default). A `local` record is `Runner::Local`. A `remote` record
 is a `Runner::Remote` for its url (phase 2), which plugs in there and nowhere else.
 
 ## Phases
@@ -103,8 +105,8 @@ client, no concurrency or plugin changes.
 - `Runner::Remote` is the HTTP client; `Runner.for` returns one for a `remote` record. Connection failures,
   timeouts and anything that is not the runner's own answer (a proxy's 502) are `Runner::Unreachable`;
   `RunSessionReconcileJob` then skips that runner's sessions for the sweep and reconciles the others.
-- `register_runner` (admin-only, `Orchestrator::RunnerRegistration`): name, url, `orchestratorUrl` and
-  checkouts (`[{ workspace, path }]`, each checked there with `check_repository` and recorded as that
+- `register_runner` (admin-only, `Orchestrator::RunnerRegistration`): name, url, `orchestratorUrl`,
+  `projectsDir` (since "Checkouts on demand") and checkouts (`[{ workspace, path }]`, each checked there with `check_repository` and recorded as that
   runner's `workspace_checkouts` row). Nothing is saved unless the runner answers `ping`; registering again
   updates it.
 - A remote session's spec carries `runners.orchestrator_url` + `/mcp` (`RunSessionRunner.mcp_url(runner)`);
@@ -114,7 +116,8 @@ client, no concurrency or plugin changes.
   `PANEYARD_RUNNER_PORT`, `PANEYARD_RUNNER_NAME` defaulting to the hostname) and registers it on every start
   of that process, or when what it would register changes, with each workspace that has a checkout here
   (its repository path through `PANEYARD_REMOTE_PATHS`, which keeps translating everything else). Without
-  `PANEYARD_RUNNER_URL` nothing new starts. Registering a checkout from a pane there is left for later.
+  `PANEYARD_RUNNER_URL` nothing new starts. A repository from a pane there that the path prefixes do not map
+  registers on that runner (`register_workspace`'s `runner`).
 - `bin/sandbox start --remote-runner` and `bin/sandbox verify` run a second runner-only process with its
   own fake herdr and sandbox root, registered over `/mcp/admin`; `Orchestrator::Sandbox` refuses any runner
   url that is not a loopback one it started (`PANEYARD_SANDBOX_RUNNER_URLS`).
@@ -124,8 +127,9 @@ client, no concurrency or plugin changes.
 - `queue_run` takes an optional `runner:` (a runner name). `Orchestrator::RunRunner` picks and checks it:
   the named runner, else the calling run's own runner (a session queuing follow-up work), else the
   workspace's runner when it is checked out on only one, else local. A named runner must exist and have a
-  checkout of the workspace; the error lists the ones that do. The run's `target_root` starts as that
-  runner's checkout, and the base branch is checked there (`RunBaseBranch.problem(..., runner:)`).
+  checkout of the workspace (since "Checkouts on demand": or a projects directory to clone one into); the
+  error lists the ones that do. The run's `target_root` starts as that runner's checkout (or where the clone
+  will go), and the base branch is checked there (`RunBaseBranch.problem(..., runner:)`) when there is one.
 - Per-runner caps: `RunConcurrency` counts slots per runner as well as globally (`in_flight_by_runner`,
   `slots`), with `max_concurrent_runs` (nil means only the global cap). `RunDispatchJob` makes one
   oldest-first pass, passing over a run whose runner is full, so it never blocks runs for other runners.
@@ -147,8 +151,8 @@ An admin-only tool, `move_run(workspace, runId, toRunner, force)`, and the plugi
 <runner>**; `get_run`'s `moveTo` lists the candidates), moving a run from runner A to runner B
 (`Orchestrator::RunMove`):
 
-1. **Check, then close on A.** B is another registered runner with a checkout of the workspace, the run has a
-   branch, it is not queued or starting, and a session still working is refused unless forced. B is asked
+1. **Check, then close on A.** B is another registered runner with a checkout of the workspace (or a projects
+   directory: it clones one first, `WorkspaceCheckout.ensure!`), the run has a branch, it is not queued or starting, and a session still working is refused unless forced. B is asked
    which of the run's base commits it has (`known_commits`, fetching origin there if one is missing, read-only)
    *before* anything changes, so an unreachable B refuses with nothing touched. A live session then goes
    through the ordinary Close session path (`SessionClose`), which saves its transcripts.
@@ -183,6 +187,38 @@ orchestrator (runner A to orchestrator to runner B) so runners never need to rea
 moving stays inside its root: repository paths are guarded, origin is fetched only when it is inside the root,
 and transcripts are written into a CLI's config only when that is inside the root.
 
+### Checkouts on demand (done)
+
+A runner without a checkout of a workspace stops being a dead end, and the local runner stops being special:
+
+- **The workspace model.** A workspace is a name plus an origin; `workspaces.repository_path` is gone, every
+  existing workspace keeping its local checkout as a `workspace_checkouts` row. `list_workspaces` still says
+  `repositoryPath` (the local checkout, or null), plus `originUrl` and `runners`: each runner a job could run on,
+  with its checkout there or `checkedOut: false`.
+- **`ensure_checkout(path:, origin_url:, default_base_branch:)`** on every runner (`Runner::Repositories`,
+  `Wire::METHODS`, a slow method for `Runner::Remote`): a checkout already at `path` whose origin is the same
+  repository (normalised, so `git@host:o/r` and `https://host/o/r.git` match) is reused as it is; nothing there,
+  or an empty directory, gets a `git clone` with that machine's own credentials (no prompt, a timeout that kills
+  the clone's process group, the default branch made local if origin's HEAD is another); anything else is
+  refused untouched. A sandbox clones only into its root, from an origin inside it (`Sandbox.guard_clone!`).
+- **A projects directory per runner**, `<projects dir>/<workspace name>` being where it clones: the plugin's
+  setup asks for it (default `~/Source`) and writes `PANEYARD_PROJECTS_DIR` to its `.env`; a remote runner
+  sends it with `register_runner` (`runners.projects_dir`); the local runner uses the env value, else the
+  column (where the old `projects_dir` setting was migrated, and `update_settings projectsDir` saves), else
+  `~/Source`. `create_workspace` puts new projects there too.
+- **`Orchestrator::WorkspaceCheckout.ensure!(workspace, runner)`** returns the path on that runner, cloning
+  and recording the checkout when it has none, with the origin stored on the workspace or read from another
+  runner's checkout. It runs at a run's launch (`GitWorktree.provision!`; queuing stays fast, and a failed
+  clone fails the launch with git's reason), before `move_run`'s `known_commits`, and when the lobby opens on
+  a machine without a checkout. `queue_run`'s `runner` and `get_run`'s `moveTo` accept every runner with a
+  checkout or a projects directory.
+- **Registration on any runner.** `register_workspace` and `create_workspace` take an optional `runner`, check
+  (or create) there, and record only that runner's checkout, so a repository that exists only on another
+  machine registers with that machine's runner.
+
+After merging, the orchestrator needs a restart (a migration), and so does each remote machine's `bin/runner`
+(a new runner method).
+
 ## The single-machine guarantee
 
 A single-machine install stays zero-config and behaves exactly as today, through every phase:
@@ -210,3 +246,9 @@ A single-machine install stays zero-config and behaves exactly as today, through
   export and placement, `spec/services/orchestrator/run_move_spec.rb` (refusals, an unreachable destination,
   a failure after closing, the janitor and the worktree left behind), a move there and back in
   `spec/integration/remote_runner_lifecycle_spec.rb`, and a move in `bin/sandbox verify`.
+- Checkouts on demand: `spec/services/orchestrator/runner/ensure_checkout_spec.rb` (real git: clone, reuse,
+  every refusal, the sandbox), `spec/services/orchestrator/workspace_checkout_spec.rb`, the launch path
+  (`git_worktree_spec.rb`), `queue_run` and `move_run` to a runner with no checkout, `register_workspace` on a
+  remote runner, the migration's backfill (`spec/db/workspace_origin_migration_spec.rb`), a clone over the wire
+  and a remote-only workspace in `spec/integration/remote_runner_lifecycle_spec.rb`, and a remote-only
+  workspace cloned here in `bin/sandbox verify`.

@@ -32,7 +32,7 @@ RSpec.shared_context "launched runs" do
     post path, headers:, params: JSON.generate(jsonrpc: "2.0", id: 2, method: "tools/call", params:)
     body = response.body
     body = body.lines.find { |line| line.start_with?("data:") }.delete_prefix("data:") if body.start_with?("event:", "data:")
-    result = JSON.parse(body).fetch("result")
+    result = JSON.parse(body).fetch("result") { raise "no result: #{body[0, 2000]}" }
     expect(result["isError"]).to be_falsey, result.to_s
     result.fetch("structuredContent")
   end

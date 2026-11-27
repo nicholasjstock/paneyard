@@ -497,27 +497,29 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "asks for the projects directory first when none is set, saves it, then starts the project by name" do
-      allow(client).to receive(:settings).and_return("projectsDir" => nil, "defaultGithubOwner" => nil)
-      allow(client).to receive(:update_projects_dir).with(File.expand_path("~/Source"))
-        .and_return("projectsDir" => File.expand_path("~/Source"), "defaultGithubOwner" => nil)
+      allow(client).to receive(:settings).and_return({ "projectsDir" => nil, "defaultGithubOwner" => nil },
+        { "projectsDir" => File.expand_path("~/Source"), "defaultGithubOwner" => nil })
       allow(client).to receive(:create_workspace).and_return(created)
 
       run_cli("project-ui", input: "~/Source\nlists\n\n\n\n")
 
+      # Here it is the plugin's own PANEYARD_PROJECTS_DIR, which the restart
+      # (the next ensure_running, the .env having changed) applies.
+      expect(File.read(File.join(state, ".env"))).to include("PANEYARD_PROJECTS_DIR=#{File.expand_path('~/Source')}\n")
+      expect(daemon).to have_received(:ensure_running).twice
       expect(client).to have_received(:create_workspace).with(name: "lists", path: nil, owner: nil, visibility: nil)
       expect(out.string).to include("PANEYARD  /  NEW WORKSPACE", "No projects directory is set yet",
         "Saved: new projects go in #{File.expand_path('~/Source')}.", "GitHub owner (Enter for your gh account",
         "lists is ready", "https://github.com/Gembani/lists", "Done: create directory, git init")
     end
 
-    it "asks again when the directory is refused, and cancels with q" do
+    it "cancels with q, saving nothing" do
       allow(client).to receive(:settings).and_return("projectsDir" => nil)
-      allow(client).to receive(:update_projects_dir).and_raise(PaneyardSandbox::McpClient::ToolError.new("update_settings failed",
-        { "problems" => [ { "message" => "/nope is not a directory here; create it first (mkdir -p /nope)." } ] }))
 
-      run_cli("project-ui", input: "/nope\nq\n")
+      run_cli("project-ui", input: "q\n")
 
-      expect(out.string).to include("mkdir -p /nope", "Cancelled.")
+      expect(out.string).to include("Cancelled.")
+      expect(File.exist?(File.join(state, ".env"))).to be(false)
       expect(client).not_to receive(:create_workspace)
     end
 
@@ -561,11 +563,11 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "changes the projects directory with d" do
-      allow(client).to receive(:settings).and_return(set)
-      allow(client).to receive(:update_projects_dir).with("/srv/projects").and_return(set.merge("projectsDir" => "/srv/projects"))
+      allow(client).to receive(:settings).and_return(set, set.merge("projectsDir" => "/srv/projects"))
 
       run_cli("project-ui", input: "d\n/srv/projects\nq\n")
 
+      expect(File.read(File.join(state, ".env"))).to include("PANEYARD_PROJECTS_DIR=/srv/projects\n")
       expect(out.string).to include("Saved: new projects go in /srv/projects.", "Projects directory: /srv/projects")
     end
 
@@ -712,7 +714,7 @@ RSpec.describe PaneyardPlugin::Cli do
 
     it "asks before configuring every detected client" do
       commands = []
-      run_cli("setup-ui", input: "y\n\n") do |cli|
+      run_cli("setup-ui", input: "\ny\n\n") do |cli|
         allow(cli).to receive(:executable?).with("claude").and_return(true)
         allow(cli).to receive(:executable?).with("codex").and_return(true)
         allow(cli).to receive(:run_command) do |*argv|
@@ -735,8 +737,22 @@ RSpec.describe PaneyardPlugin::Cli do
         "✓ Paneyard MCP configured for Claude Code", "✓ Paneyard MCP configured for Codex")
     end
 
+    it "asks for the projects directory first, saving one the operator types to the plugin's .env" do
+      run_cli("setup-ui", input: "/srv/src\nn\n\n") do |cli|
+        allow(cli).to receive(:executable?).and_return(true)
+      end
+
+      expect(out.string).to include("Projects directory (Enter for ~/Source)", "Saved /srv/src")
+      expect(PaneyardPlugin::EnvFile.load(File.join(state, ".env")).first).to include("PANEYARD_PROJECTS_DIR" => "/srv/src")
+
+      run_cli("setup-ui", input: "\nn\n\n") do |cli|
+        allow(cli).to receive(:executable?).and_return(true)
+      end
+      expect(out.string).to include("Projects directory (Enter for /srv/src)", "Kept /srv/src.")
+    end
+
     it "changes nothing when the operator declines" do
-      run_cli("setup-ui", input: "n\n\n") do |cli|
+      run_cli("setup-ui", input: "\nn\n\n") do |cli|
         allow(cli).to receive(:executable?).and_return(true)
         expect(cli).not_to receive(:run_command)
       end
@@ -746,7 +762,7 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "recognizes current entries and does not add duplicates" do
-      run_cli("setup-ui", input: "\n\n") do |cli|
+      run_cli("setup-ui", input: "\n\n\n") do |cli|
         allow(cli).to receive(:executable?).and_return(true)
         allow(cli).to receive(:run_command) do |*argv|
           case argv.first
@@ -763,7 +779,7 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "continues when one client fails" do
-      run_cli("setup-ui", input: "\n\n") do |cli|
+      run_cli("setup-ui", input: "\n\n\n") do |cli|
         allow(cli).to receive(:executable?).and_return(true)
         allow(cli).to receive(:run_command) do |*argv|
           if argv[1..3] == [ "mcp", "get", "paneyard" ]
@@ -783,7 +799,7 @@ RSpec.describe PaneyardPlugin::Cli do
     it "updates a stale entry and restores it if adding the new URL fails" do
       old_url = "http://127.0.0.1:7001/mcp/admin"
       commands = []
-      run_cli("setup-ui", input: "\n\n") do |cli|
+      run_cli("setup-ui", input: "\n\n\n") do |cli|
         allow(cli).to receive(:executable?).with("claude").and_return(true)
         allow(cli).to receive(:executable?).with("codex").and_return(false)
         allow(cli).to receive(:run_command) do |*argv|
@@ -807,7 +823,7 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "reports no clients without treating that as an error" do
-      status = run_cli("setup-ui", input: "\n") do |cli|
+      status = run_cli("setup-ui", input: "\n\n") do |cli|
         allow(cli).to receive(:executable?).and_return(false)
       end
 
@@ -1027,13 +1043,26 @@ RSpec.describe PaneyardPlugin::Cli do
 
         expect(runner_daemon).to have_received(:ensure_running)
         expect(remote_client).to have_received(:register_runner).with(name: "laptop", url: "https://laptop.example.ts.net:7264",
-          orchestrator_url: "http://server.example:7263", checkouts: [ { "workspace" => "app", "path" => checkout } ])
+          orchestrator_url: "http://server.example:7263", projects_dir: File.expand_path("~/Source"),
+          checkouts: [ { "workspace" => "app", "path" => checkout } ])
         expect(out.string).to include("this machine's runner laptop is up at https://laptop.example.ts.net:7264")
 
         allow(runner_daemon).to receive_messages(ensure_running: PaneyardPlugin::Daemon::Result.new(outcome: :running, pid: 42,
           port: 7264, url: "http://127.0.0.1:7264"))
         run_cli("runs-ui", input: "\n")
         expect(remote_client).to have_received(:register_runner).once
+      end
+
+      it "registers a repository only this machine has on its own runner, with its path here" do
+        allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/opt/only-here", "main" ])
+        allow(remote_client).to receive(:register).and_return("name" => "only-here", "repositoryPath" => nil, "defaultBaseBranch" => "main")
+        allow(remote_client).to receive(:models).and_return({})
+        allow(remote_client).to receive(:queue).and_return("runId" => "run-3", "queuedBehind" => 0, "capacity" => {})
+
+        run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/opt/only-here" })
+
+        expect(remote_client).to have_received(:register).with(path: "/opt/only-here", runner: "laptop")
+        expect(out.string).to include("Registered only-here (/opt/only-here)")
       end
 
       it "goes on with the action, warning, when the runner cannot start" do

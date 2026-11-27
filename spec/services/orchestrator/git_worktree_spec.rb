@@ -7,6 +7,43 @@ RSpec.describe Orchestrator::GitWorktree do
     expect(described_class.name_for(run)).to eq("add-worktree-support-a1b2")
   end
 
+  it "clones the workspace on a runner with no checkout before provisioning there, and records it", :fake_herdr do
+    origin = create_source_checkout(name: "origin")
+    mac = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet.test:3100")
+    workspace = Workspace.new(name: "cloned-here", origin_url: origin)
+    workspace.record_checkout(mac, "/Users/me/cloned-here")
+    workspace.save!
+    clone = File.join(ENV.fetch("PANEYARD_PROJECTS_DIR"), "cloned-here")
+    run, session = create_run_and_session(run: create_run(workspace:, runner: RegisteredRunner.local, target_root: clone,
+      worktree_name: "clone-me-a1b2", status: "launching"))
+
+    described_class.provision!(run, session:)
+
+    expect(workspace.reload.repository_path).to eq(clone)
+    expect(fake_herdr.requests_for("worktree.create").sole).to include("cwd" => clone, "base" => "main")
+    expect(run.reload).to have_attributes(source_root: clone, branch_name: "paneyard/clone-me-a1b2")
+  ensure
+    FileUtils.rm_rf(clone) if clone
+  end
+
+  it "fails the launch with why when the clone fails, before anything is provisioned", :fake_herdr do
+    mac = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet.test:3100")
+    workspace = Workspace.new(name: "no-access", origin_url: File.join(Dir.mktmpdir("no-access"), "missing.git"))
+    workspace.record_checkout(mac, "/Users/me/no-access")
+    workspace.save!
+    run, = create_run_and_session(run: create_run(workspace:, runner: RegisteredRunner.local, target_root: "/planned",
+      worktree_name: "no-access-a1b2", status: "launching"))
+    run.run_sessions.delete_all
+
+    expect { StartRunSessionJob.perform_now(run.id) }.to raise_error(Orchestrator::WorkspaceCheckout::Unavailable)
+
+    expect(run.reload).to have_attributes(status: "failed", launch_error: include("Could not check workspace \"no-access\" out on runner local", "git clone"))
+    expect(fake_herdr.requests_for("worktree.create")).to be_empty
+    expect(workspace.checkouts.reload.map(&:runner)).to eq([ mac ])
+    # Reopening it tries the clone again at launch.
+    expect(Orchestrator::SessionReopen.problem(run)).to be_nil
+  end
+
   it "does not mistake the repository for a provisioned worktree to reopen", :fake_herdr do
     repository = create_source_checkout
     workspace = create_workspace(repository_path: repository)

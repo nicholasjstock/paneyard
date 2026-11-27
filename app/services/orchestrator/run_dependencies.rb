@@ -92,11 +92,15 @@ module Orchestrator
       run.dependency_run_ids.present? && run.branch_name.blank?
     end
 
+    # Read where the run will start: its runner's checkout. A runner with no
+    # checkout yet (it clones one at launch) has no merge to read, so the
+    # dependency's own runner, where its branch is, is asked instead.
     def merged?(dependency, run)
       return false if dependency.branch_name.blank? || dependency.base_sha.blank?
 
-      Runner.for(run).branch_merged?(
-        repository_path: run.repository_path, branch: dependency.branch_name,
+      subject = run.workspace.checkout_for(run.runner) ? run : dependency
+      Runner.for(subject).branch_merged?(
+        repository_path: subject.repository_path, branch: dependency.branch_name,
         base_branch: run.base_branch, since: dependency.base_sha
       )
     rescue Runner::Error

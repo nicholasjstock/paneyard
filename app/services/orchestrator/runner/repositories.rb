@@ -1,5 +1,8 @@
+require "fileutils"
 require "open3"
 require "shellwords"
+require "timeout"
+require "uri"
 
 module Orchestrator
   module Runner
@@ -16,9 +19,145 @@ module Orchestrator
     # fail its first run over its branch.
     #
     # The one thing here that changes a checkout is switch_checkout!, which
-    # puts it on the branch the operator opens its lobby on.
+    # puts it on the branch the operator opens its lobby on. The one thing
+    # that makes one is ensure_checkout, which clones a workspace's origin
+    # into a path that has nothing there yet, for a runner that has no
+    # checkout of it (Orchestrator::WorkspaceCheckout).
     module Repositories
       module_function
+
+      # A clone of a large repository over a slow link takes a while; short
+      # of Runner::Remote's read timeout for a slow method, so a remote
+      # caller hears this one's error rather than its own timeout.
+      CLONE_TIMEOUT = 540
+
+      # A checkout of `origin_url` at `path`, for a runner that has none of
+      # the workspace yet:
+      #
+      #   - a git checkout already there (its top directory) whose origin is
+      #     the same repository (Repositories.same_origin?): reused as it is;
+      #   - nothing there, or an empty directory: `git clone`, with this
+      #     machine's own git credentials, no prompt and a deadline, and then
+      #     the workspace's default branch made a local branch from origin if
+      #     the clone did not check it out;
+      #   - anything else (another repository, a directory with files in it,
+      #     a file): refused, untouched.
+      #
+      # A clone only reads from origin. Nothing here removes, resets or
+      # switches an existing directory or checkout; a clone that fails or
+      # times out removes only the directory it made itself.
+      #
+      # Returns check's keys plus "cloned" (true when it cloned), problems
+      # empty when it is a checkout runs can start from. Raises Error when
+      # it could not get one.
+      def ensure_checkout(path:, origin_url:, default_base_branch: nil)
+        raw = path.to_s.strip
+        raise Error, "path must be an absolute path (or start with ~), not #{raw.inspect}" unless raw.start_with?("/", "~")
+
+        origin = origin_url.to_s.strip
+        raise Error, "the workspace has no origin to clone" if origin.empty?
+
+        given = Pathname(File.expand_path(raw)).cleanpath
+        Sandbox.guard_clone!(path: given, origin_path: Worktrees.local_remote_path(given.dirname, origin))
+        if given.exist? && !(given.directory? && given.empty?)
+          reuse!(given, origin)
+          return check(given.to_s, default_base_branch:).merge("cloned" => false)
+        end
+
+        clone!(given, origin)
+        track_default_branch!(given, default_base_branch)
+        check(given.to_s, default_base_branch:).merge("cloned" => true)
+      rescue Sandbox::Violation => error
+        raise Error, error.message
+      end
+
+      # An existing checkout at `path` may stand in for a clone only if it is
+      # the checkout itself (not a directory inside another one) of the same
+      # repository.
+      def reuse!(path, origin)
+        raise Error, "#{path} exists and is not a directory; not cloning #{origin} there" unless path.directory?
+
+        top = git_output(path, "rev-parse", "--show-toplevel")
+        unless top && Pathname(top).realpath == path.realpath
+          raise Error, "#{path} already exists and is not a git checkout; not cloning #{origin} into it. Clone it " \
+            "yourself, or move what is there"
+        end
+
+        theirs = git_output(path, "config", "--get", "remote.origin.url")
+        raise Error, "#{path} is a git checkout with no origin remote, not a clone of #{origin}" unless theirs
+        return if same_origin?(theirs, origin, base: path)
+
+        raise Error, "#{path} is already a checkout of #{theirs}, not of #{origin}; not touching it"
+      end
+
+      def clone!(path, origin)
+        created = !path.exist?
+        Open3.popen3({ "GIT_TERMINAL_PROMPT" => "0" }, "git", "-c", "credential.interactive=false",
+          "clone", "--quiet", "--", origin, path.to_s, pgroup: true) do |input, output, errors, process|
+          input.close
+          readers = [ Thread.new { output.read }, Thread.new { errors.read } ]
+          begin
+            Timeout.timeout(CLONE_TIMEOUT) do
+              unless process.value.success?
+                raise Error, "git clone #{origin} into #{path} failed: #{readers.last.value.strip.presence || 'no message'}. " \
+                  "This machine needs read access to it with its own git credentials"
+              end
+            end
+          rescue Timeout::Error
+            begin
+              Process.kill("KILL", -process.pid)
+            rescue Errno::ESRCH
+              nil
+            end
+            raise Error, "git clone #{origin} into #{path} timed out after #{CLONE_TIMEOUT}s"
+          ensure
+            readers.each(&:join)
+          end
+        end
+      rescue Error
+        FileUtils.rm_rf(path) if created && path.exist?
+        raise
+      end
+
+      # A fresh clone has a local branch only for origin's HEAD. When the
+      # workspace's default branch is another one origin has, it is made a
+      # local branch tracking it (this checks nothing out), so runs can
+      # start from it.
+      def track_default_branch!(repository, branch)
+        branch = branch.to_s.strip
+        return if branch.empty? || !GitRef.branch?(branch) || Worktrees.local_branch?(repository, branch)
+        return unless Worktrees.git_success?(repository, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/#{branch}^{commit}")
+
+        Worktrees.git!(repository, "branch", "--track", branch, "origin/#{branch}")
+      end
+
+      # Whether two origin URLs name the same repository: the same host and
+      # path whatever the protocol, user or trailing ".git" (so a machine
+      # that clones over ssh matches one that cloned over https), or the
+      # same local directory. `base` resolves a relative local path.
+      def same_origin?(one, other, base: nil)
+        normalize_origin(one, base:) == normalize_origin(other, base:)
+      end
+
+      def normalize_origin(url, base: nil)
+        url = url.to_s.strip
+        if (local = Worktrees.local_remote_path(base || Dir.pwd, url))
+          return "file:" + File.expand_path(local).delete_suffix("/").delete_suffix(".git")
+        end
+
+        host, path =
+          if url.match?(%r{\A[a-z][a-z0-9+.-]*://}i)
+            uri = URI.parse(url)
+            [ uri.host, uri.path ]
+          elsif (scp = url.match(/\A(?:[^@\/]+@)?([^:\/]+):(.*)\z/))
+            [ scp[1], scp[2] ]
+          else
+            [ nil, url ]
+          end
+        "#{host.to_s.downcase}/#{path.to_s.sub(%r{\A/+}, '').delete_suffix('/').delete_suffix('.git')}"
+      rescue URI::InvalidURIError
+        url
+      end
 
       # Returns { "repository_path", "default_base_branch", "origin_url",
       # "problems" => [{ "code", "message" }] }, problems empty when it can be

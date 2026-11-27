@@ -23,7 +23,7 @@ RSpec.describe Workspace do
     )
 
     expect(workspace.update(repository_path: Dir.mktmpdir)).to be(false)
-    expect(workspace.errors[:repository_path]).to include("cannot change while a run is active")
+    expect(workspace.errors["checkouts.repository_path"]).to include("cannot change while a run is active")
   end
 
   describe "layout" do

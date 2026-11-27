@@ -17,8 +17,10 @@ module McpTools
       "nothing at the path but <owner>/<name> on GitHub, it clones that; for an existing directory or repository it " \
       "does only what is missing (git init, a first commit of just the README and AGENTS.md, the GitHub repository, " \
       "pushing the default branch), never committing other files there. Then it registers the workspace on the " \
-      "repository's default branch. The path is path, else the projects directory setting (update_settings " \
-      "projectsDir) joined with name; with neither it asks for one. name defaults to the path's directory name and " \
+      "repository's default branch. It is made on runner (a machine from list_runners; default the local runner), " \
+      "and only that runner's checkout is recorded; other runners clone it when a job needs it there. The path is " \
+      "path, else that runner's projects directory (get_settings' projectsDir for the local runner, ~/Source " \
+      "unless the operator set another) joined with name. name defaults to the path's directory name and " \
       "is also the GitHub repository's and the workspace's; owner defaults to the defaultGithubOwner setting, else " \
       "the gh user. Everything is checked first and nothing is done if anything is wrong; every problem comes back " \
       "with how to fix it. If a step then fails, it removes only a directory it made itself and nothing on GitHub, " \
@@ -30,15 +32,17 @@ module McpTools
         path: { type: "string", description: "Absolute path (~ allowed) of the project's directory, existing or not. Defaults to <projects directory>/<name>." },
         owner: { type: "string", description: "GitHub user or organization of the repository. Defaults to the defaultGithubOwner setting, else the logged-in gh user." },
         visibility: { type: "string", enum: %w[private public internal], description: "Visibility of a repository it creates. Default private." },
-        description: { type: "string", description: "One line about the project, for a README it writes and a GitHub repository it creates." }
+        description: { type: "string", description: "One line about the project, for a README it writes and a GitHub repository it creates." },
+        runner: { type: "string", description: "The runner (machine) to make it on, from list_runners. Defaults to the local runner." }
       },
       required: []
     )
 
-    def self.call(server_context:, name: nil, owner: nil, visibility: nil, path: nil, description: nil)
+    def self.call(server_context:, name: nil, owner: nil, visibility: nil, path: nil, description: nil, runner: nil)
       workspace, result = Orchestrator::WorkspaceCreation.create(
         name: name.to_s.strip.presence, owner: owner.to_s.strip.presence, visibility: visibility.to_s.strip.presence,
-        path: path.to_s.strip.presence, description: description.to_s.strip.presence
+        path: path.to_s.strip.presence, description: description.to_s.strip.presence,
+        runner: Orchestrator::RunRunner.named!(runner)
       )
       return created(workspace, result) if workspace
 
@@ -54,12 +58,15 @@ module McpTools
       if (registration = result["registration_problems"])
         return ToolResponse.error(
           "#{result.fetch('repository_path')} is ready (#{steps_text(result)}), but it could not be registered. Fix " \
-            "these, then call register_workspace with path #{result.fetch('repository_path')}:\n" + numbered(registration),
+            "these, then call register_workspace with path #{result.fetch('repository_path')}" \
+            "#{runner.present? ? " and runner #{runner}" : ''}:\n" + numbered(registration),
           code: "workspace_not_registered", problems: registration, remaining:
         )
       end
 
       ToolResponse.error(result.fetch("message"), code: "workspace_not_created", remaining:, steps: result.fetch("done", []))
+    rescue Orchestrator::RunRunner::Invalid => error
+      ToolResponse.error(error.message, code: "runner_invalid")
     rescue ActiveRecord::RecordInvalid => error
       ToolResponse.error(error.message)
     end

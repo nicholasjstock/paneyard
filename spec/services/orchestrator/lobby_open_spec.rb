@@ -24,6 +24,26 @@ RSpec.describe Orchestrator::LobbyOpen do
     described_class.call(workspace, **arguments)
   end
 
+  it "clones the workspace on this machine first when only another runner has it checked out" do
+    mac = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet.test:3100")
+    remote_only = Workspace.new(name: "remote-only", origin_url: "https://example.test/remote-only.git")
+    remote_only.record_checkout(mac, "/Users/me/remote-only")
+    remote_only.save!
+    clone = File.join(ENV.fetch("PANEYARD_PROJECTS_DIR"), "remote-only")
+    allow(runner).to receive(:ensure_checkout).and_return(
+      "repository_path" => clone, "default_base_branch" => "main", "origin_url" => "https://example.test/remote-only.git",
+      "problems" => [], "cloned" => true
+    )
+
+    opened = described_class.call(remote_only)
+
+    expect(runner).to have_received(:ensure_checkout)
+      .with(path: clone, origin_url: "https://example.test/remote-only.git", default_base_branch: "main")
+    expect(remote_only.reload.repository_path).to eq(clone)
+    expect(opened).to include(state: "opened")
+    expect(runner).to have_received(:open_checkout_workspace).with(repository_path: clone, label: "remote-only lobby (main)")
+  end
+
   it "opens the lobby on the branch the checkout is on, not the workspace default: an agent on /mcp/admin, no prompt" do
     allow(runner).to receive(:checkout_branch).with(repository_path: workspace.repository_path).and_return("feature/x")
     allow(runner).to receive(:switch_checkout).and_return("branch" => "feature/x", "previous_branch" => "feature/x", "switched" => false)

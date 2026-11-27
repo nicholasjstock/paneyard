@@ -8,7 +8,8 @@ RSpec.describe McpTools::ListRunnersTool do
     listed = described_class.call(server_context: {}).structured_content
 
     expect(listed[:runners]).to eq([
-      { name: "local", kind: "local", url: nil, maxConcurrentRuns: nil, inFlight: 1, workspaces: [ workspace.name ], reachable: true }
+      { name: "local", kind: "local", url: nil, maxConcurrentRuns: nil, projectsDir: ENV.fetch("PANEYARD_PROJECTS_DIR"), inFlight: 1, workspaces: [ workspace.name ],
+        reachable: true }
     ])
     expect(listed[:capacity]).to eq(limit: Orchestrator::RunConcurrency.limit, inFlight: 1)
   end

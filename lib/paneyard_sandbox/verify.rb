@@ -15,7 +15,7 @@ module PaneyardSandbox
 
     Scenario = Struct.new(:name, :directive, :run_id, keyword_init: true)
 
-    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session register_runner move_run].freeze
+    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session register_runner register_workspace move_run].freeze
 
     # remote_runner: the name of a runner-only process the instance started
     # and registered (Instance#register_remote_runner!), to run a session on
@@ -53,6 +53,9 @@ module PaneyardSandbox
         step("remote runner: launched there, reports here over HTTP, closed, worktree reclaimed there") { verify_remote }
         moving = queue("move_run: a dirty run moved to the remote runner, reopened there, both worktrees kept", "dirty")
         step(moving.name) { verify_move(moving) }
+        step("checkout on demand: a workspace registered on the remote runner only, cloned here when a run launches") do
+          verify_checkout_on_demand
+        end
       end
 
       @out.puts(@failures.empty? ? "sandbox verify: all green" : "sandbox verify: #{@failures.size} failed")
@@ -179,6 +182,44 @@ module PaneyardSandbox
       close(scenario)
       run = wait_for_run(scenario) { |detail| detail["status"] == "completed" }
       expect(File.exist?(File.join(run["worktree"], "FAKE_AGENT_CHANGES.md")), "dirty worktree #{run['worktree']} was removed")
+    end
+
+    # A repository only the remote runner's machine has, registered there
+    # (register_workspace's runner), so only that checkout is recorded; then
+    # a run queued on this machine's runner, which has no checkout of it and
+    # clones it into its projects directory when the run launches
+    # (Orchestrator::WorkspaceCheckout), then provisions and reports as usual.
+    def verify_checkout_on_demand
+      checkout = @instance.seed_remote_only_repository!("remote-only")
+      registered = @admin.call_tool("register_workspace", path: checkout, name: "remote-only", runner: @remote_runner)
+      expect(registered["repositoryPath"].nil?, "registered with a local checkout: #{registered['repositoryPath']}")
+      expect(Array(registered["runners"]).any? { |runner| runner["name"] == @remote_runner && runner["checkedOut"] },
+        "runners #{registered['runners']}")
+
+      queued = @admin.call_tool("queue_run", task: "Sandbox verify (checkout on demand) [fake-agent: done]",
+        workspace: "remote-only", runner: "local")
+      expect(queued["clonesAtLaunch"] == true, "queue_run answered #{JSON.generate(queued)[0, 400]}")
+      scenario = Scenario.new(name: "checkout on demand", directive: "done", run_id: queued.fetch("runId"))
+
+      run = wait_for_run_in(scenario, "remote-only") { |detail| detail["checkpoints"]&.any? || detail["status"] == "failed" }
+      clone = File.join(File.realpath(@instance.projects_dir), "remote-only")
+      expect(run["status"] == "awaiting_review", "status #{run['status']}: #{run['launchError']}")
+      expect(File.directory?(File.join(clone, ".git")), "no clone at #{clone}")
+      listed = @admin.call_tool("list_workspaces").fetch("workspaces").find { |workspace| workspace["name"] == "remote-only" }
+      expect(listed["repositoryPath"] == clone, "local checkout #{listed['repositoryPath'].inspect}, not #{clone}")
+
+      @admin.call_tool("close_session", runId: scenario.run_id, workspace: "remote-only")
+      run = wait_for_run_in(scenario, "remote-only") { |detail| detail["status"] == "completed" }
+      expect(!File.directory?(run["worktree"]), "clean worktree #{run['worktree']} was not reclaimed")
+      expect(File.directory?(File.join(clone, ".git")), "the clone itself was removed")
+    end
+
+    def wait_for_run_in(scenario, workspace, timeout: @timeout, &)
+      original = @workspace
+      @workspace = workspace
+      wait_for_run(scenario, timeout:, &)
+    ensure
+      @workspace = original
     end
 
     # RunSessionReconcileJob runs every 30 seconds, so this waits on the real

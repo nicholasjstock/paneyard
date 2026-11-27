@@ -29,17 +29,36 @@ RSpec.describe McpTools::ListWorkspacesTool do
     expect(listed[:lobby]).to eq(branch: "release", herdrWorkspace: "w9", driver: "codex", model: "gpt-5.5", live: false)
   end
 
-  it "lists the runners each workspace is checked out on, local first, with the path on each" do
+  it "lists the runners a workspace's jobs can run on, local first, with its checkout on each or none yet" do
     workspace = create_workspace(prefix: "list-workspaces-runners")
     laptop = RegisteredRunner.create!(name: "laptop", kind: "remote", url: "http://laptop.tailnet:3100")
+    RegisteredRunner.create!(name: "nas", kind: "remote", url: "http://nas.tailnet:3100", projects_dir: "/volume1/src")
 
     listed = -> { described_class.call(server_context: {}).structured_content[:workspaces].find { |w| w[:name] == workspace.name } }
-    expect(listed.call[:runners]).to eq([ { name: "local", kind: "local", repositoryPath: workspace.repository_path } ])
+    expect(listed.call[:runners]).to eq([
+      { name: "local", kind: "local", repositoryPath: workspace.repository_path, checkedOut: true },
+      { name: "nas", kind: "remote", repositoryPath: nil, checkedOut: false }
+    ])
 
     workspace.checkouts.create!(runner: laptop, repository_path: "/Users/me/code/app")
     expect(listed.call[:runners]).to eq([
-      { name: "local", kind: "local", repositoryPath: workspace.repository_path },
-      { name: "laptop", kind: "remote", repositoryPath: "/Users/me/code/app" }
+      { name: "local", kind: "local", repositoryPath: workspace.repository_path, checkedOut: true },
+      { name: "laptop", kind: "remote", repositoryPath: "/Users/me/code/app", checkedOut: true },
+      { name: "nas", kind: "remote", repositoryPath: nil, checkedOut: false }
+    ])
+  end
+
+  it "lists a workspace checked out only on a remote runner, with no local path" do
+    laptop = RegisteredRunner.create!(name: "laptop", kind: "remote", url: "http://laptop.tailnet:3100")
+    workspace = Workspace.new(name: "remote-only", origin_url: "git@github.com:me/remote-only.git")
+    workspace.record_checkout(laptop, "/Users/me/code/remote-only")
+    workspace.save!
+
+    listed = described_class.call(server_context: {}).structured_content[:workspaces].find { |w| w[:name] == "remote-only" }
+    expect(listed).to include(repositoryPath: nil, originUrl: "git@github.com:me/remote-only.git")
+    expect(listed[:runners]).to eq([
+      { name: "local", kind: "local", repositoryPath: nil, checkedOut: false },
+      { name: "laptop", kind: "remote", repositoryPath: "/Users/me/code/remote-only", checkedOut: true }
     ])
   end
 end

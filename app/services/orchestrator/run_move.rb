@@ -4,11 +4,13 @@ module Orchestrator
   # and its saved conversation go with it, and it is reopened there.
   #
   #   1. Check: the destination is another registered runner with a checkout
-  #      of the workspace, the run has a branch, and nothing is starting or
-  #      working in it (a session still working is refused unless forced).
-  #      The destination is asked which of the run's base commits it has
-  #      (fetching origin there if not, read-only) before anything changes,
-  #      so a runner that cannot be reached refuses up front.
+  #      of the workspace or a projects directory to clone one into, the run
+  #      has a branch, and nothing is starting or working in it (a session
+  #      still working is refused unless forced). A destination without a
+  #      checkout clones one now (WorkspaceCheckout.ensure!). It is asked
+  #      which of the run's base commits it has (fetching origin there if
+  #      not, read-only) before anything changes, so a runner that cannot be
+  #      reached, or cannot clone, refuses up front.
   #   2. Close: a live session goes through SessionClose, so the CLI is gone,
   #      nothing writes to the worktree, and its transcripts are saved.
   #   3. Export from the source runner (Runner#export_run): the branch as a
@@ -51,8 +53,8 @@ module Orchestrator
     def call(run, to:, force: false)
       destination = destination!(run, to)
       source_record = run.runner
-      destination_repository = run.workspace.repository_path_for(destination)
       check!(run, force:)
+      destination_repository = WorkspaceCheckout.ensure!(run.workspace, destination)
       source = Runner.for(run)
       target = Runner.for(destination)
       have = target.known_commits(repository_path: destination_repository, commits: [ run.base_sha ].compact).fetch("have")
@@ -96,7 +98,8 @@ module Orchestrator
     end
 
     # The runners the run could move to, by name: every other runner with a
-    # checkout of its workspace, once it has a branch and is not queued or
+    # checkout of its workspace or a projects directory to clone one into
+    # (RunRunner.candidates), once it has a branch and is not queued or
     # starting. For showing the option (get_run's moveTo); call re-checks,
     # including whether its session is still working.
     def destinations(run)
@@ -104,28 +107,24 @@ module Orchestrator
       return [] if run.live_session.nil? && run.status.in?(Run::SESSION_ACTIVE_STATUSES)
       return [] if run.live_session&.status == "starting"
 
-      runners = run.workspace.checkouts.includes(:runner).map(&:runner)
-      runners |= [ RegisteredRunner.local ]
-      runners.reject { |runner| runner.id == run.runner_id }.map(&:name).sort
+      RunRunner.candidates(run.workspace).reject { |runner| runner.id == run.runner_id }.map(&:name).sort
     end
 
     # The registered runner `name`, which must not be the run's own and must
-    # have a checkout of its workspace.
+    # have a checkout of its workspace or be able to clone one.
     def destination!(run, name)
       destination = RegisteredRunner.find_by(name: name.to_s)
-      checked_out = run.workspace.checkouts.includes(:runner).map { |checkout| checkout.runner.name }
-      checked_out |= [ RegisteredRunner.local.name ]
+      possible = RunRunner.candidates(run.workspace).map(&:name).sort
       unless destination
-        raise NotMovable, "There is no runner named #{name.to_s.inspect}. Workspace #{run.workspace.name.inspect} is checked " \
-          "out on: #{checked_out.sort.join(', ')} (list_runners)."
+        raise NotMovable, "There is no runner named #{name.to_s.inspect}. Workspace #{run.workspace.name.inspect} can run " \
+          "on: #{possible.join(', ')} (list_runners)."
       end
       raise NotMovable, "Run #{run.run_id} is already on #{destination.name}." if destination == run.runner
+      return destination if WorkspaceCheckout.available?(run.workspace, destination)
 
-      run.workspace.repository_path_for(destination)
-      destination
-    rescue Runner::Error
-      raise NotMovable, "Runner #{destination.name} has no checkout of workspace #{run.workspace.name.inspect}; it is checked out " \
-        "on: #{checked_out.sort.join(', ')}. Register the checkout there (register_runner) first."
+      raise NotMovable, "Runner #{destination.name} has no checkout of workspace #{run.workspace.name.inspect} and no " \
+        "projects directory to clone it into; it can run on: #{possible.join(', ')}. Register the runner with a projects " \
+        "directory, or its checkout (register_runner), first."
     end
 
     def check!(run, force:)

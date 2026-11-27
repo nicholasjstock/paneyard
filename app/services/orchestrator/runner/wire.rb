@@ -35,6 +35,7 @@ module Orchestrator
         ping
         provision_worktree base_branch_problem branch_exists? branch_merged? verify_job_finished!
         worktree_registered? release_worktree remove_worktree reclaim_worktrees origin_url check_repository
+        ensure_checkout
         check_projects_dir check_project create_project
         switch_checkout checkout_branch open_checkout_workspace
         open_session launch_agent agent_state send_prompt snapshot process_alive? terminate

@@ -39,8 +39,24 @@ RSpec.describe Orchestrator::Sandbox do
     inside = Workspace.new(name: "scratch", repository_path: File.join(sandbox_root, "repos", "demo"))
 
     expect(outside).not_to be_valid
-    expect(outside.errors[:repository_path].join).to include("inside the sandbox root")
+    expect(outside.errors["checkouts.repository_path"].join).to include("inside the sandbox root")
     expect(inside).to be_valid
+  end
+
+  it "clones a workspace onto a runner only into its root, from an origin inside it" do
+    sandbox_on!
+    inside = File.join(sandbox_root, "Source", "app")
+
+    expect { Orchestrator::Sandbox.guard_clone!(path: "/home/me/Source/app", origin_path: File.join(sandbox_root, "origin.git")) }
+      .to raise_error(Orchestrator::Sandbox::Violation, /clone a repository into/)
+    expect { Orchestrator::Sandbox.guard_clone!(path: inside, origin_path: nil) }
+      .to raise_error(Orchestrator::Sandbox::Violation, /origin outside/)
+    expect { Orchestrator::Sandbox.guard_clone!(path: inside, origin_path: "/home/me/code/app") }
+      .to raise_error(Orchestrator::Sandbox::Violation, /origin outside/)
+    expect { Orchestrator::Sandbox.guard_clone!(path: inside, origin_path: File.join(sandbox_root, "origin.git")) }.not_to raise_error
+    expect { Orchestrator::Runner.local.ensure_checkout(path: inside, origin_url: "git@github.com:me/app.git") }
+      .to raise_error(Orchestrator::Runner::Error, /origin outside/)
+    expect(File.exist?(inside)).to be(false)
   end
 
   it "never starts a new project: no directory outside it, and no GitHub repository even inside it" do

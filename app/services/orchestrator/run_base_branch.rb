@@ -13,9 +13,14 @@ module Orchestrator
     # nil when runs can start from `branch`, else why not and how to fix it.
     # Checked in the checkout on `runner`, the machine the run is queued on
     # (nil: the local one), since each machine has its own copy of the branch.
+    # A runner with no checkout yet is not asked: it clones one at launch
+    # (WorkspaceCheckout), which is when provisioning checks the branch there.
     def problem(workspace, branch, runner: nil)
       runner ||= RegisteredRunner.local
-      found = Runner.for(runner).base_branch_problem(repository_path: workspace.repository_path_for(runner), branch:)
+      repository_path = workspace.checkout_path(runner)
+      return unless repository_path
+
+      found = Runner.for(runner).base_branch_problem(repository_path:, branch:)
       found && "Base branch `#{branch}`: #{found.fetch('message')}"
     rescue Runner::Error => error
       "Could not check base branch `#{branch}`: #{error.message}"

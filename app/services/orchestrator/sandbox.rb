@@ -20,6 +20,9 @@ module Orchestrator
   #     is under the root too (Runner::Transcripts.restore);
   #   - moving a run (Runner::RunTransfer): only repositories under the root,
   #     and `git fetch origin` only from an origin inside it;
+  #   - cloning a workspace onto a runner (Runner::Repositories
+  #     .ensure_checkout): only into a path inside the root, and only from an
+  #     origin inside it;
   #   - GitHub: never; a sandbox cannot start a new project (create_workspace),
   #     which would make a real GitHub repository;
   #   - remote runners: only the sandbox's own runner-only process, a loopback
@@ -82,6 +85,19 @@ module Orchestrator
       return if local_path.present? && allows_path?(local_path)
 
       raise Violation, "sandbox refuses to verify a remote outside its root"
+    end
+
+    # A runner without a checkout of a workspace clones one
+    # (Runner::Repositories.ensure_checkout). A sandbox clones only into its
+    # own root, and only from an origin there: `origin_path` is the origin as
+    # a local directory, nil for a network URL, which is always refused.
+    def guard_clone!(path:, origin_path:)
+      return unless enabled?
+
+      guard_path!(path, "clone a repository into")
+      return if origin_path.present? && allows_path?(origin_path)
+
+      raise Violation, "sandbox refuses to clone from an origin outside #{root}"
     end
 
     # Starting a new project makes a GitHub repository (Runner::GitHub), which

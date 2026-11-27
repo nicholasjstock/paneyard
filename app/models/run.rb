@@ -86,7 +86,7 @@ class Run < ApplicationRecord
       run_id: run_id,
       task: "(unspecified — auto-created from bus activity)",
       workspace: default_workspace,
-      target_root: default_workspace.repository_path,
+      target_root: default_workspace.checkouts.first&.repository_path || "(unknown)",
       launcher_variant: "codex",
       status: "running"
     )
@@ -134,11 +134,14 @@ class Run < ApplicationRecord
   # behind. The runner asks git whether target_root is actually a linked
   # worktree of the repository, ruling out both.
   def kept_worktree?
-    managed_worktree? && target_root.present? && session_over? &&
-      Orchestrator::Runner.for(self).worktree_registered?(repository_path:, path: target_root)
+    repository = workspace.checkout_path(runner)
+    managed_worktree? && target_root.present? && repository.present? && session_over? &&
+      Orchestrator::Runner.for(self).worktree_registered?(repository_path: repository, path: target_root)
   end
 
-  # The workspace's repository checkout on this run's runner.
+  # The workspace's repository checkout on this run's runner. Raises when
+  # that runner has none yet: a run queued on such a runner gets it cloned at
+  # launch (Orchestrator::WorkspaceCheckout.ensure!, from GitWorktree.provision!).
   def repository_path
     workspace.repository_path_for(runner)
   end

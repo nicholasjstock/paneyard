@@ -17,7 +17,8 @@ module McpTools
       "that work. If one of them fails or is stopped first, it waits as blocked (get_run says why) instead of " \
       "launching. Use after for a genuine order dependency, not to serialise jobs that merely touch the same files. " \
       "Pass runner (a machine, from list_runners where offered) only when the operator names one; by default the job " \
-      "runs on your own machine from inside a run, else on the workspace's runner."
+      "runs on your own machine from inside a run, else on a runner with a checkout of the workspace (the local one " \
+      "first). A runner without one clones the repository into its projects directory when the job starts."
     input_schema(
       properties: {
         task: { type: "string" },
@@ -49,7 +50,7 @@ module McpTools
         runner: machine,
         run_id: "run-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}",
         task:, base_branch:, launcher_variant: driver.presence || "claude", model: model.to_s.strip.presence,
-        target_root: target.repository_path_for(machine), status: "queued", launched_by: "mcp", dependency_run_ids: dependencies.map(&:run_id)
+        target_root: planned_root(target, machine), status: "queued", launched_by: "mcp", dependency_run_ids: dependencies.map(&:run_id)
       )
       run.worktree_name = Orchestrator::GitWorktree.name_for(run)
       run.save!
@@ -72,6 +73,8 @@ module McpTools
       if machine.max_concurrent_runs
         response[:runner_capacity] = { limit: machine.max_concurrent_runs, in_flight: Orchestrator::RunConcurrency.in_flight_on(machine) }
       end
+      # The runner has no checkout yet: it clones one when the run launches.
+      response[:clones_at_launch] = true unless target.checkout_for(machine)
       ToolResponse.structured(response)
     rescue Orchestrator::RunDependencies::Invalid => error
       ToolResponse.error(error.message, code: "dependency_invalid")
@@ -79,6 +82,13 @@ module McpTools
       ToolResponse.error(error.message, code: "runner_invalid")
     rescue ArgumentError, ActiveRecord::RecordInvalid => error
       ToolResponse.error(error.message)
+    end
+
+    # The run's root until its worktree is made: the runner's checkout, or,
+    # on a runner that clones one at launch, where that clone will go.
+    def self.planned_root(workspace, runner)
+      workspace.checkout_path(runner) || Orchestrator::WorkspaceCheckout.planned_path(workspace, runner) ||
+        raise(ArgumentError, "runner #{runner.name.inspect} cannot check workspace #{workspace.name.inspect} out")
     end
   end
 end

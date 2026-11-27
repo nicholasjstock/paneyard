@@ -6,8 +6,9 @@ module McpTools
     tool_name "list_runners"
     description "List the runners (machines) runs can be queued on, by the names queue_run accepts as runner: " \
       "kind (local is this orchestrator's own machine), url, maxConcurrentRuns (its own cap beside the global one; " \
-      "null: only the global cap), how many runs hold a slot on it, the workspaces checked out there, and whether " \
-      "it is reachable."
+      "null: only the global cap), how many runs hold a slot on it, the workspaces checked out there, projectsDir " \
+      "(where it clones a workspace it has no checkout of when a job needs one there; null: it clones none), and " \
+      "whether it is reachable."
     input_schema(properties: {}, required: [])
 
     def self.call(server_context:)
@@ -19,12 +20,13 @@ module McpTools
       ToolResponse.structured(
         capacity: { limit: Orchestrator::RunConcurrency.limit, in_flight: in_flight.values.sum },
         runners: RegisteredRunner.order(:name).sort_by { |runner| runner == local ? 0 : 1 }.map do |runner|
-          workspaces = runner.local? ? Workspace.order(:name).pluck(:name) : checked_out.fetch(runner.id, [])
+          workspaces = checked_out.fetch(runner.id, [])
           {
             name: runner.name,
             kind: runner.kind,
             url: runner.url,
             max_concurrent_runs: runner.max_concurrent_runs,
+            projects_dir: runner.clone_projects_dir,
             in_flight: in_flight.fetch(runner.id, 0),
             workspaces:,
             **reachability(runner)

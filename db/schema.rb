@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_100000) do
   create_table "lobbies", force: :cascade do |t|
     t.integer "workspace_id", null: false
     t.string "branch", null: false
@@ -95,6 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_120000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "orchestrator_url"
+    t.string "projects_dir"
     t.index ["kind"], name: "index_runners_on_one_local", unique: true, where: "kind = 'local'"
     t.index ["name"], name: "index_runners_on_name", unique: true
   end
@@ -151,10 +152,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_120000) do
     t.text "layout"
     t.string "name", null: false
     t.datetime "updated_at", null: false
-    t.string "repository_path", null: false
     t.string "default_base_branch", default: "main", null: false
+    t.string "origin_url"
     t.index ["name"], name: "index_workspaces_on_name", unique: true
-    t.index ["repository_path"], name: "index_workspaces_on_repository_path", unique: true
   end
 
   add_foreign_key "lobbies", "workspaces"

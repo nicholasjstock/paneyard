@@ -27,7 +27,7 @@ module Orchestrator
       READ_TIMEOUT = 60
       SLOW_READ_TIMEOUT = 600
       SLOW_METHODS = %w[
-        launch_agent create_project provision_worktree save_transcripts available_models
+        launch_agent create_project ensure_checkout provision_worktree save_transcripts available_models
         known_commits export_run import_run restore_transcripts
       ].freeze
       # ping only says the runner is there (list_runners, registration).

@@ -10,7 +10,12 @@
 #           the tailnet (Orchestrator::Runner::Remote). It registers itself
 #           (register_runner), saying where its sessions reach this
 #           orchestrator (orchestrator_url) and where workspaces are checked
-#           out there (workspace_checkouts).
+#           out there (workspace_checkouts) and where it clones the ones it
+#           has not got (projects_dir).
+#
+# Every runner, local included, can be handed a workspace it has no checkout
+# of: Orchestrator::WorkspaceCheckout clones it into the runner's projects
+# directory (clone_projects_dir) as <projects dir>/<workspace name>.
 #
 # Named RegisteredRunner rather than Runner, because inside the Orchestrator
 # module Runner is the runner interface itself.
@@ -19,6 +24,13 @@ class RegisteredRunner < ApplicationRecord
 
   LOCAL_NAME = "local".freeze
   KINDS = %w[local remote].freeze
+  # The local runner's projects directory comes from here first (the herdr
+  # plugin's setup writes it to the plugin's .env), then the projects_dir
+  # column (update_settings, or the old projects_dir setting), then
+  # DEFAULT_PROJECTS_DIR. A path on the runner's own machine, which expands
+  # `~` there: the orchestrator never does.
+  PROJECTS_DIR_ENV_VAR = "PANEYARD_PROJECTS_DIR".freeze
+  DEFAULT_PROJECTS_DIR = "~/Source".freeze
 
   has_many :runs, foreign_key: :runner_id, inverse_of: :runner, dependent: :restrict_with_error
   has_many :workspace_checkouts, foreign_key: :runner_id, inverse_of: :runner, dependent: :restrict_with_error
@@ -29,6 +41,7 @@ class RegisteredRunner < ApplicationRecord
   validates :url, presence: true, if: :remote?
   validates :url, absence: true, if: :local?
   validates :orchestrator_url, absence: true, if: :local?
+  validate :projects_dir_is_absolute
   validate :urls_are_http
   validate :one_local_runner, if: :local?
 
@@ -51,7 +64,33 @@ class RegisteredRunner < ApplicationRecord
     kind == "remote"
   end
 
+  normalizes :projects_dir, with: ->(path) { path.strip.delete_suffix("/").presence }
+
+  # Where this runner clones a workspace it has no checkout of, and where
+  # create_workspace puts a new project on it: nil for a remote runner that
+  # registered without one (it gets no clones). See PROJECTS_DIR_ENV_VAR.
+  def clone_projects_dir
+    return projects_dir.presence unless local?
+
+    ENV[PROJECTS_DIR_ENV_VAR].to_s.strip.delete_suffix("/").presence || projects_dir.presence || DEFAULT_PROJECTS_DIR
+  end
+
+  # Where clone_projects_dir comes from: "env", "setting" (the column),
+  # "default", or nil (none).
+  def projects_dir_source
+    return (projects_dir.present? ? "setting" : nil) unless local?
+    return "env" if ENV[PROJECTS_DIR_ENV_VAR].to_s.strip.present?
+
+    projects_dir.present? ? "setting" : "default"
+  end
+
   private
+
+  def projects_dir_is_absolute
+    return if projects_dir.blank? || projects_dir.start_with?("/", "~")
+
+    errors.add(:projects_dir, "must be an absolute path (or start with ~)")
+  end
 
   def urls_are_http
     { url:, orchestrator_url: }.each do |attribute, value|

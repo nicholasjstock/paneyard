@@ -439,7 +439,7 @@ module PaneyardPlugin
       clear_screen
       say accent("PANEYARD  /  NEW RUN")
       say rule
-      say "#{bold(workspace.fetch('name'))}  #{dim(workspace.fetch('repositoryPath'))}"
+      say "#{bold(workspace.fetch('name'))}  #{dim(workspace['repositoryPath'] || workspace['originUrl'].to_s)}"
       say dim("Registered as a new workspace; runs start from #{default} by default.") if registered
       say dim("Runs on #{remote.host}, from its own copy of the branch: push your commits there first.") if remote && runners.size < 2
       say ""
@@ -557,7 +557,7 @@ module PaneyardPlugin
       return say("Cancelled.") unless workspace
 
       say ""
-      say "#{bold(workspace.fetch('name'))}  #{dim(workspace.fetch('repositoryPath'))}"
+      say "#{bold(workspace.fetch('name'))}  #{dim(workspace['repositoryPath'] || workspace['originUrl'].to_s)}"
       lobby = workspace["lobby"]
       if lobby && lobby["live"]
         say "Its lobby is open on #{lobby['branch']} (#{[ lobby['driver'], lobby['model'] ].compact.join(', ')})."
@@ -638,13 +638,23 @@ module PaneyardPlugin
       end
     end
 
-    # nil cancels; otherwise the settings with the directory saved.
+    # nil cancels; otherwise the settings with the directory saved. Here (not
+    # remote mode) it is PANEYARD_PROJECTS_DIR in the plugin's .env, so it is
+    # saved there and Paneyard restarted to take it; against another
+    # machine's Paneyard it is saved there with update_settings.
     def ask_projects_dir(client, current: nil)
       say "Where do new projects go? No projects directory is set yet." unless current
       loop do
         answer = ask("Projects directory, e.g. ~/Source (#{current ? 'Enter keeps it' : 'q cancels'}): ")
         return nil if answer.nil? || answer == "q" || (answer.empty? && current)
         next if answer.empty?
+
+        unless remote
+          EnvFile.set(paths.env_file, "PANEYARD_PROJECTS_DIR", expand_path(answer))
+          say dim("Restarting Paneyard to use it…")
+          restarted = connect!
+          return restarted.settings.tap { |saved| say "Saved: new projects go in #{saved.fetch('projectsDir')}." }
+        end
 
         begin
           return client.update_projects_dir(expand_path(answer)).tap { |saved| say "Saved: new projects go in #{saved.fetch('projectsDir')}." }
@@ -837,6 +847,7 @@ module PaneyardPlugin
     end
 
     def mcp_ui
+      setup_projects_dir
       connect!
       url = "#{@url}/mcp/admin"
       heading "Connect coding agents to Paneyard"
@@ -863,6 +874,43 @@ module PaneyardPlugin
       say dim("New agent sessions will have Paneyard's tools. This setup is safe to run again.")
       show_skill_command
       pause
+    end
+
+    DEFAULT_PROJECTS_DIR = "~/Source"
+
+    # Where this machine clones workspaces it has no checkout of and puts new
+    # projects: PANEYARD_PROJECTS_DIR in the plugin's .env, asked for here
+    # (default ~/Source; the directory may well exist already). Not asked in
+    # remote mode without a runner here, when no job runs on this machine.
+    # A change applies when the daemon next starts, which the next action
+    # does, since the .env changed.
+    def setup_projects_dir
+      return if remote && !remote.runner?
+
+      current = projects_dir_setting
+      heading "Projects directory"
+      say "Where this machine clones a workspace it has no checkout of (as <directory>/<workspace>) when a job"
+      say "runs here, and where new projects go. It may already exist; an existing clone there is reused."
+      answer = ask("Projects directory (Enter for #{current || DEFAULT_PROJECTS_DIR}): ")
+      return if answer.nil?
+
+      return say(dim("Kept the default, #{DEFAULT_PROJECTS_DIR}.\n")) if answer.empty? && current.nil?
+
+      chosen = answer.empty? ? current : answer
+      chosen = File.expand_path(chosen) unless chosen.start_with?("~")
+      if chosen == current
+        say dim("Kept #{chosen}.")
+      else
+        EnvFile.set(paths.env_file, "PANEYARD_PROJECTS_DIR", chosen)
+        say "Saved #{chosen} to #{paths.env_file}."
+      end
+      say ""
+    end
+
+    def projects_dir_setting
+      settings, = EnvFile.load(paths.env_file)
+      value = settings["PANEYARD_PROJECTS_DIR"].to_s.strip
+      value.empty? ? nil : value
     end
 
     # skills/paneyard teaches an agent to queue well. Linked rather than
@@ -1126,10 +1174,14 @@ module PaneyardPlugin
       say error.payload["message"] || error.message
     end
 
+    # In remote mode, a repository PANEYARD_REMOTE_PATHS does not map to the
+    # other machine is registered on this machine's runner, when there is
+    # one: it exists only here, and other runners clone it when they need it.
     def register!(client, path)
       say "#{path} is not in a Paneyard workspace yet. Registering it…"
-      workspace = client.register(path:)
-      say "Registered #{workspace.fetch('name')} (#{workspace.fetch('repositoryPath')}), whose runs start from " \
+      runner = remote.runner_name if remote&.runner? && remote.to_remote(path) == path
+      workspace = runner ? client.register(path:, runner:) : client.register(path:)
+      say "Registered #{workspace.fetch('name')} (#{workspace['repositoryPath'] || path}), whose runs start from " \
         "#{workspace.fetch('defaultBaseBranch')} by default."
       say ""
       workspace
@@ -1280,6 +1332,8 @@ module PaneyardPlugin
         end
         if choice
           say dim("Runs on #{choice}, from its own copy of the branch: push your commits there first.") if choice != mine
+          picked = runners.find { |runner| runner["name"] == choice }
+          say dim("#{choice} has no checkout yet: it clones the repository into its projects directory first.") if picked && picked["checkedOut"] == false
           return choice
         end
 
@@ -1462,6 +1516,7 @@ module PaneyardPlugin
     def register_runner!(client, force: false)
       registration = {
         name: remote.runner_name, url: remote.runner_url, orchestrator_url: remote.url,
+        projects_dir: File.expand_path(projects_dir_setting || DEFAULT_PROJECTS_DIR),
         checkouts: remote.checkouts(client.workspaces)
       }
       stamp = Digest::SHA256.hexdigest(JSON.generate([ registration, runner_daemon.status&.pid ]))

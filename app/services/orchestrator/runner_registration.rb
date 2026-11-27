@@ -2,8 +2,14 @@ module Orchestrator
   # Registering a remote runner, as the register_runner MCP tool does it: a
   # second machine's runner-only process (bin/runner), which the herdr plugin
   # there starts and registers on every start, so this is idempotent -- the
-  # same name again updates its url, its orchestrator url and the checkouts
-  # it names, and leaves everything else as it was.
+  # same name again updates its url, its orchestrator url, its projects
+  # directory and the checkouts it names, and leaves everything else as it
+  # was.
+  #
+  # The projects directory (runners.projects_dir) is where that machine
+  # clones a workspace it has no checkout of (WorkspaceCheckout) and where
+  # create_workspace puts a new project there. A runner that sends none
+  # keeps the one it sent before; one that never sent one gets no clones.
   #
   # Nothing is saved unless the runner answers at url (Runner::Remote#ping).
   # Each checkout is checked on that runner (check_repository, as
@@ -20,7 +26,7 @@ module Orchestrator
     # Returns { runner:, hostname:, checkouts: [{ workspace, repository_path }],
     # problems: [{ "workspace", "code", "message" }] }, or raises Invalid
     # with nothing saved.
-    def register(name:, url:, orchestrator_url:, checkouts: [])
+    def register(name:, url:, orchestrator_url:, checkouts: [], projects_dir: nil)
       name = name.to_s.strip
       raise Invalid, "name is required" if name.empty?
       raise Invalid, "#{name.inspect} is the local runner's name; a remote runner needs another" if name == RegisteredRunner::LOCAL_NAME
@@ -31,6 +37,7 @@ module Orchestrator
 
       record.assign_attributes(kind: "remote", url: url.to_s.strip.delete_suffix("/"),
         orchestrator_url: orchestrator_url.to_s.strip.delete_suffix("/"))
+      record.projects_dir = projects_dir if projects_dir.to_s.strip.present?
       raise Invalid, record.errors.full_messages.to_sentence unless record.valid?
 
       runner = Runner.for(record)
@@ -67,6 +74,7 @@ module Orchestrator
       repository_path = checked.fetch("repository_path")
       row = workspace.checkouts.find_or_initialize_by(runner: record)
       row.update!(repository_path:)
+      workspace.update!(origin_url: checked["origin_url"]) if workspace.origin_url.blank? && checked["origin_url"].present?
       { workspace: workspace.name, repository_path: }
     rescue Runner::Error => error
       problem(workspace_name, "runner_error", "Could not check #{path} on #{record.name}: #{error.message}")

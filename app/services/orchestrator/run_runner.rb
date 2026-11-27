@@ -1,14 +1,18 @@
 module Orchestrator
   # The machine a run is queued on (queue_run's `runner`, Run#runner): the
-  # runner the caller named, else a sensible default. Either way it must have
-  # a checkout of the workspace's repository (Workspace#repository_path_for),
-  # since that is where the run's worktree is made.
+  # runner the caller named, else a sensible default. Any runner will do that
+  # has a checkout of the workspace's repository, or a projects directory to
+  # clone one into when the run launches (WorkspaceCheckout); the local
+  # runner is no different, except that it always has a projects directory.
   #
-  # The default, when no runner is named:
-  #   1. the calling run's own runner, when it has a checkout here: a session
-  #      queuing follow-up work defaults to its own machine;
-  #   2. else the workspace's only runner, when it is checked out on just one;
-  #   3. else the local runner.
+  # The default, when no runner is named, prefers a runner that already has a
+  # checkout:
+  #   1. the calling run's own runner: a session queuing follow-up work
+  #      defaults to its own machine;
+  #   2. else the local runner, when it has a checkout;
+  #   3. else the first runner (by name) that has one, e.g. the remote runner
+  #      a remote-only workspace was registered on;
+  #   4. else the local runner, which clones it.
   # With only the local runner registered, that is always the local runner.
   module RunRunner
     class Invalid < ArgumentError; end
@@ -16,31 +20,45 @@ module Orchestrator
     module_function
 
     def choose!(workspace, requested, caller_run: nil)
-      candidates = candidates(workspace)
       name = requested.to_s.strip.presence
       if name
+        candidates = candidates(workspace)
         return candidates.find { |runner| runner.name == name } || raise(Invalid, problem(workspace, name, candidates))
       end
 
+      local = RegisteredRunner.local
+      checked_out = workspace.checked_out_runners
       own = caller_run&.runner
-      return own if own && candidates.include?(own)
-      return candidates.sole if candidates.one?
+      return own if own && checked_out.include?(own)
+      return local if checked_out.include?(local)
 
-      RegisteredRunner.local
+      checked_out.first || local
     end
 
-    # The runners with a checkout of the workspace, local first. The local
-    # runner always has one: its checkout is workspaces.repository_path.
+    # The registered runner called `name`, or the local one for a blank name.
+    # For tools that take a runner to act on (register_workspace,
+    # create_workspace).
+    def named!(name)
+      name = name.to_s.strip
+      return RegisteredRunner.local if name.empty?
+
+      RegisteredRunner.find_by(name:) ||
+        raise(Invalid, "there is no runner named #{name.inspect}. Runners: #{RegisteredRunner.order(:name).pluck(:name).join(', ')} (list_runners).")
+    end
+
+    # The runners a run of the workspace can be queued on, local first, then
+    # by name: those with a checkout of it, and those that can clone one.
     def candidates(workspace)
       local = RegisteredRunner.local
-      others = RegisteredRunner.where(id: workspace.checkouts.select(:runner_id)).where.not(id: local.id).order(:name)
-      [ local, *others ]
+      runners = [ local, *RegisteredRunner.where.not(id: local.id).order(:name) ]
+      runners.select { |runner| WorkspaceCheckout.available?(workspace, runner) }
     end
 
     def problem(workspace, name, candidates)
-      valid = "Runners with a checkout of #{workspace.name.inspect}: #{candidates.map(&:name).join(', ')}."
+      valid = "Runners that can run #{workspace.name.inspect}: #{candidates.map(&:name).join(', ')}."
       if RegisteredRunner.exists?(name:)
-        "runner #{name.inspect} has no checkout of workspace #{workspace.name.inspect}. #{valid}"
+        "runner #{name.inspect} has no checkout of workspace #{workspace.name.inspect} and no projects directory to " \
+          "clone it into (it sends one when it registers). #{valid}"
       else
         "there is no runner named #{name.inspect}. #{valid}"
       end

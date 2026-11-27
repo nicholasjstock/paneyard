@@ -46,12 +46,17 @@ module PaneyardPlugin
     end
 
     # The server names it after the repository and works out its default branch.
-    def register(path:)
+    # With runner, path is on that runner's machine (this one, in remote
+    # mode), so it is not translated.
+    def register(path:, runner: nil)
+      return local_workspace(@mcp.call_tool("register_workspace", path:, runner:)) if runner
+
       local_workspace(@mcp.call_tool("register_workspace", path: @paths ? @paths.to_remote(path) : path))
     end
 
-    # {"projectsDir", "defaultGithubOwner"}, nil for unset; projectsDir as a
-    # path on this machine.
+    # {"projectsDir", "projectsDirSource", "defaultGithubOwner"}, nil for
+    # unset; projectsDir (the orchestrator's local runner's) as a path on
+    # this machine.
     def settings
       local_settings(@mcp.call_tool("get_settings"))
     end
@@ -98,8 +103,9 @@ module PaneyardPlugin
     # Registers this machine's runner-only process with the orchestrator
     # (remote mode). checkouts' paths are this machine's, as the runner sees
     # them, so they are not translated.
-    def register_runner(name:, url:, orchestrator_url:, checkouts:)
-      @mcp.call_tool("register_runner", name:, url:, orchestratorUrl: orchestrator_url, checkouts:)
+    def register_runner(name:, url:, orchestrator_url:, checkouts:, projects_dir: nil)
+      @mcp.call_tool("register_runner", name:, url:, orchestratorUrl: orchestrator_url, checkouts:,
+        **{ projectsDir: projects_dir }.compact)
     end
 
     # Lets a queued run start without waiting for the runs it was queued after.

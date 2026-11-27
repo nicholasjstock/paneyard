@@ -63,6 +63,39 @@ module PaneyardSandbox
       File.join(root, "remote")
     end
 
+    # Where each machine clones a workspace it has no checkout of
+    # (Orchestrator::WorkspaceCheckout): inside its own root, since a sandbox
+    # clones nowhere else.
+    def projects_dir
+      File.join(root, "projects")
+    end
+
+    def remote_projects_dir
+      File.join(remote_root, "projects")
+    end
+
+    # A repository only the "other machine" has: a bare origin and a clone
+    # of it, both under the remote runner's root (so inside this sandbox's
+    # root too, where its local runner may clone from). Returns the clone.
+    def seed_remote_only_repository!(name)
+      base = File.join(remote_root, "only", name)
+      origin = File.join(base, "origin.git")
+      checkout = File.join(base, "checkout")
+      return checkout if File.directory?(File.join(checkout, ".git"))
+
+      FileUtils.mkdir_p(base)
+      git = ->(*args) { system("git", *args, out: File::NULL, err: File::NULL, exception: true) }
+      git.call("init", "-q", "--bare", "-b", "main", origin)
+      git.call("clone", "-q", origin, checkout)
+      git.call("-C", checkout, "config", "user.email", "sandbox@example.test")
+      git.call("-C", checkout, "config", "user.name", "Paneyard Sandbox")
+      File.write(File.join(checkout, "README.md"), "Only on the other machine.\n")
+      git.call("-C", checkout, "add", "README.md")
+      git.call("-C", checkout, "commit", "-q", "-m", "Initial commit")
+      git.call("-C", checkout, "push", "-q", "-u", "origin", "main")
+      checkout
+    end
+
     def remote_herdr_socket_path
       PaneyardSandbox.herdr_socket_path(remote_root)
     end
@@ -169,7 +202,7 @@ module PaneyardSandbox
       end
       McpClient.new("#{url}/mcp/admin").call_tool(
         "register_runner", name: REMOTE_RUNNER_NAME, url: runner_url, orchestratorUrl: url,
-        checkouts: [ { workspace:, path: checkout } ]
+        projectsDir: remote_projects_dir, checkouts: [ { workspace:, path: checkout } ]
       )
     end
 
@@ -200,6 +233,7 @@ module PaneyardSandbox
         "PANEYARD_ROLE" => nil,
         # The one remote runner this sandbox may call: its own.
         "PANEYARD_SANDBOX_RUNNER_URLS" => runner_url,
+        "PANEYARD_PROJECTS_DIR" => projects_dir,
         "PIDFILE" => File.join(root, "puma.pid")
       }.merge(secret_env).merge(@extra_env)
     end

@@ -2,13 +2,15 @@
 # (update_settings) and applies straight away. Only the keys in KEYS exist;
 # a blank value is no row.
 #
-#   projects_dir          where create_workspace puts a project when it is
-#                         given no path (a directory on the runner's machine)
+# The projects directory is not one: it is per runner
+# (RegisteredRunner#clone_projects_dir), and get_settings/update_settings'
+# projectsDir is the local runner's.
+#
 #   default_github_owner  the GitHub user or organization create_workspace
 #                         creates or clones repositories under when it is
 #                         given no owner (else the gh user)
 class Setting < ApplicationRecord
-  KEYS = %w[projects_dir default_github_owner].freeze
+  KEYS = %w[default_github_owner].freeze
 
   validates :key, presence: true, uniqueness: true, inclusion: { in: KEYS }
 

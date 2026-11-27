@@ -3,6 +3,33 @@ require "tmpdir"
 require_relative "../../../lib/paneyard_plugin"
 
 RSpec.describe PaneyardPlugin::EnvFile do
+  describe ".set" do
+    let(:dir) { Dir.mktmpdir("env-file-set") }
+    let(:path) { File.join(dir, ".env") }
+
+    after { FileUtils.rm_rf(dir) }
+
+    it "starts from the sample, taking the place of its commented-out line" do
+      described_class.set(path, "PANEYARD_PROJECTS_DIR", "~/Source")
+
+      text = File.read(path)
+      expect(text).to include("\nPANEYARD_PROJECTS_DIR=~/Source\n").and include("# PANEYARD_MAX_CONCURRENT_RUNS=4")
+      expect(text).not_to include("# PANEYARD_PROJECTS_DIR=")
+      expect(described_class.load(path).first).to eq("PANEYARD_PROJECTS_DIR" => "~/Source")
+      expect(File.stat(path).mode & 0o777).to eq(0o600)
+    end
+
+    it "replaces the line that sets it, keeps the rest, and quotes a value that needs it" do
+      File.write(path, "PORT=7000\nexport PANEYARD_PROJECTS_DIR=/old\n# a note\n")
+
+      described_class.set(path, "PANEYARD_PROJECTS_DIR", "/home/me/My Projects")
+      described_class.set(path, "PANEYARD_RUNNER_NAME", "laptop")
+
+      expect(File.read(path)).to eq("PORT=7000\nPANEYARD_PROJECTS_DIR=\"/home/me/My Projects\"\n# a note\nPANEYARD_RUNNER_NAME=laptop\n")
+      expect(described_class.load(path).first).to include("PANEYARD_PROJECTS_DIR" => "/home/me/My Projects", "PORT" => "7000")
+    end
+  end
+
   describe ".parse" do
     it "reads dotenv lines" do
       values, warnings = described_class.parse(<<~ENV)

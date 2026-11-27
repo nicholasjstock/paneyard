@@ -143,6 +143,49 @@ RSpec.describe Orchestrator::RunMove, type: :request do
     expect(File.directory?(run.target_root)).to be(true)
   end
 
+  it "moves a run to a runner with no checkout of the workspace, cloning one there first", :fake_herdr do
+    nas_root = File.join(there_root, "nas")
+    nas = RegisteredRunner.create!(name: "nas", kind: "remote", url: "http://nas.tailnet.test:3100", projects_dir: File.join(nas_root, "Source"))
+    on_nas = Orchestrator::Runner::Local.new(runtime_root: File.join(nas_root, "run_sessions"))
+    allow(Orchestrator::Runner).to receive(:resolve).and_wrap_original do |original, record|
+      case record&.name
+      when "mac" then other
+      when "nas" then on_nas
+      else original.call(record)
+      end
+    end
+    # Where the other machine clones it from.
+    workspace.update!(origin_url: workspace.repository_path)
+    run = launched
+    File.write(File.join(run.target_root, "wip.txt"), "wip\n")
+    report(run, "done", "## Ready")
+    expect(Orchestrator::RunMove.destinations(run)).to eq(%w[mac nas])
+
+    moved = described_class.call(run, to: "nas")
+
+    clone = File.join(nas_root, "Source", workspace.name)
+    expect(moved).to include(from: "local", to: "nas", reopen_error: nil)
+    expect(workspace.reload.repository_path_for(nas)).to eq(clone)
+    expect(run.reload).to have_attributes(runner: nas, source_root: clone)
+    expect(File.read(File.join(run.target_root, "wip.txt"))).to eq("wip\n")
+  end
+
+  it "refuses before closing anything when the destination cannot clone the workspace", :fake_herdr do
+    nas = RegisteredRunner.create!(name: "nas", kind: "remote", url: "http://nas.tailnet.test:3100", projects_dir: File.join(there_root, "nas"))
+    on_nas = Orchestrator::Runner::Local.new(runtime_root: File.join(there_root, "nas-rt"))
+    allow(Orchestrator::Runner).to receive(:resolve).and_wrap_original do |original, record|
+      record&.name == "nas" ? on_nas : original.call(record)
+    end
+    workspace.update!(origin_url: File.join(there_root, "no-such-origin.git"))
+    run = launched
+    report(run, "done", "## Ready")
+
+    expect(refusal(run, to: "nas")).to include("Could not check workspace", "git clone")
+    expect(run.reload.live_session).to be_present
+    expect(run.runner.name).to eq("local")
+    expect(workspace.checkouts.reload.map { |checkout| checkout.runner.name }).to contain_exactly("local", "mac")
+  end
+
   it "is admin-only" do
     expect(Orchestrator::AdminMcpServer::TOOLS).to include(McpTools::MoveRunTool)
     expect(Orchestrator::RunMcpServer::TOOLS).not_to include(McpTools::MoveRunTool)

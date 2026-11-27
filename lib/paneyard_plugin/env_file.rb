@@ -31,6 +31,13 @@ module PaneyardPlugin
       # PANEYARD_CLAUDE_MODEL=opus
       # PANEYARD_CODEX_MODEL=
 
+      # Where this machine clones a workspace it has no checkout of, as
+      # <directory>/<workspace name>, when a job runs here, and where new
+      # projects go (default ~/Source). The setup action asks for it. With
+      # PANEYARD_RUNNER_URL it is sent to the Paneyard this machine hosts
+      # jobs for.
+      # PANEYARD_PROJECTS_DIR=~/Source
+
       # A fixed port for /mcp/admin and /mcp/run. By default Paneyard picks a
       # free one the first time and keeps it.
       # PORT=
@@ -82,6 +89,32 @@ module PaneyardPlugin
       true
     rescue Errno::EEXIST
       false
+    end
+
+    # Sets KEY=value in the file, keeping everything else as it is: the
+    # line that sets it is replaced, else the sample's commented-out one,
+    # else it is appended. A missing file starts from the sample.
+    def set(path, key, value)
+      raise ArgumentError, "#{key} is not a setting name" unless key.match?(KEY)
+
+      write_sample(path)
+      lines = File.read(path).lines.map(&:chomp)
+      line = "#{key}=#{quote(value)}"
+      index = lines.index { |text| text.strip.delete_prefix("export ").match?(/\A#{Regexp.escape(key)}\s*=/) } ||
+        lines.index { |text| text.match?(/\A#\s*#{Regexp.escape(key)}\s*=/) }
+      index ? lines[index] = line : lines << line
+      File.write(path, lines.join("\n") + "\n", perm: 0o600)
+      value
+    end
+
+    # A value as parse reads it back: bare when it is plain, else in double
+    # quotes.
+    def quote(value)
+      value = value.to_s
+      return value if value.match?(%r{\A[A-Za-z0-9_./~:@%+,=-]*\z})
+
+      escapes = { "\\" => "\\\\", '"' => '\\"', "\n" => "\\n", "\t" => "\\t", "\r" => "\\r" }
+      '"' + value.gsub(/[\\"\n\t\r]/) { |char| escapes.fetch(char) } + '"'
     end
 
     # Returns [values, warnings].

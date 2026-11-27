@@ -10,10 +10,12 @@ require "open3"
 # reports through /mcp/run, reconcile rides out the runner going away, and
 # Close session has the janitor remove the worktree over there.
 #
-# The run is created directly on the remote one. The second example moves a
-# run between the two machines with move_run (Orchestrator::RunMove): its
-# commits, uncommitted changes, untracked files and transcripts go over and
-# back, through the orchestrator.
+# The run is created directly on the remote one. The second example has the
+# other machine clone a workspace it has no checkout of when a run launches
+# there (Orchestrator::WorkspaceCheckout), and registers a repository only it
+# has. The third moves a run between the two machines with move_run
+# (Orchestrator::RunMove): its commits, uncommitted changes, untracked files
+# and transcripts go over and back, through the orchestrator.
 RSpec.describe "a run on a remote runner", type: :request do
   include_context "launched runs"
 
@@ -110,6 +112,46 @@ RSpec.describe "a run on a remote runner", type: :request do
 
     # The janitor's sweep reaches the remote runner too, and finds nothing left.
     expect { WorktreeCleanupJob.perform_now }.not_to raise_error
+  end
+
+  it "clones a workspace the other machine has no checkout of when a run launches there, and registers one only it has", :fake_herdr do
+    projects = File.join(remote_root, "Source")
+    registered = mcp_call("/mcp/admin", "register_runner", name: "mac", url: @runner_process.url,
+      orchestratorUrl: "http://box.tailnet.test:7263", projectsDir: projects)
+    expect(registered).to include("projectsDir" => projects, "checkouts" => [])
+    # The origin the other machine clones, readable from there.
+    workspace.update!(origin_url: workspace.repository_path)
+
+    queued = mcp_call("/mcp/admin", "queue_run", task: "Exercise a clone", workspace: workspace.name, runner: "mac")
+    expect(queued).to include("runner" => "mac", "clonesAtLaunch" => true)
+    run = Run.find_by!(run_id: queued.fetch("runId"))
+    perform_enqueued_jobs(only: [ RunDispatchJob, StartRunSessionJob ]) { RunDispatchJob.perform_later }
+    run.reload
+    clone = File.join(projects, workspace.name)
+    expect(run).to have_attributes(status: "running", source_root: clone, launch_error: nil)
+    expect(git(clone, "rev-parse", "HEAD")).to eq(git(workspace.repository_path, "rev-parse", "main"))
+    expect(run.target_root).to start_with(remote_root)
+    expect(workspace.repository_path_for(RegisteredRunner.find_by!(name: "mac"))).to eq(clone)
+    expect(@remote_herdr.requests_for("worktree.create").last).to include("cwd" => clone, "base" => "main")
+    expect(fake_herdr.requests).to be_empty
+    report(run, "done", "## Cloned and done")
+    Orchestrator::SessionClose.call(run)
+    expect(File.directory?(clone)).to be(true)
+
+    # A repository that is only on that machine registers there, and only
+    # that checkout is recorded.
+    only_there = File.join(remote_root, "only-there")
+    system("git", "clone", "-q", workspace.repository_path, only_there, exception: true)
+    system("git", "-C", only_there, "remote", "set-url", "origin", "https://example.test/only-there.git", exception: true)
+
+    added = mcp_call("/mcp/admin", "register_workspace", path: only_there, runner: "mac")
+
+    expect(added).to include("name" => "only-there", "repositoryPath" => nil, "originUrl" => "https://example.test/only-there.git")
+    expect(added["runners"]).to include({ "name" => "mac", "kind" => "remote", "repositoryPath" => only_there, "checkedOut" => true })
+    expect(Workspace.find_by!(name: "only-there").checkouts.map { |checkout| checkout.runner.name }).to eq([ "mac" ])
+    defaulted = mcp_call("/mcp/admin", "queue_run", task: "Over there by default", workspace: "only-there")
+    expect(defaulted).to include("runner" => "mac")
+    expect(defaulted).not_to have_key("clonesAtLaunch")
   end
 
   def git(dir, *args)
