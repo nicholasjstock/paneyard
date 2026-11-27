@@ -37,6 +37,8 @@ class Run < ApplicationRecord
   has_many :run_sessions, dependent: :destroy
   # The run's own history: one row per time a session reported going idle.
   has_many :checkpoints, -> { chronological }, class_name: "RunCheckpoint", inverse_of: :run, dependent: :destroy
+  # Each time it moved between runners (Orchestrator::RunMove), oldest first.
+  has_many :moves, -> { chronological }, class_name: "RunMoveRecord", inverse_of: :run, dependent: :destroy
 
 
   validates :run_id, presence: true, uniqueness: true

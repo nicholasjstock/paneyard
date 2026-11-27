@@ -1,4 +1,5 @@
 require "rails_helper"
+require "open3"
 
 # A run on a remote runner, end to end, with two machines' worth of runner
 # on this one: the orchestrator here (this process, its own fake herdr, the
@@ -9,8 +10,10 @@ require "rails_helper"
 # reports through /mcp/run, reconcile rides out the runner going away, and
 # Close session has the janitor remove the worktree over there.
 #
-# queue_run cannot choose a runner yet (phase 3), so the run is created
-# directly on the remote one.
+# The run is created directly on the remote one. The second example moves a
+# run between the two machines with move_run (Orchestrator::RunMove): its
+# commits, uncommitted changes, untracked files and transcripts go over and
+# back, through the orchestrator.
 RSpec.describe "a run on a remote runner", type: :request do
   include_context "launched runs"
 
@@ -107,5 +110,99 @@ RSpec.describe "a run on a remote runner", type: :request do
 
     # The janitor's sweep reaches the remote runner too, and finds nothing left.
     expect { WorktreeCleanupJob.perform_now }.not_to raise_error
+  end
+
+  def git(dir, *args)
+    output, error, status = Open3.capture3("git", "-C", dir.to_s, *args)
+    raise "git #{args.join(' ')} failed in #{dir}: #{error}" unless status.success?
+
+    output
+  end
+
+  def claude_project(config_dir, cwd)
+    File.join(config_dir, "projects", File.realpath(cwd).gsub(/[^A-Za-z0-9]/, "-"))
+  end
+
+  it "moves a run with its uncommitted work to the other machine and reopens it there, then back again", :fake_herdr do
+    there = clone_there
+    mcp_call("/mcp/admin", "register_runner", name: "mac", url: @runner_process.url,
+      orchestratorUrl: "http://box.tailnet.test:7263", checkouts: [ { workspace: workspace.name, path: there } ])
+    run = queue_and_launch("Exercise a move")
+    here = run.target_root
+    expect(run.runner).to eq(RegisteredRunner.local)
+    # The session's work so far: a commit, a staged and an unstaged change,
+    # an untracked file, and a conversation the CLI kept for this worktree.
+    git(here, "config", "user.email", "agent@example.test")
+    git(here, "config", "user.name", "Agent")
+    File.write(File.join(here, "feature.rb"), "feature\n")
+    git(here, "add", "feature.rb")
+    git(here, "commit", "-q", "-m", "Add feature")
+    File.write(File.join(here, "README.md"), "staged\n")
+    git(here, "add", "README.md")
+    File.write(File.join(here, "feature.rb"), "feature, unfinished\n")
+    File.write(File.join(here, "notes.md"), "untracked notes\n")
+    project_here = claude_project(File.join(TRANSCRIPT_SOURCES_ROOT, "claude"), here)
+    FileUtils.mkdir_p(project_here)
+    File.write(File.join(project_here, "conv-1.jsonl"), "#{JSON.generate('type' => 'user', 'cwd' => here)}\n")
+    report(run, "done", "## Halfway there")
+    commits = git(here, "rev-parse", "HEAD")
+
+    moved = mcp_call("/mcp/admin", "move_run", workspace: workspace.name, runId: run.run_id, toRunner: "mac")
+
+    run.reload
+    expect(moved).to include("from" => "local", "runner" => "mac", "status" => "queued", "reopened" => "kept",
+      "closed" => { "outcome" => "done", "worktree" => "kept" })
+    expect(moved["sourceWorktree"]).to eq("path" => here, "state" => "kept")
+    expect(moved["transferred"]).to include("changedFiles" => contain_exactly("README.md", "feature.rb"),
+      "untrackedFiles" => [ "notes.md" ], "staged" => true, "transcripts" => [ "claude/conv-1.jsonl" ])
+    expect(run.runner.name).to eq("mac")
+    expect(run.target_root).to start_with(remote_root)
+    expect(run.source_root).to eq(there)
+    # The work is over there, uncommitted as it was; and still here.
+    gone = run.target_root
+    expect(git(gone, "rev-parse", "HEAD")).to eq(commits)
+    expect(git(gone, "diff", "--cached", "--name-only").split).to eq([ "README.md" ])
+    expect(File.read(File.join(gone, "feature.rb"))).to eq("feature, unfinished\n")
+    expect(File.read(File.join(gone, "notes.md"))).to eq("untracked notes\n")
+    expect(File.read(File.join(here, "notes.md"))).to eq("untracked notes\n")
+    expect(git(there, "rev-parse", "refs/heads/#{run.branch_name}")).to eq(commits)
+    # The transcript is where claude over there looks for the new worktree.
+    placed = File.join(claude_project(File.join(@runner_process.root, "home", ".claude"), gone), "conv-1.jsonl")
+    expect(JSON.parse(File.read(placed))["cwd"]).to eq(gone)
+    expect(get_run = mcp_call("/mcp/admin", "get_run", workspace: workspace.name, runId: run.run_id))
+      .to include("runner" => "mac", "moves" => [ include("from" => "local", "to" => "mac", "leftBehind" => here, "leftBehindState" => "kept") ])
+    # Queued again over there: not movable until its session is up.
+    expect(get_run).not_to have_key("moveTo")
+
+    perform_enqueued_jobs(only: [ RunDispatchJob, StartRunSessionJob ]) { RunDispatchJob.perform_later }
+    session = run.reload.live_session
+    expect(session).to have_attributes(status: "running")
+    expect(@remote_herdr.requests_for("worktree.open").last).to include("path" => gone)
+    prompt = @remote_herdr.requests_for("agent.prompt").last["text"]
+    expect(prompt).to include("# Reopened", "## Halfway there", "moved this run from runner `local` to `mac`")
+    expect(JSON.parse(File.read(session.mcp_config_path)).dig("mcpServers", "paneyard", "url")).to eq("http://box.tailnet.test:7263/mcp/run")
+
+    # More work over there, then back to this machine, where the worktree it
+    # left is still exactly as it was carried away.
+    File.write(File.join(gone, "notes.md"), "untracked notes, longer\n")
+    report(run, "done", "## Done over there")
+    expect(mcp_call("/mcp/admin", "get_run", workspace: workspace.name, runId: run.run_id)["moveTo"]).to eq([ "local" ])
+
+    back = mcp_call("/mcp/admin", "move_run", workspace: workspace.name, runId: run.run_id, toRunner: "local")
+
+    run.reload
+    expect(back).to include("from" => "mac", "runner" => "local", "reopened" => "kept")
+    expect(back["sourceWorktree"]).to include("path" => gone, "state" => "kept")
+    expect(run.target_root).to eq(here)
+    expect(File.read(File.join(here, "notes.md"))).to eq("untracked notes, longer\n")
+    expect(git(here, "diff", "--cached", "--name-only").split).to eq([ "README.md" ])
+    expect(run.moves.map(&:source_worktree)).to eq(%w[reused kept])
+
+    # The janitor keeps what holds work, on both machines.
+    WorktreeCleanupJob.perform_now
+    expect(File.directory?(gone)).to be(true)
+    expect(File.directory?(here)).to be(true)
+  ensure
+    FileUtils.rm_rf(project_here) if project_here
   end
 end

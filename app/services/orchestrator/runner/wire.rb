@@ -14,7 +14,7 @@ module Orchestrator
     #
     # Only plain data crosses, as it already does in process (Runner::Local):
     # strings, numbers, booleans, nil, and hashes and arrays of them. A
-    # binary string (an attachment's content) is not valid JSON text, so it
+    # binary string (an attachment's content, a moved run's bundle) is not valid JSON text, so it
     # crosses as { "$base64" => ... } and comes back out as a binary string.
     #
     # A session spec (open_session, launch_agent) is a symbol-keyed hash in
@@ -40,6 +40,7 @@ module Orchestrator
         open_session launch_agent agent_state send_prompt snapshot process_alive? terminate
         close_workspace close_workspace! notify
         available_models store_attachment attachments attachments_dir save_transcripts
+        known_commits export_run import_run restore_transcripts
       ].freeze
 
       # The error classes that cross, by name. Anything else a runner raised

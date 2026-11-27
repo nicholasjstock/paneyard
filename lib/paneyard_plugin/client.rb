@@ -81,6 +81,14 @@ module PaneyardPlugin
       @mcp.call_tool("reopen_session", runId: run_id, workspace:)
     end
 
+    # Moving a run to another runner can carry a whole branch both ways.
+    MOVE_TIMEOUT = 600
+
+    def move(run_id, workspace:, to_runner:, force: false)
+      mcp = PaneyardSandbox::McpClient.new("#{@url}/mcp/admin", client_name: "paneyard-herdr-plugin", timeout: MOVE_TIMEOUT)
+      mcp.call_tool("move_run", runId: run_id, workspace:, toRunner: to_runner, force:)
+    end
+
     # {"state", "branch", "switchedFrom", "herdrWorkspace", ...}: the
     # workspace's lobby, opened on branch (or found open on it).
     def open_lobby(workspace:, branch: nil, driver: nil, model: nil)

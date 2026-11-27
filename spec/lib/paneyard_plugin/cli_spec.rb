@@ -426,6 +426,52 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(out.string).to include("Its branch no longer exists.")
     end
 
+    describe "moving a run to another runner" do
+      let(:idle) do
+        parent.merge("status" => "awaiting_review", "runner" => "local", "reopenable" => false, "moveTo" => [ "mac" ],
+          "session" => { "live" => true, "status" => "done" })
+      end
+
+      before { allow(client).to receive(:run).with(parent["runId"], workspace: "app").and_return(idle) }
+
+      it "offers its one other runner and moves it there once confirmed" do
+        allow(client).to receive(:move).and_return(
+          "runner" => "mac", "from" => "local", "worktree" => "/there/app-7efb", "reopened" => "kept",
+          "sourceWorktree" => { "path" => "/code/.herdr/app-7efb", "state" => "kept" }
+        )
+
+        run_cli("runs-ui", input: "2\nm\ny\n\n")
+
+        expect(out.string).to include("m to move it to mac", "Resuming its conversation on another machine is not verified")
+        expect(client).to have_received(:move).with(parent["runId"], workspace: "app", to_runner: "mac", force: false)
+        expect(out.string).to include("Moved to mac: /there/app-7efb.", "Kept its worktree on local, /code/.herdr/app-7efb",
+          "Reopened: it starts when a slot frees.")
+      end
+
+      it "asks which runner when there are several, forces a session still working, and moves nothing without a yes" do
+        working = idle.merge("moveTo" => %w[mac spare], "session" => { "live" => true, "status" => "running" })
+        allow(client).to receive(:run).with(parent["runId"], workspace: "app").and_return(working)
+        allow(client).to receive(:move).and_return("runner" => "spare", "from" => "local", "reopened" => "kept", "sourceWorktree" => {})
+
+        run_cli("runs-ui", input: "2\nm\n2\nn\n\n")
+        expect(client).not_to have_received(:move)
+        expect(out.string).to include("m to move it to another runner", "stops it mid-turn", "Left it where it is.")
+
+        run_cli("runs-ui", input: "2\nm\nspare\ny\n\n")
+        expect(client).to have_received(:move).with(parent["runId"], workspace: "app", to_runner: "spare", force: true)
+      end
+
+      it "shows why the server refused to move it" do
+        allow(client).to receive(:move).and_raise(
+          PaneyardSandbox::McpClient::ToolError.new("refused", { "error" => "not_movable", "message" => "Branch has diverged there." })
+        )
+
+        run_cli("runs-ui", input: "2\nm\ny\n\n")
+
+        expect(out.string).to include("Branch has diverged there.")
+      end
+    end
+
     it "does not offer to reopen a run that cannot be" do
       allow(client).to receive(:run).with(parent["runId"], workspace: "app").and_return(parent.merge("reopenable" => false))
       allow(client).to receive(:reopen)

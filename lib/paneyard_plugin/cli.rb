@@ -982,6 +982,8 @@ module PaneyardPlugin
         options << "f to go to its herdr workspace" if live && session["herdrWorkspace"]
         options << "c to close its session" if live
         options << "o to reopen its session" if run["reopenable"]
+        move_to = Array(run["moveTo"])
+        options << (move_to.one? ? "m to move it to #{move_to.first}" : "m to move it to another runner") if move_to.any?
         waiting = %w[waiting blocked].include?(run.dig("dependencies", "state"))
         options << "s to start it without waiting" if waiting
         options += [ "r to re-read", "b back", "q quit" ]
@@ -1003,6 +1005,12 @@ module PaneyardPlugin
           next unless run["reopenable"]
 
           reopen!(client, workspace, run)
+          pause
+          return :quit
+        when "m"
+          next unless move_to.any?
+
+          move!(client, workspace, run, move_to)
           pause
           return :quit
         when "s"
@@ -1069,6 +1077,42 @@ module PaneyardPlugin
         "Its herdr workspace opens when it starts."
     rescue PaneyardSandbox::McpClient::ToolError => error
       say error.payload["message"] || error.message
+    end
+
+    # Move to <runner>: move_run carries the branch, uncommitted changes and
+    # transcripts to that runner and reopens the run there.
+    def move!(client, workspace, run, destinations)
+      to = destinations.one? ? destinations.first : ask_destination(destinations)
+      return say("Left it where it is.") unless to
+
+      working = run.dig("session", "live") && run.dig("session", "status") == "running"
+      say ""
+      say "Moving closes its session#{' (it is still working: this stops it mid-turn)' if working}, carries its branch, " \
+        "uncommitted changes, untracked files"
+      say "and transcripts to #{to}'s checkout, and reopens it there. Nothing is committed or pushed. Its worktree on " \
+        "#{run['runner']} is kept unless its work is saved."
+      say dim("Resuming its conversation on another machine is not verified; if it cannot, it starts fresh with its report.")
+      return say("Left it where it is.") unless ask("Move #{run.fetch('runId')} to #{to}? [y/N] ")&.downcase == "y"
+
+      moved = client.move(run.fetch("runId"), workspace: workspace.fetch("name"), to_runner: to, force: working)
+      say bold("Moved to #{moved.fetch('runner')}: #{moved['worktree']}.")
+      left = moved.fetch("sourceWorktree", {})
+      case left["state"]
+      when "removed" then say "Its worktree on #{moved['from']} was removed (its work was saved)."
+      when "kept" then say "Kept its worktree on #{moved['from']}, #{left['path']}: it has uncommitted or unpushed work."
+      when "error" then say "Could not check its worktree on #{moved['from']}: #{left['error']}"
+      end
+      say(moved["reopened"] ? "Reopened: it starts when a slot frees." : "Not reopened: #{moved['reopenError']}")
+    rescue PaneyardSandbox::McpClient::ToolError => error
+      say error.payload["message"] || error.message
+    end
+
+    def ask_destination(destinations)
+      destinations.each_with_index { |name, index| say dim(format("%3d  %s", index + 1, name)) }
+      answer = ask("Move to (a number or name; Enter to cancel): ").to_s
+      return destinations[answer.to_i - 1] if answer.match?(/\A\d+\z/) && answer.to_i.positive?
+
+      destinations.find { |name| name == answer }
     end
 
     def release!(client, workspace, run)

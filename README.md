@@ -241,6 +241,12 @@ Some things differ with a remote server:
 
 [Operating](./docs/operating.md#as-a-herdr-plugin) has the details.
 
+#### Running jobs on your machine too, and moving them
+
+Your machine can also host the server's jobs, in its own herdr on its own checkouts. Add `PANEYARD_RUNNER_URL` to its `.env`, the tailnet URL its runner will answer on, and expose that port the same way (`tailscale serve --bg --https=7264 http://127.0.0.1:7264`). The plugin then runs a runner here and registers it with the server, with every checkout here of the server's workspaces. Once a workspace is checked out on both machines, the queue popup asks which machine a job runs on.
+
+To move a job from one machine to the other, open its screen in the jobs popup and press `m` (**Move to** the other machine), or ask your agent to `move_run` it. Paneyard closes its session if it is idle (one still working is refused unless you force it), and carries over its branch, uncommitted changes (staged ones staged again), untracked files and saved conversation transcripts. It checks that the new worktree matches the old one, then reopens the job there. Nothing is committed or pushed, and files git ignores (dependencies, build output, `.env` files) stay behind. The worktree on the machine it left stays until its work is saved, as any closed job's would. Resuming the agent's conversation on the other machine has not been verified yet. If it doesn't resume, the job starts fresh with its task and newest report, as a reopened job does. [Moving a run](./docs/operating.md#moving-a-run-to-another-runner) has the details.
+
 ### Running without the plugin
 
 Paneyard is an ordinary Rails app, and the plugin only packages it. To run it from a clone instead (as its contributors do):

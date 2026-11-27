@@ -50,7 +50,7 @@ module Orchestrator
         was removed while closed (only ever once its work was saved), made again from the branch. Your `paneyard`
         MCP connection is a new one; report through `report_idle` as before. Do not start new work on your own:
         check the worktree is as you left it, call `report_idle` with where the run stands, and wait for the
-        operator. Call `job_finished` only if later explicitly asked to end the job/session, after all requested actions
+        operator. #{moved_note(run)} Call `job_finished` only if later explicitly asked to end the job/session, after all requested actions
         succeed and this clean worktree's branch is merged into `#{run.base_branch}` or fully pushed. Include the
         requested PR's URL in the final summary. A push or merge alone leaves this session open.
       PROMPT
@@ -131,7 +131,24 @@ module Orchestrator
         `#{run.base_branch}`, and anything left uncommitted. #{report}Do not start new work on your own: check the
         worktree (`git status`, `git log #{run.base_branch}..HEAD`) against that report and the task below, call
         `report_idle` with where the run stands, and wait for the operator.
+        #{moved_note(run)}
       SECTION
+    end
+
+    # A run that moved to another machine since its last session ended
+    # (Orchestrator::RunMove): the worktree is a new one there, rebuilt from
+    # the old one, which the agent should know before it trusts paths it
+    # remembers.
+    def moved_note(run)
+      move = run.moves.last
+      previous = run.run_sessions.where.not(ended_at: nil).order(:ended_at).last
+      return "" if move.nil? || (previous && move.created_at < previous.ended_at)
+
+      "Since that session, the operator moved this run from runner `#{move.from_runner.name}` to " \
+        "`#{move.to_runner.name}`, another machine: `#{run.target_root}` is a new worktree there, with the " \
+        "branch's commits and the uncommitted changes and untracked files carried over from " \
+        "`#{move.source_target_root.presence || 'the branch alone'}`. Paths outside this worktree may differ " \
+        "here, and anything ignored by git (dependencies, build output, local env files) did not come along."
     end
 
     def task_section(run)

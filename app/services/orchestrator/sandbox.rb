@@ -15,7 +15,11 @@ module Orchestrator
   #     sandbox root (herdr picks where the worktree itself goes: the fake herdr
   #     beside the repository, so inside the root too);
   #   - processes: a session pid is only signalled if it is a fake agent;
-  #   - CLI transcripts: copied only for a worktree under the sandbox root;
+  #   - CLI transcripts: copied only for a worktree under the sandbox root,
+  #     and a moved run's written into a CLI's config only when that config
+  #     is under the root too (Runner::Transcripts.restore);
+  #   - moving a run (Runner::RunTransfer): only repositories under the root,
+  #     and `git fetch origin` only from an origin inside it;
   #   - GitHub: never; a sandbox cannot start a new project (create_workspace),
   #     which would make a real GitHub repository;
   #   - remote runners: only the sandbox's own runner-only process, a loopback

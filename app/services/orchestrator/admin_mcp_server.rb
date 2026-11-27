@@ -10,9 +10,10 @@ module Orchestrator
   #
   # register_workspace, register_runner, create_workspace, get_settings, update_settings,
   # update_workspace_layout, list_runners, close_session,
-  # reopen_session, update_run_dependencies and open_lobby are the tools only
+  # reopen_session, move_run, update_run_dependencies and open_lobby are the tools only
   # this endpoint has beyond ping: changing what Paneyard manages or what panes
-  # a run starts, ending a session or bringing one back, letting a run start
+  # a run starts, ending a session or bringing one back, moving a run to
+  # another machine, letting a run start
   # without the work it was queued after, starting a new project (which makes
   # a GitHub repository) or where projects go, or switching the operator's own
   # checkout for their lobby, is the operator's decision, while a run session
@@ -36,6 +37,7 @@ module Orchestrator
       ::McpTools::UpdateWorkspaceLayoutTool,
       ::McpTools::CloseSessionTool,
       ::McpTools::ReopenSessionTool,
+      ::McpTools::MoveRunTool,
       ::McpTools::UpdateRunDependenciesTool,
       ::McpTools::OpenLobbyTool
     ].freeze
@@ -64,7 +66,8 @@ module Orchestrator
       "asking the operator to merge them in order; it waits, holding no slot, until that work is merged into the " \
       "shared baseBranch. A workspace's lobby (open_lobby) is the operator's own integration session on its " \
       "checkout; open one only when the operator asks. Pass runner to queue_run only when the operator names a " \
-      "machine to run a job on (list_runners lists them); otherwise leave it out.".freeze
+      "machine to run a job on (list_runners lists them); otherwise leave it out. Move a run to another runner " \
+      "(move_run) only when the operator asks.".freeze
 
     def build
       MCP::Server.new(

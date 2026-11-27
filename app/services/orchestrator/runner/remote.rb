@@ -21,11 +21,15 @@ module Orchestrator
       # Most calls answer in well under a second. Launching an agent waits
       # for the CLI to come up and take its prompt (with restarts:
       # SessionLauncher), creating a project clones and pushes, and saving
-      # transcripts copies files, so the ceiling is generous; a call that
+      # transcripts copies files, and moving a run fetches and carries its
+      # whole branch, so the ceiling is generous; a call that
       # hits it is Unreachable, not a failure of the thing asked for.
       READ_TIMEOUT = 60
       SLOW_READ_TIMEOUT = 600
-      SLOW_METHODS = %w[launch_agent create_project provision_worktree save_transcripts available_models].freeze
+      SLOW_METHODS = %w[
+        launch_agent create_project provision_worktree save_transcripts available_models
+        known_commits export_run import_run restore_transcripts
+      ].freeze
       # ping only says the runner is there (list_runners, registration).
       PING_READ_TIMEOUT = 5
 
@@ -54,7 +58,7 @@ module Orchestrator
         request["Accept"] = "application/json"
         request.body = JSON.generate("method" => method, "args" => Wire.encode(args), "kwargs" => Wire.encode(kwargs))
         response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
-          open_timeout: OPEN_TIMEOUT, read_timeout: read_timeout(method), write_timeout: OPEN_TIMEOUT) do |http|
+          open_timeout: OPEN_TIMEOUT, read_timeout: read_timeout(method), write_timeout: write_timeout(method)) do |http|
           http.request(request)
         end
         answer(method, response)
@@ -83,6 +87,11 @@ module Orchestrator
         return PING_READ_TIMEOUT if method == "ping"
 
         SLOW_METHODS.include?(method) ? SLOW_READ_TIMEOUT : READ_TIMEOUT
+      end
+
+      # import_run sends a whole branch's bundle up.
+      def write_timeout(method)
+        SLOW_METHODS.include?(method) ? SLOW_READ_TIMEOUT : OPEN_TIMEOUT
       end
 
       def guard!

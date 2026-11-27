@@ -15,7 +15,7 @@ module PaneyardSandbox
 
     Scenario = Struct.new(:name, :directive, :run_id, keyword_init: true)
 
-    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session register_runner].freeze
+    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session register_runner move_run].freeze
 
     # remote_runner: the name of a runner-only process the instance started
     # and registered (Instance#register_remote_runner!), to run a session on
@@ -51,6 +51,8 @@ module PaneyardSandbox
       step(pushed.name) { verify_finalization(pushed, pushed: true) }
       if @remote_runner
         step("remote runner: launched there, reports here over HTTP, closed, worktree reclaimed there") { verify_remote }
+        moving = queue("move_run: a dirty run moved to the remote runner, reopened there, both worktrees kept", "dirty")
+        step(moving.name) { verify_move(moving) }
       end
 
       @out.puts(@failures.empty? ? "sandbox verify: all green" : "sandbox verify: #{@failures.size} failed")
@@ -98,6 +100,32 @@ module PaneyardSandbox
       run = wait_for_run(scenario) { |detail| detail["status"] == "completed" }
       expect(run.dig("session", "live") == false, "session still live after Close session")
       expect(!File.directory?(run["worktree"]), "clean worktree #{run['worktree']} was not reclaimed on the remote runner")
+    end
+
+    # A run with uncommitted work, launched here and moved to the remote
+    # runner: its session is closed, the work carried over through this
+    # instance, and the run reopened over there, where its fresh session
+    # reports again. The worktree it left here is kept (it is dirty), and so
+    # is the new one once closed.
+    def verify_move(scenario)
+      here = wait_for_run(scenario) { |detail| detail["checkpoints"]&.any? }.fetch("worktree")
+      moved = @admin.call_tool("move_run", runId: scenario.run_id, workspace: @workspace, toRunner: @remote_runner)
+      @out.puts("    move_run: #{moved['from']} -> #{moved['runner']}; left #{moved.dig('sourceWorktree', 'state')}; reopened #{moved['reopened'].inspect}")
+      remote_root = File.realpath(@instance.remote_root)
+      expect(moved["runner"] == @remote_runner && moved["reopened"] == "kept", "move_run answered #{JSON.generate(moved)[0, 400]}")
+      expect(File.realpath(moved["worktree"]).start_with?("#{remote_root}/"), "moved worktree #{moved['worktree']} is not the remote runner's")
+      expect(File.exist?(File.join(moved["worktree"], "FAKE_AGENT_CHANGES.md")), "the uncommitted file did not move")
+      expect(moved.dig("sourceWorktree", "state") == "kept" && File.exist?(File.join(here, "FAKE_AGENT_CHANGES.md")),
+        "the dirty worktree here was not kept: #{moved['sourceWorktree']}")
+
+      run = wait_for_run(scenario, timeout: @timeout + 30) { |detail| detail["checkpoints"].to_a.size >= 2 }
+      expect(run["runner"] == @remote_runner, "runner #{run['runner']} after the move")
+      expect(run["checkpoints"].last["summary"].to_s.include?(remote_root), "reported from #{run['checkpoints'].last['summary']}")
+      expect(Array(run["moves"]).size == 1, "moves #{run['moves']}")
+
+      close(scenario)
+      run = wait_for_run(scenario) { |detail| detail["status"] == "completed" }
+      expect(File.exist?(File.join(run["worktree"], "FAKE_AGENT_CHANGES.md")), "dirty moved worktree #{run['worktree']} was removed")
     end
 
     def verify_finalization(scenario, pushed: false)

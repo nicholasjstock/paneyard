@@ -1,7 +1,8 @@
 # Multi-runner: one orchestrator, a runner on each machine
 
-Status: phases 1, 2 and 3 of 4 implemented on the `multi-runner` branch (the runner registry and a runner per
-run; a runner-only process and `Runner::Remote`; choosing a runner and per-runner caps). Phase 4 is planned.
+Status: all four phases implemented on the `multi-runner` branch (the runner registry and a runner per run; a
+runner-only process and `Runner::Remote`; choosing a runner and per-runner caps; moving a run between runners).
+Resuming a conversation on another machine after a move still needs live verification by the operator.
 The four phases land on `multi-runner` and go into `main` as a
 single pull request. Where a build changes the plan, the plan is updated to match.
 
@@ -140,29 +141,47 @@ client, no concurrency or plugin changes.
   worktree. Reconcile skips an unreachable runner's sessions for the sweep (phase 2). Still to do: model
   discovery per runner (`list_models` still asks the local one).
 
-### 4. `move_run`
+### 4. `move_run` (done)
 
-An admin tool (and plugin action) that moves a run from runner A to runner B:
+An admin-only tool, `move_run(workspace, runId, toRunner, force)`, and the plugin run screen's `m` (**Move to
+<runner>**; `get_run`'s `moveTo` lists the candidates), moving a run from runner A to runner B
+(`Orchestrator::RunMove`):
 
-1. **Close on A.** The ordinary Close session path (`SessionClose`), so the CLI is gone and nothing writes to
-   the worktree. Transcripts are saved as they are today (`save_transcripts`).
-2. **Export from A.** A's runner produces, as data the orchestrator relays:
-   - the branch's commits since its base as a **git bundle**;
-   - the **uncommitted state**: a binary diff of tracked changes (staged and unstaged) against HEAD, and a
-     **tarball of untracked files** (respecting `.gitignore`);
-   - the session's saved **transcripts**.
-3. **Import on B.** B's runner fetches the bundle into its checkout, creates the run's worktree on the
-   branch (`provision_worktree`, as a reopen would), applies the diff and unpacks the untracked tarball,
-   and puts the transcripts where B's CLI looks for them.
-4. **Reopen on B.** `runs.runner_id` becomes B and the run is reopened (`SessionReopen`). The CLI resumes
-   the conversation when it can; when it cannot (a different path or CLI install), the existing fresh-start
-   fallback (`RunPrompt.compose_reopened`, the task plus the newest checkpoint) covers it.
-5. **A's worktree** is then an ordinary closed run's worktree there, kept until its work is safe, which the
-   janitor checks as it does today. Nothing is force-removed.
+1. **Check, then close on A.** B is another registered runner with a checkout of the workspace, the run has a
+   branch, it is not queued or starting, and a session still working is refused unless forced. B is asked
+   which of the run's base commits it has (`known_commits`, fetching origin there if one is missing, read-only)
+   *before* anything changes, so an unreachable B refuses with nothing touched. A live session then goes
+   through the ordinary Close session path (`SessionClose`), which saves its transcripts.
+2. **Export from A** (`export_run`, `Runner::RunTransfer` and `Runner::Transcripts`), as plain data the
+   orchestrator relays:
+   - the branch as a **git bundle**, leaving out the base commits B already has (the whole branch when it has
+     none, e.g. a base branch that was never pushed);
+   - the **uncommitted state**: binary diffs of the staged (`HEAD` to index) and unstaged (index to worktree)
+     changes, a **tar of untracked files** (respecting `.gitignore`; pure Ruby, so it reads the same on Linux and
+     macOS), and a **fingerprint**: HEAD, the index's tree and the whole worktree's tree (written with a
+     scratch index), comparable by object id across machines;
+   - the run's saved **transcripts**.
+3. **Import on B** (`import_run`): the bundle is fetched into a local branch of the same name (created, or
+   fast-forwarded; a diverging branch is refused), the worktree provisioned on it (`Worktrees.provision!`),
+   the staged diff applied with `--index`, the unstaged one and the untracked files on top, and the result
+   checked against the fingerprint. A failure undoes the import there (the worktree and branch it made are
+   copies of work still on A). Then `restore_transcripts` puts the transcripts where B's CLI looks for the new
+   worktree (claude's `projects/<encoded cwd>/`, codex's `sessions/YYYY/MM/DD/`), rewriting their recorded cwd.
+4. **Reopen on B.** `runs.runner_id`, `target_root` and `source_root` become B's, the move is recorded
+   (`run_moves`, `RunMoveRecord`: from, to, what crossed, the worktree left behind), and the run is reopened
+   (`SessionReopen`). The CLI resumes the conversation when it can; when it cannot, the existing fresh-start
+   fallback (`RunPrompt.compose_reopened`, the task plus the newest checkpoint, now with a note that the run
+   moved) covers it. Resume across machines is not confirmed live.
+5. **A's worktree** is released by the usual rule (`release_worktree`), usually kept, and stays in the
+   janitor's view through its `run_moves` row (`WorktreeJanitor.sweep_left_behind`) until its work is saved.
+   Nothing is force-removed. Moving the run back to A reuses that worktree, reset first, only while its
+   fingerprint is still the one it left with (`import_run`'s `replaceable`); one changed since is refused.
 
 Paneyard still never commits or pushes: the bundle carries commits the session already made, and the
-uncommitted state crosses as a diff and a tarball, never as a commit. The transfer goes through the
-orchestrator (runner A to orchestrator to runner B) so runners never need to reach each other.
+uncommitted state crosses as diffs and a tarball, never as a commit. The transfer goes through the
+orchestrator (runner A to orchestrator to runner B) so runners never need to reach each other. In a sandbox,
+moving stays inside its root: repository paths are guarded, origin is fetched only when it is inside the root,
+and transcripts are written into a CLI's config only when that is inside the root.
 
 ## The single-machine guarantee
 
@@ -185,4 +204,9 @@ A single-machine install stays zero-config and behaves exactly as today, through
   `Runner::Endpoint` specs over real HTTP, the sandbox's runner-url guard, and a remote-runner scenario in
   `bin/sandbox verify`.
 - Phases 3 and 4 extend the same, so a run can be queued on and moved between two runners without a second
-  real machine.
+  real machine. Phase 4: `spec/services/orchestrator/runner/run_transfer_spec.rb` (real git: two clones and a
+  bare origin; committed-only, staged and unstaged, untracked, binary and symlinked files, a base never
+  pushed, a diverging destination branch, a failed fingerprint undoing itself, moving back), the transcripts'
+  export and placement, `spec/services/orchestrator/run_move_spec.rb` (refusals, an unreachable destination,
+  a failure after closing, the janitor and the worktree left behind), a move there and back in
+  `spec/integration/remote_runner_lifecycle_spec.rb`, and a move in `bin/sandbox verify`.

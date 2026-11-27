@@ -27,15 +27,24 @@ module Orchestrator
     end
 
     # Returns the number of worktrees removed. Each runner is handed only its
-    # own runs' worktrees, in its own checkout of the repository.
+    # own runs' worktrees, in its own checkout of the repository, and the
+    # worktrees runs left behind on it when they moved to another runner
+    # (RunMoveRecord), by the same rule.
     def sweep(workspace)
-      finished(workspace).includes(:runner).group_by(&:runner).sum do |runner, runs|
+      reclaimed = finished(workspace).includes(:runner).group_by(&:runner).sum do |runner, runs|
         worktrees = runs.map { |run| { "path" => run.target_root, "base_branch" => run.base_branch } }
         Runner.for(runner).reclaim_worktrees(repository_path: workspace.repository_path_for(runner), worktrees:)
       rescue Runner::Error => error
         Rails.logger.warn("WorktreeJanitor: #{workspace.name} on #{runner.name}: #{error.message}")
         0
       end
+      reclaimed + sweep_left_behind(workspace)
+    end
+
+    def sweep_left_behind(workspace)
+      moves = RunMoveRecord.left_behind.joins(:run).where(runs: { workspace_id: workspace.id }).includes(:run, :from_runner)
+      moves.reject { |move| move.run.runner_id == move.from_runner_id && move.run.target_root == move.source_target_root }
+        .group_by(&:from_runner).sum { |runner, left| RunMove.sweep_left_behind(runner, left) }
     end
 
     # The workspace's runs with a worktree of their own whose session is over

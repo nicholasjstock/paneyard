@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_25_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_120000) do
   create_table "lobbies", force: :cascade do |t|
     t.integer "workspace_id", null: false
     t.string "branch", null: false
@@ -34,6 +34,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_190000) do
     t.text "summary"
     t.index ["run_id"], name: "index_run_checkpoints_on_run_id"
     t.index ["run_session_id"], name: "index_run_checkpoints_on_run_session_id"
+  end
+
+  create_table "run_moves", force: :cascade do |t|
+    t.integer "run_id", null: false
+    t.integer "from_runner_id", null: false
+    t.integer "to_runner_id", null: false
+    t.string "source_repository_path", null: false
+    t.string "source_target_root"
+    t.string "source_worktree", default: "none", null: false
+    t.text "source_worktree_error"
+    t.string "target_root", null: false
+    t.json "transferred", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["from_runner_id"], name: "index_run_moves_on_from_runner_id"
+    t.index ["run_id"], name: "index_run_moves_on_run_id"
+    t.index ["to_runner_id"], name: "index_run_moves_on_to_runner_id"
   end
 
   create_table "run_sessions", force: :cascade do |t|
@@ -143,6 +160,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_190000) do
   add_foreign_key "lobbies", "workspaces"
   add_foreign_key "run_checkpoints", "run_sessions"
   add_foreign_key "run_checkpoints", "runs"
+  add_foreign_key "run_moves", "runners", column: "from_runner_id"
+  add_foreign_key "run_moves", "runners", column: "to_runner_id"
+  add_foreign_key "run_moves", "runs"
   add_foreign_key "run_sessions", "runs"
   add_foreign_key "runs", "runners"
   add_foreign_key "runs", "workspaces"

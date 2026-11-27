@@ -8,7 +8,7 @@ module Orchestrator
     # answer the same calls with the same plain data -- and the modules beside
     # it (Runner::Herdr, SessionLauncher, SessionLayout, SessionArgs,
     # Worktrees, Repositories, Projects, GitHub, ClaudeTrust, CodexTrust, ConfigFile,
-    # ModelDiscovery, Attachments, Transcripts) are its internals, which nothing outside
+    # ModelDiscovery, Attachments, Transcripts, RunTransfer) are its internals, which nothing outside
     # Orchestrator::Runner uses.
     #
     # Errors leave as Runner::Error (or Runner::Unreachable when herdr never
@@ -278,6 +278,46 @@ module Orchestrator
         raise Error, error.message
       rescue SystemCallError, IOError => error
         raise Error, "could not save #{driver} transcripts for #{run_id}: #{error.message}"
+      end
+
+      # --- Moving a run between runners (RunTransfer) ------------------------
+      #
+      # The orchestrator relays what export_run returns to the other runner's
+      # import_run (Orchestrator::RunMove); runners never reach each other.
+
+      # Which of `commits` the repository has, after fetching origin when any
+      # is missing: { "have", "fetched", "fetch_error" }.
+      def known_commits(repository_path:, commits:)
+        RunTransfer.known_commits(repository_path:, commits:)
+      end
+
+      # The run's branch as a bundle (leaving out `exclude`, commits the other
+      # side has), the uncommitted state of its worktree at `path` if it is
+      # still there, and its saved CLI transcripts. See RunTransfer.export.
+      def export_run(run_id:, repository_path:, branch:, path: nil, exclude: [])
+        exported = RunTransfer.export(repository_path:, branch:, path:, exclude:)
+        exported.merge("transcripts" => Transcripts.export(runtime_root:, run_id:))
+      rescue SystemCallError, IOError => error
+        raise Error, "could not export run #{run_id}: #{error.message}"
+      end
+
+      # The run's worktree here, on `branch` at `head`, from export_run's
+      # bundle and worktree state, checked against its fingerprint and opened
+      # by herdr as provision_worktree's is. `replaceable` is worktrees the run
+      # left here, with the fingerprints they left with. See
+      # RunTransfer.import.
+      def import_run(repository_path:, branch:, base_branch:, label:, head:, bundle: nil, worktree: nil, replaceable: [])
+        RunTransfer.import(repository_path:, branch:, base_branch:, label:, head:, bundle:, worktree:, replaceable:)
+      end
+
+      # export_run's transcripts, put where this machine's CLI looks for the
+      # conversations of `cwd`. Returns { "saved", "placed", "skipped" }.
+      def restore_transcripts(run_id:, cwd:, source_cwd:, transcripts:)
+        Transcripts.restore(runtime_root:, run_id:, cwd:, source_cwd:, transcripts:)
+      rescue Sandbox::Violation => error
+        raise Error, error.message
+      rescue SystemCallError, IOError => error
+        raise Error, "could not restore the transcripts of #{run_id}: #{error.message}"
       end
 
       private
