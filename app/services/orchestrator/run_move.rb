@@ -75,6 +75,9 @@ module Orchestrator
     def transfer(run, source:, target:, source_record:, destination:, destination_repository:, have:, closed:)
       source_repository = WorktreeJanitor.repository_for(run)
       source_root = run.target_root if run.managed_worktree? && run.target_root != source_repository
+      # Close session already removed a clean, saved worktree: nothing is left
+      # behind (found live, where it was recorded as kept).
+      source_root = nil if closed&.fetch(:worktree, nil) == "removed"
       exported = source.export_run(run_id: run.run_id, repository_path: source_repository, branch: run.branch_name,
         path: source_root, exclude: have)
       imported = target.import_run(
@@ -210,6 +213,11 @@ module Orchestrator
     # The worktree left behind, by the same rule as any closed run's.
     def release_source!(move, source, run)
       return if move.source_target_root.blank?
+      # Gone already, removed by hand or by an earlier release: nothing is
+      # left for the janitor to keep sweeping.
+      unless source.worktree_registered?(repository_path: move.source_repository_path, path: move.source_target_root)
+        return move.update!(source_worktree: "removed", source_worktree_error: nil)
+      end
 
       removed = source.release_worktree(repository_path: move.source_repository_path, path: move.source_target_root,
         base_branch: run.base_branch)

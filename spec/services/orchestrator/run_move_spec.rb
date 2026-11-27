@@ -73,6 +73,9 @@ RSpec.describe Orchestrator::RunMove, type: :request do
       moved = described_class.call(run, to: "mac", force: true)
 
       expect(moved[:closed]).to include(worktree: "removed")
+      # The close removed it, so nothing was left behind.
+      expect(moved[:source_worktree]).to eq("none")
+      expect(run.moves.sole).to have_attributes(source_target_root: nil, source_worktree: "none")
       expect(session.reload).not_to be_live
       expect(run.reload).to have_attributes(status: "queued")
       expect(run.runner.name).to eq("mac")
@@ -184,6 +187,22 @@ RSpec.describe Orchestrator::RunMove, type: :request do
     expect(run.reload.live_session).to be_present
     expect(run.runner.name).to eq("local")
     expect(workspace.checkouts.reload.map { |checkout| checkout.runner.name }).to contain_exactly("local", "mac")
+  end
+
+  it "counts a left-behind worktree that is gone, removed by hand, as removed", :fake_herdr do
+    run = launched
+    File.write(File.join(run.target_root, "wip.txt"), "wip\n")
+    report(run, "done", "## Ready")
+    here = run.target_root
+    described_class.call(run, to: "mac")
+    move = run.moves.sole
+    expect(move.source_worktree).to eq("kept")
+
+    git(workspace.repository_path, "worktree", "remove", "--force", here)
+
+    expect(Orchestrator::WorktreeJanitor.sweep(workspace)).to eq(1)
+    expect(move.reload.source_worktree).to eq("removed")
+    expect(RunMoveRecord.left_behind).to be_empty
   end
 
   it "is admin-only" do
