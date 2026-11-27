@@ -9,6 +9,7 @@ RSpec.describe Orchestrator::Runner::Transcripts, :transcripts do
 
   before do
     allow(described_class).to receive(:claude_config_dir).and_return(claude_dir)
+    allow(described_class).to receive(:usual_claude_config_dirs).and_return([])
     allow(described_class).to receive(:codex_home).and_return(codex_home)
   end
 
@@ -57,6 +58,17 @@ RSpec.describe Orchestrator::Runner::Transcripts, :transcripts do
       write(File.join(project_dir(worktree), "abc.jsonl"))
 
       expect(save("claude").map { File.basename(it) }).to eq([ "abc.jsonl" ])
+    end
+
+    # Confirmed live: the plugin daemon has no CLAUDE_CONFIG_DIR, while claude
+    # in the operator's login shell keeps its conversations in ~/.config/claude.
+    it "also finds the project in a usual config directory other than this process's own" do
+      xdg = File.join(root, "xdg-claude")
+      allow(described_class).to receive(:usual_claude_config_dirs).and_return([ xdg, File.join(root, "missing") ])
+      write(File.join(xdg, "projects", File.realpath(worktree).gsub(/[^A-Za-z0-9]/, "-"), "abc.jsonl"), "xdg\n")
+
+      expect(File.read(save("claude").sole)).to eq("xdg\n")
+      expect(Dir.exist?(File.join(root, "missing"))).to be(false)
     end
 
     # run-20261012-174300-3933: claude never began a conversation.

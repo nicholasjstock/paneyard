@@ -15,8 +15,10 @@ module Orchestrator
     # worktree path alone, with no session id needed -- a session that never
     # reported one (or never started a conversation) is still covered:
     #
-    #   - claude: <CLAUDE_CONFIG_DIR or ~/.claude>/projects/<cwd with every
-    #     character but letters and digits turned into "-">/, one <id>.jsonl
+    #   - claude: <config>/projects/<cwd with every character but letters
+    #     and digits turned into "-">/, where <config> is CLAUDE_CONFIG_DIR or
+    #     ~/.claude, and also ~/.claude and ~/.config/claude where they exist
+    #     (claude_config_dirs: the login shell's may differ), one <id>.jsonl
     #     per conversation, beside per-conversation directories (subagents,
     #     tool results). The whole directory is copied.
     #   - codex: <CODEX_HOME or ~/.codex>/sessions/YYYY/MM/DD/rollout-*.jsonl,
@@ -59,15 +61,32 @@ module Orchestrator
       end
 
       # The cwd as given and as the filesystem resolves it (/tmp is
-      # /private/tmp on macOS), since which one claude saw is not known.
+      # /private/tmp on macOS), since which one claude saw is not known, in
+      # every config directory claude might use (claude_config_dirs).
       def claude_project_dirs(cwd)
         paths = [ cwd.to_s ]
         paths << File.realpath(cwd.to_s) if File.exist?(cwd.to_s)
-        paths.uniq.map { |path| File.join(claude_config_dir, "projects", path.gsub(/[^A-Za-z0-9]/, "-")) }
+        claude_config_dirs.product(paths.uniq).map do |config, path|
+          File.join(config, "projects", path.gsub(/[^A-Za-z0-9]/, "-"))
+        end.uniq
+      end
+
+      # claude runs in the operator's login shell, whose CLAUDE_CONFIG_DIR
+      # this process may not have (as for ClaudeTrust): the herdr plugin's
+      # daemon was confirmed live to run without it, saving and placing
+      # transcripts under ~/.claude while claude used ~/.config/claude, so a
+      # moved run's conversation could not be resumed. So this process's own
+      # directory, and each usual one that exists.
+      def claude_config_dirs
+        [ claude_config_dir, *usual_claude_config_dirs.select { |dir| Dir.exist?(dir) } ].map { |dir| File.expand_path(dir) }.uniq
       end
 
       def claude_config_dir
         ENV["CLAUDE_CONFIG_DIR"].presence || File.join(Dir.home, ".claude")
+      end
+
+      def usual_claude_config_dirs
+        [ File.join(Dir.home, ".claude"), File.join(Dir.home, ".config", "claude") ]
       end
 
       def save_codex(target, cwd, since)

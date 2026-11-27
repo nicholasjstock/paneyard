@@ -14,6 +14,7 @@ RSpec.describe Orchestrator::Runner::Transcripts, :transcripts do
 
   before do
     allow(described_class).to receive(:claude_config_dir).and_return(claude_dir)
+    allow(described_class).to receive(:usual_claude_config_dirs).and_return([])
     allow(described_class).to receive(:codex_home).and_return(codex_home)
   end
 
@@ -26,6 +27,18 @@ RSpec.describe Orchestrator::Runner::Transcripts, :transcripts do
 
   def restore(transcripts)
     described_class.restore(runtime_root: there, run_id: "run-1", cwd: new_cwd, source_cwd: old_cwd, transcripts:)
+  end
+
+  it "puts claude's in every usual config directory that exists, since which one claude uses is the login shell's" do
+    xdg = File.join(root, "there", "xdg-claude").tap { |dir| FileUtils.mkdir_p(dir) }
+    allow(described_class).to receive(:usual_claude_config_dirs).and_return([ xdg, File.join(root, "there", "missing") ])
+
+    restored = restore([ { "driver" => "claude", "path" => "abc.jsonl", "content" => "{}\n".b } ])
+
+    encoded = File.realpath(new_cwd).gsub(/[^A-Za-z0-9]/, "-")
+    expect(restored["placed"]).to include(File.join(claude_dir, "projects", encoded, "abc.jsonl"),
+      File.join(xdg, "projects", encoded, "abc.jsonl"))
+    expect(Dir.exist?(File.join(root, "there", "missing"))).to be(false)
   end
 
   it "exports every saved file, by driver and relative path, as binary" do

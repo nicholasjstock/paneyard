@@ -9,6 +9,7 @@ RSpec.configure do |config|
     next if example.metadata[:transcripts]
 
     allow(Orchestrator::Runner::Transcripts).to receive(:claude_config_dir).and_return(File.join(TRANSCRIPT_SOURCES_ROOT, "claude"))
+    allow(Orchestrator::Runner::Transcripts).to receive(:usual_claude_config_dirs).and_return([])
     allow(Orchestrator::Runner::Transcripts).to receive(:codex_home).and_return(File.join(TRANSCRIPT_SOURCES_ROOT, "codex"))
   end
 end
