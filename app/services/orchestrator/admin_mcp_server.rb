@@ -35,7 +35,8 @@ module Orchestrator
       ::McpTools::CloseSessionTool,
       ::McpTools::ReopenSessionTool,
       ::McpTools::UpdateRunDependenciesTool,
-      ::McpTools::OpenLobbyTool
+      ::McpTools::OpenLobbyTool,
+      ::McpTools::SendSessionMessageTool
     ].freeze
 
     # Clients that surface server instructions (Claude Code does) get the one
@@ -61,7 +62,9 @@ module Orchestrator
       "others. When one job must build on another's work, queue it with after: [that job's runId] rather than " \
       "asking the operator to merge them in order; it waits, holding no slot, until that work is merged into the " \
       "shared baseBranch. A workspace's lobby (open_lobby) is the operator's own integration session on its " \
-      "checkout; open one only when the operator asks.".freeze
+      "checkout; open one only when the operator asks. When the operator asks you to pass something on to a " \
+      "running job (\"send run X this finding\"), call send_session_message with its workspace and runId: it " \
+      "types the message into that job's session; do not use it on your own initiative.".freeze
 
     def build
       MCP::Server.new(

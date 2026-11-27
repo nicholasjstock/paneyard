@@ -17,7 +17,8 @@ RSpec.describe "the admin MCP endpoint", type: :request do
     names = Orchestrator::AdminMcpServer::TOOLS.map(&:tool_name)
 
     expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces", "list_models", "register_workspace",
-      "create_workspace", "get_settings", "update_settings", "update_workspace_layout", "close_session", "reopen_session", "update_run_dependencies", "open_lobby")
+      "create_workspace", "get_settings", "update_settings", "update_workspace_layout", "close_session", "reopen_session", "update_run_dependencies", "open_lobby",
+      "send_session_message")
   end
 
   it "tells clients how to find or register the workspace before queuing" do

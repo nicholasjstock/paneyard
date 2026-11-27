@@ -48,6 +48,7 @@ The first public version. It includes:
 - Sessions leave changes uncommitted; commit, push and merge into `main` each happen only when the operator asks for that step.
 - Reports: a session calls `report_idle` (`done`, `blocked`, `failed`) with a Markdown summary each time it stops, and reports accumulate as checkpoints on the run screen.
 - A message box on the run screen that types into the live session, and **Close session** to end it and free its slot.
+- `send_session_message` on `/mcp/admin` and `/mcp/run`: when the operator asks an agent to pass something on to another running job, it types the message into that job's live session through herdr, refusing a session that is not live, still starting, or waiting at a permission prompt. From a run, only other runs of the same workspace.
 - **Reopen session** queues a closed run again on its existing branch, restores its kept worktree or recreates one, and resumes the previous CLI conversation where possible; otherwise it starts fresh with the task and latest report.
 - Attachments added at launch are handed to the session as file paths.
 - Reconciliation that notices within about 30 seconds when a session dies without reporting, and keeps the agent pane's last screen when a launch fails.

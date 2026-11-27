@@ -19,7 +19,7 @@
 #                        run lifecycle through it end to end (see
 #                        PaneyardSandbox::Verify); exits non-zero on failure
 #
-# Queue a run with a `[fake-agent: done|blocked|failed|dirty|crash|manual|working]`
+# Queue a run with a `[fake-agent: done|blocked|failed|dirty|crash|manual|working|approval]`
 # directive in its task to choose what the fake agent does (default: done).
 #
 # To try the real thing, opt Herdr back in:

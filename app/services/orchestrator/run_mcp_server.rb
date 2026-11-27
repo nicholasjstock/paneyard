@@ -11,7 +11,9 @@ module Orchestrator
   # workspace-scoped env vars a future run's process needs, and
   # queuing/inspecting runs (shared with AdminMcpServer,
   # since a session spinning off follow-up work or checking a sibling run is
-  # the same operation an external MCP client does through /mcp/admin).
+  # the same operation an external MCP client does through /mcp/admin), and
+  # passing a message the operator asked for on to a sibling run's session
+  # (send_session_message, also shared).
   module RunMcpServer
     module_function
 
@@ -21,7 +23,8 @@ module Orchestrator
       ::McpTools::QueueRunTool,
       ::McpTools::ListRunsTool,
       ::McpTools::GetRunTool,
-      ::McpTools::ListWorkspacesTool
+      ::McpTools::ListWorkspacesTool,
+      ::McpTools::SendSessionMessageTool
     ].freeze
 
     # Belt and braces: clients that surface server instructions (Claude Code
@@ -29,7 +32,8 @@ module Orchestrator
     # because not every driver is known to show these.
     INSTRUCTIONS = "Orchestrator tools for an agent session. Call report_idle every time you stop working; " \
       "call job_finished only when explicitly asked to end your job, after completing requested work and a verified merge or push. The " \
-      "others are optional, e.g. queue_run / list_runs / get_run / list_workspaces for other jobs. Files, shell " \
+      "others are optional, e.g. queue_run / list_runs / get_run / list_workspaces for other jobs, and " \
+      "send_session_message to pass something on to another run's session, only when the operator asks you to. Files, shell " \
       "and git are yours to do directly; there are no tools for them.".freeze
 
     def build(server_context:)
