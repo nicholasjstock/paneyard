@@ -944,6 +944,7 @@ module PaneyardPlugin
         say run.dig("dependencies", "reason") if run.dig("dependencies", "reason")
         say dim(run["worktree"]) if run["worktree"]
         say "Launch error: #{run['launchError']}" if run["launchError"]
+        say run["stopReason"] if run["stopReason"]
         show_report(run)
         say ""
         options = []
@@ -952,6 +953,8 @@ module PaneyardPlugin
         options << "o to reopen its session" if run["reopenable"]
         waiting = %w[waiting blocked].include?(run.dig("dependencies", "state"))
         options << "s to start it without waiting" if waiting
+        cancellable = run["status"] == "queued" && !live
+        options << "x to cancel it" if cancellable
         options += [ "r to re-read", "b back", "q quit" ]
         case ask("#{options.join(', ')}: ")
         when nil, "q" then return :quit
@@ -977,6 +980,12 @@ module PaneyardPlugin
           next unless waiting
 
           release!(client, workspace, run)
+          pause
+          return :quit
+        when "x"
+          next unless cancellable
+
+          cancel!(client, workspace, run)
           pause
           return :quit
         end
@@ -1046,6 +1055,18 @@ module PaneyardPlugin
 
       client.release(run.fetch("runId"), workspace: workspace.fetch("name"))
       say bold("Released. It starts when a slot frees.")
+    rescue PaneyardSandbox::McpClient::ToolError => error
+      say error.payload["message"] || error.message
+    end
+
+    def cancel!(client, workspace, run)
+      say ""
+      say "Cancelling takes it out of the queue: it never starts, and runs queued after it show as blocked."
+      say "Reopening it later queues it again."
+      return say("Left it queued.") unless ask("Cancel #{run.fetch('runId')}? [y/N] ")&.downcase == "y"
+
+      cancelled = client.cancel(run.fetch("runId"), workspace: workspace.fetch("name"))
+      say bold("Cancelled. Run #{cancelled.fetch('status')}.")
     rescue PaneyardSandbox::McpClient::ToolError => error
       say error.payload["message"] || error.message
     end

@@ -358,6 +358,46 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(out.string).to include("Released.")
     end
 
+    it "offers to cancel a queued run, and cancels it once confirmed" do
+      allow(client).to receive(:run).with(child["runId"], workspace: "app").and_return(child)
+      allow(client).to receive(:cancel).and_return("runId" => child["runId"], "status" => "stopped")
+
+      run_cli("runs-ui", input: "1\nx\ny\n\n")
+
+      expect(out.string).to include("x to cancel it", "never starts", "Cancelled. Run stopped.")
+      expect(client).to have_received(:cancel).with(child["runId"], workspace: "app")
+    end
+
+    it "cancels nothing without a yes" do
+      allow(client).to receive(:run).with(child["runId"], workspace: "app").and_return(child)
+      allow(client).to receive(:cancel)
+
+      run_cli("runs-ui", input: "1\nx\n\n\n")
+
+      expect(client).not_to have_received(:cancel)
+      expect(out.string).to include("Left it queued.")
+    end
+
+    it "shows why the server refused to cancel it" do
+      allow(client).to receive(:run).with(child["runId"], workspace: "app").and_return(child)
+      allow(client).to receive(:cancel).and_raise(
+        PaneyardSandbox::McpClient::ToolError.new("refused", { "error" => "not_cancellable", "message" => "Run is launching, not queued." })
+      )
+
+      run_cli("runs-ui", input: "1\nx\ny\n\n")
+
+      expect(out.string).to include("Run is launching, not queued.")
+    end
+
+    it "offers no cancel for a run that is not queued" do
+      allow(client).to receive(:cancel)
+
+      run_cli("runs-ui", input: "2\nx\nq\n")
+
+      expect(out.string).not_to include("x to cancel")
+      expect(client).not_to have_received(:cancel)
+    end
+
     it "offers to reopen a closed run's session, and reopens it once confirmed" do
       allow(client).to receive(:reopen).and_return(
         "status" => "queued", "worktree" => "recreated", "queuedBehind" => 0, "capacity" => { "inFlight" => 4, "limit" => 4 }
