@@ -243,9 +243,36 @@ Some things differ with a remote server:
 
 #### Running jobs on your machine too, and moving them
 
-Your machine can also host the server's jobs, in its own herdr on its own checkouts. Add `PANEYARD_RUNNER_URL` to its `.env`, the tailnet URL its runner will answer on, and expose that port the same way (`tailscale serve --bg --https=7264 http://127.0.0.1:7264`). The plugin then runs a runner here and registers it with the server, with every checkout here of the server's workspaces and this machine's projects directory. The queue popup then asks which machine a job runs on. A machine with no checkout of the workspace clones it into its projects directory when the job starts there, with its own git credentials (over https or ssh, whichever works there), so it needs read access to the repository; moving a job to it does the same. A repository you have only on this machine registers with this machine's runner, and the server clones it when it needs it there.
+What the plugin starts on a machine depends on its `.env`:
 
-To move a job from one machine to the other, open its screen in the jobs popup and press `m` (**Move to** the other machine), or ask your agent to `move_run` it. Paneyard closes its session if it is idle (one still working is refused unless you force it), and carries over its branch, uncommitted changes (staged ones staged again), untracked files and saved conversation transcripts. It checks that the new worktree matches the old one, then reopens the job there. Nothing is committed or pushed, and files git ignores (dependencies, build output, `.env` files) stay behind. The worktree on the machine it left stays until its work is saved, as any closed job's would. Resuming the agent's conversation on the other machine has not been verified yet. If it doesn't resume, the job starts fresh with its task and newest report, as a reopened job does. [Moving a run](./docs/operating.md#moving-a-run-to-another-runner) has the details.
+| `.env` | What runs on this machine |
+|---|---|
+| neither `PANEYARD_REMOTE_URL` nor `PANEYARD_RUNNER_URL` (the default) | All of Paneyard: the queue, the database, both MCP endpoints, and this machine's own runner, in one process. Jobs run here. |
+| `PANEYARD_REMOTE_URL` only | Nothing. The plugin drives the server, and jobs run there. |
+| `PANEYARD_REMOTE_URL` and `PANEYARD_RUNNER_URL` | Only a runner (`bin/runner`), registered with the server, so jobs can run here or there. |
+
+To make your machine a runner too, add these to its `.env` beside `PANEYARD_REMOTE_URL` and `PANEYARD_REMOTE_PATHS`:
+
+```sh
+PANEYARD_RUNNER_URL=https://laptop.example.ts.net:7264   # the tailnet URL the server reaches this runner at
+PANEYARD_RUNNER_PORT=7264                                # its loopback port; must match tailscale serve below
+# PANEYARD_RUNNER_NAME=laptop                            # defaults to this machine's host name
+# PANEYARD_PROJECTS_DIR=~/Source                         # where it clones a workspace it lacks (paneyard.setup asks)
+```
+
+Expose that port to your tailnet only, then run any Paneyard action, which starts the runner and registers it:
+
+```sh
+tailscale serve --bg --https=7264 http://127.0.0.1:7264
+```
+
+Without `PANEYARD_RUNNER_PORT` the runner picks a free port of its own, which `tailscale serve` would not be forwarding to. The server must answer its tailnet name ([step 2 above](#running-paneyard-on-another-machine)), since sessions on this machine report to it there.
+
+On each start of the runner, and whenever the checkouts here change, the plugin registers it with the server: its name, URL and projects directory, and every checkout here of the server's workspaces. A checkout is refused, with a warning in `herdr plugin log list --plugin paneyard`, when this clone lacks the workspace's default base branch. `list_runners` shows each runner and whether the server can reach it. The queue popup then asks which machine a job runs on. A machine with no checkout of the workspace clones it into its projects directory when the job starts there, with its own git credentials. It tries the repository's recorded URL first, then the same repository over the other protocol (https or ssh), so a machine with only one kind of credential still gets its clone. It needs read access to the repository; moving a job to it does the same. A repository you have only on this machine registers with this machine's runner, and the server clones it when it needs it there.
+
+Updating means installing the new version on both machines: the runner restarts on its next action, like the server.
+
+To move a job from one machine to the other, open its screen in the jobs popup and press `m` (**Move to** the other machine), or ask your agent to `move_run` it. Paneyard closes its session if it is idle (one still working is refused unless you force it), and carries over its branch, uncommitted changes (staged ones staged again), untracked files and saved conversation transcripts. It checks that the new worktree matches the old one, then reopens the job there. Nothing is committed or pushed, and files git ignores (dependencies, build output, `.env` files) stay behind. The worktree on the machine it left stays until its work is saved, as any closed job's would. The agent's conversation resumes on the other machine; that was confirmed live with Claude Code between Linux and macOS, and Codex has not been tried yet. If it doesn't resume, the job starts fresh with its task and newest report, as a reopened job does. [Moving a run](./docs/operating.md#moving-a-run-to-another-runner) has the details.
 
 ### Running without the plugin
 

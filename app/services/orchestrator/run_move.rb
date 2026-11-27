@@ -25,8 +25,8 @@ module Orchestrator
   #      record the move (RunMoveRecord), and reopen through SessionReopen. The new
   #      session resumes the conversation if that CLI can find it there, and
   #      otherwise starts fresh with the task and newest report
-  #      (RunPrompt.compose_reopened). Resuming across machines has not been
-  #      confirmed live; nothing here relies on it.
+  #      (RunPrompt.compose_reopened). Resuming claude across machines was
+  #      confirmed live (codex untried); nothing here relies on it.
   #   6. Release the source worktree through the runner's usual rule
   #      (release_worktree: removed only if clean and saved). It is usually
   #      kept, being dirty or unpushed; the RunMoveRecord row keeps it in the

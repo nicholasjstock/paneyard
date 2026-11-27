@@ -175,7 +175,8 @@ An admin-only tool, `move_run(workspace, runId, toRunner, force)`, and the plugi
    (`run_moves`, `RunMoveRecord`: from, to, what crossed, the worktree left behind), and the run is reopened
    (`SessionReopen`). The CLI resumes the conversation when it can; when it cannot, the existing fresh-start
    fallback (`RunPrompt.compose_reopened`, the task plus the newest checkpoint, now with a note that the run
-   moved) covers it. Resume across machines is not confirmed live.
+   moved) covers it. Resume across machines was confirmed live for claude (macOS and Linux, both ways);
+   codex is untried.
 5. **A's worktree** is released by the usual rule (`release_worktree`), usually kept, and stays in the
    janitor's view through its `run_moves` row (`WorktreeJanitor.sweep_left_behind`) until its work is saved.
    Nothing is force-removed. Moving the run back to A reuses that worktree, reset first, only while its

@@ -46,8 +46,8 @@ module McpTools
         # kept (the moved worktree) once queued again; nil with reopenError.
         reopened: moved[:reopened]&.fetch(:worktree),
         reopen_error: moved[:reopen_error],
-        resume_note: "Whether the agent's conversation resumes on another machine has not been verified live; " \
-          "if it cannot, the session starts fresh with the task and newest report."
+        resume_note: "The session resumes the agent's conversation there when its CLI can find it (confirmed for " \
+          "claude; untried for codex); if it cannot, it starts fresh with the task and newest report."
       )
     rescue Orchestrator::RunMove::NotMovable => error
       ToolResponse.error(error.message, code: "not_movable")

@@ -134,8 +134,8 @@ module Orchestrator
 
       # Puts a moved run's transcripts where this machine's CLI looks for the
       # conversations of `cwd`, its new worktree, so that resuming one there
-      # has a chance (whether it works across machines is for the operator to
-      # confirm live), and keeps a copy beside the run's runtime files as save
+      # works (confirmed live for claude across macOS and Linux; untried for
+      # codex), and keeps a copy beside the run's runtime files as save
       # does. Each conversation's own record of where it ran (`cwd` in claude's
       # lines, the session_meta and turn context in codex's) is rewritten from
       # source_cwd to cwd.
