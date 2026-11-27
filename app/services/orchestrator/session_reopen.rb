@@ -37,7 +37,7 @@ module Orchestrator
     def call(run)
       worktree = check!(run)
       reopened = Run.where(id: run.id, status: run.status).where.not(id: RunSession.live.select(:run_id))
-        .update_all(status: "queued", stopped_at: nil, launch_error: nil, updated_at: Time.current)
+        .update_all(status: "queued", stopped_at: nil, launch_error: nil, stop_reason: nil, updated_at: Time.current)
       raise NotReopenable, "Run #{run.run_id} changed while it was being reopened; look at it again." unless reopened == 1
 
       run.reload

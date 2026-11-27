@@ -8,12 +8,13 @@ module Orchestrator
   # code serve a caller with no run of its own (falls back to the oldest
   # registered workspace, or an explicit `workspace:` argument).
   #
-  # register_workspace, register_runner, create_workspace, get_settings, update_settings,
-  # update_workspace_layout, list_runners, close_session,
-  # reopen_session, move_run, update_run_dependencies and open_lobby are the tools only
-  # this endpoint has beyond ping: changing what Paneyard manages or what panes
-  # a run starts, ending a session or bringing one back, moving a run to
-  # another machine, letting a run start
+  # register_workspace, register_runner, create_workspace, get_settings,
+  # update_settings, update_workspace_layout, list_runners, close_session,
+  # reopen_session, move_run, cancel_run, update_run_dependencies and
+  # open_lobby are the tools only this endpoint has beyond ping: changing what
+  # Paneyard manages or what panes a run starts, ending a session or bringing
+  # one back, moving a run to another machine, taking a queued run out of the
+  # queue, letting a run start
   # without the work it was queued after, starting a new project (which makes
   # a GitHub repository) or where projects go, or switching the operator's own
   # checkout for their lobby, is the operator's decision, while a run session
@@ -38,8 +39,10 @@ module Orchestrator
       ::McpTools::CloseSessionTool,
       ::McpTools::ReopenSessionTool,
       ::McpTools::MoveRunTool,
+      ::McpTools::CancelRunTool,
       ::McpTools::UpdateRunDependenciesTool,
-      ::McpTools::OpenLobbyTool
+      ::McpTools::OpenLobbyTool,
+      ::McpTools::SendSessionMessageTool
     ].freeze
 
     # Clients that surface server instructions (Claude Code does) get the one
@@ -70,7 +73,9 @@ module Orchestrator
       "machine to run a job on (list_runners lists them); otherwise leave it out. A runner with no checkout of " \
       "the workspace clones it into its projects directory when the job starts there. When a repository is only " \
       "on another machine, register_workspace takes that machine's runner and its path there. Move a run to another runner " \
-      "(move_run) only when the operator asks.".freeze
+      "(move_run) only when the operator asks. When the operator asks you to pass something on to a " \
+      "running job (\"send run X this finding\"), call send_session_message with its workspace and runId: it " \
+      "types the message into that job's session; do not use it on your own initiative.".freeze
 
     def build
       MCP::Server.new(

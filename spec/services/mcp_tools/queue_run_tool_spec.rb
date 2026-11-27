@@ -125,6 +125,16 @@ RSpec.describe McpTools::QueueRunTool do
       expect(workspace.runs.find_by(task: "Build on it.").dependency_run_ids).to eq([ first.run_id ])
     end
 
+    it "is not told it is behind older runs that are waiting or blocked on their own after" do
+      running = create_run(workspace:, prefix: "after-running", status: "running", base_branch: "main")
+      failed = create_run(workspace:, prefix: "after-failed", status: "failed", base_branch: "main")
+      create_run(workspace:, prefix: "after-waiting", status: "queued", base_branch: "main", dependency_run_ids: [ running.run_id ])
+      create_run(workspace:, prefix: "after-blocked", status: "queued", base_branch: "main", dependency_run_ids: [ failed.run_id ])
+      create_run(workspace:, prefix: "after-ready", status: "queued", base_branch: "main", created_at: 1.minute.ago)
+
+      expect(queue("Next.").structured_content).to include(queuedBehind: 1)
+    end
+
     {
       "a run that does not exist" => [ -> { "run-missing" }, "there is no run run-missing" ],
       "a run in another workspace" => [ -> { create_run(prefix: "after-elsewhere", base_branch: "main").run_id }, "is in workspace" ],

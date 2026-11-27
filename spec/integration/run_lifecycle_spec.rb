@@ -75,6 +75,52 @@ RSpec.describe "a run's lifecycle", type: :request do
     expect(Orchestrator::RunConcurrency.in_flight).to eq(0)
   end
 
+  # nicholasjstock/paneyard#83: one session passing a finding to another,
+  # because the operator asked it to, instead of the operator copying it.
+  describe "a message from one session to another" do
+    it "types it into the other run's live agent, which reads it, over /mcp/run", :fake_herdr do
+      sender = queue_and_launch("Find the bug")
+      recipient = queue_and_launch("Fix the bug [fake-agent: working]")
+      pane = -> { fake_herdr.pane(recipient.live_session.herdr_pane_id)[:transcript] }
+      wait_for { recipient.live_session.reload.then { Orchestrator::RunSessionRunner.refresh!(_1).agent_status == "working" } }
+
+      sent = mcp_call("/mcp/run", "send_session_message", token: session_token(sender),
+        runId: recipient.run_id, message: "The bug is in parser.rb:42")
+
+      expect(sent).to include("submitted" => true, "runId" => recipient.run_id, "agentStatus" => "working")
+      expect(fake_herdr.requests_for("agent.prompt").last).to eq(
+        "target" => recipient.live_session.herdr_pane_id,
+        "text" => "[Paneyard: message relayed from run #{sender.run_id}]\n\nThe bug is in parser.rb:42"
+      )
+      # herdr showed it working when the message went in, and it took it as input.
+      expect(wait_for { pane.call.include?("read: The bug is in parser.rb:42") }).to be(true)
+      expect(fake_herdr.pane(sender.live_session.herdr_pane_id)[:transcript]).not_to include("parser.rb")
+
+      # Its own run is refused, and nothing is typed anywhere.
+      prompts = fake_herdr.requests_for("agent.prompt").size
+      own = McpTools::SendSessionMessageTool.call(runId: sender.run_id, message: "Me?",
+        server_context: { run_session_id: sender.live_session.id })
+      expect(own.error?).to be(true)
+      expect(fake_herdr.requests_for("agent.prompt").size).to eq(prompts)
+    end
+
+    it "refuses an agent waiting at an approval prompt, sending nothing", :fake_herdr do
+      recipient = queue_and_launch("Ask first [fake-agent: approval]")
+      session = recipient.live_session
+      wait_for { Orchestrator::RunSessionRunner.refresh!(session.reload).agent_status == "blocked" }
+      prompts = fake_herdr.requests_for("agent.prompt").size
+
+      result = McpTools::SendSessionMessageTool.call(runId: recipient.run_id, workspace: workspace.name,
+        message: "y", server_context: {})
+
+      expect(result.error?).to be(true)
+      expect(result.content.first[:text]).to include("permission or approval prompt")
+      expect(fake_herdr.requests_for("agent.prompt").size).to eq(prompts)
+      expect(fake_herdr.pane(session.herdr_pane_id)[:transcript]).not_to include("answer to its approval prompt")
+      expect(session.reload).to be_live
+    end
+  end
+
   # run-20260929-191533-d44e: the prompt was typed into claude's input box but
   # never submitted, after herdr briefly reported the agent non-idle.
   it "submits a prompt the agent left unsubmitted after a flicker of activity", :fake_herdr do
@@ -495,6 +541,31 @@ RSpec.describe "a run's lifecycle", type: :request do
       end
 
       expect(second.reload.status).to eq("running")
+    end
+
+    # A blocked run is not counted ahead of a new one, and cancel_run takes it
+    # out of the queue for good: it never gets a worktree.
+    it "is not counted ahead of a later run, and is cancelled without ever launching", :fake_herdr do
+      first = queue("Lay the groundwork")
+      second = queue("Build on it", after: [ first.run_id ])
+      report(first, "failed", "Could not")
+      Orchestrator::SessionClose.call(first)
+
+      # second is older and still queued, but blocked: it will not delay this one.
+      queued = mcp_call("/mcp/admin", "queue_run", task: "Something else", workspace: workspace.name)
+      expect(queued).to include("queuedBehind" => 0)
+      third = Run.find_by!(run_id: queued.fetch("runId"))
+
+      cancelled = mcp_call("/mcp/admin", "cancel_run", runId: second.run_id, workspace: workspace.name)
+      expect(cancelled).to include("status" => "stopped", "stopReason" => Orchestrator::RunCancel::REASON)
+      dispatch
+
+      expect(second.reload).to have_attributes(status: "stopped", branch_name: nil)
+      expect(second.run_sessions).to be_empty
+      expect(third.reload.status).to eq("running")
+      expect(fake_herdr.requests_for("worktree.create").size).to eq(2)
+      detail = mcp_call("/mcp/admin", "get_run", runId: second.run_id, workspace: workspace.name)
+      expect(detail).to include("status" => "stopped", "stopReason" => Orchestrator::RunCancel::REASON)
     end
   end
 

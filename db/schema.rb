@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_120000) do
   create_table "lobbies", force: :cascade do |t|
     t.integer "workspace_id", null: false
     t.string "branch", null: false
@@ -122,6 +122,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_100000) do
     t.string "base_branch", null: false
     t.json "dependency_run_ids", default: [], null: false
     t.integer "runner_id", null: false
+    t.text "stop_reason"
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
     t.index ["runner_id"], name: "index_runs_on_runner_id"
     t.index ["status"], name: "index_runs_on_status"

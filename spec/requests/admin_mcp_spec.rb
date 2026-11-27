@@ -17,7 +17,8 @@ RSpec.describe "the admin MCP endpoint", type: :request do
     names = Orchestrator::AdminMcpServer::TOOLS.map(&:tool_name)
 
     expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces", "list_models", "list_runners", "register_workspace", "register_runner",
-      "create_workspace", "get_settings", "update_settings", "update_workspace_layout", "close_session", "reopen_session", "move_run", "update_run_dependencies", "open_lobby")
+      "create_workspace", "get_settings", "update_settings", "update_workspace_layout", "close_session", "reopen_session", "move_run", "cancel_run",
+      "update_run_dependencies", "open_lobby", "send_session_message")
   end
 
   it "tells clients how to find or register the workspace before queuing" do
@@ -55,8 +56,9 @@ RSpec.describe "the admin MCP endpoint", type: :request do
     expect(Orchestrator::RunMcpServer::TOOLS).not_to include(
       McpTools::RegisterWorkspaceTool, McpTools::CreateWorkspaceTool, McpTools::GetSettingsTool,
       McpTools::UpdateSettingsTool, McpTools::UpdateWorkspaceLayoutTool, McpTools::CloseSessionTool,
-      McpTools::ReopenSessionTool, McpTools::UpdateRunDependenciesTool
+      McpTools::ReopenSessionTool, McpTools::CancelRunTool, McpTools::UpdateRunDependenciesTool
     )
+    expect(Orchestrator::RunMcpServer::TOOLS.map(&:tool_name)).not_to include("cancel_run")
   end
 
   # The full handshake a real client makes, then the call; the raw result,
@@ -105,6 +107,34 @@ RSpec.describe "the admin MCP endpoint", type: :request do
 
       expect(result["isError"]).to be(true)
       expect(result["structuredContent"]).to include("error" => "not_reopenable", "message" => include("still has a live session"))
+    end
+  end
+
+  describe "cancel_run" do
+    before { host! "127.0.0.1" }
+
+    let(:workspace) { create_workspace(prefix: "cancel") }
+
+    it "stops a queued run and says why, which get_run then shows" do
+      run = create_run(workspace:, prefix: "cancel", status: "queued")
+
+      result = call_tool("cancel_run", runId: run.run_id, workspace: workspace.name)
+
+      expect(result["isError"]).to be_falsey
+      expect(result["structuredContent"]).to include("runId" => run.run_id, "status" => "stopped",
+        "stopReason" => Orchestrator::RunCancel::REASON)
+      shown = call_tool("get_run", runId: run.run_id, workspace: workspace.name)
+      expect(shown["structuredContent"]).to include("status" => "stopped", "stopReason" => Orchestrator::RunCancel::REASON)
+    end
+
+    it "refuses a run that has launched, pointing at close_session" do
+      run, _session = create_run_and_session(run: create_run(workspace:, prefix: "cancel", status: "running"))
+
+      result = call_tool("cancel_run", runId: run.run_id, workspace: workspace.name)
+
+      expect(result["isError"]).to be(true)
+      expect(result["structuredContent"]).to include("error" => "not_cancellable", "message" => include("close_session"))
+      expect(run.reload.status).to eq("running")
     end
   end
 

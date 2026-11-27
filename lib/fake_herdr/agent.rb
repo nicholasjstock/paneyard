@@ -20,6 +20,16 @@ module FakeHerdr
   #   crash                    exit without reporting (RunSessionReconcileJob's case)
   #   manual                   go idle without reporting; the caller reports itself
   #   working                  stay "working" without reporting, as a CLI mid-task
+  #   approval                 stop at a permission/approval prompt: herdr's
+  #                            agent_status `blocked`. The next input it gets
+  #                            answers that prompt instead of reaching the agent
+  #                            as a message, which is what send_session_message
+  #                            refuses to risk.
+  #
+  # Input that arrives while it is working waits on its stdin and is taken
+  # once the current prompt is done, as a CLI queues what is typed while it
+  # works. Each prompt it takes ends with a `fake agent read: <last line>`
+  # line in the pane, so a spec can see what arrived.
   #
   # `[fake-agent-prompt: unsubmitted]` reproduces a prompt agent.prompt typed
   # but never submitted (run-20260929-191533-d44e): the agent flickers to
@@ -44,7 +54,7 @@ module FakeHerdr
     DIRECTIVE = /\[fake-agent:\s*([a-z]+)\]/
     UNSUBMITTED = /\[fake-agent-prompt:\s*unsubmitted\]/
     LOST = /\[fake-agent-prompt:\s*lost(-once)?\]/
-    MODES = %w[done blocked failed dirty crash manual working].freeze
+    MODES = %w[done blocked failed dirty crash manual working approval].freeze
 
     def initialize(argv: ARGV, env: ENV, input: $stdin, output: $stdout)
       @argv = argv
@@ -97,6 +107,7 @@ module FakeHerdr
     end
 
     def receive_prompt(text)
+      return answer_approval(text) if @awaiting_approval
       return say("fake agent lost a #{text.length}-character prompt") if lose_prompt?(text)
       return handle_prompt(text) unless text.match?(UNSUBMITTED)
 
@@ -122,6 +133,12 @@ module FakeHerdr
       true
     end
 
+    def answer_approval(text)
+      @awaiting_approval = false
+      say("fake agent took a #{text.length}-character input as the answer to its approval prompt")
+      control(status: "idle")
+    end
+
     def handle_keys(keys)
       say("(keys #{keys.join(' ')})")
       return unless keys.include?("Enter") && @unsubmitted
@@ -134,6 +151,7 @@ module FakeHerdr
       control(status: "working")
       mode = text[DIRECTIVE, 1] || @env.fetch("FAKE_AGENT_MODE", "done")
       say("fake agent received a #{text.length}-character prompt; mode #{mode}")
+      say("fake agent read: #{text.lines.map(&:strip).reject(&:empty?).last}")
       # A moment of "working", as a real CLI shows. Not the whole of
       # SessionLauncher.submit_prompt_if_unsent!'s window, so a launch usually
       # ends with its (harmless) Enter on an empty input box -- but long
@@ -152,6 +170,10 @@ module FakeHerdr
         exit 3
       when "manual" then nil
       when "working" then return
+      when "approval"
+        @awaiting_approval = true
+        say("Allow this command? (y/n)")
+        return control(status: "blocked")
       else say("unknown fake-agent mode #{mode.inspect}; expected one of #{MODES.join(', ')}")
       end
       control(status: "idle")

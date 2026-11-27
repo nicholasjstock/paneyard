@@ -17,10 +17,10 @@ class RunDispatchJob < ApplicationJob
     slots = Orchestrator::RunConcurrency.slots
     return unless slots.any?
 
-    Run.where(status: "queued").order(:created_at).each do |candidate|
+    Orchestrator::RunQueue.queued.each do |candidate|
       break unless slots.any?
       next unless slots.free_on?(candidate.runner_id)
-      next unless Orchestrator::RunDependencies.ready?(candidate)
+      next unless Orchestrator::RunQueue.eligible?(candidate)
       next unless claim(candidate)
 
       slots.take(candidate.runner_id)
@@ -33,6 +33,9 @@ class RunDispatchJob < ApplicationJob
   # Compare-and-set rather than a row lock: SQLite has no SELECT ... FOR
   # UPDATE, and a conditional UPDATE is atomic on every backend. If two
   # dispatchers race for the same run, exactly one sees a row count of 1.
+  #
+  # Orchestrator::RunCancel stops a queued run with the same compare-and-set
+  # on status "queued", so a run is claimed or cancelled, never both.
   def claim(candidate)
     Run.where(id: candidate.id, status: "queued").update_all(status: "launching", updated_at: Time.current) == 1
   end

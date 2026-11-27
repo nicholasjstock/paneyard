@@ -94,6 +94,11 @@ module PaneyardPlugin
       mcp.call_tool("move_run", runId: run_id, workspace:, toRunner: to_runner, force:)
     end
 
+    # Takes a queued run that has not started out of the queue, as stopped.
+    def cancel(run_id, workspace:)
+      @mcp.call_tool("cancel_run", runId: run_id, workspace:)
+    end
+
     # {"state", "branch", "switchedFrom", "herdrWorkspace", ...}: the
     # workspace's lobby, opened on branch (or found open on it).
     def open_lobby(workspace:, branch: nil, driver: nil, model: nil)

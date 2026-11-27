@@ -157,6 +157,38 @@ RSpec.describe FakeHerdr::Server, :fake_herdr do
       .to include("mode manual")
   end
 
+  # What send_session_message leans on: a busy agent still takes input, once
+  # it is done with what it was doing.
+  it "takes a prompt sent while the agent is working once its current one is done" do
+    pane_id = open_worktree.dig("root_pane", "pane_id")
+    herdr.agent_start(name: "run-1", kind: "claude", pane_id:, args: [])
+    wait_for { herdr.agent_get(pane_id)["interactive_ready"] }
+
+    herdr.agent_prompt(pane_id, "# Task\n\nKeep busy [fake-agent: working]")
+    wait_for { herdr.agent_get(pane_id)["agent_status"] == "working" }
+    herdr.agent_prompt(pane_id, "A finding\nfrom elsewhere")
+
+    expect(wait_for { herdr.pane_read(pane_id).then { |text| text if text.include?("read: from elsewhere") } })
+      .to include("mode working", "mode manual")
+    expect(wait_for { herdr.agent_get(pane_id)["agent_status"] == "idle" }).to be(true)
+  end
+
+  # The case send_session_message refuses: input at an approval prompt
+  # answers it, and never reaches the agent as a message.
+  it "reports agent_status blocked at an approval prompt, where the next input answers it" do
+    pane_id = open_worktree.dig("root_pane", "pane_id")
+    herdr.agent_start(name: "run-1", kind: "claude", pane_id:, args: [])
+    wait_for { herdr.agent_get(pane_id)["interactive_ready"] }
+
+    herdr.agent_prompt(pane_id, "# Task\n\nAsk first [fake-agent: approval]")
+    wait_for { herdr.agent_get(pane_id)["agent_status"] == "blocked" }
+    herdr.agent_prompt(pane_id, "A finding")
+
+    expect(wait_for { herdr.pane_read(pane_id).then { |text| text if text.include?("answer to its approval prompt") } })
+      .not_to include("read: A finding")
+    expect(herdr.agent_get(pane_id)["agent_status"]).to eq("idle")
+  end
+
   # Confirmed live on herdr 0.7.5: an existing branch is checked out at its
   # own commit, with a base or without one, at the path herdr would give it.
   it "makes a worktree on an existing branch as it is, ignoring the base" do

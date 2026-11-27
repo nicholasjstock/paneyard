@@ -15,7 +15,7 @@ module PaneyardSandbox
 
     Scenario = Struct.new(:name, :directive, :run_id, keyword_init: true)
 
-    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session register_runner register_workspace move_run].freeze
+    ADMIN_TOOLS = %w[queue_run list_runs get_run list_workspaces close_session cancel_run register_runner register_workspace move_run].freeze
 
     # remote_runner: the name of a runner-only process the instance started
     # and registered (Instance#register_remote_runner!), to run a session on

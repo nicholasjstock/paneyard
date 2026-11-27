@@ -29,7 +29,7 @@ module McpTools
         # kept, recreated (from its branch), or new (it never had one).
         worktree: reopened.fetch(:worktree),
         branch: run.branch_name,
-        queued_behind: run.workspace.runs.queued.where("created_at < ?", run.created_at).count,
+        queued_behind: Orchestrator::RunQueue.ahead_count(run),
         capacity: { limit: Orchestrator::RunConcurrency.limit, in_flight: Orchestrator::RunConcurrency.in_flight }
       )
     rescue Orchestrator::SessionReopen::NotReopenable => error
