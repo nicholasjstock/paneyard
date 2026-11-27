@@ -37,7 +37,11 @@ module Orchestrator
       #   - a git checkout already there (its top directory) whose origin is
       #     the same repository (Repositories.same_origin?): reused as it is;
       #   - nothing there, or an empty directory: `git clone`, with this
-      #     machine's own git credentials, no prompt and a deadline, and then
+      #     machine's own git credentials, no prompt and a deadline -- over
+      #     the origin as given, and when that fails, over the same
+      #     repository's other protocol (origin_alternatives: https for an
+      #     ssh origin, ssh for an https one), since a machine may hold only
+      #     one kind of credential -- and then
       #     the workspace's default branch made a local branch from origin if
       #     the clone did not check it out;
       #   - anything else (another repository, a directory with files in it,
@@ -64,7 +68,7 @@ module Orchestrator
           return check(given.to_s, default_base_branch:).merge("cloned" => false)
         end
 
-        clone!(given, origin)
+        clone_any!(given, origin)
         track_default_branch!(given, default_base_branch)
         check(given.to_s, default_base_branch:).merge("cloned" => true)
       rescue Sandbox::Violation => error
@@ -90,14 +94,50 @@ module Orchestrator
         raise Error, "#{path} is already a checkout of #{theirs}, not of #{origin}; not touching it"
       end
 
-      def clone!(path, origin)
+      # Clones the first of origin_alternatives(origin) that works, all of
+      # them within one CLONE_TIMEOUT, and raises with each one's error when
+      # none does. The clone's origin remote is the URL that worked.
+      def clone_any!(path, origin)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + CLONE_TIMEOUT
+        failures = []
+        origin_alternatives(origin).each do |candidate|
+          left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          break if left <= 0
+
+          Sandbox.guard_clone!(path:, origin_path: Worktrees.local_remote_path(path.dirname, candidate))
+          return clone!(path, candidate, timeout: left)
+        rescue Error => error
+          failures << error.message
+        end
+        raise Error, failures.join(" Then: ") if failures.one?
+
+        raise Error, "Could not clone #{origin} into #{path} over https or ssh: #{failures.join(' Then: ')}"
+      end
+
+      # The origin as given, then the same repository over the other protocol
+      # when it is a hosted one: https://host/owner/repo(.git) and
+      # git@host:owner/repo.git (or ssh://git@host/owner/repo) stand for each
+      # other. A local path, or anything else, is only itself.
+      def origin_alternatives(origin)
+        url = origin.to_s.strip
+        twin =
+          if (https = url.match(%r{\Ahttps://(?:[^@/]+@)?([^/:]+)/(.+?)/?\z}i))
+            "git@#{https[1]}:#{https[2].delete_suffix('.git')}.git"
+          elsif (ssh = url.match(%r{\Assh://(?:[^@/]+@)?([^/:]+)(?::\d+)?/(.+?)/?\z}i)) ||
+                (ssh = url.match(%r{\A[^@/:]+@([^:/]+):(?!/)(.+?)/?\z}))
+            "https://#{ssh[1]}/#{ssh[2].delete_suffix('.git')}.git"
+          end
+        [ url, twin ].compact.uniq
+      end
+
+      def clone!(path, origin, timeout: CLONE_TIMEOUT)
         created = !path.exist?
         Open3.popen3({ "GIT_TERMINAL_PROMPT" => "0" }, "git", "-c", "credential.interactive=false",
           "clone", "--quiet", "--", origin, path.to_s, pgroup: true) do |input, output, errors, process|
           input.close
           readers = [ Thread.new { output.read }, Thread.new { errors.read } ]
           begin
-            Timeout.timeout(CLONE_TIMEOUT) do
+            Timeout.timeout(timeout) do
               unless process.value.success?
                 raise Error, "git clone #{origin} into #{path} failed: #{readers.last.value.strip.presence || 'no message'}. " \
                   "This machine needs read access to it with its own git credentials"
@@ -109,7 +149,7 @@ module Orchestrator
             rescue Errno::ESRCH
               nil
             end
-            raise Error, "git clone #{origin} into #{path} timed out after #{CLONE_TIMEOUT}s"
+            raise Error, "git clone #{origin} into #{path} timed out after #{timeout.round}s"
           ensure
             readers.each(&:join)
           end

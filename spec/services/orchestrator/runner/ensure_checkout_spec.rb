@@ -135,6 +135,44 @@ RSpec.describe Orchestrator::Runner::Repositories, ".ensure_checkout" do
     expect(File.exist?(path)).to be(false)
   end
 
+  # A machine may hold only ssh keys, or only https credentials, for a
+  # repository whose origin was recorded the other way.
+  describe "falling back to the other protocol" do
+    it "clones over the other URL when the origin as given fails, and keeps the one that worked as origin" do
+      path = File.join(projects, "app")
+      allow(described_class).to receive(:origin_alternatives).and_call_original
+      allow(described_class).to receive(:origin_alternatives).with("https://example.test/me/app.git")
+        .and_return([ File.join(tmp, "missing.git"), origin ])
+
+      checked = ensure_checkout(path, origin_url: "https://example.test/me/app.git")
+
+      expect(checked).to include("cloned" => true, "problems" => [])
+      expect(git(path, "config", "--get", "remote.origin.url").strip).to eq(origin)
+    end
+
+    it "fails with each attempt's reason when neither works, leaving no directory behind" do
+      path = File.join(projects, "app")
+      allow(described_class).to receive(:origin_alternatives).and_return([ File.join(tmp, "one.git"), File.join(tmp, "two.git") ])
+
+      expect { ensure_checkout(path, origin_url: "https://example.test/me/app.git") }
+        .to raise_error(Orchestrator::Runner::Error, /over https or ssh: git clone .*one\.git.* Then: git clone .*two\.git/m)
+      expect(File.exist?(path)).to be(false)
+    end
+
+    it "pairs https and ssh URLs of a hosted repository, and leaves anything else alone" do
+      expect(described_class.origin_alternatives("https://github.com/Me/app.git"))
+        .to eq([ "https://github.com/Me/app.git", "git@github.com:Me/app.git" ])
+      expect(described_class.origin_alternatives("https://github.com/Me/app"))
+        .to eq([ "https://github.com/Me/app", "git@github.com:Me/app.git" ])
+      expect(described_class.origin_alternatives("git@github.com:Me/app.git"))
+        .to eq([ "git@github.com:Me/app.git", "https://github.com/Me/app.git" ])
+      expect(described_class.origin_alternatives("ssh://git@github.com/Me/app.git"))
+        .to eq([ "ssh://git@github.com/Me/app.git", "https://github.com/Me/app.git" ])
+      expect(described_class.origin_alternatives("/srv/git/app.git")).to eq([ "/srv/git/app.git" ])
+      expect(described_class.origin_alternatives("file:///srv/git/app.git")).to eq([ "file:///srv/git/app.git" ])
+    end
+  end
+
   it "refuses a relative path and a blank origin" do
     expect { ensure_checkout("Source/app") }.to raise_error(Orchestrator::Runner::Error, /absolute path/)
     expect { ensure_checkout(File.join(projects, "app"), origin_url: " ") }.to raise_error(Orchestrator::Runner::Error, /no origin/)
