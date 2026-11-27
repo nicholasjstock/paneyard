@@ -172,7 +172,7 @@ When the agent stops, it posts a report. Open **Jobs and reports** from the Pane
 
 Closed the wrong one? Pick the job in **Jobs and reports** and press `o` to **reopen** it. It is queued again and gets a new session on its own branch when a slot is free: in its worktree if that was kept, or in one herdr makes again from the branch if it was removed. The agent resumes its conversation where it can, and otherwise starts fresh with the task and the job's newest report. A job whose branch is gone as well cannot be reopened.
 
-A job that has to build on another job's work can be queued **after** it (`queue_run`'s `after`, from your own agent). It waits, holding no slot, until that job's work is merged into the branch both started from, then starts from there. **Jobs and reports** shows it as `queued/waiting`, or `queued/blocked` if the job it waits for failed or was stopped. Press `s` on its screen to start it without waiting.
+A job that has to build on another job's work can be queued **after** it (`queue_run`'s `after`, from your own agent). It waits, holding no slot, until that job's work is merged into the branch both started from, then starts from there. **Jobs and reports** shows it as `queued/waiting`, or `queued/blocked` if the job it waits for failed or was stopped. Press `s` on its screen to start it without waiting, or `x` to cancel it: a queued job that has not started can be taken out of the queue (`cancel_run`), and becomes `stopped` without ever launching. A job that has started is ended with **Close session** instead.
 
 A job handed off from another job's branch is a **follow-up** of it. **Jobs and reports** shows the parent's short id after the follow-up's own (`22da ↳7efb`), and a job's screen lists its follow-ups.
 

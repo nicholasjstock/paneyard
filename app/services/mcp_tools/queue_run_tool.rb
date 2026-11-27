@@ -59,7 +59,9 @@ module McpTools
         status: run.status,
         after: run.dependency_run_ids.presence,
         dependencies: Orchestrator::RunDependencies.status(run),
-        queued_behind: target.runs.queued.where("created_at < ?", run.created_at).count,
+        # Older queued runs the dispatcher would start first, in any workspace;
+        # not ones waiting or blocked on their own `after`.
+        queued_behind: Orchestrator::RunQueue.ahead_count(run),
         capacity: { limit: Orchestrator::RunConcurrency.limit, in_flight: Orchestrator::RunConcurrency.in_flight }
       )
     rescue Orchestrator::RunDependencies::Invalid => error

@@ -23,11 +23,15 @@ class RunDispatchJob < ApplicationJob
   # UPDATE, and a conditional UPDATE is atomic on every backend. If two
   # dispatchers race for the same run, exactly one sees a row count of 1.
   #
-  # A run whose dependencies are not merged yet is passed over, not claimed:
-  # it stays queued, holds no slot, and runs queued after it go first.
+  # A run Orchestrator::RunQueue says is not eligible (its dependencies are
+  # not merged yet) is passed over, not claimed: it stays queued, holds no
+  # slot, and runs queued after it go first.
+  #
+  # Orchestrator::RunCancel stops a queued run with the same compare-and-set
+  # on status "queued", so a run is claimed or cancelled, never both.
   def claim_next_queued_run
-    Run.where(status: "queued").order(:created_at).each do |candidate|
-      next unless Orchestrator::RunDependencies.ready?(candidate)
+    Orchestrator::RunQueue.queued.each do |candidate|
+      next unless Orchestrator::RunQueue.eligible?(candidate)
 
       claimed = Run.where(id: candidate.id, status: "queued")
         .update_all(status: "launching", updated_at: Time.current)

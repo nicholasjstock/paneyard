@@ -29,7 +29,9 @@ module McpTools
         dependencies: Orchestrator::RunDependencies.status(run),
         session: session && session_summary(session),
         started_at: run.started_at&.iso8601,
-        stopped_at: run.stopped_at&.iso8601
+        stopped_at: run.stopped_at&.iso8601,
+        # Why it stopped when no session reported it (cancel_run).
+        stop_reason: run.stop_reason
       }.compact
     end
 

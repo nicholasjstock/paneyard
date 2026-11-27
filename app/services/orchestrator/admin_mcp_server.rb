@@ -10,9 +10,10 @@ module Orchestrator
   #
   # register_workspace, create_workspace, get_settings, update_settings,
   # update_workspace_layout, close_session,
-  # reopen_session, update_run_dependencies and open_lobby are the tools only
-  # this endpoint has beyond ping: changing what Paneyard manages or what panes
-  # a run starts, ending a session or bringing one back, letting a run start
+  # reopen_session, cancel_run, update_run_dependencies and open_lobby are the
+  # tools only this endpoint has beyond ping: changing what Paneyard manages or
+  # what panes a run starts, ending a session or bringing one back, taking a
+  # queued run out of the queue, letting a run start
   # without the work it was queued after, starting a new project (which makes
   # a GitHub repository) or where projects go, or switching the operator's own
   # checkout for their lobby, is the operator's decision, while a run session
@@ -34,6 +35,7 @@ module Orchestrator
       ::McpTools::UpdateWorkspaceLayoutTool,
       ::McpTools::CloseSessionTool,
       ::McpTools::ReopenSessionTool,
+      ::McpTools::CancelRunTool,
       ::McpTools::UpdateRunDependenciesTool,
       ::McpTools::OpenLobbyTool,
       ::McpTools::SendSessionMessageTool
