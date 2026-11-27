@@ -14,10 +14,15 @@
 #   bin/sandbox status
 #   bin/sandbox stop
 #   bin/sandbox reset    stop and delete tmp/sandbox
+#   bin/sandbox start [--remote-runner]
+#                        also start a runner-only process (bin/runner) with its
+#                        own fake herdr, as a second machine, registered as
+#                        runner "sandbox-remote" with a clone of the scratch repo
 #   bin/sandbox verify [--keep]
-#                        boot a fresh instance under tmp/sandbox-verify and run a
-#                        run lifecycle through it end to end (see
-#                        PaneyardSandbox::Verify); exits non-zero on failure
+#                        boot a fresh instance under tmp/sandbox-verify, with a
+#                        remote runner, and run a run lifecycle through it end
+#                        to end on each runner (see PaneyardSandbox::Verify);
+#                        exits non-zero on failure
 #
 # Queue a run with a `[fake-agent: done|blocked|failed|dirty|crash|manual|working|approval]`
 # directive in its task to choose what the fake agent does (default: done).
@@ -38,8 +43,8 @@ require_relative "../lib/paneyard_sandbox/verify"
 
 APP_ROOT = File.expand_path("..", __dir__)
 
-def instance(name, env: {}, fake_herdr: true)
-  PaneyardSandbox::Instance.new(app_root: APP_ROOT, root: File.join(APP_ROOT, "tmp", name), env:, fake_herdr:)
+def instance(name, env: {}, fake_herdr: true, remote_runner: false)
+  PaneyardSandbox::Instance.new(app_root: APP_ROOT, root: File.join(APP_ROOT, "tmp", name), env:, fake_herdr:, remote_runner:)
 end
 
 def real_herdr_env
@@ -97,15 +102,20 @@ def boot(instance, modes: [])
   started = Time.now
   instance.start!(modes:)
   name, id, repository = seed!(instance)
+  remote = instance.register_remote_runner!(workspace: name, repository:) if instance.runner_url
   puts "bin/sandbox: up at #{instance.url} in #{(Time.now - started).round(1)}s"
   puts "  herdr      #{modes.include?('real-herdr') ? 'YOUR herdr: runs launch real CLIs, labelled [sandbox]' : 'fake (scripted agents, no model)'}"
   puts "  workspace  #{name} (scratch repo #{repository}, branches main and feature/sandbox)"
   puts "  mcp admin  #{instance.url}/mcp/admin"
   puts "  database   #{instance.storage_dir}"
+  if remote
+    puts "  runner     #{remote.fetch('name')} at #{instance.runner_url} (bin/runner, its own fake herdr), checkout " \
+         "#{remote.fetch('checkouts').map { |checkout| checkout.fetch('repositoryPath') }.join(', ')}"
+  end
   puts "  log        #{instance.log_path}"
   warn_untrusted!(repository) if modes.include?("real-herdr")
   [ name, id ]
-rescue PaneyardSandbox::Instance::Error => error
+rescue PaneyardSandbox::Instance::Error, PaneyardSandbox::McpClient::Error => error
   abort "bin/sandbox: #{error.message}"
 end
 
@@ -119,8 +129,9 @@ when "start"
     modes = []
     env = {}
     env.merge!(real_herdr_env) && modes << "real-herdr" if ARGV.include?("--real-herdr")
+    modes << "remote-runner" if ARGV.include?("--remote-runner")
     guard_herdr_kind!(sandbox, modes.include?("real-herdr") ? "real" : "fake")
-    boot(instance("sandbox", env:, fake_herdr: !modes.include?("real-herdr")), modes:)
+    boot(instance("sandbox", env:, fake_herdr: !modes.include?("real-herdr"), remote_runner: modes.include?("remote-runner")), modes:)
     puts "Stop it with bin/sandbox stop."
   end
 when "status"
@@ -139,13 +150,14 @@ when "reset"
   FileUtils.rm_rf(sandbox.root)
   puts "bin/sandbox: removed #{sandbox.root}"
 when "verify"
-  sandbox = instance("sandbox-verify")
+  sandbox = instance("sandbox-verify", remote_runner: true)
   sandbox.stop!
   FileUtils.rm_rf(sandbox.root)
   passed = false
   begin
     name, id = boot(sandbox)
-    passed = PaneyardSandbox::Verify.new(sandbox, workspace: name, workspace_id: id).call
+    passed = PaneyardSandbox::Verify.new(sandbox, workspace: name, workspace_id: id,
+      remote_runner: PaneyardSandbox::Instance::REMOTE_RUNNER_NAME).call
     puts "Last lines of #{sandbox.log_path}:\n#{sandbox.log_tail(80)}" unless passed
   ensure
     if ARGV.include?("--keep")
@@ -156,6 +168,6 @@ when "verify"
   end
   exit(passed ? 0 : 1)
 else
-  warn "Usage: bin/sandbox start|status|stop|reset|verify [--keep]"
+  warn "Usage: bin/sandbox start [--real-herdr] [--remote-runner]|status|stop|reset|verify [--keep]"
   exit 1
 end

@@ -8,7 +8,11 @@ module McpTools
       "registered, and register_workspace (where offered) adds it; create_workspace sets up and registers a project (new, local only, or only on GitHub) when the operator asks for that. isDefault marks the workspace list_runs " \
       "and get_run fall back to when called from outside a run with no workspace argument; queue_run never does. " \
       "lobby is the workspace's open lobby (the operator's integration session on its checkout), with the branch " \
-      "it is on and whether its agent is still live, or null."
+      "it is on and whether its agent is still live, or null. repositoryPath is the checkout on the local runner " \
+      "(this orchestrator's machine), null when it has none yet; originUrl is the repository other machines clone. " \
+      "runners lists the machines (list_runners) a job of the workspace can run on: each with repositoryPath, its " \
+      "checkout there, or null with checkedOut false when that runner will clone the repository into its projects " \
+      "directory when a job first needs it."
     input_schema(properties: {}, required: [])
 
     def self.call(server_context:)
@@ -29,13 +33,25 @@ module McpTools
         id: workspace.id,
         name: workspace.name,
         repository_path: workspace.repository_path,
+        origin_url: workspace.origin_url,
         default_base_branch: workspace.default_base_branch,
         layout_yaml: workspace.layout,
         default_layout_yaml: Orchestrator::WorkspaceLayout::DEFAULT_YAML,
         is_default: workspace == default,
         active_runs:,
-        lobby: lobby(workspace)
+        lobby: lobby(workspace),
+        runners: runners(workspace)
       }
+    end
+
+    # Each runner a run of the workspace can go on (queue_run's runner), local
+    # first: the repository's path on that machine, or nil when it clones one
+    # at launch.
+    def self.runners(workspace)
+      Orchestrator::RunRunner.candidates(workspace).map do |runner|
+        path = workspace.checkout_path(runner)
+        { name: runner.name, kind: runner.kind, repository_path: path, checked_out: !path.nil? }
+      end
     end
 
     def self.lobby(workspace)

@@ -67,7 +67,7 @@ RSpec.describe RunSessionReconcileJob do
 
   # herdr being unreachable says nothing about any one session. Failing every
   # run at once because the socket blipped would be far worse than waiting.
-  it "stops the sweep instead of failing every run when herdr itself is unreachable" do
+  it "leaves its sessions alone instead of failing every run when herdr itself is unreachable" do
     first, = create_run_and_session(prefix: "reconcile-herdr-a")
     second, = create_run_and_session(prefix: "reconcile-herdr-b")
     allow(Orchestrator::RunSessionRunner).to receive(:refresh!)
@@ -77,6 +77,30 @@ RSpec.describe RunSessionReconcileJob do
 
     expect(first.reload.status).to eq("running")
     expect(second.reload.status).to eq("running")
+  end
+
+  # A second machine asleep must not stop this one's sessions being
+  # reconciled, nor have its own sessions failed.
+  it "skips only the unreachable runner's sessions, and reconciles the rest" do
+    mac = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet.test:7264")
+    workspace = create_workspace(prefix: "reconcile-runners")
+    workspace.checkouts.create!(runner: mac, repository_path: "/Users/me/app")
+    remote_runs = Array.new(2) { create_run(workspace:, runner: mac, prefix: "reconcile-mac") }
+    remote_runs.each { |run| create_run_and_session(run:) }
+    local, = create_run_and_session(prefix: "reconcile-local")
+    refreshed = []
+    allow(Orchestrator::RunSessionRunner).to receive(:refresh!) do |session|
+      refreshed << session.run
+      raise Orchestrator::Runner::Unreachable, "runner \"mac\" did not answer" if session.run.runner == mac
+
+      session
+    end
+
+    expect { described_class.perform_now }.not_to raise_error
+
+    expect(refreshed).to include(local)
+    expect(refreshed.count { |run| run.runner == mac }).to eq(1)
+    expect(remote_runs.map { |run| run.reload.status }).to all(eq("running"))
   end
 
   # Regression: this exercises RunSessionRunner.refresh! for real (the other

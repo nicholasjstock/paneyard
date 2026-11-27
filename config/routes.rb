@@ -5,6 +5,15 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "health#show", as: :rails_health_check
 
+  # A runner-only process (bin/runner, PANEYARD_ROLE=runner) on a second
+  # machine serves the orchestrator's Runner::Remote and nothing else: no MCP
+  # endpoints, so nothing there can queue, inspect or report a run. Sessions
+  # it hosts report straight to the orchestrator's /mcp/run.
+  if PaneyardRole.runner?
+    mount Orchestrator::Runner::Endpoint.new => "/runner"
+    next
+  end
+
   # The MCP endpoint a run's interactive CLI session connects to --
   # Streamable HTTP, hosted inside this already-running process. Scoped and
   # tokenized per session (app/services/orchestrator/run_mcp_server.rb).

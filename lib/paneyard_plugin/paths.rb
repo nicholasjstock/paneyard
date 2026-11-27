@@ -34,10 +34,44 @@ module PaneyardPlugin
     def puma_pid_file = File.join(state_dir, "puma.pid")
     def manifest_file = File.join(app_root, "herdr-plugin.toml")
 
+    # The same directories, for the runner-only process (bin/runner) the
+    # plugin runs in remote mode beside nothing else: its own pid, port, log
+    # and state files, so it never mistakes the orchestrator daemon's for its
+    # own (a machine switched from local to remote mode may still have both).
+    def runner = RunnerPaths.new(self)
+
     private
 
     def present(value)
       value.nil? || value.strip.empty? ? nil : value
     end
+  end
+
+  class RunnerPaths
+    def initialize(paths)
+      @paths = paths
+    end
+
+    def plugin_id = @paths.plugin_id
+    def app_root = @paths.app_root
+    def state_dir = @paths.state_dir
+    def config_dir = @paths.config_dir
+    def env_file = @paths.env_file
+    def manifest_file = @paths.manifest_file
+    def log_dir = @paths.log_dir
+    def runtime_dir = @paths.runtime_dir
+    def secret_file = @paths.secret_file
+
+    # Where Rails' (unused) database configuration points: never the
+    # orchestrator daemon's storage.
+    def storage_dir = File.join(state_dir, "runner")
+    def log_file = File.join(log_dir, "runner.log")
+    def daemon_file = File.join(state_dir, "runner.json")
+    def lock_file = File.join(state_dir, "runner.lock")
+    def port_file = File.join(state_dir, "runner_port")
+    def url_file = File.join(state_dir, "runner_url")
+    def puma_pid_file = File.join(state_dir, "runner_puma.pid")
+    # What was last registered with the orchestrator (Cli#register_runner!).
+    def registration_file = File.join(state_dir, "runner_registration.json")
   end
 end

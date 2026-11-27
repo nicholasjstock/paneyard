@@ -27,6 +27,9 @@ class Run < ApplicationRecord
   SESSION_ACTIVE_STATUSES = %w[queued launching running].freeze
 
   belongs_to :workspace
+  # The machine the run happens on (Orchestrator::Runner.for(run)). Local
+  # unless the caller named another.
+  belongs_to :runner, class_name: "RegisteredRunner", inverse_of: :runs
 
   # Ordinary integer FK, unlike the string-run_id associations below: a
   # RunSession is Rails' own bookkeeping and never crosses the MCP wire, so it
@@ -34,6 +37,8 @@ class Run < ApplicationRecord
   has_many :run_sessions, dependent: :destroy
   # The run's own history: one row per time a session reported going idle.
   has_many :checkpoints, -> { chronological }, class_name: "RunCheckpoint", inverse_of: :run, dependent: :destroy
+  # Each time it moved between runners (Orchestrator::RunMove), oldest first.
+  has_many :moves, -> { chronological }, class_name: "RunMoveRecord", inverse_of: :run, dependent: :destroy
 
 
   validates :run_id, presence: true, uniqueness: true
@@ -56,6 +61,7 @@ class Run < ApplicationRecord
   validate :dependency_run_ids_are_a_list
 
   before_validation :default_base_branch, on: :create
+  before_validation :default_runner, on: :create
 
   scope :active, -> { where(status: NON_TERMINAL_STATUSES) }
   scope :queued, -> { where(status: "queued") }
@@ -80,7 +86,7 @@ class Run < ApplicationRecord
       run_id: run_id,
       task: "(unspecified — auto-created from bus activity)",
       workspace: default_workspace,
-      target_root: default_workspace.repository_path,
+      target_root: default_workspace.checkouts.first&.repository_path || "(unknown)",
       launcher_variant: "codex",
       status: "running"
     )
@@ -128,8 +134,16 @@ class Run < ApplicationRecord
   # behind. The runner asks git whether target_root is actually a linked
   # worktree of the repository, ruling out both.
   def kept_worktree?
-    managed_worktree? && target_root.present? && session_over? &&
-      Orchestrator::Runner.for(workspace).worktree_registered?(repository_path: workspace.repository_path, path: target_root)
+    repository = workspace.checkout_path(runner)
+    managed_worktree? && target_root.present? && repository.present? && session_over? &&
+      Orchestrator::Runner.for(self).worktree_registered?(repository_path: repository, path: target_root)
+  end
+
+  # The workspace's repository checkout on this run's runner. Raises when
+  # that runner has none yet: a run queued on such a runner gets it cloned at
+  # launch (Orchestrator::WorkspaceCheckout.ensure!, from GitWorktree.provision!).
+  def repository_path
+    workspace.repository_path_for(runner)
   end
 
   def to_param
@@ -140,6 +154,10 @@ class Run < ApplicationRecord
 
   def default_base_branch
     self.base_branch = workspace&.default_base_branch if base_branch.blank?
+  end
+
+  def default_runner
+    self.runner ||= RegisteredRunner.local
   end
 
   def dependency_run_ids_are_a_list

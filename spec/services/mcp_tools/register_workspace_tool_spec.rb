@@ -95,8 +95,41 @@ RSpec.describe McpTools::RegisterWorkspaceTool do
     git(repository, "worktree", "add", "-q", "-b", "side", worktree)
 
     expect(call(File.join(repository, "app", "models")).structured_content).to include(repositoryPath: repository)
+    WorkspaceCheckout.delete_all
     Workspace.delete_all
     expect(call(worktree).structured_content).to include(repositoryPath: repository)
+  end
+
+  it "registers a repository that is only on a remote runner, checking it there and recording only that checkout" do
+    mac = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet.test:3100")
+    on_mac = Orchestrator::Runner::Local.new(runtime_root: File.join(tmp, "mac"))
+    allow(Orchestrator::Runner).to receive(:resolve).and_wrap_original do |original, record|
+      record&.name == "mac" ? on_mac : original.call(record)
+    end
+    allow(on_mac).to receive(:check_repository).and_call_original
+    repository = checkout("over-there")
+
+    response = call(repository, runner: "mac")
+
+    expect(response.error?).to be(false), response.structured_content.to_s
+    expect(on_mac).to have_received(:check_repository).with(path: repository, default_base_branch: nil)
+    expect(response.structured_content).to include(name: "over-there", repositoryPath: nil,
+      originUrl: "https://example.test/over-there.git", defaultBaseBranch: "main")
+    workspace = Workspace.find_by!(name: "over-there")
+    expect(workspace.checkouts.map { |checkout| [ checkout.runner, checkout.repository_path ] }).to eq([ [ mac, repository ] ])
+    expect(workspace.origin_url).to eq("https://example.test/over-there.git")
+
+    # The same path on the same runner is taken; on another runner it is not.
+    again = call(repository, name: "again", runner: "mac")
+    expect(problem_codes(again)).to eq(%w[repository_taken])
+    expect(again.structured_content[:message]).to include("already registered for #{repository} on mac")
+  end
+
+  it "refuses a runner that is not registered" do
+    response = call(checkout("nowhere"), runner: "mars")
+
+    expect(response.structured_content).to include(error: "runner_invalid", message: include("no runner named \"mars\""))
+    expect(Workspace.count).to eq(0)
   end
 
   it "creates nothing for a directory that is not in a git checkout" do

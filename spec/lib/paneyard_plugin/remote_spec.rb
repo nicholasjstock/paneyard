@@ -1,5 +1,7 @@
 require "spec_helper"
 require_relative "../../../lib/paneyard_plugin"
+require "tmpdir"
+require "fileutils"
 
 RSpec.describe PaneyardPlugin::Remote do
   let(:remote) { described_class.new("http://server.example:7263", "/Users/me=/home/me, /Volumes/code/=/srv/code") }
@@ -12,6 +14,31 @@ RSpec.describe PaneyardPlugin::Remote do
 
     it "takes the URL without a trailing slash" do
       expect(described_class.from("PANEYARD_REMOTE_URL" => "http://server.example:7263/").url).to eq("http://server.example:7263")
+    end
+  end
+
+  describe "hosting jobs here too (PANEYARD_RUNNER_URL)" do
+    it "is off without PANEYARD_RUNNER_URL, and names the runner after this machine by default" do
+      expect(described_class.from("PANEYARD_REMOTE_URL" => "http://server.example:7263")).not_to be_runner
+
+      hosting = described_class.from("PANEYARD_REMOTE_URL" => "http://server.example:7263",
+        "PANEYARD_RUNNER_URL" => "https://laptop.ts.net:7264/")
+      expect(hosting).to be_runner
+      expect(hosting.runner_url).to eq("https://laptop.ts.net:7264")
+      expect(hosting.runner_name).to eq(Socket.gethostname.split(".").first.downcase)
+      expect(described_class.new("http://s", "", runner_url: "http://x", runner_name: "local").runner_name).to eq("local-remote")
+    end
+
+    it "offers as checkouts the workspaces whose repository (translated to this machine) is here" do
+      here = Dir.mktmpdir("checkout-here")
+      FileUtils.mkdir_p(File.join(here, ".git"))
+
+      checkouts = remote.checkouts([ { "name" => "app", "repositoryPath" => here },
+        { "name" => "gone", "repositoryPath" => File.join(here, "missing") } ])
+
+      expect(checkouts).to eq([ { "workspace" => "app", "path" => here } ])
+    ensure
+      FileUtils.rm_rf(here)
     end
   end
 

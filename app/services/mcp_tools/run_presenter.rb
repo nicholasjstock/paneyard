@@ -17,6 +17,8 @@ module McpTools
         driver: run.launcher_variant,
         # Blank: the driver's default when the session starts.
         model: run.model.presence,
+        # The machine it runs on (list_runners).
+        runner: run.runner&.name,
         branch: run.branch_name,
         # What it started from, and merges back into.
         base_branch: run.base_branch,
@@ -58,6 +60,19 @@ module McpTools
         # not, why (nil while it has a session, or is about to).
         reopenable: run.session_over? && reopen_problem.nil?,
         reopen_problem:,
+        # Runners move_run could move it to (none: it cannot move now).
+        move_to: Orchestrator::RunMove.destinations(run).presence,
+        # Each time it moved between runners, oldest first, and the worktree
+        # it left behind there: removed, kept (still holding work), reused
+        # (it came back to it), none or error.
+        moves: run.moves.includes(:from_runner, :to_runner).map do |move|
+          {
+            at: move.created_at.iso8601, from: move.from_runner.name, to: move.to_runner.name,
+            worktree: move.target_root, left_behind: move.source_target_root, left_behind_state: move.source_worktree,
+            left_behind_error: move.source_worktree_error,
+            transferred: move.transferred.except("fingerprint")
+          }.compact
+        end.presence,
         # The run's own history: one Markdown report per time its session went
         # idle, oldest first, so the last entry is where the run stands now.
         checkpoints: run.checkpoints.map do |checkpoint|

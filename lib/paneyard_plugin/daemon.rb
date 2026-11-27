@@ -20,6 +20,11 @@ module PaneyardPlugin
   # One daemon per user: daemon.json records the herdr socket it was started
   # for, and a caller from a different herdr server leaves it alone (its
   # sessions live on the first server, and reconcile would count them lost).
+  #
+  # role: "runner" runs bin/runner instead, the runner-only process a
+  # machine in remote mode hosts sessions with for the orchestrator elsewhere
+  # (docs/multi-runner-plan.md), with Paths#runner's files and
+  # PANEYARD_RUNNER_PORT in place of PORT.
   class Daemon
     STARTUP_TIMEOUT = 120
     STOP_GRACE = 15
@@ -32,7 +37,7 @@ module PaneyardPlugin
     INHERITED_KEYS_TO_DROP = %w[
       RUBYOPT RUBYLIB GEM_HOME GEM_PATH RAILS_ENV RACK_ENV PORT PIDFILE
       PANEYARD_SANDBOX PANEYARD_SANDBOX_ROOT PANEYARD_SANDBOX_REAL_HERDR
-      PANEYARD_RUN_ID PANEYARD_RUN_TOKEN SECRET_KEY_BASE RAILS_MASTER_KEY
+      PANEYARD_RUN_ID PANEYARD_RUN_TOKEN SECRET_KEY_BASE RAILS_MASTER_KEY PANEYARD_ROLE
     ].freeze
 
     Result = Struct.new(:outcome, :pid, :port, :url, :herdr_socket, :previous_port, keyword_init: true) do
@@ -41,16 +46,23 @@ module PaneyardPlugin
       def port_changed? = !previous_port.nil? && previous_port != port
     end
 
-    attr_reader :paths
+    ROLES = {
+      "orchestrator" => { script: "production", port_setting: "PORT" },
+      "runner" => { script: "runner", port_setting: "PANEYARD_RUNNER_PORT" }
+    }.freeze
+
+    attr_reader :paths, :role
 
     # `command` replaces bin/production (specs run a stand-in that answers /up).
     def initialize(paths:, ruby: RbConfig.ruby, herdr_socket: ENV["HERDR_SOCKET_PATH"], env: ENV, command: nil,
-      startup_timeout: STARTUP_TIMEOUT, stop_grace: STOP_GRACE)
+      startup_timeout: STARTUP_TIMEOUT, stop_grace: STOP_GRACE, role: "orchestrator")
+      @role = role
+      @role_config = ROLES.fetch(role)
       @paths = paths
       @ruby = ruby
       @herdr_socket = herdr_socket.to_s.strip.empty? ? nil : herdr_socket
       @base_env = env.to_h
-      @command = command || [ ruby, File.join(paths.app_root, "bin", "production") ]
+      @command = command || [ ruby, File.join(paths.app_root, "bin", @role_config.fetch(:script)) ]
       @startup_timeout = startup_timeout
       @stop_grace = stop_grace
     end
@@ -157,7 +169,10 @@ module PaneyardPlugin
           "RAILS_ENV" => "production",
           "PORT" => port.to_s,
           "BINDING" => "127.0.0.1",
-          "PANEYARD_RAILS_URL" => url,
+          # A runner's sessions are told the orchestrator's URL by the
+          # orchestrator itself (register_runner's orchestratorUrl).
+          "PANEYARD_RAILS_URL" => (url unless role == "runner"),
+          "PANEYARD_ROLE" => (role if role == "runner"),
           "PANEYARD_STORAGE_DIR" => paths.storage_dir,
           "PANEYARD_RUNTIME_DIR" => paths.runtime_dir,
           "PIDFILE" => paths.puma_pid_file,
@@ -252,9 +267,10 @@ module PaneyardPlugin
     # had to change].
     def choose_port
       settings, = EnvFile.load(paths.env_file)
-      if (pinned = settings["PORT"].to_s.strip) != ""
+      key = @role_config.fetch(:port_setting)
+      if (pinned = settings[key].to_s.strip) != ""
         port = Integer(pinned, 10)
-        raise Error, "PORT #{port} from #{paths.env_file} is already in use" unless port_free?(port)
+        raise Error, "#{key} #{port} from #{paths.env_file} is already in use" unless port_free?(port)
 
         return [ port, nil ]
       end
@@ -265,7 +281,7 @@ module PaneyardPlugin
 
       [ free_port, kept ]
     rescue ArgumentError
-      raise Error, "PORT in #{paths.env_file} is not a number"
+      raise Error, "#{@role_config.fetch(:port_setting)} in #{paths.env_file} is not a number"
     end
 
     def wait_until_up!(pid, port)

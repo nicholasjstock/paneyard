@@ -140,7 +140,7 @@ RSpec.describe "the run MCP endpoint", type: :request do
 
     before do
       host! "127.0.0.1"
-      allow(Orchestrator::Runner).to receive(:for).with(run.workspace).and_return(runner)
+      allow(Orchestrator::Runner).to receive(:for).with(run).and_return(runner)
     end
 
     def call_finish(meta: nil, arguments: { summary: "Explicit end requested; merged" })

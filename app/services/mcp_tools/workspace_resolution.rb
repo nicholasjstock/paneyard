@@ -34,12 +34,20 @@ module McpTools
     end
 
     def workspace_required_message
-      registered = Workspace.order(:created_at).map { |w| "#{w.name} (#{w.repository_path})" }
+      registered = Workspace.includes(checkouts: :runner).order(:created_at).map do |w|
+        "#{w.name} (#{w.repository_path || w.checkouts.map { |c| "#{c.runner.name}: #{c.repository_path}" }.join(', ').presence || w.origin_url})"
+      end
       listed = registered.any? ? "Registered workspaces: #{registered.join(', ')}." : "No workspace is registered yet."
       "workspace is required when calling from outside a run. #{listed} Pass the one whose repository is the " \
         "one you mean; if it is not listed, register it first with register_workspace (path: the repository's " \
         "directory), or, for a brand-new project the operator asked for, create it with create_workspace, then " \
         "queue again."
+    end
+
+    # The run behind a run session's call, or nil from /mcp/admin.
+    def caller_run(server_context)
+      run_session_id = context_value(server_context, :run_session_id)
+      RunSession.find_by(id: run_session_id)&.run if run_session_id.present?
     end
 
     def run!(server_context:, run_id:, workspace: nil)

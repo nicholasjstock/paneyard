@@ -15,21 +15,26 @@ module McpTools
       "herdr wherever its config puts worktrees. defaultBaseBranch is the branch jobs start from unless queue_run " \
       "names another; it defaults to the repository's own default branch (origin's HEAD, else main or master), " \
       "never just whatever is checked out, and must exist locally. The repository needs an origin remote. name " \
-      "defaults to the repository's directory name. Everything is checked first and nothing is created if anything " \
+      "defaults to the repository's directory name. path is on the machine runner names (list_runners; default the " \
+      "local runner), so a repository that is only on another machine registers with that runner; only that " \
+      "runner's checkout is recorded, and any other runner clones the repository's origin into its projects " \
+      "directory when a job first needs it there. Everything is checked first and nothing is created if anything " \
       "is wrong; every problem is returned with how to fix it. Nothing on disk is changed by this tool. On success, " \
-      "returns the workspace as list_workspaces shows it."
+      "returns the workspace as list_workspaces shows it, plus originUrl."
     input_schema(
       properties: {
         path: { type: "string", description: "Absolute path (~ allowed) of the checkout, or a directory in it." },
         name: { type: "string", description: "Unique workspace name, what queue_run and the other tools take as workspace. Defaults to the repository's directory name." },
-        defaultBaseBranch: { type: "string", description: "Local branch jobs start from by default. Defaults to the repository's own default branch." }
+        defaultBaseBranch: { type: "string", description: "Local branch jobs start from by default. Defaults to the repository's own default branch." },
+        runner: { type: "string", description: "The runner (machine) path is on, from list_runners. Defaults to the local runner." }
       },
       required: %w[path]
     )
 
-    def self.call(path:, server_context:, name: nil, defaultBaseBranch: nil)
+    def self.call(path:, server_context:, name: nil, defaultBaseBranch: nil, runner: nil)
       workspace, result = Orchestrator::WorkspaceRegistration.register(
-        path:, name: name.to_s.strip.presence, default_base_branch: defaultBaseBranch.to_s.strip.presence
+        path:, name: name.to_s.strip.presence, default_base_branch: defaultBaseBranch.to_s.strip.presence,
+        runner: Orchestrator::RunRunner.named!(runner)
       )
       problems = result.fetch("problems")
       if workspace.nil?
@@ -40,14 +45,9 @@ module McpTools
         )
       end
 
-      ToolResponse.structured(
-        name: workspace.name,
-        repository_path: workspace.repository_path,
-        default_base_branch: workspace.default_base_branch,
-        origin_url: result.fetch("origin_url"),
-        is_default: workspace == Workspace.default,
-        active_runs: 0
-      )
+      ToolResponse.structured(ListWorkspacesTool.present(workspace, active_runs: 0).merge(origin_url: result.fetch("origin_url")))
+    rescue Orchestrator::RunRunner::Invalid => error
+      ToolResponse.error(error.message, code: "runner_invalid")
     rescue ActiveRecord::RecordInvalid => error
       ToolResponse.error(error.message)
     end

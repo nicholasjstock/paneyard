@@ -32,7 +32,7 @@ class JobFinalizationJob < ApplicationJob
         raise Orchestrator::Runner::Error, released[:error] if released[:worktree] == "error"
       else
         Orchestrator::RunCompletion.call(run:, outcome: "done", summary: session.result) if run.active?
-        runner = Orchestrator::Runner.for(run.workspace)
+        runner = Orchestrator::Runner.for(run)
         runner.close_workspace!(session.herdr_workspace_id) if session.herdr_workspace_id.present?
         if runner.worktree_registered?(repository_path: Orchestrator::WorktreeJanitor.repository_for(run), path: run.target_root)
           Orchestrator::JobFinalization.validate!(run)

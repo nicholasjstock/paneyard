@@ -8,10 +8,10 @@ RSpec.describe McpTools::CreateWorkspaceTool do
   let!(:gh) { use_fake_gh!(File.join(tmp, "fake-gh")) }
 
   around do |example|
-    saved = ENV.to_h.slice("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
+    saved = ENV.to_h.slice("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "PANEYARD_PROJECTS_DIR")
     example.run
   ensure
-    %w[GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM].each { |key| ENV.delete(key) }
+    %w[GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM PANEYARD_PROJECTS_DIR].each { |key| ENV.delete(key) }
     ENV.update(saved)
     FileUtils.remove_entry(tmp) if File.exist?(tmp)
   end
@@ -22,7 +22,7 @@ RSpec.describe McpTools::CreateWorkspaceTool do
     ENV["GIT_CONFIG_GLOBAL"] = config
     ENV["GIT_CONFIG_NOSYSTEM"] = "1"
     gh.update("owners" => { "Gembani" => "Organization" }, "memberships" => [ "Gembani" ])
-    Setting["projects_dir"] = source
+    ENV["PANEYARD_PROJECTS_DIR"] = source
   end
 
   # An existing workspace, as the operator has: its checkout under Source.
@@ -104,14 +104,21 @@ RSpec.describe McpTools::CreateWorkspaceTool do
                                                    steps: %w[create_github_repository push_branch], originUrl: gh.remote("Gembani/notes"))
   end
 
-  it "asks for a projects directory when none is set and no path is given, suggesting where the workspaces are" do
-    Setting["projects_dir"] = nil
+  it "refuses a runner with no projects directory when no path is given" do
+    RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet:3100")
 
-    response = call(name: "lists")
+    response = call(name: "lists", runner: "mac")
 
     expect(problem_codes(response)).to eq(%w[projects_dir_unset])
-    expect(response.structured_content[:message]).to include("update_settings projectsDir", "most workspaces are in #{source}")
+    expect(response.structured_content[:message]).to include("Runner mac has no projects directory", "PANEYARD_PROJECTS_DIR")
     expect(gh.calls).to be_empty
+  end
+
+  it "refuses a runner that is not registered" do
+    response = call(name: "lists", runner: "nowhere")
+
+    expect(response.structured_content).to include(error: "runner_invalid")
+    expect(Workspace.where(name: "lists")).to be_empty
   end
 
   it "does nothing, on disk or on GitHub, when the workspace or repository is taken, and says so with everything else" do

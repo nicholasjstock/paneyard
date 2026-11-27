@@ -16,9 +16,9 @@ RSpec.describe "the admin MCP endpoint", type: :request do
   it "exposes exactly the external tool set" do
     names = Orchestrator::AdminMcpServer::TOOLS.map(&:tool_name)
 
-    expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces", "list_models", "register_workspace",
-      "create_workspace", "get_settings", "update_settings", "update_workspace_layout", "close_session", "reopen_session", "cancel_run", "update_run_dependencies", "open_lobby",
-      "send_session_message")
+    expect(names).to contain_exactly("ping_tool", "queue_run", "list_runs", "get_run", "list_workspaces", "list_models", "list_runners", "register_workspace", "register_runner",
+      "create_workspace", "get_settings", "update_settings", "update_workspace_layout", "close_session", "reopen_session", "move_run", "cancel_run",
+      "update_run_dependencies", "open_lobby", "send_session_message")
   end
 
   it "tells clients how to find or register the workspace before queuing" do
@@ -166,6 +166,63 @@ RSpec.describe "the admin MCP endpoint", type: :request do
       expect(result["isError"]).to be(true)
       expect(result["structuredContent"]["problems"].map { |problem| problem["code"] }).to eq(%w[not_git])
       expect(Workspace.count).to eq(0)
+    end
+  end
+  describe "register_runner" do
+    before { host! "127.0.0.1" }
+
+    let(:runtime_root) { Dir.mktmpdir("registered-runner") }
+    let!(:workspace) { create_workspace(name: "app", repository_path: create_source_checkout) }
+
+    def register(url, **arguments)
+      call_tool("register_runner", name: "mac", url:, orchestratorUrl: "https://box.tailnet.ts.net/", **arguments)
+    end
+
+    it "records a runner that answers, with each checkout it names checked there, and again idempotently" do
+      there = create_source_checkout(name: "app-on-mac")
+
+      with_runner_endpoint(runner: Orchestrator::Runner::Local.new(runtime_root:)) do |url|
+        result = register(url, checkouts: [ { workspace: "app", path: there }, { workspace: "nope", path: there } ])
+
+        expect(result["isError"]).to be_falsey, result.to_s
+        expect(result["structuredContent"]).to include(
+          "name" => "mac", "url" => url, "orchestratorUrl" => "https://box.tailnet.ts.net", "hostname" => Socket.gethostname,
+          "checkouts" => [ { "workspace" => "app", "repositoryPath" => File.realpath(there) } ]
+        )
+        expect(result.dig("structuredContent", "problems")).to contain_exactly(include("workspace" => "nope", "code" => "workspace_not_found"))
+
+        runner = RegisteredRunner.find_by!(name: "mac")
+        expect(runner).to have_attributes(kind: "remote", url:, orchestrator_url: "https://box.tailnet.ts.net")
+        expect(workspace.repository_path_for(runner)).to eq(File.realpath(there))
+        expect(Orchestrator::RunSessionRunner.mcp_url(runner)).to eq("https://box.tailnet.ts.net/mcp")
+
+        # Every plugin start registers again: the same runner, nothing doubled.
+        again = register(url, checkouts: [ { workspace: "app", path: there } ])
+        expect(again["isError"]).to be_falsey
+        expect(RegisteredRunner.remote.count).to eq(1)
+        expect(runner.workspace_checkouts.count).to eq(1)
+      end
+    end
+
+    it "reports a checkout that is not a repository there, and records the runner anyway" do
+      with_runner_endpoint(runner: Orchestrator::Runner::Local.new(runtime_root:)) do |url|
+        result = register(url, checkouts: [ { workspace: "app", path: Dir.mktmpdir("not-a-repo") } ])
+
+        expect(result.dig("structuredContent", "problems").sole).to include("workspace" => "app", "code" => "not_git")
+        expect(RegisteredRunner.find_by!(name: "mac").workspace_checkouts).to be_empty
+      end
+    end
+
+    it "saves nothing when the runner does not answer, and never takes the local runner's name" do
+      closed = TCPServer.new("127.0.0.1", 0).then { |server| server.addr[1].tap { server.close } }
+
+      unreachable = register("http://127.0.0.1:#{closed}")
+      local = call_tool("register_runner", name: "local", url: "http://127.0.0.1:#{closed}", orchestratorUrl: "http://x")
+
+      expect(unreachable["isError"]).to be(true)
+      expect(unreachable.dig("structuredContent", "message")).to include("did not answer, so nothing was registered")
+      expect(local.dig("structuredContent", "message")).to include("local runner's name")
+      expect(RegisteredRunner.remote).to be_empty
     end
   end
 end

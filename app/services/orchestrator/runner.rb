@@ -21,10 +21,13 @@ module Orchestrator
   # workspace's repository_path, a run's target_root, a session's prompt_path)
   # are the runner's, and the orchestrator only stores and hands them back.
   #
-  # Today there is one runner, Runner::Local, in this process and on this
-  # machine. A different implementation with the same public methods (see
-  # Runner::Local) can later take its place, per workspace, without the
-  # orchestrator changing.
+  # Each run belongs to a runner in the registry (RegisteredRunner, the
+  # runners table), and Runner.for(run) is that runner's object. The local one
+  # is Runner::Local, in this process and on this machine. A different
+  # implementation with the same public methods (see Runner::Local) takes its
+  # place for a remote runner, Runner::Remote, over HTTP to that machine's
+  # runner-only process (bin/runner), without the orchestrator changing
+  # (docs/multi-runner-plan.md).
   module Runner
     module_function
 
@@ -41,11 +44,37 @@ module Orchestrator
     # A session's agent never came up (see Runner::SessionLauncher).
     class LaunchError < Error; end
 
-    # The runner a workspace's runs happen on. There is one for now, so the
-    # workspace is not consulted yet; it is taken so that a workspace can
-    # later name its own runner without any caller changing.
-    def for(_workspace)
-      local
+    # The runner object for a run's runner, which is where everything about
+    # that run happens on the machine. Takes:
+    #
+    #   a Run (or RunSession)  its runner (Run#runner)
+    #   a RegisteredRunner     that runner
+    #   a Workspace, or nil    the local runner: callers with no run, such as
+    #                          the lobby and workspace registration, are on
+    #                          this machine for now
+    #
+    # This is the one place a runner record becomes an implementation, and
+    # the only orchestrator data the runner module sees: the object returned
+    # is handed plain data only. The local record is Runner::Local; a remote
+    # one is a Runner::Remote for its url (docs/multi-runner-plan.md).
+    def for(subject)
+      resolve(registered(subject))
+    end
+
+    def resolve(record)
+      return local if record.nil? || record.local?
+
+      Remote.new(name: record.name, url: record.url)
+    end
+
+    def registered(subject)
+      case subject
+      when nil, ::Workspace then nil
+      when ::Run then subject.runner
+      when ::RunSession then subject.run&.runner
+      when ::RegisteredRunner then subject
+      else raise ArgumentError, "no runner for #{subject.class}"
+      end
     end
 
     def local

@@ -7,8 +7,9 @@ module Orchestrator
   # first by when a run was first queued, across every workspace. A queued run
   # whose `after` dependencies are not merged (waiting or blocked,
   # RunDependencies) is passed over, holding no slot, so it never delays a run
-  # queued after it. There is one runner today, so no run is passed over for
-  # its runner being full; a per-runner cap would be checked here too.
+  # queued after it. RunDispatchJob also passes over a run whose runner is at
+  # its own cap (RunConcurrency); that depends on which slots are free at that
+  # moment, so it is checked there and not counted here.
   module RunQueue
     module_function
 

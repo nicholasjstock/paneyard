@@ -23,7 +23,7 @@ module Orchestrator
       released = release(run, finalizing:)
       # Removing the worktree closed its workspace; a kept one is still open.
       if workspace_id.present? && released[:worktree] != "removed"
-        runner = Runner.for(run.workspace)
+        runner = Runner.for(run)
         strict_workspace ? runner.close_workspace!(workspace_id) : runner.close_workspace(workspace_id)
       end
       { outcome:, **released }

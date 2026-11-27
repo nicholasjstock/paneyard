@@ -36,6 +36,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_120000) do
     t.index ["run_session_id"], name: "index_run_checkpoints_on_run_session_id"
   end
 
+  create_table "run_moves", force: :cascade do |t|
+    t.integer "run_id", null: false
+    t.integer "from_runner_id", null: false
+    t.integer "to_runner_id", null: false
+    t.string "source_repository_path", null: false
+    t.string "source_target_root"
+    t.string "source_worktree", default: "none", null: false
+    t.text "source_worktree_error"
+    t.string "target_root", null: false
+    t.json "transferred", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["from_runner_id"], name: "index_run_moves_on_from_runner_id"
+    t.index ["run_id"], name: "index_run_moves_on_run_id"
+    t.index ["to_runner_id"], name: "index_run_moves_on_to_runner_id"
+  end
+
   create_table "run_sessions", force: :cascade do |t|
     t.string "agent_status"
     t.string "capability_token_digest"
@@ -70,6 +87,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_120000) do
     t.index ["status"], name: "index_run_sessions_on_status"
   end
 
+  create_table "runners", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "kind", null: false
+    t.string "url"
+    t.integer "max_concurrent_runs"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "orchestrator_url"
+    t.string "projects_dir"
+    t.index ["kind"], name: "index_runners_on_one_local", unique: true, where: "kind = 'local'"
+    t.index ["name"], name: "index_runners_on_name", unique: true
+  end
+
   create_table "runs", force: :cascade do |t|
     t.string "base_sha"
     t.string "branch_name"
@@ -91,8 +121,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_120000) do
     t.string "worktree_name"
     t.string "base_branch", null: false
     t.json "dependency_run_ids", default: [], null: false
+    t.integer "runner_id", null: false
     t.text "stop_reason"
     t.index ["run_id"], name: "index_runs_on_run_id", unique: true
+    t.index ["runner_id"], name: "index_runs_on_runner_id"
     t.index ["status"], name: "index_runs_on_status"
     t.index ["workspace_id"], name: "index_runs_on_workspace_id"
     t.index ["worktree_name"], name: "index_runs_on_worktree_name"
@@ -106,20 +138,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_120000) do
     t.index ["key"], name: "index_settings_on_key", unique: true
   end
 
+  create_table "workspace_checkouts", force: :cascade do |t|
+    t.integer "workspace_id", null: false
+    t.integer "runner_id", null: false
+    t.string "repository_path", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["runner_id", "repository_path"], name: "index_workspace_checkouts_on_runner_id_and_repository_path", unique: true
+    t.index ["workspace_id", "runner_id"], name: "index_workspace_checkouts_on_workspace_id_and_runner_id", unique: true
+  end
+
   create_table "workspaces", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.text "layout"
     t.string "name", null: false
     t.datetime "updated_at", null: false
-    t.string "repository_path", null: false
     t.string "default_base_branch", default: "main", null: false
+    t.string "origin_url"
     t.index ["name"], name: "index_workspaces_on_name", unique: true
-    t.index ["repository_path"], name: "index_workspaces_on_repository_path", unique: true
   end
 
   add_foreign_key "lobbies", "workspaces"
   add_foreign_key "run_checkpoints", "run_sessions"
   add_foreign_key "run_checkpoints", "runs"
+  add_foreign_key "run_moves", "runners", column: "from_runner_id"
+  add_foreign_key "run_moves", "runners", column: "to_runner_id"
+  add_foreign_key "run_moves", "runs"
   add_foreign_key "run_sessions", "runs"
+  add_foreign_key "runs", "runners"
   add_foreign_key "runs", "workspaces"
+  add_foreign_key "workspace_checkouts", "runners"
+  add_foreign_key "workspace_checkouts", "workspaces"
 end

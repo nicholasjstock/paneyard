@@ -8,12 +8,13 @@ module Orchestrator
   # code serve a caller with no run of its own (falls back to the oldest
   # registered workspace, or an explicit `workspace:` argument).
   #
-  # register_workspace, create_workspace, get_settings, update_settings,
-  # update_workspace_layout, close_session,
-  # reopen_session, cancel_run, update_run_dependencies and open_lobby are the
-  # tools only this endpoint has beyond ping: changing what Paneyard manages or
-  # what panes a run starts, ending a session or bringing one back, taking a
-  # queued run out of the queue, letting a run start
+  # register_workspace, register_runner, create_workspace, get_settings,
+  # update_settings, update_workspace_layout, list_runners, close_session,
+  # reopen_session, move_run, cancel_run, update_run_dependencies and
+  # open_lobby are the tools only this endpoint has beyond ping: changing what
+  # Paneyard manages or what panes a run starts, ending a session or bringing
+  # one back, moving a run to another machine, taking a queued run out of the
+  # queue, letting a run start
   # without the work it was queued after, starting a new project (which makes
   # a GitHub repository) or where projects go, or switching the operator's own
   # checkout for their lobby, is the operator's decision, while a run session
@@ -28,13 +29,16 @@ module Orchestrator
       ::McpTools::GetRunTool,
       ::McpTools::ListWorkspacesTool,
       ::McpTools::ListModelsTool,
+      ::McpTools::ListRunnersTool,
       ::McpTools::RegisterWorkspaceTool,
+      ::McpTools::RegisterRunnerTool,
       ::McpTools::CreateWorkspaceTool,
       ::McpTools::GetSettingsTool,
       ::McpTools::UpdateSettingsTool,
       ::McpTools::UpdateWorkspaceLayoutTool,
       ::McpTools::CloseSessionTool,
       ::McpTools::ReopenSessionTool,
+      ::McpTools::MoveRunTool,
       ::McpTools::CancelRunTool,
       ::McpTools::UpdateRunDependenciesTool,
       ::McpTools::OpenLobbyTool,
@@ -58,13 +62,18 @@ module Orchestrator
       "queue_run. It is not a job: it finishes in seconds, so never queue a job to create a workspace. Call it " \
       "first, then queue every job into the new workspace; when one job must build on another's work there (scaffold " \
       "first, then the feature), queue both there and give the later one after: [the earlier runId]. Only do this " \
-      "when asked. If it says no projects directory is set, ask the operator where projects " \
-      "go and save it with update_settings. Pass driver as the agent CLI you are " \
+      "when asked. New projects go in the runner's projects directory (get_settings; update_settings changes it " \
+      "when the operator says so); pass path only when the " \
+      "operator names another place. Pass driver as the agent CLI you are " \
       "(claude or codex), and model as the model id you are running on if you know it, unless the operator names " \
       "others. When one job must build on another's work, queue it with after: [that job's runId] rather than " \
       "asking the operator to merge them in order; it waits, holding no slot, until that work is merged into the " \
       "shared baseBranch. A workspace's lobby (open_lobby) is the operator's own integration session on its " \
-      "checkout; open one only when the operator asks. When the operator asks you to pass something on to a " \
+      "checkout; open one only when the operator asks. Pass runner to queue_run only when the operator names a " \
+      "machine to run a job on (list_runners lists them); otherwise leave it out. A runner with no checkout of " \
+      "the workspace clones it into its projects directory when the job starts there. When a repository is only " \
+      "on another machine, register_workspace takes that machine's runner and its path there. Move a run to another runner " \
+      "(move_run) only when the operator asks. When the operator asks you to pass something on to a " \
       "running job (\"send run X this finding\"), call send_session_message with its workspace and runId: it " \
       "types the message into that job's session; do not use it on your own initiative.".freeze
 

@@ -15,8 +15,10 @@ module Orchestrator
     # worktree path alone, with no session id needed -- a session that never
     # reported one (or never started a conversation) is still covered:
     #
-    #   - claude: <CLAUDE_CONFIG_DIR or ~/.claude>/projects/<cwd with every
-    #     character but letters and digits turned into "-">/, one <id>.jsonl
+    #   - claude: <config>/projects/<cwd with every character but letters
+    #     and digits turned into "-">/, where <config> is CLAUDE_CONFIG_DIR or
+    #     ~/.claude, and also ~/.claude and ~/.config/claude where they exist
+    #     (claude_config_dirs: the login shell's may differ), one <id>.jsonl
     #     per conversation, beside per-conversation directories (subagents,
     #     tool results). The whole directory is copied.
     #   - codex: <CODEX_HOME or ~/.codex>/sessions/YYYY/MM/DD/rollout-*.jsonl,
@@ -59,15 +61,32 @@ module Orchestrator
       end
 
       # The cwd as given and as the filesystem resolves it (/tmp is
-      # /private/tmp on macOS), since which one claude saw is not known.
+      # /private/tmp on macOS), since which one claude saw is not known, in
+      # every config directory claude might use (claude_config_dirs).
       def claude_project_dirs(cwd)
         paths = [ cwd.to_s ]
         paths << File.realpath(cwd.to_s) if File.exist?(cwd.to_s)
-        paths.uniq.map { |path| File.join(claude_config_dir, "projects", path.gsub(/[^A-Za-z0-9]/, "-")) }
+        claude_config_dirs.product(paths.uniq).map do |config, path|
+          File.join(config, "projects", path.gsub(/[^A-Za-z0-9]/, "-"))
+        end.uniq
+      end
+
+      # claude runs in the operator's login shell, whose CLAUDE_CONFIG_DIR
+      # this process may not have (as for ClaudeTrust): the herdr plugin's
+      # daemon was confirmed live to run without it, saving and placing
+      # transcripts under ~/.claude while claude used ~/.config/claude, so a
+      # moved run's conversation could not be resumed. So this process's own
+      # directory, and each usual one that exists.
+      def claude_config_dirs
+        [ claude_config_dir, *usual_claude_config_dirs.select { |dir| Dir.exist?(dir) } ].map { |dir| File.expand_path(dir) }.uniq
       end
 
       def claude_config_dir
         ENV["CLAUDE_CONFIG_DIR"].presence || File.join(Dir.home, ".claude")
+      end
+
+      def usual_claude_config_dirs
+        [ File.join(Dir.home, ".claude"), File.join(Dir.home, ".config", "claude") ]
       end
 
       def save_codex(target, cwd, since)
@@ -96,6 +115,110 @@ module Orchestrator
 
       def codex_home
         ENV["CODEX_HOME"].presence || File.join(Dir.home, ".codex")
+      end
+
+      # --- Moving a run (RunTransfer, Orchestrator::RunMove) ------------------
+
+      # Every file saved for the run, for the machine it moves to:
+      # [{ "driver", "path" (relative to that driver's directory), "content"
+      # (binary) }].
+      def export(runtime_root:, run_id:)
+        root = dir(runtime_root, run_id)
+        Dir.glob(File.join(root, "*", "**", "*")).sort.filter_map do |file|
+          next unless File.file?(file) && !File.symlink?(file)
+
+          driver, relative = file.delete_prefix("#{root}/").split("/", 2)
+          { "driver" => driver, "path" => relative, "content" => File.binread(file).force_encoding(Encoding::BINARY) }
+        end
+      end
+
+      # Puts a moved run's transcripts where this machine's CLI looks for the
+      # conversations of `cwd`, its new worktree, so that resuming one there
+      # works (confirmed live for claude across macOS and Linux; untried for
+      # codex), and keeps a copy beside the run's runtime files as save
+      # does. Each conversation's own record of where it ran (`cwd` in claude's
+      # lines, the session_meta and turn context in codex's) is rewritten from
+      # source_cwd to cwd.
+      #
+      #   claude  <config>/projects/<encoded cwd>/<same relative path>
+      #   codex   <home>/sessions/YYYY/MM/DD/<rollout file>, dated from its name
+      #
+      # A sandbox writes into a CLI's config only when that config is inside
+      # its root, and otherwise keeps only the runtime copy. Returns
+      # { "saved", "placed" (paths), "skipped" (why some were not placed) }.
+      def restore(runtime_root:, run_id:, cwd:, source_cwd:, transcripts:)
+        Sandbox.guard_path!(cwd, "restore the CLI transcripts of")
+        saved = []
+        placed = []
+        skipped = []
+        Array(transcripts).each do |transcript|
+          driver = transcript.fetch("driver").to_s
+          relative = safe_relative(transcript.fetch("path").to_s)
+          next skipped << "#{driver}/#{transcript['path']}: not a plain relative path" unless relative && %w[claude codex].include?(driver)
+
+          content = transcript.fetch("content").to_s.b
+          saved << write(File.join(dir(runtime_root, run_id), driver, relative), content)
+          content = relocate(content, from: source_cwd.to_s, to: cwd.to_s) if relative.end_with?(".jsonl") && source_cwd.present?
+          destinations = driver == "claude" ? claude_destinations(cwd, relative) : [ codex_destination(relative) ]
+          destinations.each do |destination|
+            Sandbox.guard_path!(destination, "write a CLI transcript to")
+            placed << write(destination, content)
+          rescue Sandbox::Violation => error
+            skipped << error.message
+          end
+        end
+        { "saved" => saved, "placed" => placed, "skipped" => skipped.uniq }
+      end
+
+      def claude_destinations(cwd, relative)
+        claude_project_dirs(cwd).map { |project| File.join(project, relative) }
+      end
+
+      # A rollout file's name starts with its date (rollout-YYYY-MM-DDT...),
+      # which is the day directory codex files it under.
+      def codex_destination(relative)
+        name = File.basename(relative)
+        day = name[/\Arollout-(\d{4})-(\d{2})-(\d{2})/] ? [ ::Regexp.last_match(1), ::Regexp.last_match(2), ::Regexp.last_match(3) ] : Time.now.utc.strftime("%Y/%m/%d").split("/")
+        File.join(codex_home, "sessions", *day, name)
+      end
+
+      def safe_relative(path)
+        parts = path.split("/")
+        return nil if path.start_with?("/") || parts.empty? || parts.any? { |part| part.empty? || part == "." || part == ".." }
+
+        parts.join("/")
+      end
+
+      def write(path, content)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.binwrite(path, content)
+        path
+      end
+
+      # Each JSON line whose cwd (top level, or in its payload) is source_cwd,
+      # or inside it, gets the new one. Lines that are not JSON stay as they are.
+      def relocate(content, from:, to:)
+        content.force_encoding(Encoding::UTF_8)
+        return content.b unless content.valid_encoding?
+
+        content.each_line.map do |line|
+          record = JSON.parse(line)
+          next line unless record.is_a?(Hash)
+
+          changed = relocate_cwd!(record, from:, to:)
+          changed |= relocate_cwd!(record["payload"], from:, to:) if record["payload"].is_a?(Hash)
+          changed ? "#{JSON.generate(record)}#{"\n" if line.end_with?("\n")}" : line
+        rescue JSON::ParserError
+          line
+        end.join.b
+      end
+
+      def relocate_cwd!(record, from:, to:)
+        cwd = record["cwd"]
+        return false unless cwd.is_a?(String) && (cwd == from || cwd.start_with?("#{from}/"))
+
+        record["cwd"] = "#{to}#{cwd.delete_prefix(from)}"
+        true
       end
     end
   end

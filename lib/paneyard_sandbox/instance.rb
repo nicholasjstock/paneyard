@@ -4,6 +4,7 @@ require "net/http"
 require "securerandom"
 require "socket"
 require_relative "../paneyard_sandbox"
+require_relative "mcp_client"
 
 module PaneyardSandbox
   # One isolated instance of this checkout's code: bin/production (so Puma and
@@ -15,6 +16,13 @@ module PaneyardSandbox
   # Its pids and port live in <root>/instance.json, so a later `bin/sandbox
   # stop` finds it. Nothing here reads or writes the production instance's
   # storage/, tmp/pids/production.pid, or port.
+  #
+  # remote_runner: true also starts a second machine's worth of runner beside
+  # it: bin/runner (PANEYARD_ROLE=runner) on its own port, with its own fake
+  # herdr and its own sandbox root (<root>/remote), which the instance may
+  # call and nothing else (PANEYARD_SANDBOX_RUNNER_URLS). register_remote_runner!
+  # gives it a clone of a workspace's repository and registers it over
+  # /mcp/admin, as the herdr plugin does on a real second machine.
   class Instance
     class Error < StandardError; end
 
@@ -24,8 +32,11 @@ module PaneyardSandbox
 
     # fake_herdr: false runs against whatever herdr HERDR_SOCKET_PATH in `env`
     # names (bin/sandbox start --real-herdr) instead of starting a fake one.
-    def initialize(app_root:, root:, storage_dir: nil, log_path: nil, env: {}, fake_herdr: true)
+    REMOTE_RUNNER_NAME = "sandbox-remote".freeze
+
+    def initialize(app_root:, root:, storage_dir: nil, log_path: nil, env: {}, fake_herdr: true, remote_runner: false)
       @fake_herdr = fake_herdr
+      @remote_runner = remote_runner
       @app_root = File.expand_path(app_root)
       @root = File.expand_path(root)
       @storage_dir = File.expand_path(storage_dir || File.join(@root, "storage"))
@@ -44,6 +55,53 @@ module PaneyardSandbox
 
     def herdr_socket_path
       PaneyardSandbox.herdr_socket_path(root)
+    end
+
+    # The remote runner's own sandbox root: its checkouts, worktrees and
+    # runtime files are all under it.
+    def remote_root
+      File.join(root, "remote")
+    end
+
+    # Where each machine clones a workspace it has no checkout of
+    # (Orchestrator::WorkspaceCheckout): inside its own root, since a sandbox
+    # clones nowhere else.
+    def projects_dir
+      File.join(root, "projects")
+    end
+
+    def remote_projects_dir
+      File.join(remote_root, "projects")
+    end
+
+    # A repository only the "other machine" has: a bare origin and a clone
+    # of it, both under the remote runner's root (so inside this sandbox's
+    # root too, where its local runner may clone from). Returns the clone.
+    def seed_remote_only_repository!(name)
+      base = File.join(remote_root, "only", name)
+      origin = File.join(base, "origin.git")
+      checkout = File.join(base, "checkout")
+      return checkout if File.directory?(File.join(checkout, ".git"))
+
+      FileUtils.mkdir_p(base)
+      git = ->(*args) { system("git", *args, out: File::NULL, err: File::NULL, exception: true) }
+      git.call("init", "-q", "--bare", "-b", "main", origin)
+      git.call("clone", "-q", origin, checkout)
+      git.call("-C", checkout, "config", "user.email", "sandbox@example.test")
+      git.call("-C", checkout, "config", "user.name", "Paneyard Sandbox")
+      File.write(File.join(checkout, "README.md"), "Only on the other machine.\n")
+      git.call("-C", checkout, "add", "README.md")
+      git.call("-C", checkout, "commit", "-q", "-m", "Initial commit")
+      git.call("-C", checkout, "push", "-q", "-u", "origin", "main")
+      checkout
+    end
+
+    def remote_herdr_socket_path
+      PaneyardSandbox.herdr_socket_path(remote_root)
+    end
+
+    def runner_url
+      @state["runner_port"] && "http://127.0.0.1:#{@state['runner_port']}"
     end
 
     # What the running instance was started with (bin/sandbox status).
@@ -66,6 +124,7 @@ module PaneyardSandbox
       port = free_port
       log = File.open(log_path, "a")
       start_fake_herdr!(log) if @fake_herdr
+      start_remote_runner!(log) if @remote_runner
 
       pid = Process.spawn(
         # Loopback only: rails server in production otherwise listens on
@@ -84,19 +143,71 @@ module PaneyardSandbox
       raise
     end
 
-    def start_fake_herdr!(log)
+    def start_fake_herdr!(log, socket: herdr_socket_path, key: "herdr_pid")
       herdr_pid = Process.spawn(
         { "RUBYOPT" => nil, "BUNDLE_GEMFILE" => nil },
-        RbConfig.ruby, File.join(app_root, "script/fake_herdr"), herdr_socket_path,
+        RbConfig.ruby, File.join(app_root, "script/fake_herdr"), socket,
         chdir: app_root, pgroup: true, out: log, err: log, in: File::NULL
       )
       Process.detach(herdr_pid)
-      @state["herdr_pid"] = herdr_pid
-      wait_for("fake herdr socket", timeout: 10) { File.socket?(herdr_socket_path) || (raise_dead!(herdr_pid, "fake herdr") && false) }
+      @state[key] = herdr_pid
+      File.write(state_path, JSON.pretty_generate(@state))
+      wait_for("fake herdr socket", timeout: 10) { File.socket?(socket) || (raise_dead!(herdr_pid, "fake herdr") && false) }
+    end
+
+    # bin/runner with its own fake herdr, as the second machine.
+    def start_remote_runner!(log, timeout: 60)
+      FileUtils.mkdir_p(remote_root)
+      start_fake_herdr!(log, socket: remote_herdr_socket_path, key: "remote_herdr_pid")
+      runner_port = free_port
+      runner_pid = Process.spawn(
+        runner_env(runner_port), File.join(app_root, "bin/runner"), "-b", "127.0.0.1",
+        chdir: app_root, pgroup: true, out: log, err: log, in: File::NULL
+      )
+      Process.detach(runner_pid)
+      @state = @state.merge("runner_pid" => runner_pid, "runner_port" => runner_port)
+      File.write(state_path, JSON.pretty_generate(@state))
+      wait_for("#{runner_url}/up", timeout:) { raise_dead!(runner_pid, "bin/runner") || up?(runner_url) }
+    end
+
+    def runner_env(port)
+      {
+        "RAILS_ENV" => "production",
+        "PANEYARD_ROLE" => "runner",
+        "PORT" => port.to_s,
+        "PANEYARD_SANDBOX" => "1",
+        "PANEYARD_SANDBOX_ROOT" => remote_root,
+        "PANEYARD_STORAGE_DIR" => File.join(remote_root, "state"),
+        "PANEYARD_RUNTIME_DIR" => File.join(remote_root, "run_sessions"),
+        "PANEYARD_RAILS_URL" => nil,
+        "PANEYARD_SANDBOX_RUNNER_URLS" => nil,
+        "HERDR_SOCKET_PATH" => remote_herdr_socket_path,
+        "PANEYARD_RUN_TOKEN" => nil,
+        "PANEYARD_RUN_ID" => nil,
+        "PIDFILE" => File.join(remote_root, "puma.pid")
+      }.merge(secret_env)
+    end
+
+    # A clone of the workspace's repository on the "other machine", and the
+    # remote runner registered with it over /mcp/admin. Returns
+    # register_runner's result.
+    def register_remote_runner!(workspace:, repository:)
+      checkout = File.join(remote_root, "repos", workspace, "checkout")
+      unless File.directory?(File.join(checkout, ".git"))
+        origin = IO.popen([ "git", "-C", repository, "remote", "get-url", "origin" ], &:read).strip
+        FileUtils.mkdir_p(File.dirname(checkout))
+        system("git", "clone", "-q", origin, checkout, exception: true)
+        system("git", "-C", checkout, "branch", "-q", "--track", "feature/sandbox", "origin/feature/sandbox",
+          out: File::NULL, err: File::NULL)
+      end
+      McpClient.new("#{url}/mcp/admin").call_tool(
+        "register_runner", name: REMOTE_RUNNER_NAME, url: runner_url, orchestratorUrl: url,
+        projectsDir: remote_projects_dir, checkouts: [ { workspace:, path: checkout } ]
+      )
     end
 
     def stop!(grace: 15)
-      [ @state["pid"], @state["herdr_pid"] ].compact.each do |pid|
+      [ @state["pid"], @state["runner_pid"], @state["herdr_pid"], @state["remote_herdr_pid"] ].compact.each do |pid|
         signal(pid, "TERM")
         deadline = Time.now + grace
         sleep 0.1 while alive?(pid) && Time.now < deadline
@@ -104,6 +215,7 @@ module PaneyardSandbox
       end
       FileUtils.rm_f(state_path)
       FileUtils.rm_f(herdr_socket_path) if @fake_herdr
+      FileUtils.rm_f(remote_herdr_socket_path)
       @state = {}
     end
 
@@ -118,6 +230,10 @@ module PaneyardSandbox
         "HERDR_SOCKET_PATH" => herdr_socket_path,
         "PANEYARD_RUN_TOKEN" => nil,
         "PANEYARD_RUN_ID" => nil,
+        "PANEYARD_ROLE" => nil,
+        # The one remote runner this sandbox may call: its own.
+        "PANEYARD_SANDBOX_RUNNER_URLS" => runner_url,
+        "PANEYARD_PROJECTS_DIR" => projects_dir,
         "PIDFILE" => File.join(root, "puma.pid")
       }.merge(secret_env).merge(@extra_env)
     end
@@ -148,8 +264,9 @@ module PaneyardSandbox
       { "SECRET_KEY_BASE" => SecureRandom.hex(64) }
     end
 
-    def up?
-      get("/up").is_a?(Net::HTTPSuccess)
+    def up?(base = url)
+      uri = URI("#{base}/up")
+      Net::HTTP.start(uri.host, uri.port, read_timeout: 30) { |http| http.get(uri.request_uri) }.is_a?(Net::HTTPSuccess)
     rescue SystemCallError, Net::OpenTimeout, Net::ReadTimeout, EOFError
       false
     end

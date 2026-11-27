@@ -154,11 +154,11 @@ The menu offers: hand off a task, jobs and reports (where a closed job can be re
 | `paneyard.queue` | Hand off a task from the repository and branch of the current pane. |
 | `paneyard.runs` | Open lobbies, then the 40 newest jobs, newest first, a follow-up marked with its parent (`22da ↳7efb`). Pick one to read its newest report, jump to its herdr workspace, close it, or reopen it once closed. |
 | `paneyard.lobby` | Pick a workspace (Enter for the current repository's) and open its [lobby](./docs/operating.md#the-lobby): an agent on its own checkout, connected to Paneyard, to hand off jobs and merge them. Name a branch or `#PR`; it switches the checkout only if nothing would be lost. |
-| `paneyard.project` | **New workspace**: type a project name (or `owner/name`) to start a new project in your projects directory, or clone it if it is already on GitHub; or a path (`/…`, `~/…`, `./…`) to add an existing directory or repository, doing only what it lacks. Asks for the projects directory the first time and saves it (`d` changes it). Then offers to hand off its first task or open its lobby. See [Starting a new project](./docs/operating.md#starting-a-new-project). |
+| `paneyard.project` | **New workspace**: type a project name (or `owner/name`) to start a new project in your projects directory, or clone it if it is already on GitHub; or a path (`/…`, `~/…`, `./…`) to add an existing directory or repository, doing only what it lacks. New projects go in your projects directory (`~/Source` unless setup chose another; `d` changes it). Then offers to hand off its first task or open its lobby. See [Starting a new project](./docs/operating.md#starting-a-new-project). |
 | `paneyard.report` | Inside a job's herdr workspace: that job's newest report. |
 | `paneyard.close` | Inside a job's herdr workspace: close it (asks first). |
 | `paneyard.layout` | Visually build and validate the current repository's tabs and panes in a Herdr popup, including from one of its job worktrees. |
-| `paneyard.setup` | Detect Claude Code and Codex, then offer to connect them to Paneyard. |
+| `paneyard.setup` | Ask for this machine's projects directory (default `~/Source`), then detect Claude Code and Codex and offer to connect them to Paneyard. |
 | `paneyard.mcp-url` | Show the `/mcp/admin` URL as a notification. |
 | `paneyard.restart`, `paneyard.stop` | Apply a settings change; stop Paneyard (any action starts it again). Running sessions are not affected by either. |
 
@@ -178,7 +178,7 @@ A job handed off from another job's branch is a **follow-up** of it. **Jobs and 
 
 ### 6. Queue jobs from your own agent
 
-Paneyard's `/mcp/admin` endpoint lets an MCP client queue and inspect jobs. At the end of installation, Herdr prints the command for the interactive `paneyard.setup` action. It detects installed Claude Code and Codex CLIs, asks before changing either one, and registers the endpoint at user scope. Running it again recognizes an up-to-date entry and does not duplicate it. By hand:
+Paneyard's `/mcp/admin` endpoint lets an MCP client queue and inspect jobs. At the end of installation, Herdr prints the command for the interactive `paneyard.setup` action. It first asks for your projects directory (Enter keeps `~/Source`, or what it was), where new projects go and where this machine clones workspaces it has no checkout of. Then it detects installed Claude Code and Codex CLIs, asks before changing either one, and registers the endpoint at user scope. Running it again recognizes an up-to-date entry and does not duplicate it. By hand:
 
 ```sh
 claude mcp add --transport http -s user paneyard "$(cat ~/.local/state/herdr/plugins/paneyard/url)/mcp/admin"
@@ -193,7 +193,7 @@ mkdir -p ~/.claude/skills && ln -sfn <paneyard checkout>/skills/paneyard ~/.clau
 
 [skills/paneyard/SKILL.md](./skills/paneyard/SKILL.md) is a plain skill file, so other agents that read skills can use it the same way.
 
-The port stays the same across restarts; if it ever has to change (something else took it), Paneyard shows a notification, and `paneyard.setup` updates the registrations in one action. Then ask your agent to hand off a task, list jobs, or check on one. To start a project, or to bring in one that is only local or only on GitHub, use **New workspace** in the Paneyard menu, or ask your agent to "start a new project called lists with Paneyard": `create_workspace` does whatever is missing (the directory, `git init` on `main` with a first commit, the GitHub repository via `gh`, private by default, a clone, a push) and registers it, ready to queue into. New projects go in your projects directory, which you set once by telling your agent where (`update_settings`); there is no built-in default. The endpoint is unauthenticated, like the rest of the app, so it only listens on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
+The port stays the same across restarts; if it ever has to change (something else took it), Paneyard shows a notification, and `paneyard.setup` updates the registrations in one action. Then ask your agent to hand off a task, list jobs, or check on one. To start a project, or to bring in one that is only local or only on GitHub, use **New workspace** in the Paneyard menu, or ask your agent to "start a new project called lists with Paneyard": `create_workspace` does whatever is missing (the directory, `git init` on `main` with a first commit, the GitHub repository via `gh`, private by default, a clone, a push) and registers it, ready to queue into. New projects go in your projects directory, `~/Source` unless you chose another when running `paneyard.setup` (it is `PANEYARD_PROJECTS_DIR` in the plugin's `.env`). It is also where a machine clones a workspace it has no checkout of when a job runs there. The endpoint is unauthenticated, like the rest of the app, so it only listens on loopback. [MCP endpoints](./docs/operating.md#mcp-endpoints) lists its tools.
 
 ### Settings, updates and removal
 
@@ -240,6 +240,39 @@ Some things differ with a remote server:
 - `paneyard.restart` has to be run on the server.
 
 [Operating](./docs/operating.md#as-a-herdr-plugin) has the details.
+
+#### Running jobs on your machine too, and moving them
+
+What the plugin starts on a machine depends on its `.env`:
+
+| `.env` | What runs on this machine |
+|---|---|
+| neither `PANEYARD_REMOTE_URL` nor `PANEYARD_RUNNER_URL` (the default) | All of Paneyard: the queue, the database, both MCP endpoints, and this machine's own runner, in one process. Jobs run here. |
+| `PANEYARD_REMOTE_URL` only | Nothing. The plugin drives the server, and jobs run there. |
+| `PANEYARD_REMOTE_URL` and `PANEYARD_RUNNER_URL` | Only a runner (`bin/runner`), registered with the server, so jobs can run here or there. |
+
+To make your machine a runner too, add these to its `.env` beside `PANEYARD_REMOTE_URL` and `PANEYARD_REMOTE_PATHS`:
+
+```sh
+PANEYARD_RUNNER_URL=https://laptop.example.ts.net:7264   # the tailnet URL the server reaches this runner at
+PANEYARD_RUNNER_PORT=7264                                # its loopback port; must match tailscale serve below
+# PANEYARD_RUNNER_NAME=laptop                            # defaults to this machine's host name
+# PANEYARD_PROJECTS_DIR=~/Source                         # where it clones a workspace it lacks (paneyard.setup asks)
+```
+
+Expose that port to your tailnet only, then run any Paneyard action, which starts the runner and registers it:
+
+```sh
+tailscale serve --bg --https=7264 http://127.0.0.1:7264
+```
+
+Without `PANEYARD_RUNNER_PORT` the runner picks a free port of its own, which `tailscale serve` would not be forwarding to. The server must answer its tailnet name ([step 2 above](#running-paneyard-on-another-machine)), since sessions on this machine report to it there.
+
+On each start of the runner, and whenever the checkouts here change, the plugin registers it with the server: its name, URL and projects directory, and every checkout here of the server's workspaces. A checkout is refused, with a warning in `herdr plugin log list --plugin paneyard`, when this clone lacks the workspace's default base branch. `list_runners` shows each runner and whether the server can reach it. The queue popup then asks which machine a job runs on. A machine with no checkout of the workspace clones it into its projects directory when the job starts there, with its own git credentials. It tries the repository's recorded URL first, then the same repository over the other protocol (https or ssh), so a machine with only one kind of credential still gets its clone. It needs read access to the repository; moving a job to it does the same. A repository you have only on this machine registers with this machine's runner, and the server clones it when it needs it there.
+
+Updating means installing the new version on both machines: the runner restarts on its next action, like the server.
+
+To move a job from one machine to the other, open its screen in the jobs popup and press `m` (**Move to** the other machine), or ask your agent to `move_run` it. Paneyard closes its session if it is idle (one still working is refused unless you force it), and carries over its branch, uncommitted changes (staged ones staged again), untracked files and saved conversation transcripts. It checks that the new worktree matches the old one, then reopens the job there. Nothing is committed or pushed, and files git ignores (dependencies, build output, `.env` files) stay behind. The worktree on the machine it left stays until its work is saved, as any closed job's would. The agent's conversation resumes on the other machine; that was confirmed live with Claude Code between Linux and macOS, and Codex has not been tried yet. If it doesn't resume, the job starts fresh with its task and newest report, as a reopened job does. [Moving a run](./docs/operating.md#moving-a-run-to-another-runner) has the details.
 
 ### Running without the plugin
 

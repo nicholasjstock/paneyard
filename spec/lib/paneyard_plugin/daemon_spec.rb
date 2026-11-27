@@ -91,6 +91,39 @@ RSpec.describe PaneyardPlugin::Daemon do
     expect(File.read(paths.env_file)).to include("PANEYARD_MAX_CONCURRENT_RUNS=2")
   end
 
+  describe "as a runner (remote mode)" do
+    let(:runner_paths) { paths.runner }
+
+    def runner(command: [ RbConfig.ruby, "-e", STAND_IN ])
+      described_class.new(paths: runner_paths, herdr_socket: "/tmp/herdr-a.sock", env: base_env, command:,
+        startup_timeout: 15, stop_grace: 5, role: "runner").tap { |created| daemons << created }
+    end
+
+    it "runs bin/runner as the runner role, on PANEYARD_RUNNER_PORT, with files apart from the orchestrator daemon's" do
+      port = TCPServer.new("127.0.0.1", 0).then { |server| server.addr[1].tap { server.close } }
+      File.write(paths.env_file.tap { |path| FileUtils.mkdir_p(File.dirname(path)) },
+        "PANEYARD_RUNNER_PORT=#{port}\nPORT=1\nPANEYARD_RUNNER_URL=https://laptop.ts.net:7264\n")
+
+      result = runner.ensure_running
+      env = started_envs.first
+
+      expect(described_class.new(paths: runner_paths, role: "runner").fingerprint).not_to eq(described_class.new(paths:).fingerprint)
+      expect(result.port).to eq(port)
+      expect(env).to include("PANEYARD_ROLE" => "runner", "PORT" => port.to_s, "PANEYARD_STORAGE_DIR" => runner_paths.storage_dir,
+        "PANEYARD_RUNNER_URL" => "https://laptop.ts.net:7264", "HERDR_SOCKET_PATH" => "/tmp/herdr-a.sock")
+      expect(env).not_to have_key("PANEYARD_RAILS_URL")
+      expect(runner_paths.storage_dir).not_to eq(paths.storage_dir)
+      expect(File.exist?(runner_paths.daemon_file)).to be(true)
+      expect(File.exist?(paths.daemon_file)).to be(false)
+      expect(described_class.new(paths:).status).to be_nil
+    end
+
+    it "would run bin/runner" do
+      expect(described_class.new(paths: runner_paths, role: "runner").fingerprint)
+        .to eq(described_class.new(paths: runner_paths, role: "runner", command: [ RbConfig.ruby, File.join(paths.app_root, "bin", "runner") ]).fingerprint)
+    end
+  end
+
   it "writes a sample .env on first start, for the operator to fill in" do
     daemon.ensure_running
 

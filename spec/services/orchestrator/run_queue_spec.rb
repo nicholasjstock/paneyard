@@ -32,9 +32,12 @@ RSpec.describe Orchestrator::RunQueue do
 
   it "is the order the dispatcher claims in, passing over what is not eligible" do
     failed = create_run(workspace:, prefix: "queue", status: "failed", base_branch: "main")
-    queued(created_at: 2.minutes.ago, dependency_run_ids: [ failed.run_id ])
+    blocked = queued(created_at: 2.minutes.ago, dependency_run_ids: [ failed.run_id ])
     run = queued(created_at: 1.minute.ago)
 
-    expect(RunDispatchJob.new.send(:claim_next_queued_run)).to eq(run)
+    RunDispatchJob.perform_now
+
+    expect(run.reload.status).to eq("launching")
+    expect(blocked.reload.status).to eq("queued")
   end
 end

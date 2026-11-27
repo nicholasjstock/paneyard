@@ -3,6 +3,11 @@ module Orchestrator
   # once herdr has made it. herdr decides where it goes and opens it as the
   # run's herdr workspace in the same call (Runner::Local#provision_worktree),
   # so provisioning also gives the session its workspace and agent pane.
+  #
+  # A run queued on a runner with no checkout of its workspace gets one
+  # here, first (WorkspaceCheckout.ensure!: a clone into that runner's
+  # projects directory), so queuing stays fast and a clone that fails --
+  # missing credentials, say -- fails the launch with the reason.
   module GitWorktree
     module_function
 
@@ -12,8 +17,11 @@ module Orchestrator
     def provision!(run, session:)
       name = run.worktree_name.presence || name_for(run)
       current = run.target_root if run.worktree_name.present? && run.branch_name.present? && run.source_root.present?
-      result = Runner.for(run.workspace).provision_worktree(
-        repository_path: run.workspace.repository_path, branch: run.branch_name.presence || "paneyard/#{name}",
+      repository_path = WorkspaceCheckout.ensure!(run.workspace, run.runner)
+      # Queued before the clone, its root was only where the clone would go.
+      run.update!(target_root: repository_path) if run.branch_name.blank? && run.target_root != repository_path
+      result = Runner.for(run).provision_worktree(
+        repository_path:, branch: run.branch_name.presence || "paneyard/#{name}",
         base_branch: run.base_branch, label: name, current_target_root: current
       )
 

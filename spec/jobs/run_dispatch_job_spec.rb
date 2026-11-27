@@ -70,4 +70,43 @@ RSpec.describe RunDispatchJob do
 
     expect { described_class.perform_now }.not_to have_enqueued_job(StartRunSessionJob)
   end
+
+  describe "per-runner caps" do
+    let(:laptop) { RegisteredRunner.create!(name: "laptop", kind: "remote", url: "http://laptop.tailnet:3100", max_concurrent_runs: 1) }
+
+    it "does not let a full runner's queued runs block another runner's" do
+      ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "4"
+      create_run(prefix: "dispatch-laptop-busy", status: "launching", runner: laptop)
+      blocked = create_run(prefix: "dispatch-laptop-waiting", status: "queued", runner: laptop, created_at: 3.minutes.ago)
+      local = create_run(prefix: "dispatch-local", status: "queued", created_at: 1.minute.ago)
+
+      expect { described_class.perform_now }.to have_enqueued_job(StartRunSessionJob).once
+
+      expect(blocked.reload.status).to eq("queued")
+      expect(local.reload.status).to eq("launching")
+    end
+
+    it "fills a runner up to its own cap in one pass, then starts others" do
+      ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "4"
+      first = create_run(prefix: "dispatch-laptop-1", status: "queued", runner: laptop, created_at: 3.minutes.ago)
+      second = create_run(prefix: "dispatch-laptop-2", status: "queued", runner: laptop, created_at: 2.minutes.ago)
+      local = create_run(prefix: "dispatch-local-2", status: "queued", created_at: 1.minute.ago)
+
+      expect { described_class.perform_now }.to have_enqueued_job(StartRunSessionJob).twice
+
+      expect(first.reload.status).to eq("launching")
+      expect(second.reload.status).to eq("queued")
+      expect(local.reload.status).to eq("launching")
+    end
+
+    it "still holds every runner to the global cap" do
+      ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "1"
+      laptop.update!(max_concurrent_runs: nil)
+      create_run_and_session(run: create_run(prefix: "dispatch-global-busy"))
+      waiting = create_run(prefix: "dispatch-global-laptop", status: "queued", runner: laptop)
+
+      expect { described_class.perform_now }.not_to have_enqueued_job(StartRunSessionJob)
+      expect(waiting.reload.status).to eq("queued")
+    end
+  end
 end

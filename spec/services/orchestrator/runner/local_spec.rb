@@ -10,6 +10,35 @@ RSpec.describe Orchestrator::Runner::Local do
     expect(Orchestrator::Runner.for(nil)).to be(Orchestrator::Runner.for(Workspace.new))
   end
 
+  describe "Orchestrator::Runner.for" do
+    let(:local) { Orchestrator::Runner.local }
+
+    it "resolves a run, its session and the local runner record to the local runner" do
+      run, session = create_run_and_session
+
+      expect(Orchestrator::Runner.for(run)).to be(local)
+      expect(Orchestrator::Runner.for(session)).to be(local)
+      expect(Orchestrator::Runner.for(RegisteredRunner.local)).to be(local)
+      expect(Orchestrator::Runner.for(Run.new)).to be(local)
+    end
+
+    it "resolves a remote runner, and its runs, to a client for its url" do
+      mac = RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet:3100")
+      workspace = create_workspace
+      workspace.checkouts.create!(runner: mac, repository_path: "/Users/me/src/app")
+      run = create_run(workspace:, runner: mac)
+
+      expect(Orchestrator::Runner.for(mac)).to be_a(Orchestrator::Runner::Remote)
+        .and(have_attributes(name: "mac", url: "http://mac.tailnet:3100", id: "remote:mac"))
+      expect(Orchestrator::Runner.for(run)).to have_attributes(id: "remote:mac")
+      expect(Orchestrator::Runner.for(workspace)).to be(local)
+    end
+
+    it "takes nothing else" do
+      expect { Orchestrator::Runner.for("local") }.to raise_error(ArgumentError)
+    end
+  end
+
   describe "#agent_state" do
     it "answers with herdr's agent status and the CLI's own session id" do
       allow(herdr).to receive(:agent_get).with("w1:p1")

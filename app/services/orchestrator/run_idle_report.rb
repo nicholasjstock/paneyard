@@ -36,7 +36,7 @@ module Orchestrator
         run.update!(status: "awaiting_review") if run.active?
       end
 
-      Runner.for(run.workspace).notify(
+      Runner.for(run).notify(
         title: "Run #{run.run_id} idle (#{outcome})",
         body: summary.to_s.truncate(140),
         sound: outcome == "done" ? "done" : "request"

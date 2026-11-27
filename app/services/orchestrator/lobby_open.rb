@@ -51,8 +51,11 @@ module Orchestrator
         end
         retire!(existing, runner)
       end
-      branch ||= runner.checkout_branch(repository_path: workspace.repository_path) ||
-        raise(ArgumentError, "#{workspace.repository_path} is on a detached HEAD; name the branch to open the lobby on")
+      # The lobby is on the local runner's checkout, cloned first if it has
+      # none (a workspace registered on a remote runner only).
+      repository_path = WorkspaceCheckout.ensure!(workspace, RegisteredRunner.local)
+      branch ||= runner.checkout_branch(repository_path:) ||
+        raise(ArgumentError, "#{repository_path} is on a detached HEAD; name the branch to open the lobby on")
 
       # Claimed before the checkout is touched: the partial unique index
       # makes a second, concurrent open fail here rather than switch the
@@ -83,8 +86,9 @@ module Orchestrator
 
     def open!(lobby, runner)
       workspace = lobby.workspace
-      switched = runner.switch_checkout(repository_path: workspace.repository_path, branch: lobby.branch)
-      opened = runner.open_checkout_workspace(repository_path: workspace.repository_path,
+      repository_path = workspace.repository_path_for(RegisteredRunner.local)
+      switched = runner.switch_checkout(repository_path:, branch: lobby.branch)
+      opened = runner.open_checkout_workspace(repository_path:,
         label: "#{workspace.name} lobby (#{lobby.branch})")
       lobby.update!(herdr_workspace_id: opened.fetch("workspace_id"), herdr_pane_id: opened.fetch("pane_id"))
 
@@ -108,11 +112,12 @@ module Orchestrator
         label: "#{lobby.workspace.name} lobby",
         driver: lobby.driver,
         model: lobby.model,
-        cwd: lobby.workspace.repository_path,
+        cwd: lobby.workspace.repository_path_for(RegisteredRunner.local),
         capability_token: nil,
         resume_session_id: nil,
         prompt: nil,
-        mcp_url: RunSessionRunner.mcp_url,
+        # The lobby is on the local runner (Runner.for(workspace)).
+        mcp_url: RunSessionRunner.mcp_url(nil),
         mcp_endpoint: "admin",
         layout: WorkspaceLayout.for(lobby.workspace),
         herdr_workspace_id: opened.fetch("workspace_id"),

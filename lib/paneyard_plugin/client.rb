@@ -36,8 +36,8 @@ module PaneyardPlugin
       @mcp.call_tool("get_run", runId: run_id, workspace:)
     end
 
-    def queue(task:, workspace:, base_branch: nil, driver: nil, model: nil)
-      @mcp.call_tool("queue_run", task:, workspace:, **{ baseBranch: base_branch, driver:, model: }.compact)
+    def queue(task:, workspace:, base_branch: nil, driver: nil, model: nil, runner: nil)
+      @mcp.call_tool("queue_run", task:, workspace:, **{ baseBranch: base_branch, driver:, model:, runner: }.compact)
     end
 
     # {"driver", "defaultModel", "models" => [{"id", "label"}]}
@@ -46,12 +46,17 @@ module PaneyardPlugin
     end
 
     # The server names it after the repository and works out its default branch.
-    def register(path:)
+    # With runner, path is on that runner's machine (this one, in remote
+    # mode), so it is not translated.
+    def register(path:, runner: nil)
+      return local_workspace(@mcp.call_tool("register_workspace", path:, runner:)) if runner
+
       local_workspace(@mcp.call_tool("register_workspace", path: @paths ? @paths.to_remote(path) : path))
     end
 
-    # {"projectsDir", "defaultGithubOwner"}, nil for unset; projectsDir as a
-    # path on this machine.
+    # {"projectsDir", "projectsDirSource", "defaultGithubOwner"}, nil for
+    # unset; projectsDir (the orchestrator's local runner's) as a path on
+    # this machine.
     def settings
       local_settings(@mcp.call_tool("get_settings"))
     end
@@ -81,6 +86,14 @@ module PaneyardPlugin
       @mcp.call_tool("reopen_session", runId: run_id, workspace:)
     end
 
+    # Moving a run to another runner can carry a whole branch both ways.
+    MOVE_TIMEOUT = 600
+
+    def move(run_id, workspace:, to_runner:, force: false)
+      mcp = PaneyardSandbox::McpClient.new("#{@url}/mcp/admin", client_name: "paneyard-herdr-plugin", timeout: MOVE_TIMEOUT)
+      mcp.call_tool("move_run", runId: run_id, workspace:, toRunner: to_runner, force:)
+    end
+
     # Takes a queued run that has not started out of the queue, as stopped.
     def cancel(run_id, workspace:)
       @mcp.call_tool("cancel_run", runId: run_id, workspace:)
@@ -90,6 +103,14 @@ module PaneyardPlugin
     # workspace's lobby, opened on branch (or found open on it).
     def open_lobby(workspace:, branch: nil, driver: nil, model: nil)
       @mcp.call_tool("open_lobby", workspace:, **{ branch:, driver:, model: }.compact)
+    end
+
+    # Registers this machine's runner-only process with the orchestrator
+    # (remote mode). checkouts' paths are this machine's, as the runner sees
+    # them, so they are not translated.
+    def register_runner(name:, url:, orchestrator_url:, checkouts:, projects_dir: nil)
+      @mcp.call_tool("register_runner", name:, url:, orchestratorUrl: orchestrator_url, checkouts:,
+        **{ projectsDir: projects_dir }.compact)
     end
 
     # Lets a queued run start without waiting for the runs it was queued after.

@@ -38,3 +38,24 @@ namespace :sandbox do
     puts "#{workspace.name} #{workspace.id} #{workspace.repository_path}"
   end
 end
+
+namespace :sandbox do
+  # queue_run cannot choose a runner yet, so bin/sandbox verify queues its
+  # remote-runner scenario here: the same run queue_run would make, on RUNNER.
+  desc "Queue a run on a named runner (PANEYARD_SANDBOX=1 only): WORKSPACE, RUNNER, TASK"
+  task queue_on_runner: :environment do
+    abort "sandbox:queue_on_runner only runs in a sandbox instance (PANEYARD_SANDBOX=1); see bin/sandbox" unless Orchestrator::Sandbox.enabled?
+
+    workspace = Workspace.find_by!(name: ENV.fetch("WORKSPACE"))
+    runner = RegisteredRunner.find_by!(name: ENV.fetch("RUNNER"))
+    run = workspace.runs.new(
+      run_id: "run-#{Time.current.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(2)}", task: ENV.fetch("TASK"),
+      base_branch: workspace.default_base_branch, launcher_variant: "claude", target_root: McpTools::QueueRunTool.planned_root(workspace, runner),
+      status: "queued", launched_by: "mcp", runner:
+    )
+    run.worktree_name = Orchestrator::GitWorktree.name_for(run)
+    run.save!
+    RunDispatchJob.perform_later
+    puts run.run_id
+  end
+end

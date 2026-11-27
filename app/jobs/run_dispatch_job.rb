@@ -8,12 +8,23 @@
 class RunDispatchJob < ApplicationJob
   queue_as :default
 
+  # Oldest first, one pass. A run needs a slot under the global cap and under
+  # its runner's own (Orchestrator::RunConcurrency): a run whose runner is full
+  # is passed over, not waited on, so runs for another runner with room still
+  # start. A run whose dependencies are not merged yet is passed over too: it
+  # stays queued, holds no slot, and runs queued after it go first.
   def perform
-    Orchestrator::RunConcurrency.available_slots.times do
-      run = claim_next_queued_run
-      break unless run
+    slots = Orchestrator::RunConcurrency.slots
+    return unless slots.any?
 
-      StartRunSessionJob.perform_later(run.id)
+    Orchestrator::RunQueue.queued.each do |candidate|
+      break unless slots.any?
+      next unless slots.free_on?(candidate.runner_id)
+      next unless Orchestrator::RunQueue.eligible?(candidate)
+      next unless claim(candidate)
+
+      slots.take(candidate.runner_id)
+      StartRunSessionJob.perform_later(candidate.id)
     end
   end
 
@@ -23,20 +34,9 @@ class RunDispatchJob < ApplicationJob
   # UPDATE, and a conditional UPDATE is atomic on every backend. If two
   # dispatchers race for the same run, exactly one sees a row count of 1.
   #
-  # A run Orchestrator::RunQueue says is not eligible (its dependencies are
-  # not merged yet) is passed over, not claimed: it stays queued, holds no
-  # slot, and runs queued after it go first.
-  #
   # Orchestrator::RunCancel stops a queued run with the same compare-and-set
   # on status "queued", so a run is claimed or cancelled, never both.
-  def claim_next_queued_run
-    Orchestrator::RunQueue.queued.each do |candidate|
-      next unless Orchestrator::RunQueue.eligible?(candidate)
-
-      claimed = Run.where(id: candidate.id, status: "queued")
-        .update_all(status: "launching", updated_at: Time.current)
-      return candidate.reload if claimed == 1
-    end
-    nil
+  def claim(candidate)
+    Run.where(id: candidate.id, status: "queued").update_all(status: "launching", updated_at: Time.current) == 1
   end
 end

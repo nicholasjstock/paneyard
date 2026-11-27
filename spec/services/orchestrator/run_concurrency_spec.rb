@@ -70,4 +70,30 @@ RSpec.describe Orchestrator::RunConcurrency do
       expect(described_class.available_slots).to eq(0)
     end
   end
+
+  describe "per runner" do
+    let(:laptop) { RegisteredRunner.create!(name: "laptop", kind: "remote", url: "http://laptop.tailnet:3100", max_concurrent_runs: 1) }
+
+    it "counts the runs holding a slot on each runner" do
+      create_run_and_session(run: create_run(prefix: "per-runner-local"))
+      create_run(prefix: "per-runner-laptop", status: "launching", runner: laptop)
+      create_run(prefix: "per-runner-queued", status: "queued", runner: laptop)
+
+      expect(described_class.in_flight_by_runner).to eq(RegisteredRunner.local.id => 1, laptop.id => 1)
+      expect(described_class.in_flight_on(laptop)).to eq(1)
+    end
+
+    it "frees a slot on a runner only under both its own cap and the global one" do
+      ENV["PANEYARD_MAX_CONCURRENT_RUNS"] = "2"
+      create_run(prefix: "per-runner-full", status: "launching", runner: laptop)
+
+      slots = described_class.slots
+      expect(slots.free_on?(laptop.id)).to be(false)
+      expect(slots.free_on?(RegisteredRunner.local.id)).to be(true)
+
+      slots.take(RegisteredRunner.local.id)
+      expect(slots.any?).to be(false)
+      expect(slots.free_on?(RegisteredRunner.local.id)).to be(false)
+    end
+  end
 end

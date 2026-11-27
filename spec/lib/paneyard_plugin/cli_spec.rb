@@ -95,6 +95,43 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "feature/payments", driver: nil, model: nil)
     end
 
+    describe "with more than one runner" do
+      let(:workspace) do
+        { "id" => 3, "name" => "app", "repositoryPath" => "/code/app", "defaultBaseBranch" => "main",
+          "runners" => [ { "name" => "local", "kind" => "local", "repositoryPath" => "/code/app" },
+            { "name" => "laptop", "kind" => "remote", "repositoryPath" => "/Users/me/app" } ] }
+      end
+
+      before do
+        allow(client).to receive(:workspaces).and_return([ workspace ])
+        allow(client).to receive(:queue) { |**args| { "runId" => "run-7", "runner" => args[:runner], "baseBranch" => "main", "capacity" => {} } }
+      end
+
+      it "offers the runners, and Enter picks this machine's" do
+        run_cli("queue-ui", input: "Task\n\n\n\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+        expect(out.string).to include("local  (this machine)", "laptop", "Runner (Enter for local", "Queued run-7 on local from main.")
+        expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil, runner: "local")
+      end
+
+      it "queues on the runner picked by number or name" do
+        run_cli("queue-ui", input: "Task\n\n\nmars\n2\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+        expect(out.string).to include("No runner mars.", "Runs on laptop, from its own copy of the branch")
+        expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil, runner: "laptop")
+      end
+    end
+
+    it "asks nothing about runners when the workspace is on one" do
+      allow(client).to receive(:workspaces).and_return([ workspace.merge("runners" => [ { "name" => "local", "kind" => "local" } ]) ])
+      allow(client).to receive(:queue).and_return("runId" => "run-8", "baseBranch" => "main", "capacity" => {})
+
+      run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/code/app" })
+
+      expect(out.string).not_to include("Runner")
+      expect(client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil)
+    end
+
     it "queues from the branch the operator types instead" do
       allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/code/app", "feature/payments" ])
       allow(client).to receive(:workspaces).and_return([ workspace ])
@@ -429,6 +466,52 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(out.string).to include("Its branch no longer exists.")
     end
 
+    describe "moving a run to another runner" do
+      let(:idle) do
+        parent.merge("status" => "awaiting_review", "runner" => "local", "reopenable" => false, "moveTo" => [ "mac" ],
+          "session" => { "live" => true, "status" => "done" })
+      end
+
+      before { allow(client).to receive(:run).with(parent["runId"], workspace: "app").and_return(idle) }
+
+      it "offers its one other runner and moves it there once confirmed" do
+        allow(client).to receive(:move).and_return(
+          "runner" => "mac", "from" => "local", "worktree" => "/there/app-7efb", "reopened" => "kept",
+          "sourceWorktree" => { "path" => "/code/.herdr/app-7efb", "state" => "kept" }
+        )
+
+        run_cli("runs-ui", input: "2\nm\ny\n\n")
+
+        expect(out.string).to include("m to move it to mac", "Resuming its conversation on another machine is not verified")
+        expect(client).to have_received(:move).with(parent["runId"], workspace: "app", to_runner: "mac", force: false)
+        expect(out.string).to include("Moved to mac: /there/app-7efb.", "Kept its worktree on local, /code/.herdr/app-7efb",
+          "Reopened: it starts when a slot frees.")
+      end
+
+      it "asks which runner when there are several, forces a session still working, and moves nothing without a yes" do
+        working = idle.merge("moveTo" => %w[mac spare], "session" => { "live" => true, "status" => "running" })
+        allow(client).to receive(:run).with(parent["runId"], workspace: "app").and_return(working)
+        allow(client).to receive(:move).and_return("runner" => "spare", "from" => "local", "reopened" => "kept", "sourceWorktree" => {})
+
+        run_cli("runs-ui", input: "2\nm\n2\nn\n\n")
+        expect(client).not_to have_received(:move)
+        expect(out.string).to include("m to move it to another runner", "stops it mid-turn", "Left it where it is.")
+
+        run_cli("runs-ui", input: "2\nm\nspare\ny\n\n")
+        expect(client).to have_received(:move).with(parent["runId"], workspace: "app", to_runner: "spare", force: true)
+      end
+
+      it "shows why the server refused to move it" do
+        allow(client).to receive(:move).and_raise(
+          PaneyardSandbox::McpClient::ToolError.new("refused", { "error" => "not_movable", "message" => "Branch has diverged there." })
+        )
+
+        run_cli("runs-ui", input: "2\nm\ny\n\n")
+
+        expect(out.string).to include("Branch has diverged there.")
+      end
+    end
+
     it "does not offer to reopen a run that cannot be" do
       allow(client).to receive(:run).with(parent["runId"], workspace: "app").and_return(parent.merge("reopenable" => false))
       allow(client).to receive(:reopen)
@@ -454,27 +537,29 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "asks for the projects directory first when none is set, saves it, then starts the project by name" do
-      allow(client).to receive(:settings).and_return("projectsDir" => nil, "defaultGithubOwner" => nil)
-      allow(client).to receive(:update_projects_dir).with(File.expand_path("~/Source"))
-        .and_return("projectsDir" => File.expand_path("~/Source"), "defaultGithubOwner" => nil)
+      allow(client).to receive(:settings).and_return({ "projectsDir" => nil, "defaultGithubOwner" => nil },
+        { "projectsDir" => File.expand_path("~/Source"), "defaultGithubOwner" => nil })
       allow(client).to receive(:create_workspace).and_return(created)
 
       run_cli("project-ui", input: "~/Source\nlists\n\n\n\n")
 
+      # Here it is the plugin's own PANEYARD_PROJECTS_DIR, which the restart
+      # (the next ensure_running, the .env having changed) applies.
+      expect(File.read(File.join(state, ".env"))).to include("PANEYARD_PROJECTS_DIR=#{File.expand_path('~/Source')}\n")
+      expect(daemon).to have_received(:ensure_running).twice
       expect(client).to have_received(:create_workspace).with(name: "lists", path: nil, owner: nil, visibility: nil)
       expect(out.string).to include("PANEYARD  /  NEW WORKSPACE", "No projects directory is set yet",
         "Saved: new projects go in #{File.expand_path('~/Source')}.", "GitHub owner (Enter for your gh account",
         "lists is ready", "https://github.com/Gembani/lists", "Done: create directory, git init")
     end
 
-    it "asks again when the directory is refused, and cancels with q" do
+    it "cancels with q, saving nothing" do
       allow(client).to receive(:settings).and_return("projectsDir" => nil)
-      allow(client).to receive(:update_projects_dir).and_raise(PaneyardSandbox::McpClient::ToolError.new("update_settings failed",
-        { "problems" => [ { "message" => "/nope is not a directory here; create it first (mkdir -p /nope)." } ] }))
 
-      run_cli("project-ui", input: "/nope\nq\n")
+      run_cli("project-ui", input: "q\n")
 
-      expect(out.string).to include("mkdir -p /nope", "Cancelled.")
+      expect(out.string).to include("Cancelled.")
+      expect(File.exist?(File.join(state, ".env"))).to be(false)
       expect(client).not_to receive(:create_workspace)
     end
 
@@ -518,11 +603,11 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "changes the projects directory with d" do
-      allow(client).to receive(:settings).and_return(set)
-      allow(client).to receive(:update_projects_dir).with("/srv/projects").and_return(set.merge("projectsDir" => "/srv/projects"))
+      allow(client).to receive(:settings).and_return(set, set.merge("projectsDir" => "/srv/projects"))
 
       run_cli("project-ui", input: "d\n/srv/projects\nq\n")
 
+      expect(File.read(File.join(state, ".env"))).to include("PANEYARD_PROJECTS_DIR=/srv/projects\n")
       expect(out.string).to include("Saved: new projects go in /srv/projects.", "Projects directory: /srv/projects")
     end
 
@@ -669,7 +754,7 @@ RSpec.describe PaneyardPlugin::Cli do
 
     it "asks before configuring every detected client" do
       commands = []
-      run_cli("setup-ui", input: "y\n\n") do |cli|
+      run_cli("setup-ui", input: "\ny\n\n") do |cli|
         allow(cli).to receive(:executable?).with("claude").and_return(true)
         allow(cli).to receive(:executable?).with("codex").and_return(true)
         allow(cli).to receive(:run_command) do |*argv|
@@ -692,8 +777,22 @@ RSpec.describe PaneyardPlugin::Cli do
         "✓ Paneyard MCP configured for Claude Code", "✓ Paneyard MCP configured for Codex")
     end
 
+    it "asks for the projects directory first, saving one the operator types to the plugin's .env" do
+      run_cli("setup-ui", input: "/srv/src\nn\n\n") do |cli|
+        allow(cli).to receive(:executable?).and_return(true)
+      end
+
+      expect(out.string).to include("Projects directory (Enter for ~/Source)", "Saved /srv/src")
+      expect(PaneyardPlugin::EnvFile.load(File.join(state, ".env")).first).to include("PANEYARD_PROJECTS_DIR" => "/srv/src")
+
+      run_cli("setup-ui", input: "\nn\n\n") do |cli|
+        allow(cli).to receive(:executable?).and_return(true)
+      end
+      expect(out.string).to include("Projects directory (Enter for /srv/src)", "Kept /srv/src.")
+    end
+
     it "changes nothing when the operator declines" do
-      run_cli("setup-ui", input: "n\n\n") do |cli|
+      run_cli("setup-ui", input: "\nn\n\n") do |cli|
         allow(cli).to receive(:executable?).and_return(true)
         expect(cli).not_to receive(:run_command)
       end
@@ -703,7 +802,7 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "recognizes current entries and does not add duplicates" do
-      run_cli("setup-ui", input: "\n\n") do |cli|
+      run_cli("setup-ui", input: "\n\n\n") do |cli|
         allow(cli).to receive(:executable?).and_return(true)
         allow(cli).to receive(:run_command) do |*argv|
           case argv.first
@@ -720,7 +819,7 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "continues when one client fails" do
-      run_cli("setup-ui", input: "\n\n") do |cli|
+      run_cli("setup-ui", input: "\n\n\n") do |cli|
         allow(cli).to receive(:executable?).and_return(true)
         allow(cli).to receive(:run_command) do |*argv|
           if argv[1..3] == [ "mcp", "get", "paneyard" ]
@@ -740,7 +839,7 @@ RSpec.describe PaneyardPlugin::Cli do
     it "updates a stale entry and restores it if adding the new URL fails" do
       old_url = "http://127.0.0.1:7001/mcp/admin"
       commands = []
-      run_cli("setup-ui", input: "\n\n") do |cli|
+      run_cli("setup-ui", input: "\n\n\n") do |cli|
         allow(cli).to receive(:executable?).with("claude").and_return(true)
         allow(cli).to receive(:executable?).with("codex").and_return(false)
         allow(cli).to receive(:run_command) do |*argv|
@@ -764,7 +863,7 @@ RSpec.describe PaneyardPlugin::Cli do
     end
 
     it "reports no clients without treating that as an error" do
-      status = run_cli("setup-ui", input: "\n") do |cli|
+      status = run_cli("setup-ui", input: "\n\n") do |cli|
         allow(cli).to receive(:executable?).and_return(false)
       end
 
@@ -901,6 +1000,20 @@ RSpec.describe PaneyardPlugin::Cli do
       expect(out.string).to include("http://server.example:7263/mcp/admin")
     end
 
+    it "defaults to this machine's runner, the one named after its host" do
+      allow(Socket).to receive(:gethostname).and_return("laptop.local")
+      allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/Users/me/app", "main" ])
+      runners = [ { "name" => "local", "kind" => "local" }, { "name" => "desktop", "kind" => "remote" }, { "name" => "laptop", "kind" => "remote" } ]
+      allow(remote_client).to receive_messages(workspaces: [ workspace.merge("runners" => runners) ], models: {})
+      allow(remote_client).to receive(:queue).and_return("runId" => "run-1", "runner" => "laptop", "baseBranch" => "main", "capacity" => {})
+
+      run_cli("queue-ui", input: "Task\n\n\n\n\n\n", context: { "focused_pane_cwd" => "/Users/me/app" })
+
+      expect(out.string).to include("laptop  (this machine)", "Runner (Enter for laptop")
+      expect(out.string).not_to include("push your commits there first")
+      expect(remote_client).to have_received(:queue).with(task: "Task", workspace: "app", base_branch: "main", driver: nil, model: nil, runner: "laptop")
+    end
+
     it "queues through the remote Paneyard, saying the branch has to be there" do
       allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/Users/me/app", "main" ])
       allow(remote_client).to receive_messages(workspaces: [ workspace ], models: {})
@@ -938,6 +1051,75 @@ RSpec.describe PaneyardPlugin::Cli do
       run_cli("runs-ui", input: "\n")
 
       expect(out.string).to include("Paneyard on server.example is not answering")
+    end
+
+    it "starts no runner either unless PANEYARD_RUNNER_URL says this machine hosts jobs" do
+      allow(remote_client).to receive(:runs).and_return([ [ workspace, { "runs" => [] } ] ])
+      expect(PaneyardPlugin::Daemon).not_to receive(:new).with(hash_including(role: "runner"))
+
+      run_cli("runs-ui", input: "\n")
+    end
+
+    describe "and PANEYARD_RUNNER_URL" do
+      let(:runner_daemon) do
+        instance_double(PaneyardPlugin::Daemon, status: nil, stop: false,
+          ensure_running: PaneyardPlugin::Daemon::Result.new(outcome: :started, pid: 42, port: 7264, url: "http://127.0.0.1:7264"))
+      end
+      let(:checkout) { File.join(state, "checkout").tap { |path| FileUtils.mkdir_p(File.join(path, ".git")) } }
+
+      before do
+        File.write(File.join(state, ".env"), "PANEYARD_REMOTE_URL=http://server.example:7263\n" \
+          "PANEYARD_RUNNER_URL=https://laptop.example.ts.net:7264/\nPANEYARD_RUNNER_NAME=laptop\n")
+        allow(PaneyardPlugin::Daemon).to receive(:new).with(hash_including(role: "runner")).and_return(runner_daemon)
+        allow(remote_client).to receive(:workspaces).and_return([
+          workspace.merge("repositoryPath" => checkout), workspace.merge("name" => "elsewhere", "repositoryPath" => "/nowhere/here")
+        ])
+        allow(remote_client).to receive(:register_runner).and_return("problems" => [])
+        allow(remote_client).to receive(:runs).and_return([ [ workspace, { "runs" => [] } ] ])
+      end
+
+      it "starts this machine's runner and registers it with its checkouts here, once per runner start" do
+        run_cli("startup")
+
+        expect(runner_daemon).to have_received(:ensure_running)
+        expect(remote_client).to have_received(:register_runner).with(name: "laptop", url: "https://laptop.example.ts.net:7264",
+          orchestrator_url: "http://server.example:7263", projects_dir: File.expand_path("~/Source"),
+          checkouts: [ { "workspace" => "app", "path" => checkout } ])
+        expect(out.string).to include("this machine's runner laptop is up at https://laptop.example.ts.net:7264")
+
+        allow(runner_daemon).to receive_messages(ensure_running: PaneyardPlugin::Daemon::Result.new(outcome: :running, pid: 42,
+          port: 7264, url: "http://127.0.0.1:7264"))
+        run_cli("runs-ui", input: "\n")
+        expect(remote_client).to have_received(:register_runner).once
+      end
+
+      it "registers a repository only this machine has on its own runner, with its path here" do
+        allow(PaneyardPlugin::WorkspaceMatch).to receive(:repository_of).and_return([ "/opt/only-here", "main" ])
+        allow(remote_client).to receive(:register).and_return("name" => "only-here", "repositoryPath" => nil, "defaultBaseBranch" => "main")
+        allow(remote_client).to receive(:models).and_return({})
+        allow(remote_client).to receive(:queue).and_return("runId" => "run-3", "queuedBehind" => 0, "capacity" => {})
+
+        run_cli("queue-ui", input: "Task\n\n\n\n\n", context: { "focused_pane_cwd" => "/opt/only-here" })
+
+        expect(remote_client).to have_received(:register).with(path: "/opt/only-here", runner: "laptop")
+        expect(out.string).to include("Registered only-here (/opt/only-here)")
+      end
+
+      it "goes on with the action, warning, when the runner cannot start" do
+        allow(runner_daemon).to receive(:ensure_running).and_raise(PaneyardPlugin::Error, "port 7264 is in use")
+
+        expect { run_cli("runs-ui", input: "\n") }.to output(/this machine's runner: port 7264 is in use/).to_stderr
+        expect(remote_client).to have_received(:runs).at_least(:once)
+      end
+
+      it "restarts the runner here, and re-registers it, rather than refusing" do
+        allow(runner_daemon).to receive(:restart).and_return(PaneyardPlugin::Daemon::Result.new(outcome: :restarted, pid: 43,
+          port: 7264, url: "http://127.0.0.1:7264"))
+
+        expect(run_cli("restart")).to eq(0)
+        expect(out.string).to include("This machine's runner restarted", "restart that there")
+        expect(remote_client).to have_received(:register_runner)
+      end
     end
   end
 end

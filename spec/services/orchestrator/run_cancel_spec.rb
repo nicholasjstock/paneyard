@@ -62,13 +62,13 @@ RSpec.describe Orchestrator::RunCancel do
       # The first conditional update to land is the dispatcher's.
       unless raced
         raced = true
-        claimed = RunDispatchJob.new.send(:claim_next_queued_run)
+        claimed = RunDispatchJob.new.send(:claim, run)
       end
       original.call(*args, **kwargs)
     end
 
     expect { described_class.call(run) }.to raise_error(described_class::NotCancellable, /launching.*close_session/)
-    expect(claimed).to eq(run)
+    expect(claimed).to be(true)
     expect(run.reload).to have_attributes(status: "launching", stop_reason: nil, stopped_at: nil)
   end
 
@@ -76,7 +76,7 @@ RSpec.describe Orchestrator::RunCancel do
     run = queued_run
     described_class.call(run)
 
-    expect(RunDispatchJob.new.send(:claim_next_queued_run)).to be_nil
+    expect(RunDispatchJob.new.send(:claim, run)).to be(false)
     expect(run.reload.status).to eq("stopped")
   end
 
