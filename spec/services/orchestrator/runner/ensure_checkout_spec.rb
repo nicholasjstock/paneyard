@@ -155,7 +155,7 @@ RSpec.describe Orchestrator::Runner::Repositories, ".ensure_checkout" do
       allow(described_class).to receive(:origin_alternatives).and_return([ File.join(tmp, "one.git"), File.join(tmp, "two.git") ])
 
       expect { ensure_checkout(path, origin_url: "https://example.test/me/app.git") }
-        .to raise_error(Orchestrator::Runner::Error, /over https or ssh: git clone .*one\.git.* Then: git clone .*two\.git/m)
+        .to raise_error(Orchestrator::Runner::Error, /over https or ssh\. git clone .*one\.git.*credentials\. Then: git clone .*two\.git/m)
       expect(File.exist?(path)).to be(false)
     end
 

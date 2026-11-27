@@ -109,9 +109,9 @@ module Orchestrator
         rescue Error => error
           failures << error.message
         end
-        raise Error, failures.join(" Then: ") if failures.one?
+        raise Error, failures.first if failures.one?
 
-        raise Error, "Could not clone #{origin} into #{path} over https or ssh: #{failures.join(' Then: ')}"
+        raise Error, "Could not clone #{origin} into #{path} over https or ssh. #{failures.join(' Then: ')}"
       end
 
       # The origin as given, then the same repository over the other protocol
@@ -139,8 +139,9 @@ module Orchestrator
           begin
             Timeout.timeout(timeout) do
               unless process.value.success?
-                raise Error, "git clone #{origin} into #{path} failed: #{readers.last.value.strip.presence || 'no message'}. " \
-                  "This machine needs read access to it with its own git credentials"
+                reason = readers.last.value.strip.delete_suffix(".").presence || "no message"
+                raise Error, "git clone #{origin} into #{path} failed: #{reason}. " \
+                  "This machine needs read access to it with its own git credentials."
               end
             end
           rescue Timeout::Error
