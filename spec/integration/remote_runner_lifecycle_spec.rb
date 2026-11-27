@@ -19,7 +19,7 @@ require "open3"
 RSpec.describe "a run on a remote runner", type: :request do
   include_context "launched runs"
 
-  let(:remote_root) { Dir.mktmpdir("other-machine") }
+  let(:remote_root) { File.realpath(Dir.mktmpdir("other-machine")) }
 
   around do |example|
     @remote_herdr = FakeHerdr::Server.new(

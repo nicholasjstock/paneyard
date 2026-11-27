@@ -29,7 +29,7 @@ ENV.delete("PANEYARD_SANDBOX_ROOT")
 # The local runner clones a workspace it has no checkout of into its projects
 # directory, ~/Source by default: never the operator's from a spec. Specs that
 # are about where it comes from unset this themselves.
-ENV["PANEYARD_PROJECTS_DIR"] = Dir.mktmpdir("paneyard-spec-projects")
+ENV["PANEYARD_PROJECTS_DIR"] = File.realpath(Dir.mktmpdir("paneyard-spec-projects"))
 RSpec.configure do |config|
   # rspec-expectations config goes here. You can use an alternate
   # assertion/expectation library such as wrong or the stdlib/minitest

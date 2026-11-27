@@ -16,7 +16,7 @@ require "tmpdir"
 class RunnerProcess
   attr_reader :root, :port, :log_path
 
-  def initialize(herdr_socket:, root: Dir.mktmpdir("runner-process"), port: nil)
+  def initialize(herdr_socket:, root: File.realpath(Dir.mktmpdir("runner-process")), port: nil)
     @herdr_socket = herdr_socket
     @root = root
     @port = port || free_port

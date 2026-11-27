@@ -9,7 +9,7 @@ require "open3"
 RSpec.describe Orchestrator::RunMove, type: :request do
   include_context "launched runs"
 
-  let(:there_root) { Dir.mktmpdir("move-there") }
+  let(:there_root) { File.realpath(Dir.mktmpdir("move-there")) }
   let(:there) { File.join(there_root, "src", "repo") }
   let(:other_runtime) { File.join(there_root, "run_sessions") }
   let!(:mac) { RegisteredRunner.create!(name: "mac", kind: "remote", url: "http://mac.tailnet.test:3100") }

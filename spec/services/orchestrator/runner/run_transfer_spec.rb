@@ -7,7 +7,7 @@ require "open3"
 # through Runner::Wire as it would between processes, and lands through
 # herdr (the fake one, which runs the real `git worktree add`).
 RSpec.describe Orchestrator::Runner::RunTransfer, :fake_herdr do
-  let(:root) { Dir.mktmpdir("run-transfer") }
+  let(:root) { File.realpath(Dir.mktmpdir("run-transfer")) }
   let(:origin) { File.join(root, "origin.git") }
   let(:source) { File.join(root, "here", "app") }
   let(:destination) { File.join(root, "there", "app") }
